@@ -1,0 +1,16 @@
+.inline-group textarea[name$="-remark"],
+.form-row textarea[name="remark"] {
+  height: 32px;
+  min-height: 32px;
+  line-height: 20px;
+  resize: none;
+}
+
+.column-member_balance_summary {
+  min-width: 180px;
+}
+
+.column-total_balance {
+  text-align: right;
+  white-space: nowrap;
+}

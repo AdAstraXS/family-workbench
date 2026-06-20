@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}收入支出汇总{% endblock %}
+
+{% block content %}
+<section class="cashflow-hero">
+  <div>
+    <p class="eyebrow">家庭账本</p>
+    <h1>收入支出汇总</h1>
+  </div>
+  <div class="inline-actions">
+    <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
+    <a class="button ghost" href="{% url 'ledger:expense_list' %}">收支记录</a>
+    <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
+    <a class="button" href="{% url 'ledger:expense_create' %}">新增支出</a>
+  </div>
+</section>
+
+<section class="panel cashflow-panel">
+  <div class="cashflow-table-wrap">
+    <table class="cashflow-table">
+      <thead>
+        <tr>
+          <th class="period-col" rowspan="2">期间</th>
+          <th colspan="{{ members|length }}">收入</th>
+          <th colspan="{{ members|length }}">支出</th>
+          <th colspan="{{ members|length }}">结余</th>
+        </tr>
+        <tr>
+          {% for member in members %}
+            <th>{{ member.display_name }}</th>
+          {% endfor %}
+          {% for member in members %}
+            <th>{{ member.display_name }}</th>
+          {% endfor %}
+          {% for member in members %}
+            <th>{{ member.display_name }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for section in sections %}
+          {% for row in section.rows %}
+            <tr>
+              <td class="period-col">{{ row.label }}</td>
+              {% for amount in row.income_cells %}
+                <td class="number income">{{ amount|thousands }}</td>
+              {% endfor %}
+              {% for amount in row.expense_cells %}
+                <td class="number expense">{{ amount|thousands }}</td>
+              {% endfor %}
+              {% for amount in row.net_cells %}
+                <td class="number net">{{ amount|thousands }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+          <tr class="year-total-row">
+            <td class="period-col">{{ section.total.label }}</td>
+            {% for amount in section.total.income_cells %}
+              <td class="number income">{{ amount|thousands }}</td>
+            {% endfor %}
+            {% for amount in section.total.expense_cells %}
+              <td class="number expense">{{ amount|thousands }}</td>
+            {% endfor %}
+            {% for amount in section.total.net_cells %}
+              <td class="number net">{{ amount|thousands }}</td>
+            {% endfor %}
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="{{ members|length|add:members|length|add:members|length|add:1 }}">暂无数据</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

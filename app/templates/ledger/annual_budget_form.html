@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<section class="panel snapshot-form-panel">
+  <div class="section-head">
+    <h1>{{ title }}</h1>
+    <div class="inline-actions">
+      <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
+      <a class="button ghost" href="{% url 'ledger:annual_budget_list' %}">返回预算列表</a>
+    </div>
+  </div>
+  <form method="post">
+    {% csrf_token %}
+    <div class="snapshot-meta-form">
+      {% for field in form.visible_fields %}
+        <div class="form-row">
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% for error in field.errors %}
+            <div class="field-error">{{ error }}</div>
+          {% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+
+    <div class="section-head">
+      <h2>预算明细</h2>
+      <button type="button" class="button" id="add-budget-row">新增一条预算</button>
+    </div>
+    {{ formset.management_form }}
+    {% if formset.non_form_errors %}
+      <div class="form-errors">{{ formset.non_form_errors }}</div>
+    {% endif %}
+    <div class="batch-table-wrap">
+      <table class="batch-entry-table budget-entry-table">
+        <thead>
+          <tr>
+            <th>类型</th>
+            <th>收入分类</th>
+            <th>支出分类</th>
+            <th>年度预算金额</th>
+            <th>备注</th>
+            <th>删除</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line_form in formset %}
+            <tr>
+              <td>{{ line_form.id }}{{ line_form.line_type }}{{ line_form.line_type.errors }}</td>
+              <td>{{ line_form.income_category }}{{ line_form.income_category.errors }}</td>
+              <td>{{ line_form.expense_category }}{{ line_form.expense_category.errors }}</td>
+              <td>{{ line_form.annual_amount }}{{ line_form.annual_amount.errors }}</td>
+              <td>{{ line_form.remark }}{{ line_form.remark.errors }}</td>
+              <td>
+                {% if line_form.DELETE %}
+                  <span class="delete-field">{{ line_form.DELETE }}</span>
+                  <button type="button" class="delete-entry-row">删除</button>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <template id="empty-budget-row-template">
+      <tr>
+        <td>{{ formset.empty_form.id }}{{ formset.empty_form.line_type }}</td>
+        <td>{{ formset.empty_form.income_category }}</td>
+        <td>{{ formset.empty_form.expense_category }}</td>
+        <td>{{ formset.empty_form.annual_amount }}</td>
+        <td>{{ formset.empty_form.remark }}</td>
+        <td>
+          {% if formset.empty_form.DELETE %}
+            <span class="delete-field">{{ formset.empty_form.DELETE }}</span>
+            <button type="button" class="delete-entry-row">删除</button>
+          {% endif %}
+        </td>
+      </tr>
+    </template>
+    <div class="form-actions">
+      <button type="submit">保存年度预算</button>
+      <a class="button ghost" href="{% url 'ledger:annual_budget_list' %}">取消</a>
+    </div>
+  </form>
+</section>
+
+<script>
+  (function () {
+    function updateCategoryFields(row) {
+      const typeSelect = row.querySelector("select[name$='-line_type']");
+      const incomeSelect = row.querySelector("select[name$='-income_category']");
+      const expenseSelect = row.querySelector("select[name$='-expense_category']");
+      if (!typeSelect || !incomeSelect || !expenseSelect) return;
+      const isIncome = typeSelect.value === "income";
+      incomeSelect.disabled = !isIncome;
+      expenseSelect.disabled = isIncome;
+      if (isIncome) {
+        expenseSelect.value = "";
+      } else {
+        incomeSelect.value = "";
+      }
+    }
+
+    function bindRow(row) {
+      updateCategoryFields(row);
+      const typeSelect = row.querySelector("select[name$='-line_type']");
+      if (typeSelect) {
+        typeSelect.addEventListener("change", function () {
+          updateCategoryFields(row);
+        });
+      }
+      const deleteButton = row.querySelector(".delete-entry-row");
+      const deleteInput = row.querySelector("input[name$='-DELETE']");
+      if (deleteButton && deleteInput) {
+        deleteButton.addEventListener("click", function () {
+          if (!window.confirm("确认删除这条预算明细吗？")) return;
+          deleteInput.checked = true;
+          row.style.display = "none";
+        });
+      }
+    }
+
+    document.querySelectorAll(".budget-entry-table tbody tr").forEach(bindRow);
+
+    const addButton = document.getElementById("add-budget-row");
+    const template = document.getElementById("empty-budget-row-template");
+    const tbody = document.querySelector(".budget-entry-table tbody");
+    const totalForms = document.querySelector("input[name$='-TOTAL_FORMS']");
+    if (addButton && template && tbody && totalForms) {
+      addButton.addEventListener("click", function () {
+        const index = parseInt(totalForms.value, 10);
+        const html = template.innerHTML.replace(/__prefix__/g, index);
+        const temp = document.createElement("tbody");
+        temp.innerHTML = html.trim();
+        const row = temp.firstElementChild;
+        tbody.appendChild(row);
+        totalForms.value = index + 1;
+        bindRow(row);
+      });
+    }
+  })();
+</script>
+{% endblock %}

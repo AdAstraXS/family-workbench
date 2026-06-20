@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}年度收支记录{% endblock %}
+
+{% block content %}
+<section class="cashflow-hero">
+  <div>
+    <p class="eyebrow">家庭账本</p>
+    <h1>年度收支记录</h1>
+  </div>
+  <div class="inline-actions">
+    <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
+    <a class="button ghost" href="{% url 'ledger:cashflow_summary' %}">收入支出汇总</a>
+    <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
+    <a class="button" href="{% url 'ledger:expense_create' %}">新增支出</a>
+  </div>
+</section>
+
+<section class="panel record-panel">
+  <div class="record-table-wrap">
+    <table class="record-table annual-record-table">
+      <thead>
+        <tr>
+          <th rowspan="2">家庭</th>
+          <th rowspan="2">年度</th>
+          <th colspan="{{ members|length|add:1 }}">收入</th>
+          <th colspan="{{ members|length|add:1 }}">支出</th>
+          <th colspan="{{ members|length|add:1 }}">总结余</th>
+          <th rowspan="2">操作</th>
+        </tr>
+        <tr>
+          {% for member in members %}<th>{{ member.display_name }}</th>{% endfor %}
+          <th>家庭合计</th>
+          {% for member in members %}<th>{{ member.display_name }}</th>{% endfor %}
+          <th>家庭合计</th>
+          {% for member in members %}<th>{{ member.display_name }}</th>{% endfor %}
+          <th>家庭合计</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.family }}</td>
+            <td>{{ row.year }}</td>
+            {% for amount in row.income_cells %}<td class="number income">{{ amount|thousands }}</td>{% endfor %}
+            <td class="number income strong-number">{{ row.income_total|thousands }}</td>
+            {% for amount in row.expense_cells %}<td class="number expense">{{ amount|thousands }}</td>{% endfor %}
+            <td class="number expense strong-number">{{ row.expense_total|thousands }}</td>
+            {% for amount in row.net_cells %}<td class="number net">{{ amount|thousands }}</td>{% endfor %}
+            <td class="number net strong-number">{{ row.net_total|thousands }}</td>
+            <td><a class="text-action" href="{% url 'ledger:expense_year_detail' row.year %}">查看明细</a></td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="{{ members|length|add:members|length|add:members|length|add:6 }}">暂无年度收支记录</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

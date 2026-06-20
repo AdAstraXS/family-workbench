@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<section class="panel snapshot-form-panel">
+  <div class="section-head">
+    <h1>{{ title }}</h1>
+    <div class="inline-actions">
+      <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
+      <a class="button ghost" href="{% url 'ledger:asset_snapshot_list' %}">返回列表</a>
+    </div>
+  </div>
+  <form method="post">
+    {% csrf_token %}
+    <div class="snapshot-meta-form">
+      {% for field in form.hidden_fields %}
+        {{ field }}
+      {% endfor %}
+      {% for field in form.visible_fields %}
+        <div class="form-row">
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% for error in field.errors %}
+            <div class="field-error">{{ error }}</div>
+          {% endfor %}
+        </div>
+      {% endfor %}
+      <div class="form-row">
+        <label>汇率查询</label>
+        <a class="button ghost" href="https://www.chinamoney.com.cn/chinese/bkccpr/" target="_blank" rel="noopener noreferrer">中国货币网汇率查询</a>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <h2>资产明细</h2>
+      <button type="button" class="button" id="add-entry-row">新增一条记录</button>
+    </div>
+    {{ formset.management_form }}
+    {% if formset.non_form_errors %}
+      <div class="form-errors">{{ formset.non_form_errors }}</div>
+    {% endif %}
+    <div class="batch-table-wrap">
+      <table class="batch-entry-table">
+        <thead>
+          <tr>
+            <th>成员</th>
+            <th>账户名称</th>
+            <th>账户资产类别</th>
+            <th>币种</th>
+            <th>原币余额</th>
+            <th>备注</th>
+            <th>删除</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry_form in formset %}
+            <tr>
+              <td>{{ entry_form.id }}{{ entry_form.member }}{{ entry_form.member.errors }}</td>
+              <td>{{ entry_form.account }}{{ entry_form.account.errors }}</td>
+              <td>{{ entry_form.asset_category }}{{ entry_form.asset_category.errors }}</td>
+              <td>{{ entry_form.currency }}{{ entry_form.currency.errors }}</td>
+              <td>{{ entry_form.original_amount }}{{ entry_form.original_amount.errors }}</td>
+              <td>{{ entry_form.remark }}{{ entry_form.remark.errors }}</td>
+              <td>
+                {% if entry_form.DELETE %}
+                  <span class="delete-field">{{ entry_form.DELETE }}</span>
+                  <button type="button" class="delete-entry-row">删除</button>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <template id="empty-entry-row-template">
+      <tr>
+        <td>{{ formset.empty_form.id }}{{ formset.empty_form.member }}</td>
+        <td>{{ formset.empty_form.account }}</td>
+        <td>{{ formset.empty_form.asset_category }}</td>
+        <td>{{ formset.empty_form.currency }}</td>
+        <td>{{ formset.empty_form.original_amount }}</td>
+        <td>{{ formset.empty_form.remark }}</td>
+        <td>
+          {% if formset.empty_form.DELETE %}
+            <span class="delete-field">{{ formset.empty_form.DELETE }}</span>
+            <button type="button" class="delete-entry-row">删除</button>
+          {% endif %}
+        </td>
+      </tr>
+    </template>
+    <div class="form-actions">
+      <button type="submit">保存资产快照</button>
+      <a class="button ghost" href="{% url 'ledger:asset_snapshot_list' %}">取消</a>
+    </div>
+  </form>
+</section>
+<script id="account-member-map" type="application/json">{{ account_member_map|safe }}</script>
+<script id="account-options" type="application/json">{{ account_options|safe }}</script>
+<script>
+  (function () {
+    const mapEl = document.getElementById("account-member-map");
+    const optionsEl = document.getElementById("account-options");
+    if (!mapEl || !optionsEl) return;
+    const accountMemberMap = JSON.parse(mapEl.textContent || "{}");
+    const accountOptions = JSON.parse(optionsEl.textContent || "[]");
+
+    function filterRow(row) {
+      const memberSelect = row.querySelector("select[name$='-member']");
+      const accountSelect = row.querySelector("select[name$='-account']");
+      if (!memberSelect || !accountSelect) return;
+      const memberId = memberSelect.value;
+      const selectedValue = accountSelect.value;
+      accountSelect.innerHTML = "";
+
+      const emptyOption = document.createElement("option");
+      emptyOption.value = "";
+      emptyOption.textContent = "---------";
+      accountSelect.appendChild(emptyOption);
+
+      accountOptions.forEach(function (account) {
+        if (memberId && account.member_id !== memberId) return;
+        const option = document.createElement("option");
+        option.value = account.id;
+        option.textContent = account.label;
+        accountSelect.appendChild(option);
+      });
+
+      if (selectedValue && accountMemberMap[selectedValue] === memberId) {
+        accountSelect.value = selectedValue;
+      } else {
+        accountSelect.value = "";
+      }
+    }
+
+    function bindRow(row) {
+      filterRow(row);
+      const memberSelect = row.querySelector("select[name$='-member']");
+      if (memberSelect) {
+        memberSelect.addEventListener("change", function () {
+          filterRow(row);
+        });
+      }
+      const deleteButton = row.querySelector(".delete-entry-row");
+      const deleteInput = row.querySelector("input[name$='-DELETE']");
+      if (deleteButton && deleteInput) {
+        deleteButton.addEventListener("click", function () {
+          if (!window.confirm("确认删除这条资产明细吗？")) return;
+          deleteInput.checked = true;
+          row.style.display = "none";
+        });
+      }
+    }
+
+    document.querySelectorAll(".batch-entry-table tbody tr").forEach(bindRow);
+
+    const addButton = document.getElementById("add-entry-row");
+    const template = document.getElementById("empty-entry-row-template");
+    const tbody = document.querySelector(".batch-entry-table tbody");
+    const totalForms = document.querySelector("input[name$='-TOTAL_FORMS']");
+    if (addButton && template && tbody && totalForms) {
+      addButton.addEventListener("click", function () {
+        const index = parseInt(totalForms.value, 10);
+        const html = template.innerHTML.replace(/__prefix__/g, index);
+        const temp = document.createElement("tbody");
+        temp.innerHTML = html.trim();
+        const row = temp.firstElementChild;
+        tbody.appendChild(row);
+        totalForms.value = index + 1;
+        bindRow(row);
+      });
+    }
+  })();
+</script>
+{% endblock %}

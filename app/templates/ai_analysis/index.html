@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}AI 分析{% endblock %}
+
+{% block content %}
+<section class="headline">
+  <h1>AI 分析</h1>
+  <p>第一阶段先保存分析请求和结果，后续再接入具体 AI API。</p>
+</section>
+<section class="panel">
+  <h2>最近分析请求</h2>
+  <table>
+    <thead><tr><th>时间</th><th>成员</th><th>模块</th><th>类型</th><th>服务商</th><th>状态</th></tr></thead>
+    <tbody>
+      {% for item in recent_requests %}
+        <tr><td>{{ item.created_at }}</td><td>{{ item.member }}</td><td>{{ item.module }}</td><td>{{ item.analysis_type }}</td><td>{{ item.provider }}</td><td>{{ item.get_status_display }}</td></tr>
+      {% empty %}
+        <tr><td colspan="6">暂无数据，请先到后台录入分析请求。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

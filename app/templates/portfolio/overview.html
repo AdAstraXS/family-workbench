@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}投资组合{% endblock %}
+
+{% block content %}
+<section class="headline">
+  <h1>投资组合</h1>
+  <p>投资账户、持仓和交易记录的第一版入口。</p>
+</section>
+<section class="metrics">
+  <div class="metric"><span>现金余额</span><strong>{{ total_cash|thousands }}</strong></div>
+  <div class="metric"><span>持仓市值</span><strong>{{ total_market_value|thousands }}</strong></div>
+</section>
+<section class="panel">
+  <div class="section-head">
+    <h2>最近持仓</h2>
+    <a class="button" href="{% url 'portfolio:position_create' %}">新增持仓</a>
+  </div>
+  <table>
+    <thead><tr><th>日期</th><th>账户</th><th>标的</th><th>数量</th><th>市值</th><th>盈亏</th></tr></thead>
+    <tbody>
+      {% for item in positions %}
+        <tr><td>{{ item.position_date }}</td><td>{{ item.account.account_name }}</td><td>{{ item.security }}</td><td>{{ item.quantity|thousands }}</td><td>{{ item.market_value|thousands }}</td><td>{{ item.unrealized_pnl|thousands }}</td></tr>
+      {% empty %}
+        <tr><td colspan="6">暂无数据，请先到后台录入。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

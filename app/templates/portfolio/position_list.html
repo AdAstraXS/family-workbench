@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}投资持仓{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="section-head">
+    <h1>投资持仓</h1>
+    <a class="button" href="{% url 'portfolio:position_create' %}">新增持仓</a>
+  </div>
+  <table>
+    <thead><tr><th>日期</th><th>账户</th><th>标的</th><th>数量</th><th>成本</th><th>现价</th><th>市值</th><th>操作</th></tr></thead>
+    <tbody>
+      {% for item in positions %}
+        <tr>
+          <td>{{ item.position_date }}</td>
+          <td>{{ item.account.account_name }}</td>
+          <td>{{ item.security }}</td>
+          <td>{{ item.quantity|thousands }}</td>
+          <td>{{ item.avg_cost|thousands }}</td>
+          <td>{{ item.current_price|thousands }}</td>
+          <td>{{ item.market_value|thousands }}</td>
+          <td><a href="{% url 'portfolio:position_edit' item.id %}">编辑</a></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8">暂无数据</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

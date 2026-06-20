@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}收入记录{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="section-head">
+    <h1>收入记录</h1>
+    <a class="button" href="{% url 'ledger:income_create' %}">新增收入</a>
+  </div>
+  <table>
+    <thead><tr><th>统计区间</th><th>成员</th><th>分类</th><th>金额</th><th>币种</th><th>操作</th></tr></thead>
+    <tbody>
+      {% for item in records %}
+        <tr><td>{{ item.period_start|default:item.income_date }} 至 {{ item.period_end|default:item.income_date }}</td><td>{{ item.member }}</td><td>{{ item.category }}</td><td>{{ item.amount|thousands }}</td><td>{{ item.currency }}</td><td><a href="{% url 'ledger:income_edit' item.id %}">编辑</a></td></tr>
+      {% empty %}
+        <tr><td colspan="6">暂无数据</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

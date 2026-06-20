@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}{{ year }}年收支记录{% endblock %}
+
+{% block content %}
+<section class="cashflow-hero">
+  <div>
+    <p class="eyebrow">{{ family }} · {{ year }}</p>
+    <h1>{{ year }}年收支记录</h1>
+  </div>
+  <div class="inline-actions">
+    <a class="button ghost" href="{% url 'ledger:expense_list' %}">返回年度收支</a>
+    <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
+    <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
+    <a class="button" href="{% url 'ledger:expense_create' %}">新增支出</a>
+  </div>
+</section>
+
+<section class="panel record-panel split-record-panel">
+  <div class="section-head inner-head">
+    <h2>收入记录</h2>
+  </div>
+  <div class="record-table-wrap">
+    <table class="record-table year-detail-table">
+      <thead>
+        <tr>
+          <th>年月</th>
+          <th>成员</th>
+          <th>分类</th>
+          <th>金额</th>
+          <th>币种</th>
+          <th>备注</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in income_rows %}
+          <tr>
+            <td>{{ row.period_label }}</td>
+            <td>{{ row.member }}</td>
+            <td>{{ row.category|default:"-" }}</td>
+            <td class="number income">{{ row.amount|thousands }}</td>
+            <td>{{ row.currency }}</td>
+            <td class="record-remark">{{ row.remark|default:"-" }}</td>
+            <td>
+              <div class="row-actions">
+                <a class="text-action" href="{% url 'ledger:income_edit' row.record.id %}">编辑</a>
+                <form method="post" action="{% url 'ledger:income_delete' row.record.id %}" onsubmit="return confirm('确认删除这条收入记录吗？');">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.path }}">
+                  <button type="submit" class="link-danger">删除</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7">暂无收入记录</td></tr>
+        {% endfor %}
+        {% for total in income_member_totals %}
+          <tr class="record-total-row">
+            <td colspan="3">{{ total.member }}收入合计</td>
+            <td class="number income">{{ total.amount|thousands }}</td>
+            <td colspan="3"></td>
+          </tr>
+        {% endfor %}
+        <tr class="record-total-row family-total-row">
+          <td colspan="3">家庭收入合计</td>
+          <td class="number income">{{ income_family_total|thousands }}</td>
+          <td colspan="3"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel record-panel split-record-panel">
+  <div class="section-head inner-head">
+    <h2>支出记录</h2>
+  </div>
+  <div class="record-table-wrap">
+    <table class="record-table year-detail-table">
+      <thead>
+        <tr>
+          <th>年月</th>
+          <th>成员</th>
+          <th>分类</th>
+          <th>金额</th>
+          <th>币种</th>
+          <th>备注</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in expense_rows %}
+          <tr>
+            <td>{{ row.period_label }}</td>
+            <td>{{ row.member }}</td>
+            <td>{{ row.category|default:"-" }}</td>
+            <td class="number expense">{{ row.amount|thousands }}</td>
+            <td>{{ row.currency }}</td>
+            <td class="record-remark">{{ row.remark|default:"-" }}</td>
+            <td>
+              <div class="row-actions">
+                <a class="text-action" href="{% url 'ledger:expense_edit' row.record.id %}">编辑</a>
+                <form method="post" action="{% url 'ledger:expense_delete' row.record.id %}" onsubmit="return confirm('确认删除这条支出记录吗？');">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.path }}">
+                  <button type="submit" class="link-danger">删除</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7">暂无支出记录</td></tr>
+        {% endfor %}
+        {% for total in expense_member_totals %}
+          <tr class="record-total-row">
+            <td colspan="3">{{ total.member }}支出合计</td>
+            <td class="number expense">{{ total.amount|thousands }}</td>
+            <td colspan="3"></td>
+          </tr>
+        {% endfor %}
+        <tr class="record-total-row family-total-row">
+          <td colspan="3">家庭支出合计</td>
+          <td class="number expense">{{ expense_family_total|thousands }}</td>
+          <td colspan="3"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

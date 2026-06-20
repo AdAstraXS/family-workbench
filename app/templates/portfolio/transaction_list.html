@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}交易记录{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="section-head">
+    <h1>交易记录</h1>
+    <a class="button" href="{% url 'portfolio:transaction_create' %}">新增交易</a>
+  </div>
+  <table>
+    <thead><tr><th>日期</th><th>账户</th><th>标的</th><th>类型</th><th>数量</th><th>金额</th><th>操作</th></tr></thead>
+    <tbody>
+      {% for item in transactions %}
+        <tr><td>{{ item.trade_date }}</td><td>{{ item.account.account_name }}</td><td>{{ item.security }}</td><td>{{ item.trade_type }}</td><td>{{ item.quantity|thousands }}</td><td>{{ item.amount|thousands }}</td><td><a href="{% url 'portfolio:transaction_edit' item.id %}">编辑</a></td></tr>
+      {% empty %}
+        <tr><td colspan="7">暂无数据</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}资产快照详情{% endblock %}
+
+{% block content %}
+<section class="panel snapshot-detail-panel">
+  <div class="section-head">
+    <h1>{{ snapshot.snapshot_date }} 资产快照</h1>
+    <div class="inline-actions">
+      <a class="button" href="{% url 'ledger:asset_snapshot_edit' snapshot.id %}">编辑</a>
+      <a class="button ghost" href="{% url 'ledger:asset_snapshot_list' %}">返回列表</a>
+    </div>
+  </div>
+  <div class="snapshot-table-wrap">
+    <table class="snapshot-table compact-snapshot-table">
+      <thead>
+        <tr>
+          <th colspan="3">{{ snapshot.snapshot_date|date:"Y年n月j日" }}</th>
+          {% for member in members %}
+            <th colspan="2">{{ member.display_name }}</th>
+          {% endfor %}
+          <th colspan="2">合计</th>
+        </tr>
+        <tr>
+          <th>账户名称</th>
+          <th>资产类别</th>
+          <th>币种</th>
+          {% for member in members %}
+            <th>原币</th>
+            <th>本位币</th>
+          {% endfor %}
+          <th>原币</th>
+          <th>本位币</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.account_name }}</td>
+            <td>{{ row.asset_category }}</td>
+            <td>{{ row.currency }}</td>
+            {% for cell in row.cells %}
+              {% if cell %}
+                <td class="number">{{ cell.original_amount|thousands }}</td>
+                <td class="number">{{ cell.base_amount|thousands }}</td>
+              {% else %}
+                <td class="number muted">-</td>
+                <td class="number muted">-</td>
+              {% endif %}
+            {% endfor %}
+            <td class="number">{{ row.total_original|thousands }}</td>
+            <td class="number">{{ row.total_base|thousands }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7">暂无明细</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        {% for total in currency_totals %}
+          <tr>
+            <td colspan="3">{{ total.label }}</td>
+            {% for cell in total.cells %}
+              <td class="number">{{ cell.original|thousands }}</td>
+              <td class="number">{{ cell.base|thousands }}</td>
+            {% endfor %}
+            <td class="number">{{ total.total_original|thousands }}</td>
+            <td class="number">{{ total.total_base|thousands }}</td>
+          </tr>
+        {% endfor %}
+        <tr class="base-total-row">
+          <td colspan="3">{{ base_total_row.label }}</td>
+          {% for amount in base_total_row.cells %}
+            <td class="muted">人民币</td>
+            <td class="number">{{ amount|thousands }}</td>
+          {% endfor %}
+          <td class="muted">人民币</td>
+          <td class="number">{{ base_total_row.total|thousands }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</section>
+{% endblock %}

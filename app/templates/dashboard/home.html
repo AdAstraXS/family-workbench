@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}首页仪表盘{% endblock %}
+
+{% block content %}
+<section class="headline">
+  <h1>首页仪表盘</h1>
+  <p>这里展示家庭投资和收支的核心摘要。</p>
+</section>
+
+<section class="metrics">
+  <div class="metric"><span>投资资产</span><strong>{{ total_investment_asset|thousands }}</strong></div>
+  <div class="metric"><span>最新资产快照</span><strong>{{ bank_total|thousands }}</strong></div>
+  <div class="metric"><span>本月收入</span><strong>{{ month_income|thousands }}</strong></div>
+  <div class="metric"><span>本月支出</span><strong>{{ month_expense|thousands }}</strong></div>
+  <div class="metric"><span>本月结余</span><strong>{{ month_net|thousands }}</strong></div>
+</section>
+
+<section class="grid two">
+  <div class="panel">
+    <h2>最近投资交易</h2>
+    <table>
+      <thead><tr><th>日期</th><th>账户</th><th>标的</th><th>类型</th><th>金额</th></tr></thead>
+      <tbody>
+        {% for item in recent_transactions %}
+          <tr><td>{{ item.trade_date }}</td><td>{{ item.account.account_name }}</td><td>{{ item.security }}</td><td>{{ item.trade_type }}</td><td>{{ item.amount|thousands }}</td></tr>
+        {% empty %}
+          <tr><td colspan="5">暂无数据</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="panel">
+    <h2>最近支出</h2>
+    <table>
+      <thead><tr><th>日期</th><th>成员</th><th>分类</th><th>商户</th><th>金额</th></tr></thead>
+      <tbody>
+        {% for item in recent_expenses %}
+          <tr><td>{{ item.expense_date }}</td><td>{{ item.member }}</td><td>{{ item.category }}</td><td>{{ item.merchant }}</td><td>{{ item.amount|thousands }}</td></tr>
+        {% empty %}
+          <tr><td colspan="5">暂无数据</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

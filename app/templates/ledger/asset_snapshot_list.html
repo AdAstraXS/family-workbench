@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}资产快照{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="section-head">
+    <h1>资产快照</h1>
+    <div class="inline-actions">
+      <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
+      <a class="button" href="{% url 'ledger:asset_snapshot_create' %}">新增资产快照</a>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>日期</th>
+        <th>家庭</th>
+        {% for member in members %}
+          <th>{{ member.display_name }}余额</th>
+        {% endfor %}
+        <th>合计余额</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+        <tr>
+          <td>{{ row.snapshot.snapshot_date }}</td>
+          <td>{{ row.snapshot.family }}</td>
+          {% for amount in row.member_totals %}
+            <td class="number">{{ amount|thousands }}</td>
+          {% endfor %}
+          <td class="number">{{ row.total|thousands }}</td>
+          <td>
+            <a href="{% url 'ledger:asset_snapshot_detail' row.snapshot.id %}">查看</a>
+            <a href="{% url 'ledger:asset_snapshot_edit' row.snapshot.id %}">编辑</a>
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="{{ members|length|add:4 }}">暂无资产快照</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

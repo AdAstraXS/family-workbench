@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}基础资料管理{% endblock %}
+
+{% block content %}
+<section class="section-head">
+  <h1>基础资料管理</h1>
+  <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
+</section>
+
+<section class="panel">
+  <div class="section-head">
+    <h1>账户</h1>
+    <a class="button" href="{% url 'ledger:bank_account_create' %}">新增账户</a>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>成员</th>
+        <th>账户名称</th>
+        <th>账号</th>
+        <th>账户地区</th>
+        <th>账户类型</th>
+        <th>状态</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for account in accounts %}
+        <tr>
+          <td>{{ account.member }}</td>
+          <td>{{ account.account_name }}</td>
+          <td>{{ account.account_no_masked|default:"-" }}</td>
+          <td>{{ account.account_region|default:"-" }}</td>
+          <td>{{ account.account_type_ref|default:"-" }}</td>
+          <td>{{ account.is_active }}</td>
+          <td><a href="{% url 'ledger:bank_account_edit' account.id %}">编辑</a></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7">暂无账户</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="grid two basics-grid">
+  <div class="panel">
+    <div class="section-head">
+      <h1>收入分类</h1>
+      <a class="button" href="{% url 'ledger:income_category_create' %}">新增收入分类</a>
+    </div>
+    <table>
+      <thead><tr><th>名称</th><th>家庭</th><th>父分类</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody>
+        {% for category in income_categories %}
+          <tr><td>{{ category.name }}</td><td>{{ category.family }}</td><td>{{ category.parent|default:"-" }}</td><td>{{ category.is_active }}</td><td><a href="{% url 'ledger:income_category_edit' category.id %}">编辑</a></td></tr>
+        {% empty %}
+          <tr><td colspan="5">暂无收入分类</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="panel">
+    <div class="section-head">
+      <h1>支出分类</h1>
+      <a class="button" href="{% url 'ledger:expense_category_create' %}">新增支出分类</a>
+    </div>
+    <table>
+      <thead><tr><th>名称</th><th>家庭</th><th>父分类</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody>
+        {% for category in expense_categories %}
+          <tr><td>{{ category.name }}</td><td>{{ category.family }}</td><td>{{ category.parent|default:"-" }}</td><td>{{ category.is_active }}</td><td><a href="{% url 'ledger:expense_category_edit' category.id %}">编辑</a></td></tr>
+        {% empty %}
+          <tr><td colspan="5">暂无支出分类</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
