@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% load money %}
 
-{% block title %}{{ year }}年收支记录{% endblock %}
+{% block title %}{{ report_title }}{% endblock %}
 
 {% block content %}
 <section class="cashflow-hero">
   <div>
-    <p class="eyebrow">{{ family }} · {{ year }}</p>
-    <h1>{{ year }}年收支记录</h1>
+    <p class="eyebrow">{{ family }} · {% if month %}{{ year }}年{{ month }}月{% else %}{{ year }}年{% endif %}</p>
+    <h1>{{ report_title }}</h1>
   </div>
   <div class="inline-actions">
-    <a class="button ghost" href="{% url 'ledger:expense_list' %}">返回年度收支</a>
+    <a class="button ghost" href="{% url 'ledger:cashflow_summary_year' year %}">{{ return_label }}</a>
     <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
     <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
     <a class="button" href="{% url 'ledger:expense_create' %}">新增支出</a>

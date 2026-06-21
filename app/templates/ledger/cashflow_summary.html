@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% load money %}
 
-{% block title %}收入支出汇总{% endblock %}
+{% block title %}月度收支汇总{% endblock %}
 
 {% block content %}
 <section class="cashflow-hero">
   <div>
     <p class="eyebrow">家庭账本</p>
-    <h1>收入支出汇总</h1>
+    <h1>{% if year %}{{ year }}年月度收支汇总{% else %}月度收支汇总{% endif %}</h1>
   </div>
   <div class="inline-actions">
     <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
-    <a class="button ghost" href="{% url 'ledger:expense_list' %}">收支记录</a>
+    <a class="button ghost" href="{% url 'ledger:expense_list' %}">返回年度收支</a>
     <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
     <a class="button" href="{% url 'ledger:expense_create' %}">新增支出</a>
   </div>
@@ -26,6 +26,7 @@
           <th colspan="{{ members|length }}">收入</th>
           <th colspan="{{ members|length }}">支出</th>
           <th colspan="{{ members|length }}">结余</th>
+          <th rowspan="2">操作</th>
         </tr>
         <tr>
           {% for member in members %}
@@ -53,6 +54,7 @@
               {% for amount in row.net_cells %}
                 <td class="number net">{{ amount|thousands }}</td>
               {% endfor %}
+              <td><a class="text-action" href="{% url 'ledger:expense_month_detail' row.year row.month %}">查看明细</a></td>
             </tr>
           {% endfor %}
           <tr class="year-total-row">
@@ -66,10 +68,11 @@
             {% for amount in section.total.net_cells %}
               <td class="number net">{{ amount|thousands }}</td>
             {% endfor %}
+            <td><a class="text-action" href="{% url 'ledger:expense_year_detail' section.year %}">查看明细</a></td>
           </tr>
         {% empty %}
           <tr>
-            <td colspan="{{ members|length|add:members|length|add:members|length|add:1 }}">暂无数据</td>
+            <td colspan="{{ members|length|add:members|length|add:members|length|add:2 }}">暂无数据</td>
           </tr>
         {% endfor %}
       </tbody>

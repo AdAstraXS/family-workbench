@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}投资收益{% endblock %}
+
+{% block content %}
+<section class="return-hero">
+  <div>
+    <p class="eyebrow">家庭账本</p>
+    <h1>投资收益</h1>
+    {% if latest_snapshot %}
+      <p>{{ family }} · 最新资产快照：{{ latest_snapshot.snapshot_date|date:"Y年n月j日" }}</p>
+    {% else %}
+      <p>{{ family }} · 暂无资产快照</p>
+    {% endif %}
+  </div>
+  <div class="inline-actions">
+    <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
+    <a class="button ghost" href="{% url 'ledger:asset_snapshot_list' %}">资产快照</a>
+    <a class="button ghost" href="{% url 'ledger:expense_list' %}">收支记录</a>
+  </div>
+</section>
+
+{% if latest_snapshot %}
+  <section class="return-summary-grid">
+    <div class="return-summary-card">
+      <span>上年末资产基准</span>
+      <strong>{% if previous_year_snapshot %}{{ previous_year_snapshot.snapshot_date|date:"Y年n月j日" }}{% else %}暂无{% endif %}</strong>
+    </div>
+    <div class="return-summary-card">
+      <span>上月资产基准</span>
+      <strong>{% if previous_month_snapshot %}{{ previous_month_snapshot.snapshot_date|date:"Y年n月j日" }}{% else %}暂无{% endif %}</strong>
+    </div>
+    <div class="return-summary-card accent">
+      <span>本月资产快照</span>
+      <strong>{{ latest_snapshot.snapshot_date|date:"Y年n月j日" }}</strong>
+    </div>
+  </section>
+
+  <section class="panel return-panel">
+    <div class="return-table-wrap">
+      <table class="return-table">
+        <thead>
+          <tr>
+            <th>成员</th>
+            <th>上年末资产余额</th>
+            <th>上月资产余额</th>
+            <th>本月资产余额</th>
+            <th>较上年底增加额</th>
+            <th>较上月增加额</th>
+            <th>本年收支结余</th>
+            <th>本月收支结余</th>
+            <th>本年投资收益</th>
+            <th>本月投资收益</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr class="{% if row.is_total %}total-row{% endif %}">
+              <td>{{ row.label }}</td>
+              <td class="number">{{ row.previous_year_balance|thousands }}</td>
+              <td class="number">{{ row.previous_month_balance|thousands }}</td>
+              <td class="number strong-number">{{ row.current_balance|thousands }}</td>
+              <td class="number {% if row.increase_from_year_end > 0 %}positive{% elif row.increase_from_year_end < 0 %}negative{% endif %}">{{ row.increase_from_year_end|thousands }}</td>
+              <td class="number {% if row.increase_from_previous_month > 0 %}positive{% elif row.increase_from_previous_month < 0 %}negative{% endif %}">{{ row.increase_from_previous_month|thousands }}</td>
+              <td class="number {% if row.year_net_cashflow > 0 %}positive{% elif row.year_net_cashflow < 0 %}negative{% endif %}">{{ row.year_net_cashflow|thousands }}</td>
+              <td class="number {% if row.month_net_cashflow > 0 %}positive{% elif row.month_net_cashflow < 0 %}negative{% endif %}">{{ row.month_net_cashflow|thousands }}</td>
+              <td class="number return-value {% if row.year_investment_return > 0 %}positive{% elif row.year_investment_return < 0 %}negative{% endif %}">{{ row.year_investment_return|thousands }}</td>
+              <td class="number return-value {% if row.month_investment_return > 0 %}positive{% elif row.month_investment_return < 0 %}negative{% endif %}">{{ row.month_investment_return|thousands }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="return-footnote">投资收益 = 本期资产余额 - 上期资产余额 - 本期收支结余；页面以最新资产快照月份作为本月。</p>
+  </section>
+{% else %}
+  <section class="panel empty-state-panel">
+    <h2>暂无可计算数据</h2>
+    <p>请先录入至少一张资产快照，再查看投资收益。</p>
+    <a class="button" href="{% url 'ledger:asset_snapshot_create' %}">新增资产快照</a>
+  </section>
+{% endif %}
+{% endblock %}

@@ -682,6 +682,163 @@ textarea {
   text-align: center;
 }
 
+.return-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.return-hero .eyebrow {
+  margin: 0 0 6px;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.return-hero h1 {
+  margin: 0 0 6px;
+  color: #111827;
+  font-size: 32px;
+  letter-spacing: 0;
+}
+
+.return-hero p {
+  margin: 0;
+  color: #6b7280;
+}
+
+.return-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.return-summary-card {
+  min-height: 92px;
+  padding: 16px;
+  border: 1px solid rgba(209, 213, 219, 0.8);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+}
+
+.return-summary-card span {
+  display: block;
+  margin-bottom: 10px;
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.return-summary-card strong {
+  color: #111827;
+  font-size: 22px;
+}
+
+.return-summary-card.accent {
+  border-color: rgba(37, 99, 235, 0.25);
+  background: linear-gradient(180deg, #ffffff 0%, #eef5ff 100%);
+}
+
+.return-panel {
+  overflow: visible;
+}
+
+.return-table-wrap {
+  max-height: calc(100vh - 290px);
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.return-table {
+  min-width: 1380px;
+  margin-top: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.return-table th,
+.return-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid #eef0f4;
+  text-align: center;
+}
+
+.return-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(249, 250, 251, 0.96);
+  color: #374151;
+  font-size: 13px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 1px 0 #e5e7eb;
+}
+
+.return-table td:first-child,
+.return-table th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  text-align: left;
+}
+
+.return-table td:first-child {
+  background: #ffffff;
+  color: #111827;
+  font-weight: 700;
+}
+
+.return-table th:first-child {
+  background: rgba(249, 250, 251, 0.98);
+}
+
+.return-table tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.return-table .number {
+  font-variant-numeric: tabular-nums;
+}
+
+.return-table .strong-number,
+.return-table .return-value {
+  font-weight: 750;
+}
+
+.return-table .positive {
+  color: #047857;
+}
+
+.return-table .negative {
+  color: #dc2626;
+}
+
+.return-table .total-row td {
+  background: #f1f5f9;
+  border-top: 1px solid #dbe2ea;
+  font-weight: 750;
+}
+
+.return-table .total-row td:first-child {
+  background: #f1f5f9;
+}
+
+.return-footnote {
+  margin: 12px 2px 0;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.empty-state-panel {
+  max-width: 720px;
+}
+
 .budget-month-panel {
   margin-top: 18px;
 }

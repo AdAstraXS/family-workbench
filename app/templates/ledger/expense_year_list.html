@@ -11,7 +11,6 @@
   </div>
   <div class="inline-actions">
     <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
-    <a class="button ghost" href="{% url 'ledger:cashflow_summary' %}">收入支出汇总</a>
     <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
     <a class="button" href="{% url 'ledger:expense_create' %}">新增支出</a>
   </div>
@@ -49,7 +48,7 @@
             <td class="number expense strong-number">{{ row.expense_total|thousands }}</td>
             {% for amount in row.net_cells %}<td class="number net">{{ amount|thousands }}</td>{% endfor %}
             <td class="number net strong-number">{{ row.net_total|thousands }}</td>
-            <td><a class="text-action" href="{% url 'ledger:expense_year_detail' row.year %}">查看明细</a></td>
+            <td><a class="text-action" href="{% url 'ledger:cashflow_summary_year' row.year %}">查看明细</a></td>
           </tr>
         {% empty %}
           <tr><td colspan="{{ members|length|add:members|length|add:members|length|add:6 }}">暂无年度收支记录</td></tr>

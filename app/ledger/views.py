@@ -2,6 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from datetime import date
 from decimal import Decimal
 import json
 
@@ -64,7 +65,7 @@ def get_record_year_month_label(record, fallback_field):
     return f"{record_date.year}年{record_date.month}月"
 
 
-def build_cashflow_monthly_rows():
+def build_cashflow_monthly_rows(target_year=None):
     default_family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
     members_query = FamilyMember.objects.filter(is_active=True)
     if default_family:
@@ -98,16 +99,20 @@ def build_cashflow_monthly_rows():
         if record.member_id not in member_ids:
             continue
         year, month = get_record_month(record, "income_date")
+        if target_year and year != target_year:
+            continue
         ensure_month(year, month)["income"][record.member_id] += record.amount or Decimal("0")
 
     for record in expense_records:
         if record.member_id not in member_ids:
             continue
         year, month = get_record_month(record, "expense_date")
+        if target_year and year != target_year:
+            continue
         ensure_month(year, month)["expense"][record.member_id] += record.amount or Decimal("0")
 
     today = timezone.localdate()
-    if not month_map:
+    if not month_map and not target_year:
         ensure_month(today.year, today.month)
 
     rows = []
@@ -212,18 +217,24 @@ def build_annual_cashflow_rows():
     return members, rows
 
 
-def build_year_cashflow_detail(year):
+def build_year_cashflow_detail(year, month=None):
     default_family, income_records, expense_records = get_default_family_records()
     members = list(FamilyMember.objects.filter(family=default_family, is_active=True).order_by("display_name")) if default_family else []
     member_ids = [member.id for member in members]
-    income_records = list(
+    income_records = (
         income_records.filter(Q(period_start__year=year) | Q(period_start__isnull=True, income_date__year=year))
         .order_by("period_start", "income_date", "member__display_name", "created_at")
     )
-    expense_records = list(
+    expense_records = (
         expense_records.filter(Q(period_start__year=year) | Q(period_start__isnull=True, expense_date__year=year))
         .order_by("period_start", "expense_date", "member__display_name", "created_at")
     )
+    if month:
+        income_records = [record for record in income_records if get_record_month(record, "income_date") == (year, month)]
+        expense_records = [record for record in expense_records if get_record_month(record, "expense_date") == (year, month)]
+    else:
+        income_records = list(income_records)
+        expense_records = list(expense_records)
 
     def make_row(record, kind):
         fallback_field = "income_date" if kind == "income" else "expense_date"
@@ -253,6 +264,10 @@ def build_year_cashflow_detail(year):
 
     return {
         "family": default_family,
+        "year": year,
+        "month": month,
+        "report_title": f"{year}年{month}月收支记录" if month else f"{year}年收支记录",
+        "return_label": "返回月度收支" if month else "返回月度收支",
         "members": members,
         "income_rows": income_rows,
         "expense_rows": expense_rows,
@@ -659,6 +674,159 @@ def build_asset_snapshot_matrix(snapshot):
     return members, rows.values(), currency_total_rows, base_total_row, grand_total
 
 
+def get_month_start(day):
+    return date(day.year, day.month, 1)
+
+
+def get_next_month_start(day):
+    if day.month == 12:
+        return date(day.year + 1, 1, 1)
+    return date(day.year, day.month + 1, 1)
+
+
+def get_previous_month_start(day):
+    if day.month == 1:
+        return date(day.year - 1, 12, 1)
+    return date(day.year, day.month - 1, 1)
+
+
+def get_snapshot_member_totals(snapshot, members):
+    totals = {member.id: Decimal("0") for member in members}
+    if not snapshot:
+        return totals
+    for entry in snapshot.entries.all():
+        if entry.member_id in totals:
+            totals[entry.member_id] += entry.base_amount or Decimal("0")
+    return totals
+
+
+def get_cashflow_member_totals(family, members, start_date, end_date):
+    member_ids = [member.id for member in members]
+    income_totals = {member.id: Decimal("0") for member in members}
+    expense_totals = {member.id: Decimal("0") for member in members}
+    if not family:
+        return {member.id: Decimal("0") for member in members}
+
+    income_records = IncomeRecord.objects.filter(family=family).filter(
+        Q(period_start__lte=end_date, period_end__gte=start_date)
+        | Q(period_start__gte=start_date, period_start__lte=end_date, period_end__isnull=True)
+        | Q(period_start__isnull=True, income_date__gte=start_date, income_date__lte=end_date)
+    )
+    expense_records = ExpenseRecord.objects.filter(family=family).filter(
+        Q(period_start__lte=end_date, period_end__gte=start_date)
+        | Q(period_start__gte=start_date, period_start__lte=end_date, period_end__isnull=True)
+        | Q(period_start__isnull=True, expense_date__gte=start_date, expense_date__lte=end_date)
+    )
+    for record in income_records:
+        if record.member_id in member_ids:
+            income_totals[record.member_id] += record.amount or Decimal("0")
+    for record in expense_records:
+        if record.member_id in member_ids:
+            expense_totals[record.member_id] += record.amount or Decimal("0")
+    return {member.id: income_totals[member.id] - expense_totals[member.id] for member in members}
+
+
+def build_investment_return_report():
+    family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
+    members = list(FamilyMember.objects.filter(family=family, is_active=True).order_by("display_name")) if family else []
+    latest_snapshot = (
+        AssetBalanceSnapshot.objects.filter(family=family)
+        .prefetch_related("entries")
+        .order_by("-snapshot_date", "-created_at")
+        .first()
+        if family
+        else None
+    )
+    if not latest_snapshot:
+        return {
+            "family": family,
+            "members": members,
+            "latest_snapshot": None,
+            "previous_year_snapshot": None,
+            "previous_month_snapshot": None,
+            "rows": [],
+        }
+
+    latest_date = latest_snapshot.snapshot_date
+    year_start = date(latest_date.year, 1, 1)
+    month_start = get_month_start(latest_date)
+    previous_year_end = date(latest_date.year - 1, 12, 31)
+    previous_month_start = get_previous_month_start(latest_date)
+
+    previous_year_snapshot = (
+        AssetBalanceSnapshot.objects.filter(family=family, snapshot_date__lte=previous_year_end)
+        .prefetch_related("entries")
+        .order_by("-snapshot_date", "-created_at")
+        .first()
+    )
+    previous_month_snapshot = (
+        AssetBalanceSnapshot.objects.filter(
+            family=family,
+            snapshot_date__gte=year_start,
+            snapshot_date__lt=month_start,
+        )
+        .prefetch_related("entries")
+        .order_by("-snapshot_date", "-created_at")
+        .first()
+    )
+
+    previous_year_totals = get_snapshot_member_totals(previous_year_snapshot, members)
+    previous_month_totals = get_snapshot_member_totals(previous_month_snapshot, members)
+    current_totals = get_snapshot_member_totals(latest_snapshot, members)
+    year_net_totals = get_cashflow_member_totals(family, members, year_start, latest_date)
+    month_net_totals = get_cashflow_member_totals(family, members, month_start, latest_date)
+
+    rows = []
+    total_row = {
+        "label": "家庭合计",
+        "previous_year_balance": Decimal("0"),
+        "previous_month_balance": Decimal("0"),
+        "current_balance": Decimal("0"),
+        "increase_from_year_end": Decimal("0"),
+        "increase_from_previous_month": Decimal("0"),
+        "year_net_cashflow": Decimal("0"),
+        "month_net_cashflow": Decimal("0"),
+        "year_investment_return": Decimal("0"),
+        "month_investment_return": Decimal("0"),
+        "is_total": True,
+    }
+    for member in members:
+        previous_year_balance = previous_year_totals[member.id]
+        previous_month_balance = previous_month_totals[member.id]
+        current_balance = current_totals[member.id]
+        year_net_cashflow = year_net_totals[member.id]
+        month_net_cashflow = month_net_totals[member.id]
+        row = {
+            "label": member.display_name,
+            "previous_year_balance": previous_year_balance,
+            "previous_month_balance": previous_month_balance,
+            "current_balance": current_balance,
+            "increase_from_year_end": current_balance - previous_year_balance,
+            "increase_from_previous_month": current_balance - previous_month_balance,
+            "year_net_cashflow": year_net_cashflow,
+            "month_net_cashflow": month_net_cashflow,
+            "year_investment_return": current_balance - previous_year_balance - year_net_cashflow,
+            "month_investment_return": current_balance - previous_month_balance - month_net_cashflow,
+            "is_total": False,
+        }
+        rows.append(row)
+        for key in total_row:
+            if key not in {"label", "is_total"}:
+                total_row[key] += row[key]
+    rows.append(total_row)
+
+    return {
+        "family": family,
+        "members": members,
+        "latest_snapshot": latest_snapshot,
+        "previous_year_snapshot": previous_year_snapshot,
+        "previous_month_snapshot": previous_month_snapshot,
+        "month_label": f"{latest_date.year}年{latest_date.month}月",
+        "year_label": f"{latest_date.year}年",
+        "rows": rows,
+    }
+
+
 @login_required
 def overview(request):
     latest_snapshot = AssetBalanceSnapshot.objects.order_by("-snapshot_date", "-created_at").first()
@@ -681,6 +849,12 @@ def overview(request):
             "latest_snapshot": latest_snapshot,
         },
     )
+
+
+@login_required
+def investment_return_report(request):
+    report = build_investment_return_report()
+    return render(request, "ledger/investment_return_report.html", report)
 
 
 @login_required
@@ -939,14 +1113,15 @@ def income_delete(request, pk):
 
 
 @login_required
-def cashflow_summary(request):
-    members, sections = build_cashflow_monthly_rows()
+def cashflow_summary(request, year=None):
+    members, sections = build_cashflow_monthly_rows(year)
     return render(
         request,
         "ledger/cashflow_summary.html",
         {
             "members": members,
             "sections": sections,
+            "year": year,
         },
     )
 
@@ -961,6 +1136,12 @@ def expense_list(request):
 def expense_year_detail(request, year):
     report = build_year_cashflow_detail(year)
     return render(request, "ledger/expense_list.html", {"year": year, **report})
+
+
+@login_required
+def expense_month_detail(request, year, month):
+    report = build_year_cashflow_detail(year, month)
+    return render(request, "ledger/expense_list.html", {"year": year, "month": month, **report})
 
 
 @login_required
