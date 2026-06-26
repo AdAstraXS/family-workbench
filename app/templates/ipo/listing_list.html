@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}港股打新{% endblock %}
+
+{% block content %}
+<section class="headline">
+  <h1>港股打新</h1>
+  <p>新股资料、发行排期和估值判断的第一版台账。</p>
+</section>
+
+<section class="quick-actions">
+  <a class="button" href="{% url 'ipo:listing_create' %}">新增新股资料</a>
+  <a class="button ghost" href="{% url 'ipo:subscription_trade_list' %}">申购和交易</a>
+  <a class="button ghost" href="{% url 'ipo:index' %}">返回模块首页</a>
+</section>
+
+<section class="metrics ipo-status-metrics">
+  <div class="metric"><span>招股中数量</span><strong>{{ metrics.subscribing|default:0 }}</strong></div>
+  <div class="metric"><span>待上市数量</span><strong>{{ metrics.waiting_listing|default:0 }}</strong></div>
+  <div class="metric"><span>今日上市数量</span><strong>{{ metrics.listing_today|default:0 }}</strong></div>
+  <div class="metric"><span>新股数量</span><strong>{{ metrics.total|default:0 }}</strong></div>
+</section>
+
+<section class="ipo-list-section">
+  <div class="section-head">
+    <h2>今日上市</h2>
+  </div>
+  <div class="panel record-panel">
+    <div class="record-table-wrap ipo-table-wrap">
+      {% include "ipo/_listing_table.html" with listings=today_listings empty_text="暂无今日上市新股。" %}
+    </div>
+  </div>
+</section>
+
+<section class="ipo-list-section">
+  <div class="section-head">
+    <h2>今日暗盘</h2>
+  </div>
+  <div class="panel record-panel">
+    <div class="record-table-wrap ipo-table-wrap">
+      {% include "ipo/_listing_table.html" with listings=grey_market_listings empty_text="暂无今日暗盘新股。" %}
+    </div>
+  </div>
+</section>
+
+<section class="ipo-list-section">
+  <div class="section-head">
+    <h2>招股中</h2>
+  </div>
+  <div class="panel record-panel">
+    <div class="record-table-wrap ipo-table-wrap">
+      {% include "ipo/_listing_table.html" with listings=subscribing_listings empty_text="暂无招股中新股。" show_expected_margin=True %}
+    </div>
+  </div>
+</section>
+
+<section class="ipo-list-section">
+  <div class="section-head">
+    <h2>待上市</h2>
+  </div>
+  <div class="panel record-panel">
+    <div class="record-table-wrap ipo-table-wrap">
+      {% include "ipo/_listing_table.html" with listings=waiting_listings empty_text="暂无待上市新股。" %}
+    </div>
+  </div>
+</section>
+
+<section class="ipo-list-section">
+  <div class="section-head">
+    <h2>已上市</h2>
+    <span class="muted-text">共 {{ listed_count }} 条，默认显示前 10 条</span>
+  </div>
+  <div class="panel record-panel">
+    <div class="record-table-wrap ipo-table-wrap">
+      {% include "ipo/_listing_table.html" with listings=listed_visible empty_text="暂无已上市新股。" %}
+    </div>
+    {% if listed_hidden %}
+      <details class="ipo-more-listings">
+        <summary>展开查看剩余 {{ listed_hidden|length }} 条已上市新股</summary>
+        <div class="record-table-wrap ipo-table-wrap">
+          {% include "ipo/_listing_table.html" with listings=listed_hidden %}
+        </div>
+      </details>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

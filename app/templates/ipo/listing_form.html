@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<section class="panel form-panel wide-form-panel">
+  <div class="section-head">
+    <h1>{{ title }}</h1>
+  </div>
+  <div class="image-recognition-box">
+    <div>
+      <strong>图片识别录入</strong>
+      <p>上传招股资料截图，系统会识别可匹配字段并填入下方表单，保存前请人工核对。</p>
+    </div>
+    <div class="image-recognition-controls">
+      <input id="ipo-image-input" type="file" accept="image/*">
+      <button id="ipo-image-recognize" type="button">识别并填入</button>
+    </div>
+    <div id="ipo-image-status" class="image-recognition-status" aria-live="polite"></div>
+  </div>
+  <form method="post" enctype="multipart/form-data" class="data-form">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+      <div class="form-errors">{{ form.non_field_errors }}</div>
+    {% endif %}
+    {% for group in form.grouped_fields %}
+      <fieldset class="form-fieldset">
+        <legend>{{ group.title }}</legend>
+        <div class="fieldset-grid">
+          {% for field in group.fields %}
+            <div class="form-row">
+              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.help_text %}
+                <small>{{ field.help_text }}</small>
+              {% endif %}
+              {% for error in field.errors %}
+                <div class="field-error">{{ error }}</div>
+              {% endfor %}
+            </div>
+          {% endfor %}
+        </div>
+      </fieldset>
+    {% endfor %}
+    <div class="form-actions">
+      <button type="submit">保存</button>
+      <a class="button ghost" href="javascript:history.back()">返回</a>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const imageInput = document.getElementById("ipo-image-input");
+  const recognizeButton = document.getElementById("ipo-image-recognize");
+  const statusBox = document.getElementById("ipo-image-status");
+  const recognizeUrl = "{% url 'ipo:recognize_listing_image' %}";
+  const csrfToken = document.querySelector("input[name='csrfmiddlewaretoken']").value;
+
+  function setStatus(message, kind = "") {
+    statusBox.textContent = message;
+    statusBox.className = `image-recognition-status ${kind}`.trim();
+  }
+
+  function fillField(name, value) {
+    const field = document.getElementById(`id_${name}`);
+    if (!field || value === null || value === undefined || value === "") {
+      return false;
+    }
+    if (field.type === "checkbox") {
+      field.checked = Boolean(value);
+      return true;
+    }
+    field.value = value;
+    field.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }
+
+  recognizeButton.addEventListener("click", async () => {
+    const file = imageInput.files[0];
+    if (!file) {
+      setStatus("请先选择一张图片。", "error");
+      return;
+    }
+    const formData = new FormData();
+    formData.append("image", file);
+
+    recognizeButton.disabled = true;
+    setStatus("正在识别图片内容，较大的截图可能需要等待几十秒...");
+    try {
+      const response = await fetch(recognizeUrl, {
+        method: "POST",
+        headers: {"X-CSRFToken": csrfToken},
+        body: formData,
+      });
+      let data = null;
+      try {
+        data = await response.json();
+      } catch (error) {
+        setStatus("识别服务暂时没有返回有效结果，请稍后重试。", "error");
+        return;
+      }
+      if (!data.ok) {
+        setStatus(data.error || "识别失败，请稍后重试。", "error");
+        return;
+      }
+      let filledCount = 0;
+      Object.entries(data.fields || {}).forEach(([name, value]) => {
+        if (fillField(name, value)) {
+          filledCount += 1;
+        }
+      });
+      setStatus(`已识别并填入 ${filledCount} 个字段，请核对后保存。`, "success");
+    } catch (error) {
+      setStatus("识别请求失败，请检查网络或 AI 服务配置。", "error");
+    } finally {
+      recognizeButton.disabled = false;
+    }
+  });
+})();
+</script>
+{% endblock %}

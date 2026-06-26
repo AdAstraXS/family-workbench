@@ -1,0 +1,51 @@
+{% load money %}
+<table class="record-table ipo-listing-table">
+  <thead>
+    <tr>
+      <th>股票代码</th>
+      <th>股票名称</th>
+      <th>类型</th>
+      <th>机制</th>
+      <th>招股截止</th>
+      <th>撞车</th>
+      <th>公配手数</th>
+      {% if show_expected_margin %}<th>预计孖展</th>{% endif %}
+      <th>最终定价</th>
+      <th>每手股数</th>
+      <th>入场费</th>
+      <th>港股通预期</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for listing in listings %}
+      <tr>
+        <td><a href="{% url 'ipo:listing_detail' listing.pk %}">{{ listing.stock_code }}</a></td>
+        <td>{{ listing.stock_name|default:listing.company_name }}</td>
+        <td><span class="ipo-chip type-{{ listing.listing_type }}">{{ listing.get_listing_type_display }}</span></td>
+        <td><span class="ipo-chip mechanism-{{ listing.mechanism }}">{{ listing.get_mechanism_display }}</span></td>
+        <td>{{ listing.subscription_end_date|date:"Y-m-d"|default:"-" }}</td>
+        <td>
+          {% with collision_count=listing.collision_count %}
+            <span class="ipo-chip {% if collision_count <= 1 %}success{% elif collision_count == 2 %}collision-2{% elif collision_count == 3 %}collision-3{% elif collision_count == 4 %}collision-4{% else %}collision-5{% endif %}">{{ listing.collision_label }}</span>
+          {% endwith %}
+        </td>
+        <td class="number">{{ listing.public_offer_lots|lots }}</td>
+        {% if show_expected_margin %}<td class="number">{{ listing.expected_margin_multiple|default:"-" }}</td>{% endif %}
+        <td class="number">{{ listing.final_price|money2 }}</td>
+        <td class="number">{{ listing.lot_size|lots }}</td>
+        <td class="number">{{ listing.entry_fee|money2 }}</td>
+        <td class="number {% if listing.hk_connect_required_gain_pct > 0 %}negative{% elif listing.hk_connect_required_gain_pct < 0 %}positive{% endif %}">{{ listing.hk_connect_required_gain_pct|money2 }}{% if listing.hk_connect_required_gain_pct %}%{% endif %}</td>
+        <td>
+          <span class="row-actions">
+            <a class="text-action" href="{% url 'ipo:listing_detail' listing.pk %}">查看</a>
+          </span>
+        </td>
+      </tr>
+    {% empty %}
+      <tr>
+        <td colspan="{% if show_expected_margin %}13{% else %}12{% endif %}">{{ empty_text|default:"暂无新股资料。" }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>

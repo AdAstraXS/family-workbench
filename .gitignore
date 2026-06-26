@@ -2,6 +2,7 @@
 postgres/
 media/
 staticfiles/
+app/tmp/
 app/db.sqlite3
 __pycache__/
 *.py[cod]

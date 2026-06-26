@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}{{ listing.stock_code }} {{ listing.stock_name|default:listing.company_name }}{% endblock %}
+
+{% block content %}
+<section class="headline">
+  <h1>{{ listing.stock_code }} {{ listing.stock_name|default:listing.company_name }}</h1>
+  <p>{{ listing.company_name }}</p>
+  <div class="ipo-chip-row">
+    <span class="ipo-chip type">{{ listing.get_listing_type_display }}</span>
+    <span class="ipo-chip mechanism">{{ listing.get_mechanism_display }}</span>
+    <span class="ipo-chip {% if listing.collision_count > 1 %}danger{% else %}success{% endif %}">{{ listing.collision_label }}</span>
+  </div>
+</section>
+
+<section class="quick-actions">
+  <a class="button ghost" href="{% url 'ipo:listing_list' %}">返回列表</a>
+  <a class="button" href="{% url 'ipo:listing_edit' listing.pk %}">编辑新股资料</a>
+  {% if listing.prospectus %}
+    <a class="button ghost" href="{{ listing.prospectus.url }}" target="_blank" rel="noopener">查看招股书</a>
+  {% endif %}
+</section>
+
+<section class="metrics">
+  <div class="metric"><span>最终定价</span><strong>{{ listing.final_price|money2 }}</strong></div>
+  <div class="metric"><span>入场费</span><strong>{{ listing.entry_fee|money2 }}</strong></div>
+  <div class="metric"><span>公配手数</span><strong>{{ listing.public_offer_lots|lots }}</strong></div>
+  <div class="metric"><span>认购建议</span><strong>{{ listing.get_subscription_recommendation_display|default:"-" }}</strong></div>
+</section>
+
+<section class="grid two basics-grid">
+  <div class="panel">
+    <div class="section-head">
+      <h2>发行排期</h2>
+    </div>
+    <dl class="detail-grid">
+      <dt>招股开始日</dt><dd>{{ listing.subscription_start_date|date:"Y-m-d"|default:"-" }}</dd>
+      <dt>招股截止日</dt><dd>{{ listing.subscription_end_date|date:"Y-m-d"|default:"-" }}</dd>
+      <dt>公布结果日</dt><dd>{{ listing.allotment_result_date|date:"Y-m-d"|default:"-" }}</dd>
+      <dt>上市日期</dt><dd>{{ listing.listing_date|date:"Y-m-d"|default:"-" }}</dd>
+      <dt>是否撞车</dt><dd><span class="ipo-chip {% if listing.collision_count > 1 %}danger{% else %}success{% endif %}">{{ listing.collision_label }}</span></dd>
+      <dt>股票类型</dt><dd><span class="ipo-chip type">{{ listing.get_listing_type_display }}</span></dd>
+      <dt>发行机制</dt><dd><span class="ipo-chip mechanism">{{ listing.get_mechanism_display }}</span></dd>
+    </dl>
+  </div>
+
+  <div class="panel">
+    <div class="section-head">
+      <h2>规模与估值</h2>
+    </div>
+    <dl class="detail-grid">
+      <dt>招股价下限</dt><dd>{{ listing.offer_price_min|money2 }}</dd>
+      <dt>招股价上限</dt><dd>{{ listing.offer_price_max|money2 }}</dd>
+      <dt>每手股数</dt><dd>{{ listing.lot_size|lots }}</dd>
+      <dt>全球发售股数</dt><dd>{{ listing.global_offer_shares_10k|money2 }} 万股</dd>
+      <dt>募资金额</dt><dd>{{ listing.fundraising_amount_100m|money2 }} 亿港元</dd>
+      <dt>发行后总市值</dt><dd>{{ listing.total_market_cap_100m|money2 }} 亿港元</dd>
+      <dt>H股市值</dt><dd>{{ listing.h_share_market_cap_100m|money2 }} 亿港元</dd>
+      <dt>港股通门槛</dt><dd>{{ listing.hk_connect_threshold_100m|money2 }} 亿港元</dd>
+      <dt>港股通预期涨幅</dt><dd>{{ listing.hk_connect_required_gain_pct|money2 }}{% if listing.hk_connect_required_gain_pct %}%{% endif %}</dd>
+      <dt>市盈率 PE</dt><dd>{% if listing.pe_ratio and "亏损" in listing.pe_ratio %}<span class="ipo-chip danger">{{ listing.pe_ratio }}</span>{% else %}{{ listing.pe_ratio|default:"-" }}{% endif %}</dd>
+      <dt>市销率 PS</dt><dd>{{ listing.ps_ratio|money2 }}</dd>
+      <dt>估值评价</dt><dd>{{ listing.get_valuation_comment_display|default:"-" }}</dd>
+    </dl>
+  </div>
+</section>
+
+<section class="grid two basics-grid">
+  <div class="panel">
+    <div class="section-head">
+      <h2>业务与发行结构</h2>
+    </div>
+    <dl class="detail-grid">
+      <dt>板块</dt><dd>{{ listing.sector|default:"-" }}</dd>
+      <dt>主要业务</dt><dd>{{ listing.business_summary|linebreaksbr|default:"-" }}</dd>
+      <dt>保荐人</dt><dd>{{ listing.sponsor|company_lines|linebreaksbr }}</dd>
+      <dt>是否有庄家</dt><dd>{% if listing.has_sponsor_dealer %}<span class="ipo-chip dealer">{{ listing.get_has_sponsor_dealer_display }}</span>{% else %}-{% endif %}</dd>
+      <dt>绿鞋</dt><dd><span class="ipo-chip {% if listing.has_greenshoe %}success{% else %}danger{% endif %}">{{ listing.has_greenshoe|yesno:"是,否" }}</span></dd>
+      <dt>稳价人</dt><dd>{{ listing.stabilizing_manager|company_lines|linebreaksbr }}</dd>
+      <dt>发售量调整权</dt><dd><span class="ipo-chip {% if listing.has_offer_size_adjustment %}success{% else %}danger{% endif %}">{{ listing.has_offer_size_adjustment|yesno:"是,否" }}</span></dd>
+      <dt>发售量调整比例</dt><dd>{{ listing.offer_size_adjustment_pct|money2 }}{% if listing.offer_size_adjustment_pct %}%{% endif %}</dd>
+      <dt>是否有基石</dt><dd>{{ listing.has_cornerstone|yesno:"是,否" }}</dd>
+      <dt>基石占比</dt><dd>{{ listing.cornerstone_pct|money2 }}{% if listing.cornerstone_pct %}%{% endif %}</dd>
+      <dt>基石名单</dt><dd>{{ listing.cornerstone_investors|company_lines|linebreaksbr }}</dd>
+    </dl>
+  </div>
+
+  <div class="panel">
+    <div class="section-head">
+      <h2>评分与决策</h2>
+    </div>
+    <dl class="detail-grid">
+      <dt>基本面评分</dt><dd>{{ listing.fundamentals_score|default:"-" }}</dd>
+      <dt>热度评分</dt><dd>{{ listing.heat_score|default:"-" }}</dd>
+      <dt>认购建议</dt><dd>{{ listing.get_subscription_recommendation_display|default:"-" }}</dd>
+      <dt>同行业可比公司</dt><dd>{{ listing.comparable_companies|linebreaksbr|default:"-" }}</dd>
+      <dt>决策理由</dt><dd>{{ listing.decision_reason|linebreaksbr|default:"-" }}</dd>
+      <dt>备注</dt><dd>{{ listing.remark|linebreaksbr|default:"-" }}</dd>
+    </dl>
+  </div>
+</section>
+{% endblock %}

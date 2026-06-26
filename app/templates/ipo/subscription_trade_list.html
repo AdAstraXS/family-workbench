@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}申购和交易{% endblock %}
+
+{% block content %}
+<section class="headline">
+  <h1>申购和交易</h1>
+  <p>记录家庭账户的新股申购、分配、持有和卖出结果。</p>
+</section>
+
+<section class="quick-actions">
+  <a class="button" href="{% url 'ipo:subscription_trade_create' %}">新增申购</a>
+  <a class="button ghost" href="{% url 'ipo:listing_list' %}">新股资料</a>
+  <a class="button ghost" href="{% url 'ipo:index' %}">返回模块首页</a>
+  <form method="get" class="ipo-year-filter">
+    {% if profit_queries.selected_stock_id %}
+      <input type="hidden" name="stock" value="{{ profit_queries.selected_stock_id }}">
+    {% endif %}
+    {% if profit_queries.date_start %}
+      <input type="hidden" name="date_start" value="{{ profit_queries.date_start }}">
+    {% endif %}
+    {% if profit_queries.date_end %}
+      <input type="hidden" name="date_end" value="{{ profit_queries.date_end }}">
+    {% endif %}
+    {% if list_filters.q %}
+      <input type="hidden" name="q" value="{{ list_filters.q }}">
+    {% endif %}
+    {% if list_filters.status %}
+      <input type="hidden" name="status" value="{{ list_filters.status }}">
+    {% endif %}
+    <label for="ipo-stat-year">统计年份</label>
+    <select id="ipo-stat-year" name="year" onchange="this.form.submit()">
+      <option value="all" {% if year_filter.selected_year == "all" %}selected{% endif %}>全部年份</option>
+      {% for year in year_filter.available_years %}
+        <option value="{{ year }}" {% if year_filter.selected_year == year|stringformat:"s" %}selected{% endif %}>{{ year }}年</option>
+      {% endfor %}
+    </select>
+  </form>
+</section>
+
+<section class="metrics ipo-status-metrics">
+  <div class="metric"><span>打新股票数量</span><strong>{{ metrics.applied|default:0 }}</strong></div>
+  <div class="metric"><span>中签股票数量</span><strong>{{ metrics.allotted|default:0 }}</strong></div>
+  <div class="metric"><span>中签比例</span><strong>{{ metrics.allotment_rate|floatformat:2 }}%</strong></div>
+  <div class="metric"><span>尚持有股票数量</span><strong>{{ metrics.holding|default:0 }}</strong></div>
+  <div class="metric"><span>已卖出股票数量</span><strong>{{ metrics.closed|default:0 }}</strong></div>
+  <div class="metric"><span>已实现盈利总额</span><strong>{{ metrics.realized_profit_total|money2 }}</strong></div>
+</section>
+
+<section class="ipo-profit-query-grid">
+  <form method="get" class="panel ipo-profit-query">
+    <input type="hidden" name="year" value="{{ year_filter.selected_year }}">
+    {% if list_filters.q %}
+      <input type="hidden" name="q" value="{{ list_filters.q }}">
+    {% endif %}
+    {% if list_filters.status %}
+      <input type="hidden" name="status" value="{{ list_filters.status }}">
+    {% endif %}
+    <div class="ipo-profit-query-head">
+      <div>
+        <span>按股票查询</span>
+        <strong class="{% if profit_queries.stock_profit_total > 0 %}ipo-profit-positive{% elif profit_queries.stock_profit_total < 0 %}ipo-profit-negative{% endif %}">
+          {% if profit_queries.stock_profit_total is not None %}
+            {{ profit_queries.stock_profit_total|money2 }}
+          {% else %}
+            -
+          {% endif %}
+        </strong>
+      </div>
+      <button type="submit">查询</button>
+    </div>
+    <label for="ipo-profit-stock">股票名称</label>
+    <select id="ipo-profit-stock" name="stock">
+      <option value="">请选择股票</option>
+      {% for listing in profit_queries.stock_options %}
+        <option value="{{ listing.pk }}" {% if profit_queries.selected_stock_id == listing.pk|stringformat:"s" %}selected{% endif %}>
+          {{ listing.stock_name|default:listing.company_name }}（{{ listing.stock_code }}）
+        </option>
+      {% endfor %}
+    </select>
+    {% if profit_queries.selected_stock %}
+      <small>{{ profit_queries.selected_stock.stock_name|default:profit_queries.selected_stock.company_name }}净盈利金额</small>
+    {% else %}
+      <small>选择股票后统计该股票净盈利金额</small>
+    {% endif %}
+  </form>
+
+  <form method="get" class="panel ipo-profit-query">
+    <input type="hidden" name="year" value="{{ year_filter.selected_year }}">
+    {% if list_filters.q %}
+      <input type="hidden" name="q" value="{{ list_filters.q }}">
+    {% endif %}
+    {% if list_filters.status %}
+      <input type="hidden" name="status" value="{{ list_filters.status }}">
+    {% endif %}
+    <div class="ipo-profit-query-head">
+      <div>
+        <span>按卖出日期查询</span>
+        <strong class="{% if profit_queries.period_profit_total > 0 %}ipo-profit-positive{% elif profit_queries.period_profit_total < 0 %}ipo-profit-negative{% endif %}">
+          {% if profit_queries.period_profit_total is not None %}
+            {{ profit_queries.period_profit_total|money2 }}
+          {% else %}
+            -
+          {% endif %}
+        </strong>
+      </div>
+      <button type="submit">查询</button>
+    </div>
+    <div class="ipo-date-query-fields">
+      <label>开始日期<input type="date" name="date_start" value="{{ profit_queries.date_start }}"></label>
+      <label>结束日期<input type="date" name="date_end" value="{{ profit_queries.date_end }}"></label>
+    </div>
+    {% if profit_queries.period_query_error %}
+      <small class="field-error">{{ profit_queries.period_query_error }}</small>
+    {% else %}
+      <small>统计卖出日期位于所选区间内的净盈利金额</small>
+    {% endif %}
+  </form>
+</section>
+
+<section class="panel ipo-list-filter">
+  <form method="get">
+    <input type="hidden" name="year" value="{{ year_filter.selected_year }}">
+    {% if profit_queries.selected_stock_id %}
+      <input type="hidden" name="stock" value="{{ profit_queries.selected_stock_id }}">
+    {% endif %}
+    {% if profit_queries.date_start %}
+      <input type="hidden" name="date_start" value="{{ profit_queries.date_start }}">
+    {% endif %}
+    {% if profit_queries.date_end %}
+      <input type="hidden" name="date_end" value="{{ profit_queries.date_end }}">
+    {% endif %}
+    <label for="ipo-list-search">搜索</label>
+    <input id="ipo-list-search" type="search" name="q" value="{{ list_filters.q }}" placeholder="股票名称、代码、成员或账户">
+    <label for="ipo-list-status">状态</label>
+    <select id="ipo-list-status" name="status">
+      <option value="">全部状态</option>
+      {% for value,label in list_filters.status_choices %}
+        <option value="{{ value }}" {% if list_filters.status == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">筛选</button>
+    <a class="button ghost" href="{% url 'ipo:subscription_trade_list' %}?year={{ year_filter.selected_year }}">重置明细筛选</a>
+  </form>
+</section>
+
+<section class="ipo-list-section">
+  <div class="section-head">
+    <h2>申购中</h2>
+  </div>
+  <div class="panel record-panel">
+    <div class="record-table-wrap ipo-table-wrap">
+      {% include "ipo/_subscription_trade_table.html" with trades=applying_trades empty_text="暂无申购中新股。" %}
+    </div>
+  </div>
+</section>
+
+<section class="ipo-list-section">
+  <div class="section-head">
+    <h2>尚持有</h2>
+  </div>
+  <div class="panel record-panel">
+    <div class="record-table-wrap ipo-table-wrap">
+      {% include "ipo/_subscription_trade_table.html" with trades=holding_trades empty_text="暂无尚持有新股。" %}
+    </div>
+  </div>
+</section>
+
+<section class="ipo-list-section">
+  <div class="section-head">
+    <h2>清仓</h2>
+    <span class="muted-text">共 {{ closed_count }} 条，默认显示前 10 条</span>
+  </div>
+  <div class="panel record-panel">
+    <div class="record-table-wrap ipo-table-wrap">
+      {% include "ipo/_subscription_trade_table.html" with trades=closed_visible empty_text="暂无清仓新股。" %}
+    </div>
+    {% if closed_hidden %}
+      <details class="ipo-more-listings">
+        <summary>展开查看剩余 {{ closed_hidden|length }} 条清仓记录</summary>
+        <div class="record-table-wrap ipo-table-wrap">
+          {% include "ipo/_subscription_trade_table.html" with trades=closed_hidden %}
+        </div>
+      </details>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% load money %}
+<table class="record-table ipo-trade-table">
+  <thead>
+    <tr>
+      <th>股票代码</th>
+      <th>股票名称</th>
+      <th>家庭成员</th>
+      <th>申购账户</th>
+      <th>申购档位</th>
+      <th>申购手数</th>
+      <th>中签手数</th>
+      <th>卖出手数</th>
+      <th>卖出日期</th>
+      <th>申购方式</th>
+      <th>融资利息</th>
+      <th>盈利金额</th>
+      <th>状态</th>
+      <th>操作</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for trade in trades %}
+      <tr>
+        <td>{{ trade.listing.stock_code }}</td>
+        <td>{{ trade.listing.stock_name|default:trade.listing.company_name }}</td>
+        <td>{{ trade.member }}</td>
+        <td>{{ trade.account.account_name|default:"-" }}</td>
+        <td>{{ trade.get_tranche_display }}</td>
+        <td class="number">{{ trade.applied_lots|lots }}</td>
+        <td class="number">{{ trade.allotted_lots|default:"-" }}</td>
+        <td class="number">{{ trade.sold_lots|lots }}</td>
+        <td>{{ trade.sell_date|date:"Y-m-d"|default:"-" }}</td>
+        <td>{{ trade.get_application_method_display }}</td>
+        <td class="number">{{ trade.financing_interest|money2 }}</td>
+        <td class="number {% if trade.realized_profit > 0 %}positive{% elif trade.realized_profit < 0 %}negative{% endif %}">{{ trade.realized_profit|money2 }}</td>
+        <td><span class="ipo-chip trade-{{ trade.trade_status }}">{{ trade.get_trade_status_display }}</span></td>
+        <td>
+          <span class="row-actions">
+            <a class="text-action" href="{% url 'ipo:subscription_trade_edit' trade.pk %}">编辑</a>
+            <form method="post" action="{% url 'ipo:subscription_trade_delete' trade.pk %}" class="inline-delete-form" onsubmit="return confirm('确定删除这条申购记录吗？');">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button type="submit" class="text-action danger">删除</button>
+            </form>
+          </span>
+        </td>
+      </tr>
+    {% empty %}
+      <tr>
+        <td colspan="14">{{ empty_text|default:"暂无申购和交易记录。" }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
