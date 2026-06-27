@@ -35,7 +35,7 @@
         <td class="number">{{ listing.final_price|money2 }}</td>
         <td class="number">{{ listing.lot_size|lots }}</td>
         <td class="number">{{ listing.entry_fee|money2 }}</td>
-        <td class="number {% if listing.hk_connect_required_gain_pct > 0 %}negative{% elif listing.hk_connect_required_gain_pct < 0 %}positive{% endif %}">{{ listing.hk_connect_required_gain_pct|money2 }}{% if listing.hk_connect_required_gain_pct %}%{% endif %}</td>
+        <td>{{ listing.hk_connect_expectation }}</td>
         <td>
           <span class="row-actions">
             <a class="text-action" href="{% url 'ipo:listing_detail' listing.pk %}">查看</a>

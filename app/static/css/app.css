@@ -2,6 +2,11 @@
   box-sizing: border-box;
 }
 
+:root {
+  --profit-color: #b42318;
+  --loss-color: #047857;
+}
+
 body {
   margin: 0;
   background: #f5f7fb;
@@ -74,9 +79,227 @@ a:hover {
   margin-bottom: 18px;
 }
 
-.ipo-profit-query-grid {
+.ipo-dashboard-content {
+  animation: ipo-dashboard-enter 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ipo-dashboard-content .metric strong.positive {
+  color: var(--profit-color);
+}
+
+.ipo-dashboard-content .metric strong.negative {
+  color: var(--loss-color);
+}
+
+.ipo-dashboard-chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.ipo-dashboard-chart-panel {
+  min-width: 0;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.ipo-dashboard-trend-panel {
+  grid-column: 1 / -1;
+}
+
+.ipo-dashboard-chart-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.ipo-dashboard-chart-head span,
+.ipo-dashboard-chart-head small {
+  color: #7c8798;
+  font-size: 12px;
+}
+
+.ipo-dashboard-chart-head h2 {
+  margin: 4px 0 0;
+  color: #172033;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.ipo-ranking-chart {
+  max-height: 500px;
+  overflow-y: auto;
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.ipo-ranking-chart-rows {
+  display: grid;
+  gap: 4px;
+}
+
+.ipo-ranking-row {
+  display: grid;
+  grid-template-columns: minmax(108px, 158px) minmax(120px, 1fr) 60px;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  animation: ipo-chart-row-enter 280ms both;
+  animation-delay: var(--row-delay);
+}
+
+.ipo-ranking-label {
+  overflow: hidden;
+  color: #465166;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ipo-ranking-plot {
+  position: relative;
+  display: block;
+  height: 12px;
+  border-radius: 3px;
+  background: #f1f4f8;
+}
+
+.ipo-ranking-zero {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: #aab4c3;
+}
+
+.ipo-ranking-bar {
+  position: absolute;
+  top: 1px;
+  height: 10px;
+  border-radius: 3px;
+  transition: transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ipo-ranking-bar.positive {
+  background: #c24135;
+}
+
+.ipo-ranking-bar.negative {
+  background: #15916c;
+}
+
+.ipo-ranking-row strong {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ipo-ranking-row strong.positive,
+.ipo-trend-value.positive {
+  color: var(--profit-color);
+  fill: var(--profit-color);
+}
+
+.ipo-ranking-row strong.negative,
+.ipo-trend-value.negative {
+  color: var(--loss-color);
+  fill: var(--loss-color);
+}
+
+.ipo-chart-empty {
+  display: grid;
+  min-height: 180px;
+  margin: 0;
+  place-items: center;
+  color: #8a94a5;
+  font-size: 13px;
+}
+
+.ipo-trend-chart {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.ipo-trend-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 720px;
+  height: auto;
+}
+
+.ipo-trend-grid-line {
+  stroke: #e8edf4;
+  stroke-width: 1;
+}
+
+.ipo-trend-zero-line {
+  stroke: #aab4c3;
+  stroke-width: 1.2;
+}
+
+.ipo-trend-axis-label {
+  fill: #7c8798;
+  font-size: 11px;
+}
+
+.ipo-trend-path {
+  fill: none;
+  stroke: #2563eb;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+  transition: stroke-dashoffset 720ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ipo-trend-point {
+  stroke: #ffffff;
+  stroke-width: 2;
+}
+
+.ipo-trend-point.positive {
+  fill: #c24135;
+}
+
+.ipo-trend-point.negative {
+  fill: #15916c;
+}
+
+.ipo-trend-value {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes ipo-dashboard-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ipo-chart-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ipo-profit-query-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 24px;
 }
@@ -108,11 +331,11 @@ a:hover {
 }
 
 .ipo-profit-query-head strong.ipo-profit-positive {
-  color: #b42318;
+  color: var(--profit-color);
 }
 
 .ipo-profit-query-head strong.ipo-profit-negative {
-  color: #047857;
+  color: var(--loss-color);
 }
 
 .ipo-profit-query select,
@@ -215,6 +438,34 @@ a:hover {
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 18px;
+}
+
+.quick-action-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  padding: 0 12px 0 10px;
+  border: 1px solid #99d5cf;
+  border-left: 4px solid #0f766e;
+  border-radius: 6px;
+  background: #ecfdf5;
+  box-shadow: 0 1px 2px rgba(15, 118, 110, 0.08);
+  color: #115e59;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.quick-action-date span {
+  color: #397b75;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.quick-action-date strong {
+  color: #0f5f58;
+  font-size: 14px;
+  font-weight: 750;
 }
 
 .ipo-year-filter {
@@ -703,12 +954,12 @@ textarea {
 }
 
 .record-table .positive {
-  color: #047857;
+  color: var(--profit-color);
   font-weight: 700;
 }
 
 .record-table .negative {
-  color: #dc2626;
+  color: var(--loss-color);
   font-weight: 700;
 }
 
@@ -975,11 +1226,11 @@ textarea {
 }
 
 .return-table .positive {
-  color: #047857;
+  color: var(--profit-color);
 }
 
 .return-table .negative {
-  color: #dc2626;
+  color: var(--loss-color);
 }
 
 .return-table .total-row td {
@@ -1287,6 +1538,12 @@ textarea {
   color: #374151;
 }
 
+.ipo-chip.trade-unallotted {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
+}
+
 .image-recognition-box {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.7fr);
@@ -1356,6 +1613,19 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .ipo-dashboard-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ipo-dashboard-trend-panel {
+    grid-column: auto;
+  }
+
+  .ipo-ranking-row {
+    grid-template-columns: minmax(90px, 120px) minmax(90px, 1fr) 52px;
+    gap: 7px;
+  }
+
   .ipo-profit-query-grid,
   .ipo-date-query-fields,
   .ipo-list-filter form {
@@ -1393,5 +1663,17 @@ textarea {
     grid-template-columns: 1fr;
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ipo-dashboard-content,
+  .ipo-ranking-row {
+    animation: none;
+  }
+
+  .ipo-ranking-bar,
+  .ipo-trend-path {
+    transition: none;
   }
 }

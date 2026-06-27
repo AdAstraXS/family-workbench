@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
@@ -42,7 +43,7 @@ def money(value):
 
 def normalized_name(value):
     return (
-        str(value or "")
+        unicodedata.normalize("NFKC", str(value or ""))
         .strip()
         .upper()
         .replace("—", "-")

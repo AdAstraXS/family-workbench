@@ -1,5 +1,6 @@
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
+import calendar
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -9,30 +10,97 @@ from family_core.models import FamilyMember
 from ledger.models import BankAccount
 
 
+DEFAULT_LISTING_TYPE_CHOICES = [
+    ("new_listing", "新上市"),
+    ("ah", "AH"),
+    ("us_hk", "美港"),
+    ("gem", "创业板"),
+    ("wvr", "同股不同权"),
+    ("other", "其他"),
+]
+
+DEFAULT_MECHANISM_CHOICES = [
+    ("a", "机制A"),
+    ("b", "机制B"),
+    ("18a", "18A"),
+    ("18c", "18C"),
+]
+
+
+class HkIpoListingOption(models.Model):
+    CATEGORY_LISTING_TYPE = "listing_type"
+    CATEGORY_MECHANISM = "mechanism"
+    CATEGORY_CHOICES = [
+        (CATEGORY_LISTING_TYPE, "新股类型"),
+        (CATEGORY_MECHANISM, "发行机制"),
+    ]
+
+    category = models.CharField("选项类别", max_length=30, choices=CATEGORY_CHOICES)
+    code = models.SlugField("选项代码", max_length=30)
+    name = models.CharField("显示名称", max_length=50)
+    sort_order = models.PositiveSmallIntegerField("排序", default=0)
+    is_active = models.BooleanField("启用", default=True)
+    created_at = models.DateTimeField("创建时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "新股类型与机制选项"
+        verbose_name_plural = "新股类型与机制选项"
+        ordering = ["category", "sort_order", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["category", "code"],
+                name="unique_ipo_listing_option_code",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.get_category_display()} - {self.name}"
+
+    @classmethod
+    def choices_for(cls, category, current_value=None):
+        choices = list(
+            cls.objects.filter(category=category, is_active=True)
+            .order_by("sort_order", "id")
+            .values_list("code", "name")
+        )
+        if current_value and current_value not in {code for code, _ in choices}:
+            choices.append((current_value, cls.display_name(category, current_value)))
+        return choices
+
+    @classmethod
+    def display_name(cls, category, code):
+        if not code:
+            return ""
+        name = (
+            cls.objects.filter(category=category, code=code)
+            .values_list("name", flat=True)
+            .first()
+        )
+        if name:
+            return name
+        defaults = dict(
+            DEFAULT_LISTING_TYPE_CHOICES
+            if category == cls.CATEGORY_LISTING_TYPE
+            else DEFAULT_MECHANISM_CHOICES
+        )
+        return defaults.get(code, code)
+
+
 class HkIpoListing(models.Model):
     TYPE_NEW_LISTING = "new_listing"
     TYPE_AH = "ah"
     TYPE_US_HK = "us_hk"
     TYPE_GEM = "gem"
+    TYPE_WVR = "wvr"
     TYPE_OTHER = "other"
-    TYPE_CHOICES = [
-        (TYPE_NEW_LISTING, "新上市"),
-        (TYPE_AH, "AH"),
-        (TYPE_US_HK, "美港"),
-        (TYPE_GEM, "创业板"),
-        (TYPE_OTHER, "其他"),
-    ]
+    TYPE_CHOICES = DEFAULT_LISTING_TYPE_CHOICES
 
     MECHANISM_A = "a"
     MECHANISM_B = "b"
     MECHANISM_18A = "18a"
     MECHANISM_18C = "18c"
-    MECHANISM_CHOICES = [
-        (MECHANISM_A, "机制A"),
-        (MECHANISM_B, "机制B"),
-        (MECHANISM_18A, "18A"),
-        (MECHANISM_18C, "18C"),
-    ]
+    MECHANISM_CHOICES = DEFAULT_MECHANISM_CHOICES
 
     SPONSOR_DEALER_YES = "yes"
     SPONSOR_DEALER_LIKELY = "likely"
@@ -84,8 +152,8 @@ class HkIpoListing(models.Model):
     stock_name = models.CharField("股票名称", max_length=100, blank=True)
     company_name = models.CharField("公司名称", max_length=200)
     subscription_status = models.CharField("招股状态", max_length=30, choices=SUBSCRIPTION_STATUS_CHOICES, default=STATUS_LISTED)
-    listing_type = models.CharField("类型", max_length=30, choices=TYPE_CHOICES, default=TYPE_NEW_LISTING)
-    mechanism = models.CharField("机制", max_length=20, choices=MECHANISM_CHOICES, default=MECHANISM_A)
+    listing_type = models.CharField("类型", max_length=30, default=TYPE_NEW_LISTING)
+    mechanism = models.CharField("机制", max_length=20, default=MECHANISM_A)
     subscription_start_date = models.DateField("招股开始日", null=True, blank=True)
     subscription_end_date = models.DateField("招股截止日", null=True, blank=True)
     allotment_result_date = models.DateField("公布结果日", null=True, blank=True)
@@ -100,7 +168,13 @@ class HkIpoListing(models.Model):
     fundraising_amount_100m = models.DecimalField("募资金额（亿港元）", max_digits=20, decimal_places=4, null=True, blank=True)
     total_market_cap_100m = models.DecimalField("发行后总市值（亿港元）", max_digits=20, decimal_places=4, null=True, blank=True)
     h_share_market_cap_100m = models.DecimalField("H股市值（亿港元）", max_digits=20, decimal_places=4, null=True, blank=True)
-    hk_connect_threshold_100m = models.DecimalField("港股通门槛（亿港元）", max_digits=20, decimal_places=4, default=Decimal("105"))
+    hk_connect_threshold_100m = models.DecimalField(
+        "港股通门槛（亿港元）",
+        max_digits=20,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
     hk_connect_required_gain_pct = models.DecimalField("港股通预期涨幅", max_digits=12, decimal_places=4, null=True, blank=True)
     sector = models.CharField("板块", max_length=100, blank=True)
     business_summary = models.TextField("主要业务", blank=True)
@@ -144,6 +218,90 @@ class HkIpoListing(models.Model):
     def __str__(self):
         return f"{self.stock_code} {self.company_name}"
 
+    def get_listing_type_display(self):
+        return HkIpoListingOption.display_name(
+            HkIpoListingOption.CATEGORY_LISTING_TYPE,
+            self.listing_type,
+        )
+
+    def get_mechanism_display(self):
+        return HkIpoListingOption.display_name(
+            HkIpoListingOption.CATEGORY_MECHANISM,
+            self.mechanism,
+        )
+
+    @staticmethod
+    def _add_calendar_months(value, months):
+        month_index = value.month - 1 + months
+        year = value.year + month_index // 12
+        month = month_index % 12 + 1
+        day = min(value.day, calendar.monthrange(year, month)[1])
+        return value.replace(year=year, month=month, day=day)
+
+    @staticmethod
+    def _format_percentage(value):
+        return f"{value.quantize(Decimal('0.01'))}%"
+
+    def calculate_hk_connect_percentage(self):
+        market_cap = self._to_decimal(self.h_share_market_cap_100m)
+        threshold = self._to_decimal(self.hk_connect_threshold_100m)
+
+        if self.listing_type == self.TYPE_WVR:
+            if market_cap and market_cap < Decimal("200"):
+                return (Decimal("200") - market_cap) / market_cap * Decimal("100")
+            return None
+
+        if self.listing_type in {self.TYPE_AH, self.TYPE_GEM}:
+            return None
+        if not market_cap or not threshold:
+            return None
+        if market_cap >= threshold * Decimal("1.2"):
+            return None
+        if market_cap >= threshold:
+            return (market_cap / threshold - Decimal("1")) * Decimal("100")
+        return (threshold - market_cap) / market_cap * Decimal("100")
+
+    @property
+    def hk_connect_expectation(self):
+        market_cap = self._to_decimal(self.h_share_market_cap_100m)
+        threshold = self._to_decimal(self.hk_connect_threshold_100m)
+
+        if self.listing_type == self.TYPE_GEM:
+            return "不入通"
+
+        if self.listing_type == self.TYPE_AH:
+            if not self.listing_date:
+                return "待录入上市日期"
+            entry_date = (
+                self.listing_date + timedelta(days=28)
+                if self.has_greenshoe
+                else self.listing_date
+            )
+            return f"{entry_date:%Y-%m-%d} 入通"
+
+        if self.listing_type == self.TYPE_WVR:
+            if not market_cap:
+                return "待录入H股市值"
+            if market_cap < Decimal("200"):
+                percentage = (Decimal("200") - market_cap) / market_cap * Decimal("100")
+                return f"入通涨幅 {self._format_percentage(percentage)}"
+            if not self.listing_date:
+                return "待录入上市日期"
+            entry_date = self._add_calendar_months(self.listing_date, 6) + timedelta(weeks=4)
+            return f"{entry_date:%Y-%m-%d} 入通"
+
+        if not market_cap:
+            return "待录入H股市值"
+        if not threshold:
+            return "门槛数据暂不可用"
+        if market_cap >= threshold * Decimal("1.2"):
+            return "入通"
+        if market_cap >= threshold:
+            percentage = (market_cap / threshold - Decimal("1")) * Decimal("100")
+            return f"入通（{self._format_percentage(percentage)}）"
+        percentage = (threshold - market_cap) / market_cap * Decimal("100")
+        return f"入通涨幅 {self._format_percentage(percentage)}"
+
     @staticmethod
     def _to_decimal(value):
         if value in (None, ""):
@@ -168,7 +326,6 @@ class HkIpoListing(models.Model):
         lot_size = self._to_decimal(self.lot_size)
         global_offer_shares_10k = self._to_decimal(self.global_offer_shares_10k)
         h_share_market_cap_100m = self._to_decimal(self.h_share_market_cap_100m)
-        threshold = self._to_decimal(self.hk_connect_threshold_100m)
 
         if price and lot_size:
             self.entry_fee = price * lot_size
@@ -179,8 +336,7 @@ class HkIpoListing(models.Model):
         if global_offer_shares_10k and lot_size:
             self.public_offer_lots = global_offer_shares_10k * Decimal("10000") / lot_size * self.get_public_offer_ratio()
 
-        if threshold and h_share_market_cap_100m:
-            self.hk_connect_required_gain_pct = (threshold / h_share_market_cap_100m - Decimal("1")) * Decimal("100")
+        self.hk_connect_required_gain_pct = self.calculate_hk_connect_percentage()
 
     def calculate_subscription_status(self, now=None):
         now = timezone.localtime(now or timezone.now())
@@ -259,10 +415,13 @@ class HkIpoSubscriptionTrade(models.Model):
     STATUS_APPLYING = "applying"
     STATUS_HOLDING = "holding"
     STATUS_CLOSED = "closed"
+    STATUS_UNALLOTTED = "unallotted"
+    TERMINAL_STATUSES = (STATUS_CLOSED, STATUS_UNALLOTTED)
     STATUS_CHOICES = [
         (STATUS_APPLYING, "申购中"),
         (STATUS_HOLDING, "尚持有"),
         (STATUS_CLOSED, "清仓"),
+        (STATUS_UNALLOTTED, "未中签"),
     ]
 
     listing = models.ForeignKey(HkIpoListing, verbose_name="对应新股", on_delete=models.CASCADE, related_name="subscription_trades")
@@ -308,6 +467,26 @@ class HkIpoSubscriptionTrade(models.Model):
     def __str__(self):
         return f"{self.listing} {self.member} {self.get_tranche_display()}"
 
+    @property
+    def total_fees(self):
+        return sum(
+            (
+                self.subscription_fee or Decimal("0"),
+                self.allotment_fee or Decimal("0"),
+                self.financing_interest or Decimal("0"),
+                self.trading_fee or Decimal("0"),
+            ),
+            Decimal("0"),
+        )
+
+    @property
+    def holding_value(self):
+        allotted_lots = self.allotted_lots or 0
+        entry_fee = self.listing.entry_fee or (
+            (self.listing.final_price or Decimal("0")) * (self.listing.lot_size or 0)
+        )
+        return Decimal(allotted_lots) * entry_fee
+
     def calculate_fields(self):
         lot_size = self.listing.lot_size or 0
         final_price = self.listing.final_price or Decimal("0")
@@ -333,9 +512,16 @@ class HkIpoSubscriptionTrade(models.Model):
         else:
             self.allotted_value = Decimal(allotted_lots) * entry_fee
             self.allotment_fee = self.allotted_value * Decimal("0.01")
-            self.trade_status = self.STATUS_CLOSED if sold_lots >= allotted_lots else self.STATUS_HOLDING
-            if allotted_lots == 0 and not self.sell_date and self.listing.allotment_result_date:
-                self.sell_date = self.listing.allotment_result_date
+            if allotted_lots == 0:
+                self.trade_status = self.STATUS_UNALLOTTED
+                if not self.sell_date and self.listing.allotment_result_date:
+                    self.sell_date = self.listing.allotment_result_date
+            else:
+                self.trade_status = (
+                    self.STATUS_CLOSED
+                    if sold_lots >= allotted_lots
+                    else self.STATUS_HOLDING
+                )
 
         self.realized_profit = (
             ((self.sell_price or Decimal("0")) - final_price)

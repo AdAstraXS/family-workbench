@@ -12,7 +12,7 @@
       <th>卖出手数</th>
       <th>卖出日期</th>
       <th>申购方式</th>
-      <th>融资利息</th>
+      <th>{% if amount_column == "holding" %}持有货值{% else %}费用合计{% endif %}</th>
       <th>盈利金额</th>
       <th>状态</th>
       <th>操作</th>
@@ -31,7 +31,13 @@
         <td class="number">{{ trade.sold_lots|lots }}</td>
         <td>{{ trade.sell_date|date:"Y-m-d"|default:"-" }}</td>
         <td>{{ trade.get_application_method_display }}</td>
-        <td class="number">{{ trade.financing_interest|money2 }}</td>
+        <td class="number">
+          {% if amount_column == "holding" %}
+            {{ trade.holding_value|money2 }}
+          {% else %}
+            {{ trade.total_fees|money2 }}
+          {% endif %}
+        </td>
         <td class="number {% if trade.realized_profit > 0 %}positive{% elif trade.realized_profit < 0 %}negative{% endif %}">{{ trade.realized_profit|money2 }}</td>
         <td><span class="ipo-chip trade-{{ trade.trade_status }}">{{ trade.get_trade_status_display }}</span></td>
         <td>

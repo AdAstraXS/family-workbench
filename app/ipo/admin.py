@@ -1,17 +1,29 @@
 from django.contrib import admin
 
-from .models import HkIpoListing, HkIpoSubscriptionTrade
+from .forms import HkIpoListingForm
+from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
+from .services import fetch_hk_connect_threshold_100m
+
+
+@admin.register(HkIpoListingOption)
+class HkIpoListingOptionAdmin(admin.ModelAdmin):
+    list_display = ("name", "code", "category", "sort_order", "is_active", "updated_at")
+    list_filter = ("category", "is_active")
+    list_editable = ("sort_order", "is_active")
+    search_fields = ("name", "code")
+    ordering = ("category", "sort_order", "id")
 
 
 @admin.register(HkIpoListing)
 class HkIpoListingAdmin(admin.ModelAdmin):
+    form = HkIpoListingForm
     list_display = (
         "stock_code",
         "stock_name",
         "company_name",
         "subscription_status",
-        "listing_type",
-        "mechanism",
+        "listing_type_name",
+        "mechanism_name",
         "subscription_end_date",
         "listing_date",
         "final_price",
@@ -32,10 +44,31 @@ class HkIpoListingAdmin(admin.ModelAdmin):
         "entry_fee",
         "public_offer_lots",
         "fundraising_amount_100m",
+        "hk_connect_threshold_100m",
         "hk_connect_required_gain_pct",
+        "hk_connect_expectation_display",
         "created_at",
         "updated_at",
     )
+
+    @admin.display(description="类型", ordering="listing_type")
+    def listing_type_name(self, obj):
+        return obj.get_listing_type_display()
+
+    @admin.display(description="机制", ordering="mechanism")
+    def mechanism_name(self, obj):
+        return obj.get_mechanism_display()
+
+    @admin.display(description="港股通预期")
+    def hk_connect_expectation_display(self, obj):
+        return obj.hk_connect_expectation
+
+    def save_model(self, request, obj, form, change):
+        threshold = fetch_hk_connect_threshold_100m()
+        if threshold is not None:
+            obj.hk_connect_threshold_100m = threshold
+        super().save_model(request, obj, form, change)
+
     fieldsets = (
         ("基础资料", {
             "fields": (
@@ -72,6 +105,7 @@ class HkIpoListingAdmin(admin.ModelAdmin):
                 "h_share_market_cap_100m",
                 "hk_connect_threshold_100m",
                 "hk_connect_required_gain_pct",
+                "hk_connect_expectation_display",
             )
         }),
         ("发行结构", {

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load money %}
+{% load money static %}
 
 {% block title %}港股打新{% endblock %}
 
@@ -15,19 +15,78 @@
   <a class="button ghost" href="{% url 'ipo:allotment_index' %}">分配查询</a>
   <a class="button ghost" href="{% url 'ipo:strategy_index' %}">买卖策略分析</a>
   <a class="button ghost" href="{% url 'ipo:review_index' %}">交易复盘</a>
+  <form method="get" class="ipo-year-filter">
+    <label for="ipo-overview-year">统计年份</label>
+    <select id="ipo-overview-year" name="year" onchange="this.form.submit()">
+      <option value="all" {% if year_filter.selected_year == "all" %}selected{% endif %}>全部年份</option>
+      {% for year in year_filter.available_years %}
+        <option value="{{ year }}" {% if year_filter.selected_year == year|stringformat:"s" %}selected{% endif %}>{{ year }}年</option>
+      {% endfor %}
+    </select>
+  </form>
 </section>
 
-<section class="metrics">
-  <div class="metric"><span>招股中</span><strong>{{ metrics.subscribing }}</strong></div>
-  <div class="metric"><span>待上市</span><strong>{{ metrics.waiting_listing }}</strong></div>
-  <div class="metric"><span>今日上市</span><strong>{{ metrics.listing_today }}</strong></div>
-  <div class="metric"><span>已上市</span><strong>{{ metrics.listed }}</strong></div>
-</section>
+<div class="ipo-dashboard-content">
+  <section class="metrics ipo-status-metrics">
+    <div class="metric"><span>今日上市数量</span><strong>{{ metrics.listing_today }}</strong></div>
+    <div class="metric"><span>今日暗盘数量</span><strong>{{ metrics.grey_market_today }}</strong></div>
+    <div class="metric"><span>招股中数量</span><strong>{{ metrics.subscribing }}</strong></div>
+    <div class="metric"><span>待上市数量</span><strong>{{ metrics.waiting_listing }}</strong></div>
+    <div class="metric"><span>新股数量</span><strong>{{ metrics.listing_total }}</strong></div>
+  </section>
 
-<section class="metrics">
-  <div class="metric"><span>申购中股票</span><strong>{{ metrics.trade_applying }}</strong></div>
-  <div class="metric"><span>尚持有股票</span><strong>{{ metrics.trade_holding }}</strong></div>
-  <div class="metric"><span>已卖出股票</span><strong>{{ metrics.trade_closed }}</strong></div>
-  <div class="metric"><span>已实现盈利</span><strong>{{ metrics.realized_profit_total|money2 }}</strong></div>
-</section>
+  <section class="metrics ipo-status-metrics">
+    <div class="metric"><span>打新股票数量</span><strong>{{ metrics.trade_applied }}</strong></div>
+    <div class="metric"><span>中签股票数量</span><strong>{{ metrics.trade_allotted }}</strong></div>
+    <div class="metric"><span>尚持有股票数量</span><strong>{{ metrics.trade_holding }}</strong></div>
+    <div class="metric"><span>已卖出股票数量</span><strong>{{ metrics.trade_closed }}</strong></div>
+    <div class="metric">
+      <span>已实现盈利总额</span>
+      <strong class="{% if metrics.realized_profit_total > 0 %}positive{% elif metrics.realized_profit_total < 0 %}negative{% endif %}">
+        {{ metrics.realized_profit_total|money2 }}
+      </strong>
+    </div>
+  </section>
+
+  <section class="ipo-dashboard-chart-grid">
+    <article class="panel ipo-dashboard-chart-panel">
+      <header class="ipo-dashboard-chart-head">
+        <div>
+          <span>股票表现</span>
+          <h2>按股票盈利金额</h2>
+        </div>
+        <small>单位：万元</small>
+      </header>
+      <div id="ipo-stock-profit-chart" class="ipo-ranking-chart" aria-label="按股票盈利金额横向柱状图"></div>
+    </article>
+
+    <article class="panel ipo-dashboard-chart-panel">
+      <header class="ipo-dashboard-chart-head">
+        <div>
+          <span>账户表现</span>
+          <h2>按账户盈利金额</h2>
+        </div>
+        <small>单位：万元</small>
+      </header>
+      <div id="ipo-account-profit-chart" class="ipo-ranking-chart" aria-label="按账户盈利金额横向柱状图"></div>
+    </article>
+
+    <article class="panel ipo-dashboard-chart-panel ipo-dashboard-trend-panel">
+      <header class="ipo-dashboard-chart-head">
+        <div>
+          <span>盈利节奏</span>
+          <h2>盈利趋势</h2>
+        </div>
+        <small>{% if year_filter.selected_year == "all" %}按年{% else %}按月{% endif %} · 单位：万元</small>
+      </header>
+      <div id="ipo-profit-trend-chart" class="ipo-trend-chart" aria-label="盈利趋势折线图"></div>
+    </article>
+  </section>
+</div>
+
+{{ chart_data|json_script:"ipo-dashboard-chart-data" }}
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'js/ipo_dashboard.js' %}"></script>
 {% endblock %}

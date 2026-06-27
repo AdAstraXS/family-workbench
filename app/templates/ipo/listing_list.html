@@ -13,12 +13,26 @@
   <a class="button" href="{% url 'ipo:listing_create' %}">新增新股资料</a>
   <a class="button ghost" href="{% url 'ipo:subscription_trade_list' %}">申购和交易</a>
   <a class="button ghost" href="{% url 'ipo:index' %}">返回模块首页</a>
+  <time class="quick-action-date" datetime="{{ current_date|date:'Y-m-d' }}">
+    <span>当前日期</span>
+    <strong>{{ current_date|date:"Y年m月d日" }}</strong>
+  </time>
+  <form method="get" class="ipo-year-filter">
+    <label for="ipo-listing-year">统计年份</label>
+    <select id="ipo-listing-year" name="year" onchange="this.form.submit()">
+      <option value="all" {% if year_filter.selected_year == "all" %}selected{% endif %}>全部年份</option>
+      {% for year in year_filter.available_years %}
+        <option value="{{ year }}" {% if year_filter.selected_year == year|stringformat:"s" %}selected{% endif %}>{{ year }}年</option>
+      {% endfor %}
+    </select>
+  </form>
 </section>
 
 <section class="metrics ipo-status-metrics">
+  <div class="metric"><span>今日上市数量</span><strong>{{ metrics.listing_today|default:0 }}</strong></div>
+  <div class="metric"><span>今日暗盘数量</span><strong>{{ metrics.grey_market_today|default:0 }}</strong></div>
   <div class="metric"><span>招股中数量</span><strong>{{ metrics.subscribing|default:0 }}</strong></div>
   <div class="metric"><span>待上市数量</span><strong>{{ metrics.waiting_listing|default:0 }}</strong></div>
-  <div class="metric"><span>今日上市数量</span><strong>{{ metrics.listing_today|default:0 }}</strong></div>
   <div class="metric"><span>新股数量</span><strong>{{ metrics.total|default:0 }}</strong></div>
 </section>
 
@@ -61,7 +75,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_listing_table.html" with listings=waiting_listings empty_text="暂无待上市新股。" %}
+      {% include "ipo/_listing_table.html" with listings=waiting_listings empty_text="暂无待上市新股。" show_expected_margin=True %}
     </div>
   </div>
 </section>

@@ -57,8 +57,8 @@
       <dt>募资金额</dt><dd>{{ listing.fundraising_amount_100m|money2 }} 亿港元</dd>
       <dt>发行后总市值</dt><dd>{{ listing.total_market_cap_100m|money2 }} 亿港元</dd>
       <dt>H股市值</dt><dd>{{ listing.h_share_market_cap_100m|money2 }} 亿港元</dd>
-      <dt>港股通门槛</dt><dd>{{ listing.hk_connect_threshold_100m|money2 }} 亿港元</dd>
-      <dt>港股通预期涨幅</dt><dd>{{ listing.hk_connect_required_gain_pct|money2 }}{% if listing.hk_connect_required_gain_pct %}%{% endif %}</dd>
+      <dt>港股通门槛（定期调整）</dt><dd>{{ listing.hk_connect_threshold_100m|money2 }} 亿港元</dd>
+      <dt>港股通预期</dt><dd>{{ listing.hk_connect_expectation }}</dd>
       <dt>市盈率 PE</dt><dd>{% if listing.pe_ratio and "亏损" in listing.pe_ratio %}<span class="ipo-chip danger">{{ listing.pe_ratio }}</span>{% else %}{{ listing.pe_ratio|default:"-" }}{% endif %}</dd>
       <dt>市销率 PS</dt><dd>{{ listing.ps_ratio|money2 }}</dd>
       <dt>估值评价</dt><dd>{{ listing.get_valuation_comment_display|default:"-" }}</dd>

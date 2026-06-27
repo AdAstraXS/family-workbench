@@ -12,10 +12,14 @@
 <section class="quick-actions">
   <a class="button" href="{% url 'ipo:subscription_trade_create' %}">新增申购</a>
   <a class="button ghost" href="{% url 'ipo:listing_list' %}">新股资料</a>
+  <a class="button ghost" href="https://livereport.tradegomart.com/#/enterprise/examination" target="_blank" rel="noopener noreferrer">港股通预测</a>
   <a class="button ghost" href="{% url 'ipo:index' %}">返回模块首页</a>
   <form method="get" class="ipo-year-filter">
     {% if profit_queries.selected_stock_id %}
       <input type="hidden" name="stock" value="{{ profit_queries.selected_stock_id }}">
+    {% endif %}
+    {% if profit_queries.selected_account_id %}
+      <input type="hidden" name="account" value="{{ profit_queries.selected_account_id }}">
     {% endif %}
     {% if profit_queries.date_start %}
       <input type="hidden" name="date_start" value="{{ profit_queries.date_start }}">
@@ -96,6 +100,43 @@
     {% endif %}
     <div class="ipo-profit-query-head">
       <div>
+        <span>按账户查询</span>
+        <strong class="{% if profit_queries.account_profit_total > 0 %}ipo-profit-positive{% elif profit_queries.account_profit_total < 0 %}ipo-profit-negative{% endif %}">
+          {% if profit_queries.account_profit_total is not None %}
+            {{ profit_queries.account_profit_total|money2 }}
+          {% else %}
+            -
+          {% endif %}
+        </strong>
+      </div>
+      <button type="submit">查询</button>
+    </div>
+    <label for="ipo-profit-account">申购账户</label>
+    <select id="ipo-profit-account" name="account">
+      <option value="">请选择账户</option>
+      {% for account in profit_queries.account_options %}
+        <option value="{{ account.pk }}" {% if profit_queries.selected_account_id == account.pk|stringformat:"s" %}selected{% endif %}>
+          {{ account.member }} - {{ account.account_name }}
+        </option>
+      {% endfor %}
+    </select>
+    {% if profit_queries.selected_account %}
+      <small>{{ profit_queries.selected_account.member }} - {{ profit_queries.selected_account.account_name }}净盈利金额</small>
+    {% else %}
+      <small>选择账户后统计该账户净盈利金额</small>
+    {% endif %}
+  </form>
+
+  <form method="get" class="panel ipo-profit-query">
+    <input type="hidden" name="year" value="{{ year_filter.selected_year }}">
+    {% if list_filters.q %}
+      <input type="hidden" name="q" value="{{ list_filters.q }}">
+    {% endif %}
+    {% if list_filters.status %}
+      <input type="hidden" name="status" value="{{ list_filters.status }}">
+    {% endif %}
+    <div class="ipo-profit-query-head">
+      <div>
         <span>按卖出日期查询</span>
         <strong class="{% if profit_queries.period_profit_total > 0 %}ipo-profit-positive{% elif profit_queries.period_profit_total < 0 %}ipo-profit-negative{% endif %}">
           {% if profit_queries.period_profit_total is not None %}
@@ -125,6 +166,9 @@
     {% if profit_queries.selected_stock_id %}
       <input type="hidden" name="stock" value="{{ profit_queries.selected_stock_id }}">
     {% endif %}
+    {% if profit_queries.selected_account_id %}
+      <input type="hidden" name="account" value="{{ profit_queries.selected_account_id }}">
+    {% endif %}
     {% if profit_queries.date_start %}
       <input type="hidden" name="date_start" value="{{ profit_queries.date_start }}">
     {% endif %}
@@ -151,7 +195,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_subscription_trade_table.html" with trades=applying_trades empty_text="暂无申购中新股。" %}
+      {% include "ipo/_subscription_trade_table.html" with trades=applying_trades amount_column="fees" empty_text="暂无申购中新股。" %}
     </div>
   </div>
 </section>
@@ -162,7 +206,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_subscription_trade_table.html" with trades=holding_trades empty_text="暂无尚持有新股。" %}
+      {% include "ipo/_subscription_trade_table.html" with trades=holding_trades amount_column="holding" empty_text="暂无尚持有新股。" %}
     </div>
   </div>
 </section>
@@ -174,13 +218,13 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_subscription_trade_table.html" with trades=closed_visible empty_text="暂无清仓新股。" %}
+      {% include "ipo/_subscription_trade_table.html" with trades=closed_visible amount_column="fees" empty_text="暂无清仓新股。" %}
     </div>
     {% if closed_hidden %}
       <details class="ipo-more-listings">
         <summary>展开查看剩余 {{ closed_hidden|length }} 条清仓记录</summary>
         <div class="record-table-wrap ipo-table-wrap">
-          {% include "ipo/_subscription_trade_table.html" with trades=closed_hidden %}
+          {% include "ipo/_subscription_trade_table.html" with trades=closed_hidden amount_column="fees" %}
         </div>
       </details>
     {% endif %}

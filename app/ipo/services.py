@@ -1,5 +1,6 @@
 import base64
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 from html import unescape
 import json
 import logging
@@ -11,6 +12,7 @@ import urllib.request
 from django.utils import timezone
 
 from ai_analysis.models import AiProvider
+from .models import HkIpoListing, HkIpoListingOption
 
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 class IpoImageRecognitionError(Exception):
     pass
+
+
+DEFAULT_API_KEY_ENV_VARS = ("ZHIPU_API_KEY", "OPENAI_API_KEY", "AI_API_KEY")
+SENSITIVE_PROVIDER_EXTRA_KEYS = {"api_key", "apikey", "secret_key", "access_token", "token"}
 
 
 FIELD_SCHEMA = {
@@ -61,6 +67,15 @@ FIELD_SCHEMA = {
 
 VBKR_IPO_URL = "https://www.vbkr.com/ipo/hk/v2/ipo-hk-index"
 _vbkr_margin_cache = {"fetched_at": None, "data": {}}
+HK_CONNECT_THRESHOLD_URL = (
+    "https://cloudapi.livereport8.com/northsouthentrycheck/"
+    "NorthSouthEntryCheckNew/GetNorthCheckSummary"
+)
+_hk_connect_threshold_cache = {
+    "fetched_at": None,
+    "value": None,
+    "check_date": None,
+}
 
 CHOICE_ALIASES = {
     "listing_type": {
@@ -126,9 +141,22 @@ def get_active_vision_provider():
 
 def get_api_key(provider):
     extra_data = provider.extra_data or {}
-    api_key = extra_data.get("api_key") or os.getenv("OPENAI_API_KEY") or os.getenv("AI_API_KEY")
+    configured_env_var = extra_data.get("api_key_env_var")
+    env_var_names = [configured_env_var] if configured_env_var else []
+    env_var_names.extend(name for name in DEFAULT_API_KEY_ENV_VARS if name not in env_var_names)
+    api_key = next((os.getenv(name) for name in env_var_names if name and os.getenv(name)), None)
     if not api_key:
-        raise IpoImageRecognitionError("AI 服务商未配置 API Key。可在环境变量 OPENAI_API_KEY / AI_API_KEY 中配置，或放在服务商 extra_data.api_key。")
+        unsafe_keys = sorted(SENSITIVE_PROVIDER_EXTRA_KEYS.intersection(extra_data))
+        if unsafe_keys:
+            raise IpoImageRecognitionError(
+                "AI 服务商 API Key 不能保存在数据库 extra_data 中。"
+                "请迁移到环境变量 ZHIPU_API_KEY / OPENAI_API_KEY / AI_API_KEY，"
+                "并删除 extra_data 中的敏感字段。"
+            )
+        raise IpoImageRecognitionError(
+            "AI 服务商未配置 API Key。请在环境变量 ZHIPU_API_KEY / OPENAI_API_KEY / AI_API_KEY 中配置；"
+            "如需自定义变量名，可在服务商 extra_data.api_key_env_var 中填写环境变量名。"
+        )
     return api_key
 
 
@@ -150,6 +178,21 @@ def strip_json_markdown(text):
 def normalize_value(field_name, value):
     if value in (None, ""):
         return ""
+    configurable_categories = {
+        "listing_type": HkIpoListingOption.CATEGORY_LISTING_TYPE,
+        "mechanism": HkIpoListingOption.CATEGORY_MECHANISM,
+    }
+    if field_name in configurable_categories:
+        aliases = {
+            alias: code
+            for code, name in HkIpoListingOption.choices_for(
+                configurable_categories[field_name]
+            )
+            for alias in (code, name)
+        }
+        normalized = aliases.get(str(value).strip())
+        if normalized:
+            return normalized
     if field_name in CHOICE_ALIASES:
         normalized = CHOICE_ALIASES[field_name].get(str(value).strip())
         return normalized or str(value).strip()
@@ -170,6 +213,25 @@ def normalize_recognized_fields(raw_data):
 
 
 def build_prompt():
+    field_schema = FIELD_SCHEMA.copy()
+    field_schema["listing_type"] = (
+        "类型，可选 "
+        + ", ".join(
+            f"{code}（{name}）"
+            for code, name in HkIpoListingOption.choices_for(
+                HkIpoListingOption.CATEGORY_LISTING_TYPE
+            )
+        )
+    )
+    field_schema["mechanism"] = (
+        "机制，可选 "
+        + ", ".join(
+            f"{code}（{name}）"
+            for code, name in HkIpoListingOption.choices_for(
+                HkIpoListingOption.CATEGORY_MECHANISM
+            )
+        )
+    )
     return (
         "你是港股打新资料录入助手。请从图片中识别新股招股资料，并只返回 JSON 对象。\n"
         "不要返回解释，不要使用 Markdown。未识别字段请省略，不要编造。\n"
@@ -177,7 +239,7 @@ def build_prompt():
         "如果图片为空白、模糊、不是新股资料，或无法识别出股票代码/公司名称等核心信息，请返回空对象 {}。\n"
         "日期统一为 YYYY-MM-DD；金额、比例、股数只返回数字，不要带单位或逗号。\n"
         "字段说明如下：\n"
-        f"{json.dumps(FIELD_SCHEMA, ensure_ascii=False, indent=2)}"
+        f"{json.dumps(field_schema, ensure_ascii=False, indent=2)}"
     )
 
 
@@ -244,6 +306,58 @@ def recognize_ipo_listing_from_image(uploaded_file):
         raise IpoImageRecognitionError("AI 返回内容不是可解析的字段 JSON。") from exc
 
     return normalize_recognized_fields(raw_data)
+
+
+def fetch_hk_connect_threshold_100m(force=False):
+    fetched_at = _hk_connect_threshold_cache["fetched_at"]
+    if (
+        not force
+        and fetched_at
+        and timezone.now() - fetched_at < timedelta(hours=6)
+    ):
+        return _hk_connect_threshold_cache["value"]
+
+    request = urllib.request.Request(
+        HK_CONNECT_THRESHOLD_URL,
+        headers={"Accept": "application/json", "User-Agent": "FamilyWorkbench/1.0"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        threshold_hkd = payload.get("data", {}).get("inThreshold")
+        threshold = Decimal(str(threshold_hkd)) / Decimal("100000000")
+        if payload.get("result") != 1 or threshold <= 0:
+            raise ValueError("invalid threshold response")
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        InvalidOperation,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+    ) as exc:
+        logger.warning("HK Connect threshold fetch failed: %s", exc)
+        return _hk_connect_threshold_cache["value"]
+
+    _hk_connect_threshold_cache.update(
+        {
+            "fetched_at": timezone.now(),
+            "value": threshold,
+            "check_date": payload.get("data", {}).get("checkDate"),
+        }
+    )
+    return threshold
+
+
+def refresh_hk_connect_threshold():
+    threshold = fetch_hk_connect_threshold_100m()
+    if threshold is None:
+        return None
+    HkIpoListing.objects.exclude(hk_connect_threshold_100m=threshold).update(
+        hk_connect_threshold_100m=threshold
+    )
+    return threshold
 
 
 def fetch_vbkr_expected_margin_multiples():

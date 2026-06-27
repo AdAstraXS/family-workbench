@@ -3,7 +3,7 @@ from django import forms
 from family_core.models import FamilyMember
 from ledger.models import BankAccount
 
-from .models import HkIpoListing, HkIpoSubscriptionTrade
+from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
 
 
 class HkIpoListingForm(forms.ModelForm):
@@ -18,7 +18,6 @@ class HkIpoListingForm(forms.ModelForm):
             "global_offer_shares_10k",
             "total_market_cap_100m",
             "h_share_market_cap_100m",
-            "hk_connect_threshold_100m",
         ]),
         ("发行结构", [
             "sponsor",
@@ -59,6 +58,21 @@ class HkIpoListingForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        configurable_fields = {
+            "listing_type": HkIpoListingOption.CATEGORY_LISTING_TYPE,
+            "mechanism": HkIpoListingOption.CATEGORY_MECHANISM,
+        }
+        for field_name, category in configurable_fields.items():
+            current_value = (
+                self.data.get(field_name)
+                if self.is_bound
+                else self.initial.get(field_name) or getattr(self.instance, field_name, "")
+            )
+            self.fields[field_name] = forms.ChoiceField(
+                label=self._meta.model._meta.get_field(field_name).verbose_name,
+                choices=HkIpoListingOption.choices_for(category, current_value),
+            )
+
         for field_name, field in self.fields.items():
             field.widget.attrs.setdefault("class", "form-control")
             if field_name in self.date_fields:
@@ -94,7 +108,6 @@ class HkIpoListingForm(forms.ModelForm):
             "global_offer_shares_10k",
             "total_market_cap_100m",
             "h_share_market_cap_100m",
-            "hk_connect_threshold_100m",
             "sector",
             "business_summary",
             "sponsor",

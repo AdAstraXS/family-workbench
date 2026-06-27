@@ -1,12 +1,30 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+import io
+import json
+import os
+from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
 
+from ai_analysis.models import AiProvider
 from family_core.models import Family, FamilyMember
 from ledger.models import BankAccount
 
-from .models import HkIpoListing, HkIpoSubscriptionTrade
+from .forms import HkIpoListingForm
+from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
+from .services import (
+    IpoImageRecognitionError,
+    _hk_connect_threshold_cache,
+    build_prompt,
+    fetch_hk_connect_threshold_100m,
+    get_api_key,
+    normalize_value,
+)
+from .views import subscription_trade_list_url
 
 
 class HkIpoSubscriptionTradeCalculationTests(TestCase):
@@ -67,6 +85,18 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
             (Decimal("400") - Decimal("100") - expected_interest - Decimal("20") - Decimal("10")).quantize(Decimal("0.0001")),
         )
 
+    def test_total_fees_and_holding_value(self):
+        trade = self.make_trade(allotted_lots=2, sold_lots=1)
+
+        self.assertEqual(
+            trade.total_fees,
+            trade.subscription_fee
+            + trade.allotment_fee
+            + trade.financing_interest
+            + trade.trading_fee,
+        )
+        self.assertEqual(trade.holding_value, Decimal("2000"))
+
     def test_status_changes_from_applying_to_holding_to_closed(self):
         applying = self.make_trade(allotted_lots=None)
         holding = self.make_trade(allotted_lots=2, sold_lots=1, sell_date=date(2026, 6, 9))
@@ -79,5 +109,663 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
     def test_zero_allotted_lots_auto_sets_sell_date_to_allotment_result_date(self):
         trade = self.make_trade(allotted_lots=0, sold_lots=0)
 
-        self.assertEqual(trade.trade_status, HkIpoSubscriptionTrade.STATUS_CLOSED)
+        self.assertEqual(
+            trade.trade_status,
+            HkIpoSubscriptionTrade.STATUS_UNALLOTTED,
+        )
+        self.assertEqual(trade.get_trade_status_display(), "未中签")
         self.assertEqual(trade.sell_date, self.listing.allotment_result_date)
+
+    def test_subscription_page_uses_status_specific_amount_columns(self):
+        user = get_user_model().objects.create_user(
+            username="ipo-tester",
+            password="test-password",
+        )
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        self.make_trade(allotted_lots=None)
+        self.make_trade(allotted_lots=2, sold_lots=1)
+        self.make_trade(
+            allotted_lots=2,
+            sold_lots=2,
+            sell_price=Decimal("12"),
+            sell_date=date(2026, 6, 9),
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("ipo:subscription_trade_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "费用合计", count=2)
+        self.assertContains(response, "持有货值", count=1)
+        self.assertContains(response, "2,000.00")
+
+    def test_closed_stock_metric_excludes_zero_allotment_records(self):
+        user = get_user_model().objects.create_user(
+            username="ipo-closed-metric-tester",
+            password="test-password",
+        )
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        self.make_trade(
+            allotted_lots=1,
+            sold_lots=1,
+            sell_price=Decimal("12"),
+            sell_date=date(2026, 6, 9),
+        )
+        zero_allotment_listing = HkIpoListing.objects.create(
+            stock_code="ZERO.US",
+            stock_name="未中签测试",
+            company_name="未中签测试有限公司",
+            subscription_end_date=date(2026, 6, 5),
+            allotment_result_date=date(2026, 6, 8),
+            listing_date=date(2026, 6, 9),
+            final_price=Decimal("10"),
+            lot_size=100,
+        )
+        HkIpoSubscriptionTrade.objects.create(
+            listing=zero_allotment_listing,
+            member=self.member,
+            account=self.account,
+            application_date=date(2026, 6, 2),
+            applied_lots=1,
+            allotted_lots=0,
+            sold_lots=0,
+        )
+        self.client.force_login(user)
+
+        subscription_response = self.client.get(
+            reverse("ipo:subscription_trade_list"),
+            {"year": "2026"},
+        )
+        overview_response = self.client.get(reverse("ipo:index"))
+
+        self.assertEqual(subscription_response.context["metrics"]["allotted"], 1)
+        self.assertEqual(subscription_response.context["metrics"]["closed"], 1)
+        self.assertEqual(overview_response.context["metrics"]["trade_closed"], 1)
+
+    def test_closed_trades_use_sell_year_and_sell_date_descending(self):
+        user = get_user_model().objects.create_user(
+            username="ipo-sort-tester",
+            password="test-password",
+        )
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        older = self.make_trade(
+            application_date=date(2026, 6, 3),
+            allotted_lots=1,
+            sold_lots=1,
+            sell_date=date(2026, 6, 8),
+        )
+        newer = self.make_trade(
+            application_date=date(2026, 6, 1),
+            allotted_lots=1,
+            sold_lots=1,
+            sell_date=date(2026, 6, 10),
+        )
+        historical_listing = HkIpoListing.objects.create(
+            stock_code="HIST.US",
+            stock_name="历史新股",
+            company_name="历史新股有限公司",
+            subscription_end_date=date(2025, 9, 10),
+            allotment_result_date=date(2025, 9, 11),
+            listing_date=date(2025, 9, 11),
+            final_price=Decimal("10"),
+            lot_size=10,
+        )
+        historical_trade = HkIpoSubscriptionTrade.objects.create(
+            listing=historical_listing,
+            member=self.member,
+            account=self.account,
+            application_date=date(2026, 6, 4),
+            applied_lots=1,
+            allotted_lots=1,
+            sold_lots=1,
+            sell_price=Decimal("12"),
+            sell_date=date(2026, 6, 9),
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("ipo:subscription_trade_list"),
+            {"year": "2026"},
+        )
+
+        closed_trades = (
+            response.context["closed_visible"] + response.context["closed_hidden"]
+        )
+        self.assertEqual(
+            [trade.pk for trade in closed_trades],
+            [newer.pk, historical_trade.pk, older.pk],
+        )
+
+    def test_selected_year_persists_in_session(self):
+        user = get_user_model().objects.create_user(
+            username="ipo-year-tester",
+            password="test-password",
+        )
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        self.make_trade(
+            allotted_lots=1,
+            sold_lots=1,
+            sell_date=date(2025, 9, 12),
+        )
+        self.client.force_login(user)
+
+        self.client.get(reverse("ipo:subscription_trade_list"), {"year": "2025"})
+        self.client.get(reverse("ipo:index"))
+        response = self.client.get(reverse("ipo:subscription_trade_list"))
+
+        self.assertEqual(response.context["year_filter"]["selected_year"], "2025")
+
+    def test_closed_trade_redirects_to_its_sell_year(self):
+        trade = self.make_trade(
+            allotted_lots=1,
+            sold_lots=1,
+            sell_date=date(2025, 9, 12),
+        )
+
+        self.assertEqual(
+            subscription_trade_list_url(trade),
+            f"{reverse('ipo:subscription_trade_list')}?year=2025",
+        )
+
+    def test_stock_profit_options_only_include_closed_trades_for_selected_year(self):
+        user = get_user_model().objects.create_user(
+            username="ipo-profit-options-tester",
+            password="test-password",
+        )
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        selected_trade = self.make_trade(
+            allotted_lots=1,
+            sold_lots=1,
+            sell_price=Decimal("12"),
+            sell_date=date(2026, 6, 9),
+        )
+        self.make_trade(
+            allotted_lots=1,
+            sold_lots=1,
+            sell_price=Decimal("11"),
+            sell_date=date(2025, 6, 9),
+        )
+        newer_listing = HkIpoListing.objects.create(
+            stock_code="NEWER.US",
+            stock_name="较新卖出",
+            company_name="较新卖出有限公司",
+            subscription_end_date=date(2026, 6, 5),
+            final_price=Decimal("10"),
+            lot_size=100,
+        )
+        HkIpoSubscriptionTrade.objects.create(
+            listing=newer_listing,
+            member=self.member,
+            account=self.account,
+            application_date=date(2026, 6, 2),
+            applied_lots=1,
+            allotted_lots=1,
+            sold_lots=1,
+            sell_price=Decimal("12"),
+            sell_date=date(2026, 6, 10),
+        )
+        holding_listing = HkIpoListing.objects.create(
+            stock_code="HOLDING.US",
+            stock_name="礼邦医药测试",
+            company_name="礼邦医药测试有限公司",
+            subscription_end_date=date(2026, 6, 5),
+            final_price=Decimal("10"),
+            lot_size=100,
+        )
+        HkIpoSubscriptionTrade.objects.create(
+            listing=holding_listing,
+            member=self.member,
+            account=self.account,
+            application_date=date(2026, 6, 2),
+            applied_lots=1,
+            allotted_lots=1,
+            sold_lots=0,
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("ipo:subscription_trade_list"),
+            {"year": "2026", "stock": str(self.listing.pk)},
+        )
+
+        options = list(response.context["profit_queries"]["stock_options"])
+        self.assertEqual(
+            [listing.pk for listing in options],
+            [newer_listing.pk, self.listing.pk],
+        )
+        self.assertEqual(
+            response.context["profit_queries"]["stock_profit_total"],
+            selected_trade.realized_profit,
+        )
+
+    def test_account_profit_query_uses_selected_year_and_filters_closed_details(self):
+        user = get_user_model().objects.create_user(
+            username="ipo-account-profit-tester",
+            password="test-password",
+        )
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        selected_trade = self.make_trade(
+            allotted_lots=1,
+            sold_lots=1,
+            sell_price=Decimal("12"),
+            sell_date=date(2026, 6, 9),
+        )
+        self.make_trade(
+            allotted_lots=1,
+            sold_lots=1,
+            sell_price=Decimal("11"),
+            sell_date=date(2025, 6, 9),
+        )
+        second_account = BankAccount.objects.create(
+            family=self.family,
+            member=self.member,
+            account_name="Second IPO Account",
+            remark="打新账户",
+        )
+        HkIpoSubscriptionTrade.objects.create(
+            listing=self.listing,
+            member=self.member,
+            account=second_account,
+            application_date=date(2026, 6, 2),
+            applied_lots=1,
+            allotted_lots=1,
+            sold_lots=1,
+            sell_price=Decimal("13"),
+            sell_date=date(2026, 6, 10),
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("ipo:subscription_trade_list"),
+            {"year": "2026", "account": str(self.account.pk)},
+        )
+
+        options = list(response.context["profit_queries"]["account_options"])
+        closed_trades = (
+            response.context["closed_visible"] + response.context["closed_hidden"]
+        )
+        self.assertEqual(
+            [account.pk for account in options],
+            [self.account.pk, second_account.pk],
+        )
+        self.assertEqual(
+            response.context["profit_queries"]["account_profit_total"],
+            selected_trade.realized_profit,
+        )
+        self.assertEqual([trade.pk for trade in closed_trades], [selected_trade.pk])
+        self.assertContains(response, "按账户查询")
+
+    def test_overview_year_filter_drives_metrics_and_chart_series(self):
+        user = get_user_model().objects.create_user(
+            username="ipo-overview-chart-tester",
+            password="test-password",
+        )
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        selected_trade = self.make_trade(
+            allotted_lots=1,
+            sold_lots=1,
+            sell_price=Decimal("12"),
+            sell_date=date(2026, 6, 9),
+        )
+        historical_listing = HkIpoListing.objects.create(
+            stock_code="HIST25.US",
+            stock_name="历史亏损股",
+            company_name="历史亏损股有限公司",
+            subscription_end_date=date(2025, 9, 10),
+            allotment_result_date=date(2025, 9, 11),
+            listing_date=date(2025, 9, 12),
+            final_price=Decimal("10"),
+            lot_size=100,
+        )
+        historical_trade = HkIpoSubscriptionTrade.objects.create(
+            listing=historical_listing,
+            member=self.member,
+            account=self.account,
+            application_date=date(2025, 9, 8),
+            applied_lots=1,
+            allotted_lots=1,
+            sold_lots=1,
+            sell_price=Decimal("9"),
+            sell_date=date(2025, 9, 12),
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("ipo:index"), {"year": "2026"})
+
+        self.assertEqual(response.context["year_filter"]["selected_year"], "2026")
+        self.assertEqual(response.context["metrics"]["listing_total"], 1)
+        self.assertEqual(response.context["metrics"]["trade_applied"], 1)
+        self.assertEqual(response.context["metrics"]["trade_allotted"], 1)
+        self.assertEqual(response.context["metrics"]["trade_closed"], 1)
+        self.assertEqual(
+            response.context["metrics"]["realized_profit_total"],
+            selected_trade.realized_profit,
+        )
+        self.assertEqual(len(response.context["chart_data"]["stock"]), 1)
+        self.assertEqual(response.context["chart_data"]["trend"]["labels"], [
+            "1月",
+            "2月",
+            "3月",
+            "4月",
+            "5月",
+            "6月",
+            "7月",
+            "8月",
+            "9月",
+            "10月",
+            "11月",
+            "12月",
+        ])
+        self.assertEqual(
+            response.context["chart_data"]["trend"]["values"][5],
+            float(selected_trade.realized_profit),
+        )
+        self.assertNotContains(response, "中签比例")
+        self.assertContains(response, "ipo-stock-profit-chart")
+        self.assertContains(response, "ipo-account-profit-chart")
+        self.assertContains(response, "ipo-profit-trend-chart")
+
+        self.client.get(reverse("ipo:subscription_trade_list"), {"year": "2025"})
+        persisted_response = self.client.get(reverse("ipo:index"))
+        self.assertEqual(
+            persisted_response.context["year_filter"]["selected_year"],
+            "2026",
+        )
+
+        all_years_response = self.client.get(reverse("ipo:index"), {"year": "all"})
+
+        self.assertEqual(
+            all_years_response.context["chart_data"]["trend"]["labels"],
+            ["2025年", "2026年"],
+        )
+        self.assertEqual(
+            all_years_response.context["chart_data"]["trend"]["values"],
+            [
+                float(historical_trade.realized_profit),
+                float(selected_trade.realized_profit),
+            ],
+        )
+
+
+class IpoImageRecognitionApiKeyTests(TestCase):
+    def test_get_api_key_uses_provider_configured_environment_variable(self):
+        provider = AiProvider.objects.create(
+            name="BigModel",
+            provider_type="openai_compatible",
+            extra_data={"api_key_env_var": "CUSTOM_BIGMODEL_KEY"},
+        )
+
+        with patch.dict(os.environ, {"CUSTOM_BIGMODEL_KEY": "env-secret"}, clear=True):
+            self.assertEqual(get_api_key(provider), "env-secret")
+
+    def test_get_api_key_rejects_database_api_key(self):
+        provider = AiProvider.objects.create(
+            name="BigModel",
+            provider_type="openai_compatible",
+            extra_data={"api_key": "db-secret"},
+        )
+
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesMessage(IpoImageRecognitionError, "不能保存在数据库"):
+                get_api_key(provider)
+
+
+class HkIpoListingOptionTests(TestCase):
+    def test_active_admin_option_appears_in_listing_form_and_display(self):
+        HkIpoListingOption.objects.create(
+            category=HkIpoListingOption.CATEGORY_LISTING_TYPE,
+            code="secondary",
+            name="介绍上市",
+            sort_order=60,
+        )
+
+        form = HkIpoListingForm()
+        listing = HkIpoListing(listing_type="secondary")
+
+        self.assertIn(
+            ("secondary", "介绍上市"),
+            list(form.fields["listing_type"].choices),
+        )
+        self.assertEqual(listing.get_listing_type_display(), "介绍上市")
+
+    def test_inactive_option_is_hidden_but_preserved_when_editing_existing_listing(self):
+        option = HkIpoListingOption.objects.create(
+            category=HkIpoListingOption.CATEGORY_MECHANISM,
+            code="custom",
+            name="自定义机制",
+            is_active=False,
+        )
+        listing = HkIpoListing(mechanism=option.code)
+
+        create_form = HkIpoListingForm()
+        edit_form = HkIpoListingForm(instance=listing)
+
+        self.assertNotIn(
+            ("custom", "自定义机制"),
+            list(create_form.fields["mechanism"].choices),
+        )
+        self.assertIn(
+            ("custom", "自定义机制"),
+            list(edit_form.fields["mechanism"].choices),
+        )
+
+    def test_image_recognition_uses_configured_option(self):
+        HkIpoListingOption.objects.create(
+            category=HkIpoListingOption.CATEGORY_LISTING_TYPE,
+            code="secondary",
+            name="介绍上市",
+        )
+
+        self.assertEqual(normalize_value("listing_type", "介绍上市"), "secondary")
+        self.assertIn("secondary（介绍上市）", build_prompt())
+
+
+class HkConnectExpectationTests(TestCase):
+    def make_listing(self, **kwargs):
+        defaults = {
+            "stock_code": "09998.HK",
+            "company_name": "港股通测试",
+            "listing_type": HkIpoListing.TYPE_NEW_LISTING,
+            "listing_date": date(2026, 1, 31),
+            "h_share_market_cap_100m": Decimal("100"),
+            "hk_connect_threshold_100m": Decimal("100"),
+        }
+        defaults.update(kwargs)
+        return HkIpoListing(**defaults)
+
+    def test_new_listing_expectation_rules(self):
+        self.assertEqual(
+            self.make_listing(h_share_market_cap_100m=Decimal("120")).hk_connect_expectation,
+            "入通",
+        )
+        self.assertEqual(
+            self.make_listing(h_share_market_cap_100m=Decimal("110")).hk_connect_expectation,
+            "入通（10.00%）",
+        )
+        self.assertEqual(
+            self.make_listing(h_share_market_cap_100m=Decimal("80")).hk_connect_expectation,
+            "入通涨幅 25.00%",
+        )
+
+    def test_ah_expectation_uses_greenshoe_date_rule(self):
+        without_greenshoe = self.make_listing(
+            listing_type=HkIpoListing.TYPE_AH,
+            has_greenshoe=False,
+        )
+        with_greenshoe = self.make_listing(
+            listing_type=HkIpoListing.TYPE_AH,
+            has_greenshoe=True,
+        )
+
+        self.assertEqual(without_greenshoe.hk_connect_expectation, "2026-01-31 入通")
+        self.assertEqual(with_greenshoe.hk_connect_expectation, "2026-02-28 入通")
+
+    def test_wvr_expectation_rules(self):
+        below_threshold = self.make_listing(
+            listing_type=HkIpoListing.TYPE_WVR,
+            h_share_market_cap_100m=Decimal("160"),
+        )
+        at_threshold = self.make_listing(
+            listing_type=HkIpoListing.TYPE_WVR,
+            h_share_market_cap_100m=Decimal("200"),
+        )
+
+        self.assertEqual(below_threshold.hk_connect_expectation, "入通涨幅 25.00%")
+        self.assertEqual(at_threshold.hk_connect_expectation, "2026-08-28 入通")
+
+    def test_gem_does_not_enter_hk_connect_and_other_uses_new_listing_rule(self):
+        gem = self.make_listing(listing_type=HkIpoListing.TYPE_GEM)
+        other = self.make_listing(
+            listing_type=HkIpoListing.TYPE_OTHER,
+            h_share_market_cap_100m=Decimal("80"),
+        )
+
+        self.assertEqual(gem.hk_connect_expectation, "不入通")
+        self.assertEqual(other.hk_connect_expectation, "入通涨幅 25.00%")
+
+    def test_listing_form_does_not_allow_manual_threshold_entry(self):
+        form = HkIpoListingForm()
+
+        self.assertNotIn("hk_connect_threshold_100m", form.fields)
+
+    def test_threshold_fetch_converts_hkd_to_hundred_million_hkd(self):
+        payload = {
+            "result": 1,
+            "data": {
+                "checkDate": "2026-06-26",
+                "inThreshold": 10224598534.8177,
+            },
+        }
+        _hk_connect_threshold_cache.update(
+            {"fetched_at": None, "value": None, "check_date": None}
+        )
+
+        with patch(
+            "ipo.services.urllib.request.urlopen",
+            return_value=io.BytesIO(json.dumps(payload).encode("utf-8")),
+        ):
+            threshold = fetch_hk_connect_threshold_100m(force=True)
+
+        self.assertEqual(
+            threshold.quantize(Decimal("0.0001")),
+            Decimal("102.2460"),
+        )
+
+
+class HkIpoExpectedMarginTests(TestCase):
+    def test_listing_page_shows_expected_margin_for_subscribing_and_waiting_tables(self):
+        user = get_user_model().objects.create_user(
+            username="listing-metric-tester",
+            password="test-password",
+        )
+        today = timezone.localdate()
+        HkIpoListing.objects.create(
+            stock_code="09996.HK",
+            company_name="招股中测试",
+            subscription_start_date=date(2026, 6, 27),
+            subscription_end_date=date(2026, 6, 28),
+            listing_date=date(2026, 7, 2),
+            final_price=Decimal("11"),
+            lot_size=100,
+        )
+        HkIpoListing.objects.create(
+            stock_code="09995.HK",
+            company_name="待上市测试",
+            subscription_start_date=date(2026, 6, 20),
+            subscription_end_date=date(2026, 6, 26),
+            listing_date=date(2026, 7, 1),
+            final_price=Decimal("11"),
+            lot_size=100,
+        )
+        HkIpoListing.objects.create(
+            stock_code="09994.HK",
+            company_name="今日暗盘测试",
+            subscription_start_date=today - timedelta(days=3),
+            subscription_end_date=today - timedelta(days=1),
+            allotment_result_date=today,
+            listing_date=today + timedelta(days=1),
+            final_price=Decimal("11"),
+            lot_size=100,
+        )
+        self.client.force_login(user)
+
+        with (
+            patch("ipo.views.refresh_hk_connect_threshold", return_value=Decimal("100")),
+            patch(
+                "ipo.views.fetch_vbkr_expected_margin_multiples",
+                return_value={"09996.HK": "100倍", "09995.HK": "200倍"},
+            ),
+        ):
+            response = self.client.get(reverse("ipo:listing_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "预计孖展", count=2)
+        self.assertEqual(response.context["metrics"]["grey_market_today"], 1)
+        self.assertEqual(response.context["current_date"], today)
+        content = response.content.decode()
+        metric_labels = [
+            "今日上市数量",
+            "今日暗盘数量",
+            "招股中数量",
+            "待上市数量",
+            "新股数量",
+        ]
+        self.assertEqual(
+            [content.index(label) for label in metric_labels],
+            sorted(content.index(label) for label in metric_labels),
+        )
+        self.assertNotContains(response, "甲尾信息")
+        self.assertNotContains(response, "乙头信息")
+        self.assertNotContains(response, "预测中签情况")
+
+    def test_listing_page_year_filter_limits_metrics_and_tables(self):
+        user = get_user_model().objects.create_user(
+            username="listing-year-filter-tester",
+            password="test-password",
+        )
+        HkIpoListing.objects.create(
+            stock_code="YEAR25.US",
+            stock_name="二零二五新股",
+            company_name="二零二五新股有限公司",
+            subscription_end_date=date(2025, 9, 10),
+            listing_date=date(2025, 9, 12),
+            final_price=Decimal("10"),
+            lot_size=100,
+        )
+        HkIpoListing.objects.create(
+            stock_code="YEAR26.US",
+            stock_name="二零二六新股",
+            company_name="二零二六新股有限公司",
+            subscription_end_date=date(2026, 9, 10),
+            listing_date=date(2026, 9, 12),
+            final_price=Decimal("10"),
+            lot_size=100,
+        )
+        self.client.force_login(user)
+
+        with (
+            patch("ipo.views.refresh_hk_connect_threshold", return_value=Decimal("100")),
+            patch("ipo.views.fetch_vbkr_expected_margin_multiples", return_value={}),
+        ):
+            response = self.client.get(
+                reverse("ipo:listing_list"),
+                {"year": "2025"},
+            )
+            self.client.get(reverse("ipo:index"), {"year": "2026"})
+            persisted_response = self.client.get(reverse("ipo:listing_list"))
+
+        self.assertEqual(response.context["year_filter"]["selected_year"], "2025")
+        self.assertEqual(response.context["metrics"]["total"], 1)
+        self.assertContains(response, "二零二五新股")
+        self.assertNotContains(response, "二零二六新股")
+        self.assertEqual(
+            persisted_response.context["year_filter"]["selected_year"],
+            "2025",
+        )
