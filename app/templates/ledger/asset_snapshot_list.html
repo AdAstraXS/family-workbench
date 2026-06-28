@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% load money %}
 
 {% block title %}资产快照{% endblock %}
@@ -8,7 +9,6 @@
   <div class="section-head">
     <h1>资产快照</h1>
     <div class="inline-actions">
-      <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
       <a class="button" href="{% url 'ledger:asset_snapshot_create' %}">新增资产快照</a>
     </div>
   </div>
@@ -44,4 +44,28 @@
     </tbody>
   </table>
 </section>
+
+<section class="panel asset-trend-panel">
+  <div class="asset-trend-head">
+    <div>
+      <span class="asset-trend-eyebrow">ASSET BALANCE TREND</span>
+      <h1>资产余额趋势</h1>
+      <p>按每月或每年最后一份资产快照统计，单位：万元</p>
+    </div>
+    <div class="asset-trend-switch" role="group" aria-label="趋势统计周期">
+      <button type="button" class="active" data-trend-period="monthly">按月查看</button>
+      <button type="button" data-trend-period="yearly">按年查看</button>
+    </div>
+  </div>
+  <div class="asset-trend-chart-wrap">
+    <svg id="asset-trend-chart" class="asset-trend-chart" viewBox="0 0 1000 340" role="img" aria-label="家庭成员及家庭合计资产余额趋势图"></svg>
+    <div id="asset-trend-empty" class="asset-trend-empty" hidden>暂无资产快照数据</div>
+  </div>
+  <div id="asset-trend-legend" class="asset-trend-legend"></div>
+</section>
+{{ trend_data|json_script:"asset-trend-data" }}
+{% endblock %}
+
+{% block scripts %}
+  <script src="{% static 'js/asset_snapshot_trend.js' %}"></script>
 {% endblock %}

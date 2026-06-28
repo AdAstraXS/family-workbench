@@ -10,7 +10,13 @@ services:
     volumes:
       - ./postgres:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "${POSTGRES_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   web:
     build:
@@ -26,9 +32,10 @@ services:
       - ./media:/app/media
       - ./staticfiles:/app/staticfiles
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     ports:
-      - "${WEB_PORT}:8000"
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT}:8000"
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&

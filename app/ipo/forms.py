@@ -6,6 +6,9 @@ from ledger.models import BankAccount
 from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
 
 
+MAX_PROSPECTUS_SIZE = 30 * 1024 * 1024
+
+
 class HkIpoListingForm(forms.ModelForm):
     FIELD_GROUPS = [
         ("基础资料", ["stock_code", "stock_name", "company_name", "listing_type", "mechanism", "sector", "business_summary", "prospectus"]),
@@ -88,6 +91,18 @@ class HkIpoListingForm(forms.ModelForm):
             {"title": title, "fields": [self[field_name] for field_name in field_names if field_name in self.fields]}
             for title, field_names in self.FIELD_GROUPS
         ]
+
+    def clean_prospectus(self):
+        prospectus = self.cleaned_data.get("prospectus")
+        if not prospectus:
+            return prospectus
+        if getattr(prospectus, "size", 0) > MAX_PROSPECTUS_SIZE:
+            raise forms.ValidationError("招股书不能超过 30 MB。")
+        content_type = (getattr(prospectus, "content_type", "") or "").lower()
+        filename = (getattr(prospectus, "name", "") or "").lower()
+        if content_type != "application/pdf" or not filename.endswith(".pdf"):
+            raise forms.ValidationError("招股书仅支持 PDF 文件。")
+        return prospectus
 
     class Meta:
         model = HkIpoListing

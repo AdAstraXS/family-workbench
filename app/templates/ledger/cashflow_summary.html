@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% load money %}
 
 {% block title %}月度收支汇总{% endblock %}
@@ -10,8 +11,6 @@
     <h1>{% if year %}{{ year }}年月度收支汇总{% else %}月度收支汇总{% endif %}</h1>
   </div>
   <div class="inline-actions">
-    <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
-    <a class="button ghost" href="{% url 'ledger:expense_list' %}">返回年度收支</a>
     <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
     <a class="button" href="{% url 'ledger:expense_create' %}">新增支出</a>
   </div>
@@ -23,21 +22,24 @@
       <thead>
         <tr>
           <th class="period-col" rowspan="2">期间</th>
-          <th colspan="{{ members|length }}">收入</th>
-          <th colspan="{{ members|length }}">支出</th>
-          <th colspan="{{ members|length }}">结余</th>
+          <th colspan="{{ members|length|add:1 }}">收入</th>
+          <th colspan="{{ members|length|add:1 }}">支出</th>
+          <th colspan="{{ members|length|add:1 }}">结余</th>
           <th rowspan="2">操作</th>
         </tr>
         <tr>
           {% for member in members %}
             <th>{{ member.display_name }}</th>
           {% endfor %}
+          <th>家庭合计</th>
           {% for member in members %}
             <th>{{ member.display_name }}</th>
           {% endfor %}
+          <th>家庭合计</th>
           {% for member in members %}
             <th>{{ member.display_name }}</th>
           {% endfor %}
+          <th>家庭合计</th>
         </tr>
       </thead>
       <tbody>
@@ -48,12 +50,15 @@
               {% for amount in row.income_cells %}
                 <td class="number income">{{ amount|thousands }}</td>
               {% endfor %}
+              <td class="number income strong-number">{{ row.income_total|thousands }}</td>
               {% for amount in row.expense_cells %}
                 <td class="number expense">{{ amount|thousands }}</td>
               {% endfor %}
+              <td class="number expense strong-number">{{ row.expense_total|thousands }}</td>
               {% for amount in row.net_cells %}
                 <td class="number net">{{ amount|thousands }}</td>
               {% endfor %}
+              <td class="number net strong-number">{{ row.net_total|thousands }}</td>
               <td><a class="text-action" href="{% url 'ledger:expense_month_detail' row.year row.month %}">查看明细</a></td>
             </tr>
           {% endfor %}
@@ -62,21 +67,93 @@
             {% for amount in section.total.income_cells %}
               <td class="number income">{{ amount|thousands }}</td>
             {% endfor %}
+            <td class="number income strong-number">{{ section.total.income_total|thousands }}</td>
             {% for amount in section.total.expense_cells %}
               <td class="number expense">{{ amount|thousands }}</td>
             {% endfor %}
+            <td class="number expense strong-number">{{ section.total.expense_total|thousands }}</td>
             {% for amount in section.total.net_cells %}
               <td class="number net">{{ amount|thousands }}</td>
             {% endfor %}
+            <td class="number net strong-number">{{ section.total.net_total|thousands }}</td>
             <td><a class="text-action" href="{% url 'ledger:expense_year_detail' section.year %}">查看明细</a></td>
           </tr>
         {% empty %}
           <tr>
-            <td colspan="{{ members|length|add:members|length|add:members|length|add:2 }}">暂无数据</td>
+            <td colspan="{{ members|length|add:members|length|add:members|length|add:5 }}">暂无数据</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
+
+{% if year %}
+<section id="monthly-expense-category-pies" class="panel asset-trend-panel expense-category-pie-section">
+  <div class="asset-trend-head">
+    <div>
+      <span class="asset-trend-eyebrow">MONTHLY EXPENSE CATEGORY MIX</span>
+      <h1>支出分类构成</h1>
+      <p>
+        {{ year }}年{% if selected_category_month == "all" %}全年{% else %}{{ selected_category_month }}月{% endif %}家庭支出分类占比
+        · 单位：元 · 未细分金额自动补齐 · 点击扇区可联动下级分类
+      </p>
+    </div>
+    <form method="get" action="{{ request.path }}#monthly-expense-category-pies" class="cashflow-trend-filter">
+      <label for="category-month">统计范围</label>
+      <select id="category-month" name="category_month" onchange="this.form.submit()">
+        <option value="all" {% if selected_category_month == "all" %}selected{% endif %}>全年</option>
+        <option value="1" {% if selected_category_month == 1 %}selected{% endif %}>1月</option>
+        <option value="2" {% if selected_category_month == 2 %}selected{% endif %}>2月</option>
+        <option value="3" {% if selected_category_month == 3 %}selected{% endif %}>3月</option>
+        <option value="4" {% if selected_category_month == 4 %}selected{% endif %}>4月</option>
+        <option value="5" {% if selected_category_month == 5 %}selected{% endif %}>5月</option>
+        <option value="6" {% if selected_category_month == 6 %}selected{% endif %}>6月</option>
+        <option value="7" {% if selected_category_month == 7 %}selected{% endif %}>7月</option>
+        <option value="8" {% if selected_category_month == 8 %}selected{% endif %}>8月</option>
+        <option value="9" {% if selected_category_month == 9 %}selected{% endif %}>9月</option>
+        <option value="10" {% if selected_category_month == 10 %}selected{% endif %}>10月</option>
+        <option value="11" {% if selected_category_month == 11 %}selected{% endif %}>11月</option>
+        <option value="12" {% if selected_category_month == 12 %}selected{% endif %}>12月</option>
+      </select>
+    </form>
+  </div>
+  <div class="expense-pie-grid">
+    <article class="expense-pie-card">
+      <div class="expense-pie-card-head">
+        <h2>一级支出分类</h2>
+        <span id="primary-pie-scope">全部一级分类</span>
+      </div>
+      <svg id="primary-expense-pie" class="expense-pie-chart" viewBox="0 0 320 250" role="img" aria-label="一级支出分类饼图"></svg>
+      <div id="primary-expense-pie-empty" class="expense-pie-empty" hidden>暂无一级分类支出</div>
+      <div id="primary-expense-pie-legend" class="expense-pie-legend"></div>
+    </article>
+    <article class="expense-pie-card">
+      <div class="expense-pie-card-head">
+        <h2>二级支出分类</h2>
+        <span id="secondary-pie-scope">全部二级分类</span>
+      </div>
+      <svg id="secondary-expense-pie" class="expense-pie-chart" viewBox="0 0 320 250" role="img" aria-label="二级支出分类饼图"></svg>
+      <div id="secondary-expense-pie-empty" class="expense-pie-empty" hidden>暂无二级分类支出</div>
+      <div id="secondary-expense-pie-legend" class="expense-pie-legend"></div>
+    </article>
+    <article class="expense-pie-card">
+      <div class="expense-pie-card-head">
+        <h2>三级支出分类</h2>
+        <span id="tertiary-pie-scope">全部三级分类</span>
+      </div>
+      <svg id="tertiary-expense-pie" class="expense-pie-chart" viewBox="0 0 320 250" role="img" aria-label="三级支出分类饼图"></svg>
+      <div id="tertiary-expense-pie-empty" class="expense-pie-empty" hidden>暂无三级分类支出</div>
+      <div id="tertiary-expense-pie-legend" class="expense-pie-legend"></div>
+    </article>
+  </div>
+</section>
+{{ expense_category_pie_data|json_script:"expense-category-pie-data" }}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% if year %}
+    <script src="{% static 'js/expense_category_pies.js' %}?v=20260628-0645"></script>
+  {% endif %}
 {% endblock %}

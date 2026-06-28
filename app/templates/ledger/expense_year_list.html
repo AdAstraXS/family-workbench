@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% load money %}
 
 {% block title %}年度收支记录{% endblock %}
@@ -10,9 +11,9 @@
     <h1>年度收支记录</h1>
   </div>
   <div class="inline-actions">
-    <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
     <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
-    <a class="button" href="{% url 'ledger:expense_create' %}">新增支出</a>
+    <a class="button ghost" href="{% url 'ledger:expense_import' %}">Excel 批量导入</a>
+    <a class="button" href="{% url 'ledger:expense_create' %}">手动录入支出</a>
   </div>
 </section>
 
@@ -57,4 +58,103 @@
     </table>
   </div>
 </section>
+
+<section class="panel asset-trend-panel cashflow-trend-panel">
+  <div class="asset-trend-head">
+    <div>
+      <span class="asset-trend-eyebrow">MONTHLY CASHFLOW TREND</span>
+      <h1>月度收支趋势</h1>
+      <p>
+        {% if selected_trend_year == "all" %}
+          按年度汇总家庭收入、支出与结余
+        {% else %}
+          {{ selected_trend_year }}年1–12月家庭收入、支出与结余
+        {% endif %}
+        · 单位：万元
+      </p>
+    </div>
+    <form method="get" class="cashflow-trend-filter">
+      <input type="hidden" name="category_year" value="{{ selected_category_year }}">
+      <label for="trend-year">统计范围</label>
+      <select id="trend-year" name="trend_year" onchange="this.form.submit()">
+        <option value="all" {% if selected_trend_year == "all" %}selected{% endif %}>全部年度</option>
+        {% for available_year in available_years %}
+          <option value="{{ available_year }}" {% if selected_trend_year == available_year %}selected{% endif %}>{{ available_year }}年</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+  <div class="cashflow-trend-chart-wrap">
+    <svg id="cashflow-trend-chart" class="cashflow-trend-chart" viewBox="0 0 1000 360" role="img" aria-label="月度收入、支出柱状图和结余折线图"></svg>
+    <div id="cashflow-trend-empty" class="asset-trend-empty" hidden>暂无收支记录</div>
+  </div>
+  <div class="cashflow-trend-legend" aria-label="图例">
+    <span><i class="income"></i>收入</span>
+    <span><i class="expense"></i>支出</span>
+    <span><i class="net"></i>结余</span>
+  </div>
+</section>
+
+<section id="expense-category-pies" class="panel asset-trend-panel expense-category-pie-section">
+  <div class="asset-trend-head">
+    <div>
+      <span class="asset-trend-eyebrow">EXPENSE CATEGORY MIX</span>
+      <h1>支出分类构成</h1>
+      <p>
+        {% if selected_category_year == "all" %}
+          全部年度家庭支出分类占比
+        {% else %}
+          {{ selected_category_year }}年家庭支出分类占比
+        {% endif %}
+        · 单位：万元 · 未细分金额自动补齐 · 点击扇区可联动下级分类
+      </p>
+    </div>
+    <form method="get" action="{{ request.path }}#expense-category-pies" class="cashflow-trend-filter">
+      <input type="hidden" name="trend_year" value="{{ selected_trend_year }}">
+      <label for="category-year">统计范围</label>
+      <select id="category-year" name="category_year" onchange="this.form.submit()">
+        <option value="all" {% if selected_category_year == "all" %}selected{% endif %}>全部年度</option>
+        {% for available_year in available_years %}
+          <option value="{{ available_year }}" {% if selected_category_year == available_year %}selected{% endif %}>{{ available_year }}年</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+  <div class="expense-pie-grid">
+    <article class="expense-pie-card">
+      <div class="expense-pie-card-head">
+        <h2>一级支出分类</h2>
+        <span id="primary-pie-scope">全部一级分类</span>
+      </div>
+      <svg id="primary-expense-pie" class="expense-pie-chart" viewBox="0 0 320 250" role="img" aria-label="一级支出分类饼图"></svg>
+      <div id="primary-expense-pie-empty" class="expense-pie-empty" hidden>暂无一级分类支出</div>
+      <div id="primary-expense-pie-legend" class="expense-pie-legend"></div>
+    </article>
+    <article class="expense-pie-card">
+      <div class="expense-pie-card-head">
+        <h2>二级支出分类</h2>
+        <span id="secondary-pie-scope">全部二级分类</span>
+      </div>
+      <svg id="secondary-expense-pie" class="expense-pie-chart" viewBox="0 0 320 250" role="img" aria-label="二级支出分类饼图"></svg>
+      <div id="secondary-expense-pie-empty" class="expense-pie-empty" hidden>暂无二级分类支出</div>
+      <div id="secondary-expense-pie-legend" class="expense-pie-legend"></div>
+    </article>
+    <article class="expense-pie-card">
+      <div class="expense-pie-card-head">
+        <h2>三级支出分类</h2>
+        <span id="tertiary-pie-scope">全部三级分类</span>
+      </div>
+      <svg id="tertiary-expense-pie" class="expense-pie-chart" viewBox="0 0 320 250" role="img" aria-label="三级支出分类饼图"></svg>
+      <div id="tertiary-expense-pie-empty" class="expense-pie-empty" hidden>暂无三级分类支出</div>
+      <div id="tertiary-expense-pie-legend" class="expense-pie-legend"></div>
+    </article>
+  </div>
+</section>
+{{ cashflow_trend_data|json_script:"cashflow-trend-data" }}
+{{ expense_category_pie_data|json_script:"expense-category-pie-data" }}
+{% endblock %}
+
+{% block scripts %}
+  <script src="{% static 'js/cashflow_trend.js' %}"></script>
+  <script src="{% static 'js/expense_category_pies.js' %}?v=20260628-0645"></script>
 {% endblock %}

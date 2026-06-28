@@ -6,6 +6,8 @@ import os
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -515,6 +517,52 @@ class IpoImageRecognitionApiKeyTests(TestCase):
         with patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesMessage(IpoImageRecognitionError, "不能保存在数据库"):
                 get_api_key(provider)
+
+
+class IpoUploadValidationTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="upload-tester",
+            password="password",
+        )
+        self.client.force_login(self.user)
+
+    def test_image_recognition_rejects_unsupported_image_type(self):
+        upload = SimpleUploadedFile("image.gif", b"GIF89a", content_type="image/gif")
+
+        response = self.client.post(
+            reverse("ipo:recognize_listing_image"),
+            {"image": upload},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("JPG", response.json()["error"])
+
+    def test_image_recognition_rejects_file_larger_than_eight_megabytes(self):
+        upload = SimpleUploadedFile(
+            "large.jpg",
+            b"x" * (8 * 1024 * 1024 + 1),
+            content_type="image/jpeg",
+        )
+
+        response = self.client.post(
+            reverse("ipo:recognize_listing_image"),
+            {"image": upload},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("8 MB", response.json()["error"])
+
+    def test_prospectus_accepts_pdf_and_rejects_other_file_types(self):
+        form = HkIpoListingForm()
+        pdf = SimpleUploadedFile("prospectus.pdf", b"%PDF-1.7", content_type="application/pdf")
+        form.cleaned_data = {"prospectus": pdf}
+        self.assertIs(form.clean_prospectus(), pdf)
+
+        image = SimpleUploadedFile("prospectus.png", b"png", content_type="image/png")
+        form.cleaned_data = {"prospectus": image}
+        with self.assertRaisesMessage(ValidationError, "PDF"):
+            form.clean_prospectus()
 
 
 class HkIpoListingOptionTests(TestCase):

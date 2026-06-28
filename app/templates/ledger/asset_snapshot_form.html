@@ -6,10 +6,6 @@
 <section class="panel snapshot-form-panel">
   <div class="section-head">
     <h1>{{ title }}</h1>
-    <div class="inline-actions">
-      <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
-      <a class="button ghost" href="{% url 'ledger:asset_snapshot_list' %}">返回列表</a>
-    </div>
   </div>
   <form method="post">
     {% csrf_token %}

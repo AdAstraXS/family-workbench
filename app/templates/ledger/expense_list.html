@@ -10,10 +10,9 @@
     <h1>{{ report_title }}</h1>
   </div>
   <div class="inline-actions">
-    <a class="button ghost" href="{% url 'ledger:cashflow_summary_year' year %}">{{ return_label }}</a>
-    <a class="button ghost" href="{% url 'ledger:overview' %}">返回家庭账本</a>
     <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
-    <a class="button" href="{% url 'ledger:expense_create' %}">新增支出</a>
+    <a class="button ghost" href="{% url 'ledger:expense_import' %}">Excel 批量导入</a>
+    <a class="button" href="{% url 'ledger:expense_create' %}">手动录入支出</a>
   </div>
 </section>
 
@@ -77,18 +76,77 @@
 <section class="panel record-panel split-record-panel">
   <div class="section-head inner-head">
     <h2>支出记录</h2>
+    {% if expense_filter_active %}
+      <span class="filter-status">已按条件筛选，合计已重新计算</span>
+    {% endif %}
   </div>
+  <form id="expense-filter-form" method="get" action="{{ request.path }}"></form>
   <div class="record-table-wrap">
-    <table class="record-table year-detail-table">
+    <table class="record-table year-detail-table expense-detail-table">
       <thead>
         <tr>
-          <th>年月</th>
+          <th>日期</th>
           <th>成员</th>
-          <th>分类</th>
+          <th>支出账户</th>
+          <th>一级分类</th>
+          <th>二级分类</th>
+          <th>三级分类</th>
           <th>金额</th>
           <th>币种</th>
           <th>备注</th>
           <th>操作</th>
+        </tr>
+        <tr class="expense-filter-row">
+            <th><span class="filter-row-label">筛选</span></th>
+            <th>
+              <select name="member" id="expense-filter-member" form="expense-filter-form" aria-label="按成员筛选">
+                <option value="">全部成员</option>
+                {% for member in members %}
+                  <option value="{{ member.id }}" {% if expense_filters.member_id == member.id %}selected{% endif %}>{{ member.display_name }}</option>
+                {% endfor %}
+              </select>
+            </th>
+            <th>
+              <select name="bank_account" id="expense-filter-account" form="expense-filter-form" aria-label="按支出账户筛选">
+                <option value="">全部账户</option>
+                {% for account in expense_filter_accounts %}
+                  <option value="{{ account.id }}" data-member-id="{{ account.member_id }}" {% if expense_filters.bank_account_id == account.id %}selected{% endif %}>{{ account.member.display_name }} · {{ account.account_name }}</option>
+                {% endfor %}
+              </select>
+            </th>
+            <th>
+              <select name="primary_category" id="expense-filter-primary" form="expense-filter-form" aria-label="按一级分类筛选">
+                <option value="">全部一级</option>
+                {% for category in expense_primary_categories %}
+                  <option value="{{ category.id }}" {% if expense_filters.primary_category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
+                {% endfor %}
+              </select>
+            </th>
+            <th>
+              <select name="secondary_category" id="expense-filter-secondary" form="expense-filter-form" aria-label="按二级分类筛选">
+                <option value="">全部二级</option>
+                {% for category in expense_secondary_categories %}
+                  <option value="{{ category.id }}" data-parent-id="{{ category.parent_id }}" {% if expense_filters.secondary_category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
+                {% endfor %}
+              </select>
+            </th>
+            <th>
+              <select name="tertiary_category" id="expense-filter-tertiary" form="expense-filter-form" aria-label="按三级分类筛选">
+                <option value="">全部三级</option>
+                {% for category in expense_tertiary_categories %}
+                  <option value="{{ category.id }}" data-parent-id="{{ category.parent_id }}" {% if expense_filters.tertiary_category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
+                {% endfor %}
+              </select>
+            </th>
+            <th></th>
+            <th></th>
+            <th></th>
+            <th>
+              <div class="expense-filter-actions">
+                <button type="submit" form="expense-filter-form">筛选</button>
+                <a class="text-action" href="{{ request.path }}">重置</a>
+              </div>
+            </th>
         </tr>
       </thead>
       <tbody>
@@ -96,8 +154,11 @@
           <tr>
             <td>{{ row.period_label }}</td>
             <td>{{ row.member }}</td>
-            <td>{{ row.category|default:"-" }}</td>
-            <td class="number expense">{{ row.amount|thousands }}</td>
+            <td>{{ row.record.bank_account.account_name|default:"-" }}</td>
+            <td>{{ row.primary_category|default:"-" }}</td>
+            <td>{{ row.secondary_category|default:"-" }}</td>
+            <td>{{ row.tertiary_category|default:"-" }}</td>
+            <td class="number expense">{{ row.amount|money2 }}</td>
             <td>{{ row.currency }}</td>
             <td class="record-remark">{{ row.remark|default:"-" }}</td>
             <td>
@@ -112,22 +173,75 @@
             </td>
           </tr>
         {% empty %}
-          <tr><td colspan="7">暂无支出记录</td></tr>
+          <tr><td colspan="10">暂无符合条件的支出记录</td></tr>
         {% endfor %}
         {% for total in expense_member_totals %}
           <tr class="record-total-row">
-            <td colspan="3">{{ total.member }}支出合计</td>
-            <td class="number expense">{{ total.amount|thousands }}</td>
+            <td colspan="6">{{ total.member }}支出合计</td>
+            <td class="number expense">{{ total.amount|money2 }}</td>
             <td colspan="3"></td>
           </tr>
         {% endfor %}
         <tr class="record-total-row family-total-row">
-          <td colspan="3">家庭支出合计</td>
-          <td class="number expense">{{ expense_family_total|thousands }}</td>
+          <td colspan="6">家庭支出合计</td>
+          <td class="number expense">{{ expense_family_total|money2 }}</td>
           <td colspan="3"></td>
         </tr>
       </tbody>
     </table>
   </div>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (() => {
+    const memberSelect = document.getElementById("expense-filter-member");
+    const accountSelect = document.getElementById("expense-filter-account");
+    const primarySelect = document.getElementById("expense-filter-primary");
+    const secondarySelect = document.getElementById("expense-filter-secondary");
+    const tertiarySelect = document.getElementById("expense-filter-tertiary");
+
+    const filterAccounts = (clearInvalid = true) => {
+      const memberId = memberSelect.value;
+      for (const option of accountSelect.options) {
+        if (!option.value) continue;
+        const matches = !memberId || option.dataset.memberId === memberId;
+        option.hidden = !matches;
+        option.disabled = !matches;
+      }
+      const selected = accountSelect.selectedOptions[0];
+      if (clearInvalid && selected?.value && selected.dataset.memberId !== memberId && memberId) {
+        accountSelect.value = "";
+      }
+    };
+
+    const filterChildren = (parentSelect, childSelect, clearInvalid = true) => {
+      const parentId = parentSelect.value;
+      for (const option of childSelect.options) {
+        if (!option.value) continue;
+        const matches = !parentId || option.dataset.parentId === parentId;
+        option.hidden = !matches;
+        option.disabled = !matches;
+      }
+      const selected = childSelect.selectedOptions[0];
+      if (clearInvalid && selected?.value && parentId && selected.dataset.parentId !== parentId) {
+        childSelect.value = "";
+      }
+    };
+
+    memberSelect.addEventListener("change", () => filterAccounts(true));
+    primarySelect.addEventListener("change", () => {
+      filterChildren(primarySelect, secondarySelect, true);
+      filterChildren(secondarySelect, tertiarySelect, true);
+    });
+    secondarySelect.addEventListener("change", () => {
+      filterChildren(secondarySelect, tertiarySelect, true);
+    });
+
+    filterAccounts(false);
+    filterChildren(primarySelect, secondarySelect, false);
+    filterChildren(secondarySelect, tertiarySelect, false);
+  })();
+</script>
 {% endblock %}

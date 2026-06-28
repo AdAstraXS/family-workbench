@@ -1,0 +1,62 @@
+{% extends "form.html" %}
+
+{% block scripts %}
+<script>
+  (() => {
+    const memberSelect = document.getElementById("id_member");
+    const accountSelect = document.getElementById("id_bank_account");
+    const primarySelect = document.getElementById("id_primary_category");
+    const secondarySelect = document.getElementById("id_secondary_category");
+    const tertiarySelect = document.getElementById("id_tertiary_category");
+
+    const filterAccounts = () => {
+      if (!memberSelect || !accountSelect) return;
+      const memberId = memberSelect.value;
+      for (const option of accountSelect.options) {
+        if (!option.value) continue;
+        const matches = !memberId || option.dataset.memberId === memberId;
+        option.hidden = !matches;
+        option.disabled = !matches;
+      }
+      const selected = accountSelect.selectedOptions[0];
+      if (selected && selected.value && selected.dataset.memberId !== memberId) {
+        accountSelect.value = "";
+      }
+    };
+
+    const filterChildOptions = (parentSelect, childSelect, clearInvalid = true) => {
+      if (!parentSelect || !childSelect) return;
+      const parentId = parentSelect.value;
+      for (const option of childSelect.options) {
+        if (!option.value) continue;
+        const matches = Boolean(parentId) && option.dataset.parentId === parentId;
+        option.hidden = !matches;
+        option.disabled = !matches;
+      }
+      const selected = childSelect.selectedOptions[0];
+      if (
+        clearInvalid &&
+        selected &&
+        selected.value &&
+        selected.dataset.parentId !== parentId
+      ) {
+        childSelect.value = "";
+      }
+    };
+
+    const filterSecondary = (clearInvalid = true) => {
+      filterChildOptions(primarySelect, secondarySelect, clearInvalid);
+      filterChildOptions(secondarySelect, tertiarySelect, clearInvalid);
+    };
+    const filterTertiary = (clearInvalid = true) => {
+      filterChildOptions(secondarySelect, tertiarySelect, clearInvalid);
+    };
+
+    if (memberSelect) memberSelect.addEventListener("change", filterAccounts);
+    if (primarySelect) primarySelect.addEventListener("change", () => filterSecondary(true));
+    if (secondarySelect) secondarySelect.addEventListener("change", () => filterTertiary(true));
+    filterAccounts();
+    filterSecondary(false);
+  })();
+</script>
+{% endblock %}

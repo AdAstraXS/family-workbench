@@ -1,53 +1,104 @@
 # 家庭投资与记账工作台
 
-这是一个面向群晖 NAS 部署的 Django 项目骨架，用于管理家庭投资组合、收支账本，并预留 AI 分析能力。
+面向家庭使用的 Django 工作台，当前主要包括家庭账本和港股打新模块，并使用 Docker Compose 部署到群晖 NAS。
 
-## 本地或 NAS 首次启动
+## 首次启动
 
-1. 复制环境变量文件：
+1. 复制环境变量文件，并填写强密码、随机密钥和 NAS 地址：
 
 ```bash
 cp .env.example .env
 ```
 
-2. 修改 `.env` 中的密码、密钥和群晖 IP。
+生成 Django 密钥可以使用：
 
-3. 启动容器：
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(64))"
+```
+
+`.env` 只保存在部署设备，不应提交到 Git。AI API Key 也只通过环境变量配置。
+
+2. 启动容器：
 
 ```bash
 docker compose up -d --build
+docker compose exec -T web python manage.py check
+docker compose exec -T web python manage.py showmigrations
 ```
 
-容器启动时会先执行 `python manage.py migrate` 来创建或更新数据库表。
+容器启动时会自动执行数据库迁移和静态文件收集。默认只把 PostgreSQL 映射到 NAS 的 `127.0.0.1`，不要把 5432 端口暴露到公网。
 
-如果卡在拉取 `python:3.12-slim`，说明当前网络无法访问 Docker Hub。可以在 `.env` 中把 `PYTHON_IMAGE` 改成你能访问的 Python 镜像，例如公司/家庭代理后的私有镜像，或先在能访问 Docker Hub 的机器上拉取后导入 NAS。
-
-4. 创建管理员账号和第一批示例数据：
+3. 新建空数据库时，创建管理员：
 
 ```bash
-docker compose exec web python manage.py bootstrap_first_data --username admin --password Admin123456
+docker compose exec web python manage.py createsuperuser
 ```
 
-这条命令会创建：
+只有需要演示数据时才运行 `bootstrap_first_data`。正式账本迁移不应先生成演示数据。
 
-- 管理员账号。
-- 家庭：我的家庭。
-- 成员：我。
-- 币种：CNY、HKD、USD。
-- 示例证券账户、持仓和交易。
-- 示例银行账户、工资收入和餐饮支出。
-- AI 服务商占位配置。
+## 外网访问与 HTTPS
 
-5. 访问后台：
+建议通过群晖反向代理和有效证书提供 HTTPS，不直接把容器端口暴露到公网。反向代理目标可以是 `http://127.0.0.1:8000`。
 
-```text
-http://群晖IP:8000/admin/
+HTTPS 验证正常后，在 `.env` 设置：
+
+```dotenv
+DJANGO_ALLOWED_HOSTS=finance.example.com,nas-lan-ip
+DJANGO_CSRF_TRUSTED_ORIGINS=https://finance.example.com
+DJANGO_SECURE_PROXY_SSL_HEADER=True
+DJANGO_SECURE_SSL_REDIRECT=True
+DJANGO_SESSION_COOKIE_SECURE=True
+DJANGO_CSRF_COOKIE_SECURE=True
+DJANGO_SECURE_HSTS_SECONDS=31536000
 ```
 
-本地访问通常是：
+先确认 HTTPS 和反向代理头正确，再启用 HSTS；配置错误可能导致浏览器在有效期内强制使用 HTTPS。
 
-```text
-http://127.0.0.1:8000/admin/
+部署前检查：
+
+```bash
+docker compose exec -T web python manage.py check --deploy
+docker compose ps
+docker compose logs --tail=100 web
 ```
 
-首次登录后请立刻在后台修改管理员密码，并把示例账户改成你的真实数据或删除。
+## 迁移现有数据
+
+现有 PostgreSQL 数据、上传文件和代码是三类独立内容。Git 只用于代码；真实账本数据和密钥不进入仓库。
+
+在旧设备导出数据库：
+
+```bash
+docker compose exec -T db pg_dump -U family_finance_user -d family_finance -Fc > family_finance.dump
+```
+
+把 `family_finance.dump` 和项目根目录的 `media/` 通过受信任的局域网或加密方式复制到 NAS。NAS 上启动数据库后恢复：
+
+```bash
+docker compose exec -T db pg_restore -U family_finance_user -d family_finance --clean --if-exists < family_finance.dump
+docker compose exec -T web python manage.py migrate
+```
+
+恢复会改写目标数据库，执行前务必确认目标和备份文件。部署完成后核对家庭成员、账户数量、收支记录、资产快照和港股交易总数。
+
+## 备份与升级
+
+至少定期备份：
+
+- PostgreSQL 逻辑备份（`pg_dump -Fc`）。
+- `media/` 上传文件。
+- NAS 上的 `.env`（加密保存）。
+
+升级代码前先备份数据库，然后执行：
+
+```bash
+docker compose up -d --build
+docker compose exec -T web python manage.py check
+docker compose exec -T web python manage.py showmigrations
+```
+
+若 Docker Hub 无法访问，可在 `.env` 中把 `PYTHON_IMAGE` 改为 NAS 可访问的 Python 3.12 镜像。
+
+## 更换开发电脑
+
+建议把代码推送到私有 Git 仓库，新电脑克隆仓库后单独创建 `.env`。NAS 上的正式数据库继续由网页使用，不通过 Git 同步；如需本地调试真实问题，使用脱敏后的数据库备份。

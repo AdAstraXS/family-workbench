@@ -724,13 +724,17 @@ def review_index(request):
 
 @login_required
 def recognize_listing_image(request):
+    max_image_size = 8 * 1024 * 1024
+    allowed_image_types = {"image/jpeg", "image/png", "image/webp"}
     if request.method != "POST":
         return JsonResponse({"ok": False, "error": "只支持 POST 请求。"}, status=405)
     image = request.FILES.get("image")
     if not image:
         return JsonResponse({"ok": False, "error": "请先选择一张图片。"}, status=400)
-    if not (image.content_type or "").startswith("image/"):
-        return JsonResponse({"ok": False, "error": "请上传图片文件。"}, status=400)
+    if (image.content_type or "").lower() not in allowed_image_types:
+        return JsonResponse({"ok": False, "error": "仅支持 JPG、PNG 或 WebP 图片。"}, status=400)
+    if image.size > max_image_size:
+        return JsonResponse({"ok": False, "error": "图片不能超过 8 MB。"}, status=400)
     try:
         fields = recognize_ipo_listing_from_image(image)
     except IpoImageRecognitionError as exc:

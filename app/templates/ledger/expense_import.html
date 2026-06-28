@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}Excel 批量导入支出{% endblock %}
+
+{% block content %}
+<section class="cashflow-hero">
+  <div>
+    <p class="eyebrow">家庭账本 · 支出录入</p>
+    <h1>Excel 批量导入支出</h1>
+    <p class="hero-note">系统会按“所属账户 + 支出账户”匹配成员名下账户，并按三级分类路径自动补齐分类。</p>
+  </div>
+  <div class="inline-actions">
+    <a class="button" href="{% url 'ledger:expense_create' %}">手动录入单笔</a>
+  </div>
+</section>
+
+<section class="panel form-panel wide-form-panel expense-import-panel">
+  <div class="section-head">
+    <h2>上传固定格式文件</h2>
+  </div>
+  <form method="post" enctype="multipart/form-data" class="data-form">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+      <div class="form-errors">{{ form.non_field_errors }}</div>
+    {% endif %}
+    {% for field in form %}
+      <div class="form-row">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+        {% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+      </div>
+    {% endfor %}
+    <div class="form-actions">
+      <button type="submit">校验并导入</button>
+    </div>
+  </form>
+
+  <div class="import-format">
+    <h3>固定表头（顺序不可调整）</h3>
+    <div class="record-table-wrap">
+      <table class="record-table compact-table">
+        <thead>
+          <tr>{% for header in expected_headers %}<th>{{ header }}</th>{% endfor %}</tr>
+        </thead>
+      </table>
+    </div>
+    <p class="muted-note">三级分类可留空；负数金额按退款或冲销原样录入。重复上传同一文件或包含已导入行的新文件时，不会重复记账。</p>
+  </div>
+</section>
+
+<section class="panel record-panel">
+  <div class="section-head"><h2>最近导入批次</h2></div>
+  <div class="record-table-wrap">
+    <table class="record-table">
+      <thead>
+        <tr>
+          <th>导入时间</th>
+          <th>文件</th>
+          <th>工作表</th>
+          <th>读取</th>
+          <th>新增</th>
+          <th>重复跳过</th>
+          <th>净支出</th>
+          <th>导入用户</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for batch in batches %}
+          <tr>
+            <td>{{ batch.created_at|date:"Y-m-d H:i" }}</td>
+            <td>{{ batch.source_filename }}</td>
+            <td>{{ batch.worksheet_name|default:"-" }}</td>
+            <td class="number">{{ batch.row_count }}</td>
+            <td class="number">{{ batch.imported_count }}</td>
+            <td class="number">{{ batch.skipped_count }}</td>
+            <td class="number expense">{{ batch.total_amount|money2 }}</td>
+            <td>{{ batch.imported_by|default:"-" }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8">暂无导入记录</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

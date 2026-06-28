@@ -13,7 +13,6 @@
   <a class="button" href="{% url 'ipo:subscription_trade_create' %}">新增申购</a>
   <a class="button ghost" href="{% url 'ipo:listing_list' %}">新股资料</a>
   <a class="button ghost" href="https://livereport.tradegomart.com/#/enterprise/examination" target="_blank" rel="noopener noreferrer">港股通预测</a>
-  <a class="button ghost" href="{% url 'ipo:index' %}">返回模块首页</a>
   <form method="get" class="ipo-year-filter">
     {% if profit_queries.selected_stock_id %}
       <input type="hidden" name="stock" value="{{ profit_queries.selected_stock_id }}">

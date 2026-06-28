@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 from family_core.models import AccountRegion, AccountType, AssetCategory, Family, FamilyMember, TimestampedModel
@@ -42,9 +43,22 @@ class IncomeCategory(models.Model):
         ]
 
     def __str__(self):
-        if self.parent:
-            return f"{self.parent.name}-{self.name}"
-        return self.name
+        return "-".join(self.path_names)
+
+    @property
+    def path_names(self):
+        names = [self.name]
+        category = self.parent
+        visited = {self.pk}
+        while category and category.pk not in visited:
+            names.append(category.name)
+            visited.add(category.pk)
+            category = category.parent
+        return list(reversed(names))
+
+    @property
+    def category_level(self):
+        return len(self.path_names)
 
 
 class ExpenseCategory(models.Model):
@@ -62,9 +76,22 @@ class ExpenseCategory(models.Model):
         ]
 
     def __str__(self):
-        if self.parent:
-            return f"{self.parent.name}-{self.name}"
-        return self.name
+        return "-".join(self.path_names)
+
+    @property
+    def path_names(self):
+        names = [self.name]
+        category = self.parent
+        visited = {self.pk}
+        while category and category.pk not in visited:
+            names.append(category.name)
+            visited.add(category.pk)
+            category = category.parent
+        return list(reversed(names))
+
+    @property
+    def category_level(self):
+        return len(self.path_names)
 
 
 class IncomeRecord(TimestampedModel):
@@ -97,12 +124,53 @@ class IncomeRecord(TimestampedModel):
         return f"{self.income_date} {self.member} {self.amount}"
 
 
+class ExpenseImportBatch(TimestampedModel):
+    STATUS_COMPLETED = "completed"
+    STATUS_CHOICES = [
+        (STATUS_COMPLETED, "已完成"),
+    ]
+
+    family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="expense_import_batches")
+    imported_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="导入用户",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="expense_import_batches",
+    )
+    source_filename = models.CharField("源文件名", max_length=255)
+    source_sha256 = models.CharField("文件校验值", max_length=64)
+    worksheet_name = models.CharField("工作表", max_length=255, blank=True)
+    row_count = models.PositiveIntegerField("源数据行数", default=0)
+    imported_count = models.PositiveIntegerField("新增行数", default=0)
+    skipped_count = models.PositiveIntegerField("跳过重复行数", default=0)
+    total_amount = models.DecimalField("源文件净支出", max_digits=20, decimal_places=4, default=0)
+    status = models.CharField("状态", max_length=20, choices=STATUS_CHOICES, default=STATUS_COMPLETED)
+    extra_data = models.JSONField("扩展字段", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "支出导入批次"
+        verbose_name_plural = "支出导入批次"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["family", "source_sha256"], name="unique_expense_import_file_per_family"),
+        ]
+        indexes = [
+            models.Index(fields=["family", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.source_filename}（{self.imported_count} 笔）"
+
+
 class ExpenseRecord(TimestampedModel):
     family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="expense_records")
     member = models.ForeignKey(FamilyMember, verbose_name="所属成员", on_delete=models.CASCADE, related_name="expense_records")
     bank_account = models.ForeignKey(BankAccount, verbose_name="支出账户", on_delete=models.SET_NULL, related_name="expense_records", null=True, blank=True)
     category = models.ForeignKey(ExpenseCategory, verbose_name="支出分类", on_delete=models.SET_NULL, related_name="expense_records", null=True, blank=True)
     expense_date = models.DateField("支出日期")
+    occurred_at = models.DateTimeField("支出时间", null=True, blank=True)
     period_start = models.DateField("统计开始日期", null=True, blank=True)
     period_end = models.DateField("统计结束日期", null=True, blank=True)
     amount = models.DecimalField("金额", max_digits=20, decimal_places=4)
@@ -111,6 +179,16 @@ class ExpenseRecord(TimestampedModel):
     payment_method = models.CharField("支付方式", max_length=50, blank=True)
     visibility = models.CharField("可见范围", max_length=20, choices=VisibilityChoices.choices, default=VisibilityChoices.PRIVATE)
     remark = models.TextField("备注", blank=True)
+    import_batch = models.ForeignKey(
+        ExpenseImportBatch,
+        verbose_name="导入批次",
+        on_delete=models.SET_NULL,
+        related_name="records",
+        null=True,
+        blank=True,
+    )
+    import_row_number = models.PositiveIntegerField("源文件行号", null=True, blank=True)
+    import_fingerprint = models.CharField("导入去重指纹", max_length=64, null=True, blank=True)
     extra_data = models.JSONField("扩展字段", default=dict, blank=True)
 
     class Meta:
@@ -121,6 +199,14 @@ class ExpenseRecord(TimestampedModel):
             models.Index(fields=["family", "member", "period_start", "period_end"]),
             models.Index(fields=["category"]),
             models.Index(fields=["bank_account"]),
+            models.Index(fields=["import_batch", "import_row_number"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["family", "import_fingerprint"],
+                condition=models.Q(import_fingerprint__isnull=False),
+                name="unique_imported_expense_fingerprint",
+            ),
         ]
 
     def __str__(self):

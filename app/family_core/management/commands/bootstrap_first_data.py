@@ -23,7 +23,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--username", default="admin")
-        parser.add_argument("--password", default="Admin123456")
+        parser.add_argument("--password", required=True)
         parser.add_argument("--email", default="admin@example.com")
         parser.add_argument("--family-name", default="我的家庭")
         parser.add_argument("--member-name", default="我")

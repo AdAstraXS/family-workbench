@@ -1,7 +1,9 @@
 from django.contrib.auth.decorators import login_required
+from django.contrib import messages
 from django.db.models import Q, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from datetime import date
 from decimal import Decimal
 import json
@@ -12,14 +14,14 @@ from .forms import (
     AssetBalanceEntryFormSet,
     AssetBalanceSnapshotForm,
     BankAccountForm,
-    ExpenseCategoryForm,
+    ExpenseImportForm,
     ExpenseRecordForm,
-    IncomeCategoryForm,
     IncomeRecordForm,
     make_annual_budget_line_formset,
     make_asset_balance_entry_formset,
 )
-from .models import AnnualBudget, AnnualBudgetLine, AssetBalanceSnapshot, BankAccount, ExpenseCategory, ExpenseRecord, IncomeCategory, IncomeRecord
+from .expense_import import ExpenseWorkbookError, import_expense_workbook
+from .models import AnnualBudget, AnnualBudgetLine, AssetBalanceSnapshot, BankAccount, ExpenseCategory, ExpenseImportBatch, ExpenseRecord, IncomeCategory, IncomeRecord
 from family_core.models import Family, FamilyMember
 
 
@@ -122,6 +124,9 @@ def build_cashflow_monthly_rows(target_year=None):
         row["income_cells"] = [row["income"][member.id] for member in members]
         row["expense_cells"] = [row["expense"][member.id] for member in members]
         row["net_cells"] = [row["income"][member.id] - row["expense"][member.id] for member in members]
+        row["income_total"] = sum(row["income_cells"], Decimal("0"))
+        row["expense_total"] = sum(row["expense_cells"], Decimal("0"))
+        row["net_total"] = sum(row["net_cells"], Decimal("0"))
         rows.append(row)
 
         year_total = year_totals.setdefault(
@@ -143,6 +148,9 @@ def build_cashflow_monthly_rows(target_year=None):
             year_total["income"][member.id] - year_total["expense"][member.id]
             for member in members
         ]
+        year_total["income_total"] = sum(year_total["income_cells"], Decimal("0"))
+        year_total["expense_total"] = sum(year_total["expense_cells"], Decimal("0"))
+        year_total["net_total"] = sum(year_total["net_cells"], Decimal("0"))
 
     sections = []
     for year in sorted(year_totals.keys()):
@@ -160,7 +168,14 @@ def build_cashflow_monthly_rows(target_year=None):
 def get_default_family_records():
     default_family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
     income_records = IncomeRecord.objects.select_related("family", "member", "category", "category__parent")
-    expense_records = ExpenseRecord.objects.select_related("family", "member", "category", "category__parent")
+    expense_records = ExpenseRecord.objects.select_related(
+        "family",
+        "member",
+        "bank_account",
+        "category",
+        "category__parent",
+        "category__parent__parent",
+    )
     if default_family:
         income_records = income_records.filter(family=default_family)
         expense_records = expense_records.filter(family=default_family)
@@ -217,10 +232,266 @@ def build_annual_cashflow_rows():
     return members, rows
 
 
-def build_year_cashflow_detail(year, month=None):
+def build_cashflow_trend_data(annual_rows, selected_year):
+    def in_ten_thousands(amount):
+        return float(
+            ((amount or Decimal("0")) / Decimal("10000")).quantize(Decimal("0.01"))
+        )
+
+    if selected_year == "all":
+        yearly_totals = {}
+        for row in annual_rows:
+            totals = yearly_totals.setdefault(
+                row["year"],
+                {"income": Decimal("0"), "expense": Decimal("0")},
+            )
+            totals["income"] += row["income_total"]
+            totals["expense"] += row["expense_total"]
+        labels = [str(year) for year in sorted(yearly_totals)]
+        income = [in_ten_thousands(yearly_totals[int(label)]["income"]) for label in labels]
+        expense = [in_ten_thousands(yearly_totals[int(label)]["expense"]) for label in labels]
+        mode = "yearly"
+    else:
+        _, sections = build_cashflow_monthly_rows(selected_year)
+        section = next((item for item in sections if item["year"] == selected_year), None)
+        month_rows = {
+            row["month"]: row
+            for row in (section["rows"] if section else [])
+        }
+        labels = [f"{month}月" for month in range(1, 13)]
+        income = [
+            in_ten_thousands(month_rows.get(month, {}).get("income_total", Decimal("0")))
+            for month in range(1, 13)
+        ]
+        expense = [
+            in_ten_thousands(month_rows.get(month, {}).get("expense_total", Decimal("0")))
+            for month in range(1, 13)
+        ]
+        mode = "monthly"
+    return {
+        "mode": mode,
+        "unit": "万元",
+        "labels": labels,
+        "income": income,
+        "expense": expense,
+        "net": [
+            round(income_amount - expense_amount, 2)
+            for income_amount, expense_amount in zip(income, expense)
+        ],
+    }
+
+
+def build_expense_category_pie_data(selected_year, selected_month=None, unit="万元"):
+    _, _, expense_records = get_default_family_records()
+    exact_category_totals = {}
+    totals = {
+        "primary": {},
+        "secondary": {},
+        "tertiary": {},
+    }
+
+    def add_total(level, category_id, name, amount, **relations):
+        item = totals[level].setdefault(
+            category_id,
+            {
+                "id": category_id,
+                "name": name,
+                "amount": Decimal("0"),
+                **relations,
+            },
+        )
+        item["amount"] += amount
+
+    for record in expense_records:
+        if selected_year != "all" and get_record_year(record, "expense_date") != selected_year:
+            continue
+        if selected_month and get_record_month(record, "expense_date") != (
+            selected_year,
+            selected_month,
+        ):
+            continue
+        category_key = record.category_id or "uncategorized"
+        exact_bucket = exact_category_totals.setdefault(
+            category_key,
+            {
+                "category": record.category,
+                "amount": Decimal("0"),
+            },
+        )
+        exact_bucket["amount"] += record.amount or Decimal("0")
+
+    for exact_bucket in exact_category_totals.values():
+        amount = exact_bucket["amount"]
+        if amount <= 0:
+            continue
+        category = exact_bucket["category"]
+        if not category:
+            add_total("primary", "uncategorized", "未分类", amount)
+            add_total(
+                "secondary",
+                "uncategorized-secondary",
+                "未细分至二级",
+                amount,
+                parent_id="uncategorized",
+                parent_name="未分类",
+            )
+            add_total(
+                "tertiary",
+                "uncategorized-tertiary",
+                "未细分至三级",
+                amount,
+                parent_id="uncategorized-secondary",
+                parent_name="未细分至二级",
+                primary_id="uncategorized",
+                primary_name="未分类",
+            )
+            continue
+        path = []
+        visited = set()
+        while category and category.pk not in visited:
+            path.append(category)
+            visited.add(category.pk)
+            category = category.parent
+        path.reverse()
+        primary = path[0]
+        add_total("primary", primary.pk, primary.name, amount)
+        if len(path) >= 2:
+            secondary = path[1]
+            add_total(
+                "secondary",
+                secondary.pk,
+                secondary.name,
+                amount,
+                parent_id=primary.pk,
+                parent_name=primary.name,
+            )
+        else:
+            secondary_id = f"primary-{primary.pk}-unallocated"
+            add_total(
+                "secondary",
+                secondary_id,
+                "未细分至二级",
+                amount,
+                parent_id=primary.pk,
+                parent_name=primary.name,
+            )
+            add_total(
+                "tertiary",
+                f"{secondary_id}-tertiary",
+                "未细分至二级",
+                amount,
+                parent_id=secondary_id,
+                parent_name="未细分至二级",
+                primary_id=primary.pk,
+                primary_name=primary.name,
+            )
+        if len(path) >= 3:
+            tertiary = path[2]
+            add_total(
+                "tertiary",
+                tertiary.pk,
+                tertiary.name,
+                amount,
+                parent_id=secondary.pk,
+                parent_name=secondary.name,
+                primary_id=primary.pk,
+                primary_name=primary.name,
+            )
+        elif len(path) == 2:
+            add_total(
+                "tertiary",
+                f"secondary-{secondary.pk}-unallocated",
+                "未细分至三级",
+                amount,
+                parent_id=secondary.pk,
+                parent_name=secondary.name,
+                primary_id=primary.pk,
+                primary_name=primary.name,
+            )
+
+    def serialize(level):
+        items = []
+        divisor = Decimal("1") if unit == "元" else Decimal("10000")
+        for item in totals[level].values():
+            if item["amount"] <= 0:
+                continue
+            serialized = {
+                key: value
+                for key, value in item.items()
+                if key != "amount"
+            }
+            serialized["value"] = float(item["amount"] / divisor)
+            items.append(serialized)
+        return sorted(items, key=lambda item: (-item["value"], item["name"]))
+
+    return {
+        "unit": unit,
+        "primary": serialize("primary"),
+        "secondary": serialize("secondary"),
+        "tertiary": serialize("tertiary"),
+    }
+
+
+def parse_filter_id(value):
+    value = str(value or "").strip()
+    return int(value) if value.isdigit() else None
+
+
+def get_expense_filters(request):
+    return {
+        "member_id": parse_filter_id(request.GET.get("member")),
+        "bank_account_id": parse_filter_id(request.GET.get("bank_account")),
+        "primary_category_id": parse_filter_id(request.GET.get("primary_category")),
+        "secondary_category_id": parse_filter_id(request.GET.get("secondary_category")),
+        "tertiary_category_id": parse_filter_id(request.GET.get("tertiary_category")),
+    }
+
+
+def build_expense_filter_options(family):
+    if not family:
+        return {
+            "expense_filter_accounts": [],
+            "expense_primary_categories": [],
+            "expense_secondary_categories": [],
+            "expense_tertiary_categories": [],
+        }
+    categories = ExpenseCategory.objects.filter(family=family, is_active=True)
+    return {
+        "expense_filter_accounts": list(
+            BankAccount.objects.filter(
+                family=family,
+                is_active=True,
+                expense_records__isnull=False,
+            )
+            .select_related("member", "account_type_ref")
+            .distinct()
+            .order_by("member__display_name", "account_name")
+        ),
+        "expense_primary_categories": list(
+            categories.filter(parent__isnull=True).order_by("name")
+        ),
+        "expense_secondary_categories": list(
+            categories.filter(parent__isnull=False, parent__parent__isnull=True)
+            .select_related("parent")
+            .order_by("parent__name", "name")
+        ),
+        "expense_tertiary_categories": list(
+            categories.filter(
+                parent__isnull=False,
+                parent__parent__isnull=False,
+                parent__parent__parent__isnull=True,
+            )
+            .select_related("parent", "parent__parent")
+            .order_by("parent__parent__name", "parent__name", "name")
+        ),
+    }
+
+
+def build_year_cashflow_detail(year, month=None, expense_filters=None):
     default_family, income_records, expense_records = get_default_family_records()
     members = list(FamilyMember.objects.filter(family=default_family, is_active=True).order_by("display_name")) if default_family else []
     member_ids = [member.id for member in members]
+    expense_filters = expense_filters or {}
     income_records = (
         income_records.filter(Q(period_start__year=year) | Q(period_start__isnull=True, income_date__year=year))
         .order_by("period_start", "income_date", "member__display_name", "created_at")
@@ -229,6 +500,26 @@ def build_year_cashflow_detail(year, month=None):
         expense_records.filter(Q(period_start__year=year) | Q(period_start__isnull=True, expense_date__year=year))
         .order_by("period_start", "expense_date", "member__display_name", "created_at")
     )
+    if expense_filters.get("member_id"):
+        expense_records = expense_records.filter(member_id=expense_filters["member_id"])
+    if expense_filters.get("bank_account_id"):
+        expense_records = expense_records.filter(bank_account_id=expense_filters["bank_account_id"])
+    if expense_filters.get("primary_category_id"):
+        primary_id = expense_filters["primary_category_id"]
+        expense_records = expense_records.filter(
+            Q(category_id=primary_id)
+            | Q(category__parent_id=primary_id)
+            | Q(category__parent__parent_id=primary_id)
+        )
+    if expense_filters.get("secondary_category_id"):
+        secondary_id = expense_filters["secondary_category_id"]
+        expense_records = expense_records.filter(
+            Q(category_id=secondary_id) | Q(category__parent_id=secondary_id)
+        )
+    if expense_filters.get("tertiary_category_id"):
+        expense_records = expense_records.filter(
+            category_id=expense_filters["tertiary_category_id"]
+        )
     if month:
         income_records = [record for record in income_records if get_record_month(record, "income_date") == (year, month)]
         expense_records = [record for record in expense_records if get_record_month(record, "expense_date") == (year, month)]
@@ -238,13 +529,21 @@ def build_year_cashflow_detail(year, month=None):
 
     def make_row(record, kind):
         fallback_field = "income_date" if kind == "income" else "expense_date"
+        category_names = record.category.path_names if kind == "expense" and record.category else []
         return {
             "kind": kind,
             "record": record,
-            "period_label": get_record_year_month_label(record, fallback_field),
+            "period_label": (
+                get_record_year_month_label(record, fallback_field)
+                if kind == "income"
+                else record.expense_date.strftime("%Y-%m-%d")
+            ),
             "sort_key": record.period_start or getattr(record, fallback_field),
             "member": record.member,
             "category": record.category,
+            "primary_category": category_names[0] if category_names else "",
+            "secondary_category": category_names[1] if len(category_names) > 1 else "",
+            "tertiary_category": category_names[2] if len(category_names) > 2 else "",
             "amount": record.amount,
             "currency": record.currency,
             "remark": record.remark,
@@ -262,7 +561,7 @@ def build_year_cashflow_detail(year, month=None):
         if record.member_id in expense_member_totals:
             expense_member_totals[record.member_id] += record.amount or Decimal("0")
 
-    return {
+    report = {
         "family": default_family,
         "year": year,
         "month": month,
@@ -275,7 +574,11 @@ def build_year_cashflow_detail(year, month=None):
         "expense_member_totals": [{"member": member, "amount": expense_member_totals[member.id]} for member in members],
         "income_family_total": sum(income_member_totals.values(), Decimal("0")),
         "expense_family_total": sum(expense_member_totals.values(), Decimal("0")),
+        "expense_filters": expense_filters,
+        "expense_filter_active": any(expense_filters.values()),
     }
+    report.update(build_expense_filter_options(default_family))
+    return report
 
 
 def calculate_base_amount(snapshot, currency, original_amount):
@@ -956,7 +1259,64 @@ def asset_snapshot_list(request):
                 "total": total,
             }
         )
-    return render(request, "ledger/asset_snapshot_list.html", {"rows": rows, "members": members})
+
+    chronological_rows = list(reversed(rows))
+    monthly_points = {}
+    yearly_points = {}
+    for row in chronological_rows:
+        snapshot_date = row["snapshot"].snapshot_date
+        point = {
+            "member_values": row["member_totals"],
+            "family_value": row["total"],
+        }
+        monthly_points[f"{snapshot_date.year}-{snapshot_date.month:02d}"] = point
+        yearly_points[str(snapshot_date.year)] = point
+
+    def build_trend_period(points):
+        labels = list(points)
+        series = []
+        for index, member in enumerate(members):
+            series.append(
+                {
+                    "name": member.display_name,
+                    "kind": "member",
+                    "values": [
+                        float(
+                            (
+                                points[label]["member_values"][index]
+                                / Decimal("10000")
+                            ).quantize(Decimal("0.01"))
+                        )
+                        for label in labels
+                    ],
+                }
+            )
+        series.append(
+            {
+                "name": "家庭合计",
+                "kind": "family",
+                "values": [
+                    float(
+                        (
+                            points[label]["family_value"] / Decimal("10000")
+                        ).quantize(Decimal("0.01"))
+                    )
+                    for label in labels
+                ],
+            }
+        )
+        return {"labels": labels, "series": series}
+
+    trend_data = {
+        "unit": "万元",
+        "monthly": build_trend_period(monthly_points),
+        "yearly": build_trend_period(yearly_points),
+    }
+    return render(
+        request,
+        "ledger/asset_snapshot_list.html",
+        {"rows": rows, "members": members, "trend_data": trend_data},
+    )
 
 
 @login_required
@@ -1053,8 +1413,12 @@ def bank_account_edit(request, pk):
 @login_required
 def category_list(request):
     accounts = BankAccount.objects.select_related("family", "member", "account_type_ref", "account_region").order_by("member__display_name", "account_name")
-    income_categories = IncomeCategory.objects.select_related("family", "parent").order_by("family__name", "name")
-    expense_categories = ExpenseCategory.objects.select_related("family", "parent").order_by("family__name", "name")
+    income_categories = IncomeCategory.objects.select_related("family", "parent", "parent__parent").order_by(
+        "family__name", "parent__parent__name", "parent__name", "name"
+    )
+    expense_categories = ExpenseCategory.objects.select_related("family", "parent", "parent__parent").order_by(
+        "family__name", "parent__parent__name", "parent__name", "name"
+    )
     return render(
         request,
         "ledger/category_list.html",
@@ -1064,24 +1428,24 @@ def category_list(request):
 
 @login_required
 def income_category_create(request):
-    return save_form(request, IncomeCategoryForm, "form.html", "ledger:category_list", "新增收入分类")
+    return redirect("admin:ledger_incomecategory_add")
 
 
 @login_required
 def income_category_edit(request, pk):
-    category = get_object_or_404(IncomeCategory, pk=pk)
-    return save_form(request, IncomeCategoryForm, "form.html", "ledger:category_list", "编辑收入分类", category)
+    get_object_or_404(IncomeCategory, pk=pk)
+    return redirect("admin:ledger_incomecategory_change", object_id=pk)
 
 
 @login_required
 def expense_category_create(request):
-    return save_form(request, ExpenseCategoryForm, "form.html", "ledger:category_list", "新增支出分类")
+    return redirect("admin:ledger_expensecategory_add")
 
 
 @login_required
 def expense_category_edit(request, pk):
-    category = get_object_or_404(ExpenseCategory, pk=pk)
-    return save_form(request, ExpenseCategoryForm, "form.html", "ledger:category_list", "编辑支出分类", category)
+    get_object_or_404(ExpenseCategory, pk=pk)
+    return redirect("admin:ledger_expensecategory_change", object_id=pk)
 
 
 @login_required
@@ -1107,7 +1471,7 @@ def income_delete(request, pk):
     next_url = request.POST.get("next") if request.method == "POST" else None
     if request.method == "POST":
         record.delete()
-    if next_url and next_url.startswith("/"):
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return redirect(next_url)
     return redirect("ledger:expense_list")
 
@@ -1115,6 +1479,11 @@ def income_delete(request, pk):
 @login_required
 def cashflow_summary(request, year=None):
     members, sections = build_cashflow_monthly_rows(year)
+    requested_month = str(request.GET.get("category_month") or "").strip().lower()
+    if requested_month.isdigit() and 1 <= int(requested_month) <= 12:
+        selected_category_month = int(requested_month)
+    else:
+        selected_category_month = "all"
     return render(
         request,
         "ledger/cashflow_summary.html",
@@ -1122,6 +1491,18 @@ def cashflow_summary(request, year=None):
             "members": members,
             "sections": sections,
             "year": year,
+            "selected_category_month": selected_category_month,
+            "expense_category_pie_data": (
+                build_expense_category_pie_data(
+                    year,
+                    selected_category_month
+                    if selected_category_month != "all"
+                    else None,
+                    unit="元",
+                )
+                if year
+                else {"unit": "万元", "primary": [], "secondary": [], "tertiary": []}
+            ),
         },
     )
 
@@ -1129,30 +1510,106 @@ def cashflow_summary(request, year=None):
 @login_required
 def expense_list(request):
     members, rows = build_annual_cashflow_rows()
-    return render(request, "ledger/expense_year_list.html", {"members": members, "rows": rows})
+    available_years = sorted({row["year"] for row in rows}, reverse=True)
+    requested_year = str(request.GET.get("trend_year") or "").strip().lower()
+    if requested_year == "all":
+        selected_year = "all"
+    elif requested_year.isdigit() and int(requested_year) in available_years:
+        selected_year = int(requested_year)
+    else:
+        selected_year = available_years[0] if available_years else timezone.localdate().year
+    requested_category_year = str(request.GET.get("category_year") or "").strip().lower()
+    if requested_category_year == "all":
+        selected_category_year = "all"
+    elif requested_category_year.isdigit() and int(requested_category_year) in available_years:
+        selected_category_year = int(requested_category_year)
+    else:
+        selected_category_year = available_years[0] if available_years else timezone.localdate().year
+    return render(
+        request,
+        "ledger/expense_year_list.html",
+        {
+            "members": members,
+            "rows": rows,
+            "available_years": available_years,
+            "selected_trend_year": selected_year,
+            "cashflow_trend_data": build_cashflow_trend_data(rows, selected_year),
+            "selected_category_year": selected_category_year,
+            "expense_category_pie_data": build_expense_category_pie_data(
+                selected_category_year
+            ),
+        },
+    )
 
 
 @login_required
 def expense_year_detail(request, year):
-    report = build_year_cashflow_detail(year)
+    report = build_year_cashflow_detail(year, expense_filters=get_expense_filters(request))
     return render(request, "ledger/expense_list.html", {"year": year, **report})
 
 
 @login_required
 def expense_month_detail(request, year, month):
-    report = build_year_cashflow_detail(year, month)
+    report = build_year_cashflow_detail(year, month, get_expense_filters(request))
     return render(request, "ledger/expense_list.html", {"year": year, "month": month, **report})
 
 
 @login_required
 def expense_create(request):
-    return save_form(request, ExpenseRecordForm, "form.html", "ledger:expense_list", "新增支出记录")
+    return save_form(request, ExpenseRecordForm, "ledger/expense_form.html", "ledger:expense_list", "手动录入支出")
 
 
 @login_required
 def expense_edit(request, pk):
     record = get_object_or_404(ExpenseRecord, pk=pk)
-    return save_form(request, ExpenseRecordForm, "form.html", "ledger:expense_list", "编辑支出记录", record)
+    return save_form(request, ExpenseRecordForm, "ledger/expense_form.html", "ledger:expense_list", "编辑支出记录", record)
+
+
+@login_required
+def expense_import(request):
+    if request.method == "POST":
+        form = ExpenseImportForm(request.POST, request.FILES)
+        if form.is_valid():
+            try:
+                result = import_expense_workbook(
+                    family=form.cleaned_data["family"],
+                    uploaded_file=form.cleaned_data["workbook"],
+                    imported_by=request.user,
+                )
+            except ExpenseWorkbookError as exc:
+                form.add_error("workbook", str(exc))
+            else:
+                batch = result.batch
+                if result.duplicate_file:
+                    messages.info(request, f"该文件已导入过，本次未重复写入。原批次共 {batch.imported_count} 笔。")
+                else:
+                    messages.success(
+                        request,
+                        f"导入完成：读取 {batch.row_count} 笔，新增 {batch.imported_count} 笔，"
+                        f"跳过重复 {batch.skipped_count} 笔，净支出 {batch.total_amount:,.2f} 元。",
+                    )
+                return redirect("ledger:expense_import")
+    else:
+        form = ExpenseImportForm()
+    batches = ExpenseImportBatch.objects.select_related("family", "imported_by").order_by("-created_at")[:20]
+    return render(
+        request,
+        "ledger/expense_import.html",
+        {
+            "form": form,
+            "batches": batches,
+            "expected_headers": (
+                "支出时间",
+                "所属账户",
+                "支出账户",
+                "一级分类",
+                "二级分类",
+                "三级分类",
+                "金额",
+                "备注",
+            ),
+        },
+    )
 
 
 @login_required
@@ -1161,6 +1618,6 @@ def expense_delete(request, pk):
     next_url = request.POST.get("next") if request.method == "POST" else None
     if request.method == "POST":
         record.delete()
-    if next_url and next_url.startswith("/"):
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
         return redirect(next_url)
     return redirect("ledger:expense_list")

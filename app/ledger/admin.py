@@ -3,6 +3,9 @@ from django import forms
 from django.db.models import Prefetch
 from django.utils.html import format_html_join
 from django.utils import timezone
+from datetime import datetime, time
+
+from family_core.models import Family
 
 from .models import (
     AnnualBudget,
@@ -12,6 +15,7 @@ from .models import (
     BankAccount,
     CashflowMonthlySummary,
     ExpenseCategory,
+    ExpenseImportBatch,
     ExpenseRecord,
     IncomeCategory,
     IncomeRecord,
@@ -28,6 +32,200 @@ CURRENCY_CHOICES = [
 
 def format_money(amount):
     return f"{amount or 0:,.0f}"
+
+
+class CategoryPathChoiceField(forms.ModelChoiceField):
+    def label_from_instance(self, obj):
+        return str(obj)
+
+
+class CategoryParentSelect(forms.Select):
+    def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
+        option = super().create_option(
+            name,
+            value,
+            label,
+            selected,
+            index,
+            subindex=subindex,
+            attrs=attrs,
+        )
+        if value and hasattr(value, "instance"):
+            option["attrs"]["data-family-id"] = str(value.instance.family_id)
+            option["attrs"]["data-parent-id"] = str(value.instance.parent_id or "")
+        return option
+
+
+class HierarchicalCategoryAdminForm(forms.ModelForm):
+    LEVEL_CHOICES = (("1", "一级分类"), ("2", "二级分类"), ("3", "三级分类"))
+    category_model = None
+
+    category_level = forms.ChoiceField(label="分类层级", choices=LEVEL_CHOICES)
+    primary_category = CategoryPathChoiceField(
+        label="所属一级分类",
+        queryset=IncomeCategory.objects.none(),
+        required=False,
+        widget=CategoryParentSelect,
+        help_text="新增二级、三级分类时必选。",
+    )
+    secondary_category = CategoryPathChoiceField(
+        label="所属二级分类",
+        queryset=IncomeCategory.objects.none(),
+        required=False,
+        widget=CategoryParentSelect,
+        help_text="仅新增三级分类时必选。",
+    )
+
+    class Meta:
+        fields = (
+            "family",
+            "category_level",
+            "primary_category",
+            "secondary_category",
+            "name",
+            "is_active",
+        )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        model = self.category_model
+        self.fields["primary_category"].queryset = model.objects.none()
+        if "secondary_category" in self.fields:
+            self.fields["secondary_category"].queryset = model.objects.none()
+
+        family_id = self.data.get(self.add_prefix("family")) if self.is_bound else None
+        if not family_id and self.instance.pk:
+            family_id = self.instance.family_id
+        if not family_id and not self.is_bound:
+            default_family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
+            if default_family:
+                family_id = default_family.pk
+                self.initial["family"] = default_family.pk
+        if family_id:
+            primary_queryset = model.objects.filter(
+                family_id=family_id,
+                parent__isnull=True,
+            ).order_by("name")
+            secondary_queryset = model.objects.filter(
+                family_id=family_id,
+                parent__isnull=False,
+                parent__parent__isnull=True,
+            ).select_related("parent").order_by("parent__name", "name")
+            if self.instance.pk:
+                primary_queryset = primary_queryset.exclude(pk=self.instance.pk)
+                secondary_queryset = secondary_queryset.exclude(pk=self.instance.pk)
+            self.fields["primary_category"].queryset = primary_queryset
+            if "secondary_category" in self.fields:
+                self.fields["secondary_category"].queryset = secondary_queryset
+
+        if self.instance.pk and not self.is_bound:
+            path = []
+            category = self.instance
+            while category:
+                path.append(category)
+                category = category.parent
+            path.reverse()
+            self.fields["category_level"].initial = str(len(path))
+            if len(path) >= 2:
+                self.fields["primary_category"].initial = path[0]
+            if len(path) >= 3 and "secondary_category" in self.fields:
+                self.fields["secondary_category"].initial = path[1]
+        elif not self.is_bound:
+            self.fields["category_level"].initial = "1"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        family = cleaned_data.get("family")
+        level = cleaned_data.get("category_level")
+        primary = cleaned_data.get("primary_category")
+        secondary = cleaned_data.get("secondary_category")
+        name = (cleaned_data.get("name") or "").strip()
+
+        if level == "1":
+            parent = None
+        elif level == "2":
+            parent = primary
+            if primary is None:
+                self.add_error("primary_category", "二级分类必须选择所属一级分类。")
+        elif level == "3":
+            parent = secondary
+            if primary is None:
+                self.add_error("primary_category", "三级分类必须选择所属一级分类。")
+            if secondary is None:
+                self.add_error("secondary_category", "三级分类必须选择所属二级分类。")
+            elif primary and secondary.parent_id != primary.pk:
+                self.add_error("secondary_category", "所选二级分类不属于所选一级分类。")
+        else:
+            parent = None
+
+        for field_name, category in (
+            ("primary_category", primary),
+            ("secondary_category", secondary),
+        ):
+            if category and family and category.family_id != family.pk:
+                self.add_error(field_name, "所选分类必须属于同一家庭。")
+
+        if family and name and level in {"1", "2", "3"} and not self._errors:
+            duplicates = self.category_model.objects.filter(
+                family=family,
+                parent=parent,
+                name=name,
+            )
+            if self.instance.pk:
+                duplicates = duplicates.exclude(pk=self.instance.pk)
+            if duplicates.exists():
+                self.add_error("name", "同一层级下已存在同名分类。")
+        cleaned_data["_resolved_parent"] = parent
+        return cleaned_data
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.parent = self.cleaned_data.get("_resolved_parent")
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
+
+
+class IncomeCategoryAdminForm(HierarchicalCategoryAdminForm):
+    category_model = IncomeCategory
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields.pop("secondary_category", None)
+        self.fields["category_level"].choices = (("1", "一级分类"), ("2", "二级分类"))
+
+    class Meta(HierarchicalCategoryAdminForm.Meta):
+        model = IncomeCategory
+        fields = (
+            "family",
+            "category_level",
+            "primary_category",
+            "name",
+            "is_active",
+        )
+
+
+class ExpenseCategoryAdminForm(HierarchicalCategoryAdminForm):
+    category_model = ExpenseCategory
+
+    primary_category = CategoryPathChoiceField(
+        label="所属一级分类",
+        queryset=ExpenseCategory.objects.none(),
+        required=False,
+        widget=CategoryParentSelect,
+        help_text="新增二级、三级分类时必选。",
+    )
+    secondary_category = CategoryPathChoiceField(
+        label="所属二级分类",
+        queryset=ExpenseCategory.objects.none(),
+        required=False,
+        widget=CategoryParentSelect,
+        help_text="仅新增三级分类时必选。",
+    )
+
+    class Meta(HierarchicalCategoryAdminForm.Meta):
+        model = ExpenseCategory
 
 
 class AccountSelect(forms.Select):
@@ -65,16 +263,57 @@ class BankAccountAdmin(admin.ModelAdmin):
 
 @admin.register(IncomeCategory)
 class IncomeCategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "family", "parent", "is_active")
+    form = IncomeCategoryAdminForm
+    fields = (
+        "family",
+        "category_level",
+        "primary_category",
+        "name",
+        "is_active",
+    )
+    list_display = ("category_path", "category_level_label", "family", "is_active")
     list_filter = ("family", "is_active")
-    search_fields = ("name",)
+    search_fields = ("name", "parent__name", "parent__parent__name")
+    list_select_related = ("parent", "parent__parent")
+
+    class Media:
+        js = ("js/admin_category_form.js",)
+
+    @admin.display(description="分类路径", ordering="name")
+    def category_path(self, obj):
+        return str(obj)
+
+    @admin.display(description="层级")
+    def category_level_label(self, obj):
+        return f"{obj.category_level} 级"
 
 
 @admin.register(ExpenseCategory)
 class ExpenseCategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "family", "parent", "is_active")
-    list_filter = ("family", "is_active")
-    search_fields = ("name",)
+    form = ExpenseCategoryAdminForm
+    fields = (
+        "family",
+        "category_level",
+        "primary_category",
+        "secondary_category",
+        "name",
+        "is_active",
+    )
+    list_display = ("category_path", "category_level_label", "family", "is_active")
+    list_filter = ("family", "is_active", "parent")
+    search_fields = ("name", "parent__name", "parent__parent__name")
+    list_select_related = ("parent", "parent__parent")
+
+    class Media:
+        js = ("js/admin_category_form.js",)
+
+    @admin.display(description="分类路径", ordering="name")
+    def category_path(self, obj):
+        return str(obj)
+
+    @admin.display(description="层级")
+    def category_level_label(self, obj):
+        return f"{obj.category_level} 级"
 
 
 @admin.register(IncomeRecord)
@@ -99,9 +338,9 @@ class IncomeRecordAdmin(admin.ModelAdmin):
 
 @admin.register(ExpenseRecord)
 class ExpenseRecordAdmin(admin.ModelAdmin):
-    fields = ("family", "member", "category", "period_start", "period_end", "amount", "currency", "remark")
-    list_display = ("period_start", "period_end", "member", "category", "amount", "currency")
-    list_filter = ("family", "member", "category", "currency", "period_start", "period_end")
+    fields = ("family", "member", "bank_account", "category", "expense_date", "amount", "currency", "remark")
+    list_display = ("expense_date", "member", "bank_account", "category", "amount", "currency", "import_batch")
+    list_filter = ("family", "member", "bank_account", "category", "currency", "expense_date", "import_batch")
     search_fields = ("remark",)
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
@@ -110,12 +349,53 @@ class ExpenseRecordAdmin(admin.ModelAdmin):
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     def save_model(self, request, obj, form, change):
-        obj.expense_date = obj.period_end or obj.period_start or timezone.localdate()
-        obj.bank_account = None
+        obj.period_start = obj.expense_date
+        obj.period_end = obj.expense_date
+        if not obj.occurred_at:
+            obj.occurred_at = timezone.make_aware(
+                datetime.combine(obj.expense_date, time.min)
+            )
         obj.merchant = ""
-        obj.payment_method = ""
+        obj.payment_method = obj.bank_account.account_type_ref.name if obj.bank_account_id else ""
         obj.visibility = VisibilityChoices.PRIVATE
         super().save_model(request, obj, form, change)
+
+
+@admin.register(ExpenseImportBatch)
+class ExpenseImportBatchAdmin(admin.ModelAdmin):
+    list_display = (
+        "created_at",
+        "source_filename",
+        "family",
+        "row_count",
+        "imported_count",
+        "skipped_count",
+        "total_amount",
+        "imported_by",
+    )
+    list_filter = ("family", "status", "created_at")
+    search_fields = ("source_filename", "source_sha256", "worksheet_name")
+    readonly_fields = (
+        "family",
+        "imported_by",
+        "source_filename",
+        "source_sha256",
+        "worksheet_name",
+        "row_count",
+        "imported_count",
+        "skipped_count",
+        "total_amount",
+        "status",
+        "extra_data",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(CashflowMonthlySummary)
