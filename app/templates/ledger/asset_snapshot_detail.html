@@ -6,7 +6,10 @@
 {% block content %}
 <section class="panel snapshot-detail-panel">
   <div class="section-head">
-    <h1>{{ snapshot.snapshot_date }} 资产快照</h1>
+    <h1>
+      {{ snapshot.snapshot_date }} 资产快照
+      {% if snapshot.is_draft %}<span class="record-badge">草稿</span>{% endif %}
+    </h1>
     <div class="inline-actions">
       <a class="button" href="{% url 'ledger:asset_snapshot_edit' snapshot.id %}">编辑</a>
     </div>
@@ -41,15 +44,15 @@
             <td>{{ row.currency }}</td>
             {% for cell in row.cells %}
               {% if cell %}
-                <td class="number">{{ cell.original_amount|thousands }}</td>
-                <td class="number">{{ cell.base_amount|thousands }}</td>
+                <td class="number">{{ cell.original_amount|money2 }}</td>
+                <td class="number">{{ cell.base_amount|money2 }}</td>
               {% else %}
                 <td class="number muted">-</td>
                 <td class="number muted">-</td>
               {% endif %}
             {% endfor %}
-            <td class="number">{{ row.total_original|thousands }}</td>
-            <td class="number">{{ row.total_base|thousands }}</td>
+            <td class="number">{{ row.total_original|money2 }}</td>
+            <td class="number">{{ row.total_base|money2 }}</td>
           </tr>
         {% empty %}
           <tr><td colspan="7">暂无明细</td></tr>
@@ -60,21 +63,30 @@
           <tr>
             <td colspan="3">{{ total.label }}</td>
             {% for cell in total.cells %}
-              <td class="number">{{ cell.original|thousands }}</td>
-              <td class="number">{{ cell.base|thousands }}</td>
+              <td class="number">{{ cell.original|money2 }}</td>
+              <td class="number">{{ cell.base|money2 }}</td>
             {% endfor %}
-            <td class="number">{{ total.total_original|thousands }}</td>
-            <td class="number">{{ total.total_base|thousands }}</td>
+            <td class="number">{{ total.total_original|money2 }}</td>
+            <td class="number">{{ total.total_base|money2 }}</td>
           </tr>
         {% endfor %}
         <tr class="base-total-row">
           <td colspan="3">{{ base_total_row.label }}</td>
           {% for amount in base_total_row.cells %}
             <td class="muted">人民币</td>
-            <td class="number">{{ amount|thousands }}</td>
+            <td class="number">{{ amount|money2 }}</td>
           {% endfor %}
           <td class="muted">人民币</td>
-          <td class="number">{{ base_total_row.total|thousands }}</td>
+          <td class="number">{{ base_total_row.total|money2 }}</td>
+        </tr>
+        <tr class="exchange-gain-row">
+          <td colspan="3">{{ exchange_gain_row.label }}</td>
+          {% for amount in exchange_gain_row.cells %}
+            <td class="muted">人民币</td>
+            <td class="number {% if amount > 0 %}positive{% elif amount < 0 %}negative{% endif %}">{{ amount|money2 }}</td>
+          {% endfor %}
+          <td class="muted">人民币</td>
+          <td class="number {% if exchange_gain_row.total > 0 %}positive{% elif exchange_gain_row.total < 0 %}negative{% endif %}">{{ exchange_gain_row.total|money2 }}</td>
         </tr>
       </tfoot>
     </table>

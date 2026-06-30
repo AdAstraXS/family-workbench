@@ -1,5 +1,6 @@
 import calendar
 from datetime import datetime, time
+from decimal import Decimal, InvalidOperation
 
 from django import forms
 from django.forms import inlineformset_factory
@@ -19,6 +20,16 @@ from .models import (
 from family_core.models import Family, FamilyMember
 
 
+class TwoDecimalNumberInput(forms.NumberInput):
+    def format_value(self, value):
+        if value in (None, ""):
+            return ""
+        try:
+            return f"{Decimal(str(value)):.2f}"
+        except (InvalidOperation, TypeError, ValueError):
+            return value
+
+
 class BaseModelForm(forms.ModelForm):
     date_fields = ()
 
@@ -31,6 +42,10 @@ class BaseModelForm(forms.ModelForm):
                     attrs={"class": "form-control", "type": "date"},
                     format="%Y-%m-%d",
                 )
+            elif isinstance(field, forms.DecimalField):
+                attrs = dict(field.widget.attrs)
+                attrs.update({"class": "form-control", "step": "0.01"})
+                field.widget = TwoDecimalNumberInput(attrs=attrs)
 
 
 class BankAccountForm(BaseModelForm):
@@ -393,8 +408,10 @@ class AssetBalanceSnapshotForm(BaseModelForm):
         default_family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
         if default_family and not self.instance.pk:
             self.fields["family"].initial = default_family
+            self.initial.setdefault("family", default_family.pk)
         self.fields["base_currency"].widget = forms.HiddenInput()
         self.fields["base_currency"].initial = "CNY"
+        self.initial.setdefault("base_currency", "CNY")
 
     class Meta:
         model = AssetBalanceSnapshot
@@ -410,6 +427,7 @@ class AssetBalanceEntryForm(CurrencyChoiceMixin, BaseModelForm):
         self.apply_currency_choices()
         self.fields["remark"].widget.attrs.update({"rows": 1})
         self.fields["remark"].widget.attrs["class"] = "form-control compact-textarea"
+        self.fields["display_order"].widget = forms.HiddenInput()
 
     class Meta:
         model = AssetBalanceEntry
@@ -419,6 +437,7 @@ class AssetBalanceEntryForm(CurrencyChoiceMixin, BaseModelForm):
             "asset_category",
             "currency",
             "original_amount",
+            "display_order",
             "remark",
         ]
 

@@ -23,9 +23,13 @@
           <th rowspan="2">家庭</th>
           <th colspan="3">收入</th>
           <th colspan="3">支出</th>
+          <th colspan="3">攒钱计划</th>
           <th rowspan="2">操作</th>
         </tr>
         <tr>
+          <th>预算总额</th>
+          <th>实际发生</th>
+          <th>执行率</th>
           <th>预算总额</th>
           <th>实际发生</th>
           <th>执行率</th>
@@ -45,6 +49,9 @@
             <td class="number expense">{{ row.expense_budget|thousands }}</td>
             <td class="number expense">{{ row.expense_actual|thousands }}</td>
             <td class="number">{% if row.expense_rate is None %}-{% else %}{{ row.expense_rate|thousands }}%{% endif %}</td>
+            <td class="number net">{{ row.savings_budget|thousands }}</td>
+            <td class="number net">{{ row.savings_actual|thousands }}</td>
+            <td class="number">{% if row.savings_rate is None %}-{% else %}{{ row.savings_rate|thousands }}%{% endif %}</td>
             <td>
               <div class="row-actions">
                 <a class="text-action" href="{% url 'ledger:annual_budget_detail' row.budget.id %}">查看执行</a>
@@ -53,7 +60,7 @@
             </td>
           </tr>
         {% empty %}
-          <tr><td colspan="9">暂无年度预算</td></tr>
+          <tr><td colspan="12">暂无年度预算</td></tr>
         {% endfor %}
       </tbody>
     </table>

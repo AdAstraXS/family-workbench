@@ -42,6 +42,7 @@ class HkIpoListingOption(models.Model):
     is_active = models.BooleanField("启用", default=True)
     created_at = models.DateTimeField("创建时间", auto_now_add=True)
     updated_at = models.DateTimeField("更新时间", auto_now=True)
+    _choice_cache = {}
 
     class Meta:
         verbose_name = "新股类型与机制选项"
@@ -58,13 +59,30 @@ class HkIpoListingOption(models.Model):
         return f"{self.get_category_display()} - {self.name}"
 
     @classmethod
-    def choices_for(cls, category, current_value=None):
-        choices = list(
+    def clear_choice_cache(cls, category=None):
+        if category is None:
+            cls._choice_cache.clear()
+            return
+        cls._choice_cache.pop(category, None)
+
+    @classmethod
+    def _get_choice_map(cls, category):
+        cached = cls._choice_cache.get(category)
+        if cached is not None:
+            return cached
+        choice_map = dict(
             cls.objects.filter(category=category, is_active=True)
             .order_by("sort_order", "id")
             .values_list("code", "name")
         )
-        if current_value and current_value not in {code for code, _ in choices}:
+        cls._choice_cache[category] = choice_map
+        return choice_map
+
+    @classmethod
+    def choices_for(cls, category, current_value=None):
+        choice_map = cls._get_choice_map(category)
+        choices = list(choice_map.items())
+        if current_value and current_value not in choice_map:
             choices.append((current_value, cls.display_name(category, current_value)))
         return choices
 
@@ -72,11 +90,13 @@ class HkIpoListingOption(models.Model):
     def display_name(cls, category, code):
         if not code:
             return ""
-        name = (
-            cls.objects.filter(category=category, code=code)
-            .values_list("name", flat=True)
-            .first()
-        )
+        name = cls._get_choice_map(category).get(code)
+        if not name:
+            name = (
+                cls.objects.filter(category=category, code=code)
+                .values_list("name", flat=True)
+                .first()
+            )
         if name:
             return name
         defaults = dict(
@@ -85,6 +105,15 @@ class HkIpoListingOption(models.Model):
             else DEFAULT_MECHANISM_CHOICES
         )
         return defaults.get(code, code)
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self.clear_choice_cache(self.category)
+
+    def delete(self, *args, **kwargs):
+        category = self.category
+        super().delete(*args, **kwargs)
+        self.clear_choice_cache(category)
 
 
 class HkIpoListing(models.Model):
@@ -161,6 +190,40 @@ class HkIpoListing(models.Model):
     offer_price_min = models.DecimalField("招股价下限", max_digits=12, decimal_places=4, null=True, blank=True)
     offer_price_max = models.DecimalField("招股价上限", max_digits=12, decimal_places=4, null=True, blank=True)
     final_price = models.DecimalField("最终定价", max_digits=12, decimal_places=4, null=True, blank=True)
+    industry = models.CharField("行业", max_length=100, blank=True)
+    over_subscription_multiple = models.DecimalField(
+        "超额认购倍数",
+        max_digits=14,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    first_day_open_change_pct = models.DecimalField(
+        "首日开盘涨幅",
+        max_digits=12,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    first_day_close_change_pct = models.DecimalField(
+        "首日收盘涨幅",
+        max_digits=12,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    cumulative_change_pct = models.DecimalField(
+        "上市至今累计涨幅",
+        max_digits=12,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+    market_data_fetched_at = models.DateTimeField(
+        "上市行情静态数据抓取时间",
+        null=True,
+        blank=True,
+    )
     lot_size = models.PositiveIntegerField("每手股数", null=True, blank=True)
     entry_fee = models.DecimalField("入场费", max_digits=20, decimal_places=4, null=True, blank=True)
     public_offer_lots = models.DecimalField("公配手数", max_digits=20, decimal_places=2, null=True, blank=True)
@@ -367,6 +430,9 @@ class HkIpoListing(models.Model):
 
     @property
     def collision_count(self):
+        cached = getattr(self, "_collision_count_cache", None)
+        if cached is not None:
+            return cached
         if not self.subscription_end_date:
             return 0
         query = HkIpoListing.objects.filter(subscription_end_date=self.subscription_end_date)

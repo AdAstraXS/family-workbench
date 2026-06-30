@@ -13,6 +13,7 @@ urlpatterns = [
     path("annual-budgets/<int:pk>/edit/", views.annual_budget_edit, name="annual_budget_edit"),
     path("investment-returns/", views.investment_return_report, name="investment_return_report"),
     path("asset-snapshots/", views.asset_snapshot_list, name="asset_snapshot_list"),
+    path("asset-snapshots/export/", views.asset_snapshot_export, name="asset_snapshot_export"),
     path("asset-snapshots/create/", views.asset_snapshot_create, name="asset_snapshot_create"),
     path("asset-snapshots/<int:pk>/", views.asset_snapshot_detail, name="asset_snapshot_detail"),
     path("asset-snapshots/<int:pk>/edit/", views.asset_snapshot_edit, name="asset_snapshot_edit"),

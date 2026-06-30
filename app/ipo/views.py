@@ -15,8 +15,9 @@ from .forms import HkIpoListingForm, HkIpoSubscriptionTradeForm
 from .models import HkIpoListing, HkIpoSubscriptionTrade
 from .services import (
     IpoImageRecognitionError,
-    fetch_vbkr_expected_margin_multiples,
+    get_cached_vbkr_expected_margin_multiples,
     refresh_hk_connect_threshold,
+    refresh_listed_market_data,
     recognize_ipo_listing_from_image,
 )
 from ledger.models import BankAccount
@@ -41,6 +42,19 @@ def load_current_ipo_listings():
             changed.append(listing)
     if changed:
         HkIpoListing.objects.bulk_update(changed, ["subscription_status"])
+    collision_counts = defaultdict(int)
+    for listing in listings:
+        if (
+            listing.subscription_status != HkIpoListing.STATUS_LISTED
+            and listing.subscription_end_date
+        ):
+            collision_counts[listing.subscription_end_date] += 1
+    for listing in listings:
+        if listing.subscription_status != HkIpoListing.STATUS_LISTED:
+            listing._collision_count_cache = collision_counts.get(
+                listing.subscription_end_date,
+                0,
+            )
     return listings
 
 
@@ -240,7 +254,6 @@ def index(request):
 
 @login_required
 def listing_list(request):
-    refresh_hk_connect_threshold()
     listings = load_current_ipo_listings()
     available_years = sorted(
         {
@@ -283,6 +296,20 @@ def listing_list(request):
         if item.subscription_status == HkIpoListing.STATUS_WAITING_LISTING and item.pk not in grey_market_listing_ids
     ]
     listed_listings = [item for item in listings if item.subscription_status == HkIpoListing.STATUS_LISTED]
+    if selected_year != "all":
+        market_data_year = int(selected_year)
+    else:
+        listed_years = [
+            (item.listing_date or item.subscription_end_date).year
+            for item in listed_listings
+            if item.listing_date or item.subscription_end_date
+        ]
+        market_data_year = (
+            (min(listed_years), max(listed_years))
+            if listed_years
+            else today.year
+        )
+    refresh_listed_market_data(listed_listings, market_data_year)
 
     def active_sort_key(item):
         return (item.subscription_end_date or item.listing_date or date.max, item.stock_code, item.stock_name)
@@ -297,7 +324,7 @@ def listing_list(request):
     waiting_listings.sort(key=active_sort_key)
     listed_listings.sort(key=listed_sort_key, reverse=True)
 
-    expected_margin_map = fetch_vbkr_expected_margin_multiples()
+    expected_margin_map = get_cached_vbkr_expected_margin_multiples()
     for listing in subscribing_listings + waiting_listings:
         stock_code = (listing.stock_code or "").strip().upper()
         listing.expected_margin_multiple = (
@@ -338,7 +365,6 @@ def listing_list(request):
 
 @login_required
 def listing_detail(request, pk):
-    refresh_hk_connect_threshold()
     listing = get_object_or_404(HkIpoListing, pk=pk)
     return render(request, "ipo/listing_detail.html", {"listing": listing})
 

@@ -144,7 +144,7 @@
             <th>
               <div class="expense-filter-actions">
                 <button type="submit" form="expense-filter-form">筛选</button>
-                <a class="text-action" href="{{ request.path }}">重置</a>
+                <a class="text-action" id="expense-filter-reset" href="{{ request.path }}">重置</a>
               </div>
             </th>
         </tr>
@@ -196,11 +196,27 @@
 {% block scripts %}
 <script>
   (() => {
+    const filterForm = document.getElementById("expense-filter-form");
+    const resetLink = document.getElementById("expense-filter-reset");
     const memberSelect = document.getElementById("expense-filter-member");
     const accountSelect = document.getElementById("expense-filter-account");
     const primarySelect = document.getElementById("expense-filter-primary");
     const secondarySelect = document.getElementById("expense-filter-secondary");
     const tertiarySelect = document.getElementById("expense-filter-tertiary");
+    const scrollStorageKey = `expense-filter-scroll:${window.location.pathname}`;
+
+    const rememberScrollPosition = () => {
+      sessionStorage.setItem(scrollStorageKey, String(window.scrollY));
+    };
+
+    const savedScrollValue = sessionStorage.getItem(scrollStorageKey);
+    const savedScrollPosition = Number(savedScrollValue);
+    if (savedScrollValue !== null && Number.isFinite(savedScrollPosition)) {
+      sessionStorage.removeItem(scrollStorageKey);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => window.scrollTo(0, savedScrollPosition));
+      });
+    }
 
     const filterAccounts = (clearInvalid = true) => {
       const memberId = memberSelect.value;
@@ -238,6 +254,8 @@
     secondarySelect.addEventListener("change", () => {
       filterChildren(secondarySelect, tertiarySelect, true);
     });
+    filterForm.addEventListener("submit", rememberScrollPosition);
+    resetLink.addEventListener("click", rememberScrollPosition);
 
     filterAccounts(false);
     filterChildren(primarySelect, secondarySelect, false);

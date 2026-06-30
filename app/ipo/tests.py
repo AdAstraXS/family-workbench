@@ -23,8 +23,10 @@ from .services import (
     _hk_connect_threshold_cache,
     build_prompt,
     fetch_hk_connect_threshold_100m,
+    fetch_jesselivermore_ipo_metrics,
     get_api_key,
     normalize_value,
+    refresh_listed_market_data,
 )
 from .views import subscription_trade_list_url
 
@@ -745,11 +747,11 @@ class HkIpoExpectedMarginTests(TestCase):
         self.client.force_login(user)
 
         with (
-            patch("ipo.views.refresh_hk_connect_threshold", return_value=Decimal("100")),
             patch(
-                "ipo.views.fetch_vbkr_expected_margin_multiples",
+                "ipo.views.get_cached_vbkr_expected_margin_multiples",
                 return_value={"09996.HK": "100倍", "09995.HK": "200倍"},
             ),
+            patch("ipo.views.refresh_listed_market_data", return_value=0),
         ):
             response = self.client.get(reverse("ipo:listing_list"))
 
@@ -799,8 +801,11 @@ class HkIpoExpectedMarginTests(TestCase):
         self.client.force_login(user)
 
         with (
-            patch("ipo.views.refresh_hk_connect_threshold", return_value=Decimal("100")),
-            patch("ipo.views.fetch_vbkr_expected_margin_multiples", return_value={}),
+            patch(
+                "ipo.views.get_cached_vbkr_expected_margin_multiples",
+                return_value={},
+            ),
+            patch("ipo.views.refresh_listed_market_data", return_value=0),
         ):
             response = self.client.get(
                 reverse("ipo:listing_list"),
@@ -817,3 +822,116 @@ class HkIpoExpectedMarginTests(TestCase):
             persisted_response.context["year_filter"]["selected_year"],
             "2025",
         )
+
+
+class HkIpoListedMarketDataTests(TestCase):
+    def test_livermore_fetch_parses_year_range_and_market_fields(self):
+        fields = [
+            "stock_code",
+            "issue_date",
+            "industry",
+            "over_subscribed_multiple",
+            "offering_price",
+            "px_open_rate",
+            "px_close_rate",
+            "inception_px_change_rate",
+        ]
+        payload = {
+            "status": "200",
+            "data": {
+                "fields": fields,
+                "list": [
+                    [
+                        "06915",
+                        "2026-06-30",
+                        "生物科技-制药",
+                        475.56,
+                        11.2,
+                        -33.9286,
+                        -12.68,
+                        8.88,
+                    ]
+                ],
+            },
+        }
+        with patch(
+            "ipo.services.urllib.request.urlopen",
+            return_value=io.BytesIO(json.dumps(payload).encode("utf-8")),
+        ) as urlopen:
+            metrics = fetch_jesselivermore_ipo_metrics((2025, 2026))
+
+        request = urlopen.call_args.args[0]
+        self.assertIn("issue_year=2025%2C2026", request.full_url)
+        self.assertEqual(metrics["06915"]["listing_date"], date(2026, 6, 30))
+        self.assertEqual(metrics["06915"]["industry"], "生物科技-制药")
+        self.assertEqual(
+            metrics["06915"]["cumulative_change_pct"],
+            Decimal("8.88"),
+        )
+
+    def test_static_metrics_are_saved_once_and_cumulative_change_is_refreshed(self):
+        listing = HkIpoListing.objects.create(
+            stock_code="06915.HK",
+            stock_name="江西生物",
+            company_name="江西生物有限公司",
+            subscription_end_date=date(2026, 6, 25),
+            listing_date=date(2026, 6, 30),
+            final_price=Decimal("10"),
+            lot_size=100,
+        )
+        first_payload = {
+            "06915": {
+                "listing_date": date(2026, 6, 30),
+                "industry": "生物科技-制药",
+                "over_subscription_multiple": Decimal("475.56"),
+                "final_price": Decimal("11.20"),
+                "first_day_open_change_pct": Decimal("-33.9286"),
+                "first_day_close_change_pct": Decimal("-12.68"),
+                "cumulative_change_pct": Decimal("-12.679"),
+            }
+        }
+        with patch(
+            "ipo.services.fetch_jesselivermore_ipo_metrics",
+            return_value=first_payload,
+        ):
+            refresh_listed_market_data([listing], 2026)
+
+        listing.refresh_from_db()
+        self.assertEqual(listing.industry, "生物科技-制药")
+        self.assertEqual(
+            listing.over_subscription_multiple,
+            Decimal("475.5600"),
+        )
+        self.assertEqual(listing.final_price, Decimal("11.2000"))
+        self.assertEqual(
+            listing.first_day_open_change_pct,
+            Decimal("-33.9286"),
+        )
+        self.assertEqual(
+            listing.first_day_close_change_pct,
+            Decimal("-12.6800"),
+        )
+        self.assertEqual(
+            listing.cumulative_change_pct,
+            Decimal("-12.6790"),
+        )
+        self.assertIsNotNone(listing.market_data_fetched_at)
+
+        second_payload = {
+            "06915": {
+                **first_payload["06915"],
+                "industry": "不应覆盖的行业",
+                "final_price": Decimal("99"),
+                "cumulative_change_pct": Decimal("8.88"),
+            }
+        }
+        with patch(
+            "ipo.services.fetch_jesselivermore_ipo_metrics",
+            return_value=second_payload,
+        ):
+            refresh_listed_market_data([listing], 2026)
+
+        listing.refresh_from_db()
+        self.assertEqual(listing.industry, "生物科技-制药")
+        self.assertEqual(listing.final_price, Decimal("11.2000"))
+        self.assertEqual(listing.cumulative_change_pct, Decimal("8.8800"))

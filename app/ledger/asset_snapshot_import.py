@@ -169,7 +169,7 @@ def parse_asset_snapshot_workbook(source):
 
 
 def latest_snapshot_default_signature(family=None):
-    snapshots = AssetBalanceSnapshot.objects.all()
+    snapshots = AssetBalanceSnapshot.objects.filter(is_draft=False)
     if family is not None:
         snapshots = snapshots.filter(family=family)
     latest = snapshots.order_by("-snapshot_date", "-created_at").first()

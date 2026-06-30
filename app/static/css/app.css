@@ -1406,6 +1406,19 @@ textarea {
   display: none;
 }
 
+.entry-order-actions {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.entry-order-actions .button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 3px 8px;
+}
+
 .delete-entry-row {
   min-height: auto;
   padding: 0;
@@ -1424,6 +1437,11 @@ textarea {
 
 .compact-snapshot-table {
   min-width: 960px;
+}
+
+.snapshot-table .exchange-gain-row td {
+  background: #fff8e1;
+  font-weight: 700;
 }
 
 .snapshot-table th {

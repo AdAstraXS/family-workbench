@@ -9,6 +9,7 @@
   <div class="section-head">
     <h1>资产快照</h1>
     <div class="inline-actions">
+      <a class="button ghost" href="{% url 'ledger:asset_snapshot_export' %}">导出到 Excel</a>
       <a class="button" href="{% url 'ledger:asset_snapshot_create' %}">新增资产快照</a>
     </div>
   </div>
@@ -27,12 +28,15 @@
     <tbody>
       {% for row in rows %}
         <tr>
-          <td>{{ row.snapshot.snapshot_date }}</td>
+          <td>
+            {{ row.snapshot.snapshot_date }}
+            {% if row.snapshot.is_draft %}<span class="record-badge">草稿</span>{% endif %}
+          </td>
           <td>{{ row.snapshot.family }}</td>
           {% for amount in row.member_totals %}
-            <td class="number">{{ amount|thousands }}</td>
+            <td class="number">{{ amount|money2 }}</td>
           {% endfor %}
-          <td class="number">{{ row.total|thousands }}</td>
+          <td class="number">{{ row.total|money2 }}</td>
           <td>
             <a href="{% url 'ledger:asset_snapshot_detail' row.snapshot.id %}">查看</a>
             <a href="{% url 'ledger:asset_snapshot_edit' row.snapshot.id %}">编辑</a>

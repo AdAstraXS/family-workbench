@@ -8,7 +8,7 @@ from django.db.models import Sum
 from django.test import TestCase
 from django.utils import timezone
 from django.urls import reverse
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from family_core.models import AccountRegion, AccountType, AssetCategory, Family, FamilyMember
 
@@ -19,8 +19,10 @@ from .asset_snapshot_import import (
 )
 from .admin import ExpenseCategoryAdminForm, IncomeCategoryAdminForm
 from .expense_import import EXPECTED_HEADERS, ExpenseWorkbookError, import_expense_workbook
-from .forms import ExpenseRecordForm
+from .forms import AssetBalanceEntryForm, AssetBalanceSnapshotForm, ExpenseRecordForm
 from .models import (
+    AnnualBudget,
+    AnnualBudgetLine,
     AssetBalanceEntry,
     AssetBalanceSnapshot,
     BankAccount,
@@ -30,7 +32,11 @@ from .models import (
     IncomeCategory,
     IncomeRecord,
 )
-from .views import build_cashflow_monthly_rows
+from .views import (
+    build_asset_snapshot_matrix,
+    build_budget_report,
+    build_cashflow_monthly_rows,
+)
 
 
 class LedgerExpenseImportTests(TestCase):
@@ -545,6 +551,9 @@ class LedgerExpenseImportTests(TestCase):
         self.assertEqual(response.context["expense_family_total"], Decimal("25.50"))
         self.assertContains(response, "已按条件筛选，合计已重新计算")
         self.assertContains(response, 'aria-label="按三级分类筛选"')
+        self.assertContains(response, "expense-filter-scroll:")
+        self.assertContains(response, "sessionStorage.setItem")
+        self.assertContains(response, "window.scrollTo(0, savedScrollPosition)")
 
         year_response = self.client.get(
             reverse("ledger:expense_year_detail", args=[2026]),
@@ -744,6 +753,270 @@ class AssetSnapshotImportTests(TestCase):
         self.assertIn('class="asset-trend-empty" hidden', rendered_html)
 
 
+class AssetSnapshotWorkspaceTests(TestCase):
+    def setUp(self):
+        self.family = Family.objects.create(name="我的家庭")
+        self.member = FamilyMember.objects.create(
+            family=self.family,
+            display_name="我",
+        )
+        self.secretary = FamilyMember.objects.create(
+            family=self.family,
+            display_name="孙秘书",
+        )
+        self.category = AssetCategory.objects.create(
+            family=self.family,
+            name="现金",
+        )
+        self.account = BankAccount.objects.create(
+            family=self.family,
+            member=self.member,
+            account_name="测试账户一",
+        )
+        self.second_account = BankAccount.objects.create(
+            family=self.family,
+            member=self.member,
+            account_name="测试账户二",
+        )
+        self.user = get_user_model().objects.create_user(
+            username="snapshot-workspace-tester",
+            password="password",
+        )
+        self.client.force_login(self.user)
+
+    def test_decimal_inputs_render_with_two_decimal_places(self):
+        snapshot = AssetBalanceSnapshot(
+            family=self.family,
+            snapshot_date=date(2026, 6, 30),
+            usd_to_base=Decimal("7.12345678"),
+            hkd_to_base=Decimal("0.91234567"),
+        )
+        snapshot_form = AssetBalanceSnapshotForm(instance=snapshot)
+        entry = AssetBalanceEntry(
+            snapshot=snapshot,
+            member=self.member,
+            account=self.account,
+            asset_category=self.category,
+            original_amount=Decimal("123.4567"),
+        )
+        entry_form = AssetBalanceEntryForm(instance=entry)
+
+        self.assertIn('value="7.12"', str(snapshot_form["usd_to_base"]))
+        self.assertIn('value="0.91"', str(snapshot_form["hkd_to_base"]))
+        self.assertIn('value="123.46"', str(entry_form["original_amount"]))
+
+    def test_save_draft_and_persist_manual_row_order(self):
+        response = self.client.post(
+            reverse("ledger:asset_snapshot_create"),
+            {
+                "family": self.family.pk,
+                "snapshot_date": "2026-06-30",
+                "base_currency": "CNY",
+                "usd_to_base": "7.20",
+                "hkd_to_base": "0.92",
+                "remark": "草稿测试",
+                "save_action": "draft",
+                "entries-TOTAL_FORMS": "2",
+                "entries-INITIAL_FORMS": "0",
+                "entries-MIN_NUM_FORMS": "0",
+                "entries-MAX_NUM_FORMS": "1000",
+                "entries-0-member": self.member.pk,
+                "entries-0-account": self.account.pk,
+                "entries-0-asset_category": self.category.pk,
+                "entries-0-currency": "CNY",
+                "entries-0-original_amount": "",
+                "entries-0-display_order": "2",
+                "entries-0-remark": "",
+                "entries-1-member": self.member.pk,
+                "entries-1-account": self.second_account.pk,
+                "entries-1-asset_category": self.category.pk,
+                "entries-1-currency": "CNY",
+                "entries-1-original_amount": "20.00",
+                "entries-1-display_order": "1",
+                "entries-1-remark": "",
+            },
+        )
+
+        snapshot = AssetBalanceSnapshot.objects.get()
+        self.assertRedirects(
+            response,
+            reverse("ledger:asset_snapshot_detail", args=[snapshot.pk]),
+        )
+        self.assertTrue(snapshot.is_draft)
+        self.assertEqual(
+            list(
+                snapshot.entries.order_by("display_order").values_list(
+                    "account_id",
+                    "display_order",
+                )
+            ),
+            [(self.second_account.pk, 1), (self.account.pk, 2)],
+        )
+        self.assertEqual(
+            snapshot.entries.get(account=self.account).original_amount,
+            Decimal("0"),
+        )
+
+    def test_exchange_gain_combines_usd_and_hkd(self):
+        AssetBalanceSnapshot.objects.create(
+            family=self.family,
+            snapshot_date=date(2026, 5, 31),
+            usd_to_base=Decimal("7.00"),
+            hkd_to_base=Decimal("0.90"),
+        )
+        current = AssetBalanceSnapshot.objects.create(
+            family=self.family,
+            snapshot_date=date(2026, 6, 30),
+            usd_to_base=Decimal("7.20"),
+            hkd_to_base=Decimal("0.95"),
+        )
+        AssetBalanceEntry.objects.create(
+            snapshot=current,
+            member=self.member,
+            account=self.account,
+            account_name=self.account.account_name,
+            asset_category=self.category,
+            currency="USD",
+            original_amount=Decimal("100"),
+            base_amount=Decimal("720"),
+            display_order=1,
+        )
+        AssetBalanceEntry.objects.create(
+            snapshot=current,
+            member=self.member,
+            account=self.second_account,
+            account_name=self.second_account.account_name,
+            asset_category=self.category,
+            currency="HKD",
+            original_amount=Decimal("1000"),
+            base_amount=Decimal("950"),
+            display_order=2,
+        )
+
+        matrix = build_asset_snapshot_matrix(current)
+        exchange_gain_row = matrix[4]
+
+        self.assertEqual(exchange_gain_row["cells"], [Decimal("70.00")])
+        self.assertEqual(exchange_gain_row["total"], Decimal("70.00"))
+
+    def test_export_contains_all_snapshot_blocks_and_two_decimal_format(self):
+        snapshot = AssetBalanceSnapshot.objects.create(
+            family=self.family,
+            snapshot_date=date(2026, 6, 30),
+            usd_to_base=Decimal("7.20"),
+            hkd_to_base=Decimal("0.92"),
+        )
+        AssetBalanceEntry.objects.create(
+            snapshot=snapshot,
+            member=self.member,
+            account=self.account,
+            account_name=self.account.account_name,
+            asset_category=self.category,
+            currency="CNY",
+            original_amount=Decimal("123.45"),
+            base_amount=Decimal("123.45"),
+            display_order=1,
+        )
+
+        response = self.client.get(reverse("ledger:asset_snapshot_export"))
+        workbook = load_workbook(BytesIO(response.content), data_only=False)
+        worksheet = workbook["资产快照"]
+        values = [
+            cell.value
+            for row in worksheet.iter_rows()
+            for cell in row
+            if cell.value is not None
+        ]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment;", response["Content-Disposition"])
+        self.assertIn("2026年06月30日 资产快照", values)
+        self.assertIn("汇兑损益金额", values)
+        self.assertEqual(worksheet["D3"].number_format, "#,##0.00")
+        workbook.close()
+
+
+class AnnualBudgetReportTests(TestCase):
+    def setUp(self):
+        self.family = Family.objects.create(name="我的家庭")
+        self.member = FamilyMember.objects.create(
+            family=self.family,
+            display_name="我",
+        )
+        self.user = get_user_model().objects.create_user(
+            username="budget-report-tester",
+            password="password",
+        )
+        self.client.force_login(self.user)
+
+    def test_legacy_budget_category_collects_current_descendant_records(self):
+        legacy_root = ExpenseCategory.objects.create(
+            family=self.family,
+            name="经营性",
+        )
+        legacy_food = ExpenseCategory.objects.create(
+            family=self.family,
+            name="餐饮",
+            parent=legacy_root,
+        )
+        current_root = ExpenseCategory.objects.create(
+            family=self.family,
+            name="经常性",
+        )
+        current_food = ExpenseCategory.objects.create(
+            family=self.family,
+            name="餐饮",
+            parent=current_root,
+        )
+        takeaway = ExpenseCategory.objects.create(
+            family=self.family,
+            name="外卖",
+            parent=current_food,
+        )
+        budget = AnnualBudget.objects.create(family=self.family, year=2026)
+        line = AnnualBudgetLine.objects.create(
+            budget=budget,
+            line_type=AnnualBudgetLine.LINE_TYPE_EXPENSE,
+            expense_category=legacy_food,
+            annual_amount=Decimal("12000"),
+            extra_data={"category_path": "经营性-餐饮"},
+        )
+        legacy_food.delete()
+        line.refresh_from_db()
+        self.assertIsNone(line.expense_category)
+        ExpenseRecord.objects.create(
+            family=self.family,
+            member=self.member,
+            category=takeaway,
+            expense_date=date(2026, 6, 30),
+            period_start=date(2026, 6, 1),
+            period_end=date(2026, 6, 30),
+            amount=Decimal("88.50"),
+        )
+
+        report = build_budget_report(budget)
+
+        self.assertEqual(report["expense_line_rows"][0]["actual"], Decimal("88.50"))
+
+    def test_budget_list_includes_savings_plan(self):
+        budget = AnnualBudget.objects.create(family=self.family, year=2026)
+        AnnualBudgetLine.objects.create(
+            budget=budget,
+            line_type=AnnualBudgetLine.LINE_TYPE_INCOME,
+            annual_amount=Decimal("100"),
+        )
+        AnnualBudgetLine.objects.create(
+            budget=budget,
+            line_type=AnnualBudgetLine.LINE_TYPE_EXPENSE,
+            annual_amount=Decimal("40"),
+        )
+
+        response = self.client.get(reverse("ledger:annual_budget_list"))
+
+        self.assertContains(response, "攒钱计划")
+        self.assertEqual(response.context["rows"][0]["savings_budget"], Decimal("60"))
+
+
 class CategoryManagementTests(TestCase):
     def setUp(self):
         self.family = Family.objects.create(name="我的家庭")
@@ -938,7 +1211,8 @@ class LedgerNavigationAndRedirectTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'class="page-context-nav"')
-        self.assertContains(response, "data-page-back")
+        self.assertContains(response, 'class="button page-nav-back"')
+        self.assertContains(response, "返回上一级")
         self.assertContains(response, reverse("ledger:overview"))
         self.assertContains(response, reverse("dashboard:home"))
 
@@ -946,8 +1220,26 @@ class LedgerNavigationAndRedirectTests(TestCase):
         response = self.client.get(reverse("ledger:overview"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "data-page-back")
+        self.assertContains(
+            response,
+            f'href="{reverse("dashboard:home")}"',
+        )
         self.assertNotContains(response, 'class="button page-nav-module"')
+
+    def test_month_detail_parent_is_year_detail_not_browser_history(self):
+        response = self.client.get(
+            reverse(
+                "ledger:expense_month_detail",
+                kwargs={"year": 2026, "month": 6},
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'href="{reverse("ledger:expense_year_detail", args=[2026])}"',
+        )
+        self.assertNotContains(response, "data-page-back")
 
     def test_delete_redirect_does_not_accept_scheme_relative_external_url(self):
         record = ExpenseRecord.objects.create(

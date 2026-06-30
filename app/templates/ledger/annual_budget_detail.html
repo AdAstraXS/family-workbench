@@ -34,7 +34,6 @@
           <th>类型</th>
           <th>分类</th>
           <th>年度预算</th>
-          <th>月均预算</th>
           <th>实际发生</th>
           <th>偏差</th>
           <th>执行率</th>
@@ -45,9 +44,8 @@
         {% for row in report.income_line_rows %}
           <tr>
             <td><span class="record-badge {% if row.line.line_type == 'income' %}income{% else %}expense{% endif %}">{{ row.type_label }}</span></td>
-            <td>{{ row.category|default:"-" }}</td>
+            <td>{{ row.category_label|default:"-" }}</td>
             <td class="number">{{ row.budget|thousands }}</td>
-            <td class="number">{{ row.monthly_budget|thousands }}</td>
             <td class="number">{{ row.actual|thousands }}</td>
             <td class="number {% if row.line.line_type == 'income' %}income{% else %}expense{% endif %}">{{ row.variance|thousands }}</td>
             <td class="number">{% if row.execution_rate is None %}-{% else %}{{ row.execution_rate|thousands }}%{% endif %}</td>
@@ -58,7 +56,6 @@
           <td><span class="record-badge income">收入</span></td>
           <td>{{ report.income_summary_row.label }}</td>
           <td class="number">{{ report.income_summary_row.budget|thousands }}</td>
-          <td class="number">{{ report.income_summary_row.monthly_budget|thousands }}</td>
           <td class="number">{{ report.income_summary_row.actual|thousands }}</td>
           <td class="number income">{{ report.income_summary_row.variance|thousands }}</td>
           <td class="number">{% if report.income_summary_row.execution_rate is None %}-{% else %}{{ report.income_summary_row.execution_rate|thousands }}%{% endif %}</td>
@@ -67,9 +64,8 @@
         {% for row in report.expense_line_rows %}
           <tr>
             <td><span class="record-badge expense">{{ row.type_label }}</span></td>
-            <td>{{ row.category|default:"-" }}</td>
+            <td>{{ row.category_label|default:"-" }}</td>
             <td class="number">{{ row.budget|thousands }}</td>
-            <td class="number">{{ row.monthly_budget|thousands }}</td>
             <td class="number">{{ row.actual|thousands }}</td>
             <td class="number expense">{{ row.variance|thousands }}</td>
             <td class="number">{% if row.execution_rate is None %}-{% else %}{{ row.execution_rate|thousands }}%{% endif %}</td>
@@ -81,7 +77,6 @@
             <td><span class="record-badge expense">支出</span></td>
             <td>{{ row.label }}</td>
             <td class="number">{{ row.budget|thousands }}</td>
-            <td class="number">{{ row.monthly_budget|thousands }}</td>
             <td class="number">{{ row.actual|thousands }}</td>
             <td class="number expense">{{ row.variance|thousands }}</td>
             <td class="number">{% if row.execution_rate is None %}-{% else %}{{ row.execution_rate|thousands }}%{% endif %}</td>
@@ -89,7 +84,7 @@
           </tr>
         {% empty %}
           {% if not report.income_line_rows %}
-            <tr><td colspan="8">暂无预算明细</td></tr>
+            <tr><td colspan="7">暂无预算明细</td></tr>
           {% endif %}
         {% endfor %}
       </tbody>

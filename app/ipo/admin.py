@@ -26,7 +26,12 @@ class HkIpoListingAdmin(admin.ModelAdmin):
         "mechanism_name",
         "subscription_end_date",
         "listing_date",
+        "industry",
+        "over_subscription_multiple",
         "final_price",
+        "first_day_open_change_pct",
+        "first_day_close_change_pct",
+        "cumulative_change_pct",
         "entry_fee",
         "subscription_recommendation",
     )
@@ -39,8 +44,21 @@ class HkIpoListingAdmin(admin.ModelAdmin):
         "subscription_end_date",
         "listing_date",
     )
-    search_fields = ("stock_code", "stock_name", "company_name", "sector", "sponsor")
+    search_fields = (
+        "stock_code",
+        "stock_name",
+        "company_name",
+        "sector",
+        "industry",
+        "sponsor",
+    )
     readonly_fields = (
+        "industry",
+        "over_subscription_multiple",
+        "first_day_open_change_pct",
+        "first_day_close_change_pct",
+        "cumulative_change_pct",
+        "market_data_fetched_at",
         "entry_fee",
         "public_offer_lots",
         "fundraising_amount_100m",
@@ -106,6 +124,16 @@ class HkIpoListingAdmin(admin.ModelAdmin):
                 "hk_connect_threshold_100m",
                 "hk_connect_required_gain_pct",
                 "hk_connect_expectation_display",
+            )
+        }),
+        ("上市表现（利弗莫尔网页抓取）", {
+            "fields": (
+                "industry",
+                "over_subscription_multiple",
+                "first_day_open_change_pct",
+                "first_day_close_change_pct",
+                "cumulative_change_pct",
+                "market_data_fetched_at",
             )
         }),
         ("发行结构", {

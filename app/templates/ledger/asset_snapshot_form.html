@@ -7,7 +7,7 @@
   <div class="section-head">
     <h1>{{ title }}</h1>
   </div>
-  <form method="post">
+  <form method="post" id="asset-snapshot-form">
     {% csrf_token %}
     <div class="snapshot-meta-form">
       {% for field in form.hidden_fields %}
@@ -46,18 +46,23 @@
             <th>币种</th>
             <th>原币余额</th>
             <th>备注</th>
+            <th>排序</th>
             <th>删除</th>
           </tr>
         </thead>
         <tbody>
           {% for entry_form in formset %}
             <tr>
-              <td>{{ entry_form.id }}{{ entry_form.member }}{{ entry_form.member.errors }}</td>
+              <td>{{ entry_form.id }}{{ entry_form.display_order }}{{ entry_form.member }}{{ entry_form.member.errors }}</td>
               <td>{{ entry_form.account }}{{ entry_form.account.errors }}</td>
               <td>{{ entry_form.asset_category }}{{ entry_form.asset_category.errors }}</td>
               <td>{{ entry_form.currency }}{{ entry_form.currency.errors }}</td>
               <td>{{ entry_form.original_amount }}{{ entry_form.original_amount.errors }}</td>
               <td>{{ entry_form.remark }}{{ entry_form.remark.errors }}</td>
+              <td class="entry-order-actions">
+                <button type="button" class="move-entry-up button ghost" aria-label="上移">↑</button>
+                <button type="button" class="move-entry-down button ghost" aria-label="下移">↓</button>
+              </td>
               <td>
                 {% if entry_form.DELETE %}
                   <span class="delete-field">{{ entry_form.DELETE }}</span>
@@ -71,12 +76,16 @@
     </div>
     <template id="empty-entry-row-template">
       <tr>
-        <td>{{ formset.empty_form.id }}{{ formset.empty_form.member }}</td>
+        <td>{{ formset.empty_form.id }}{{ formset.empty_form.display_order }}{{ formset.empty_form.member }}</td>
         <td>{{ formset.empty_form.account }}</td>
         <td>{{ formset.empty_form.asset_category }}</td>
         <td>{{ formset.empty_form.currency }}</td>
         <td>{{ formset.empty_form.original_amount }}</td>
         <td>{{ formset.empty_form.remark }}</td>
+        <td class="entry-order-actions">
+          <button type="button" class="move-entry-up button ghost" aria-label="上移">↑</button>
+          <button type="button" class="move-entry-down button ghost" aria-label="下移">↓</button>
+        </td>
         <td>
           {% if formset.empty_form.DELETE %}
             <span class="delete-field">{{ formset.empty_form.DELETE }}</span>
@@ -86,7 +95,8 @@
       </tr>
     </template>
     <div class="form-actions">
-      <button type="submit">保存资产快照</button>
+      <button type="submit" name="save_action" value="publish">保存资产快照</button>
+      <button type="submit" name="save_action" value="draft" class="button ghost" formnovalidate>保存草稿</button>
       <a class="button ghost" href="{% url 'ledger:asset_snapshot_list' %}">取消</a>
     </div>
   </form>
@@ -100,6 +110,16 @@
     if (!mapEl || !optionsEl) return;
     const accountMemberMap = JSON.parse(mapEl.textContent || "{}");
     const accountOptions = JSON.parse(optionsEl.textContent || "[]");
+    const form = document.getElementById("asset-snapshot-form");
+    const tbody = document.querySelector(".batch-entry-table tbody");
+
+    function syncDisplayOrder() {
+      if (!tbody) return;
+      Array.from(tbody.querySelectorAll("tr")).forEach(function (row, index) {
+        const orderInput = row.querySelector("input[name$='-display_order']");
+        if (orderInput) orderInput.value = index + 1;
+      });
+    }
 
     function filterRow(row) {
       const memberSelect = row.querySelector("select[name$='-member']");
@@ -146,13 +166,32 @@
           row.style.display = "none";
         });
       }
+      const upButton = row.querySelector(".move-entry-up");
+      const downButton = row.querySelector(".move-entry-down");
+      if (upButton) {
+        upButton.addEventListener("click", function () {
+          const previous = row.previousElementSibling;
+          if (previous) {
+            tbody.insertBefore(row, previous);
+            syncDisplayOrder();
+          }
+        });
+      }
+      if (downButton) {
+        downButton.addEventListener("click", function () {
+          const next = row.nextElementSibling;
+          if (next) {
+            tbody.insertBefore(next, row);
+            syncDisplayOrder();
+          }
+        });
+      }
     }
 
     document.querySelectorAll(".batch-entry-table tbody tr").forEach(bindRow);
 
     const addButton = document.getElementById("add-entry-row");
     const template = document.getElementById("empty-entry-row-template");
-    const tbody = document.querySelector(".batch-entry-table tbody");
     const totalForms = document.querySelector("input[name$='-TOTAL_FORMS']");
     if (addButton && template && tbody && totalForms) {
       addButton.addEventListener("click", function () {
@@ -164,8 +203,11 @@
         tbody.appendChild(row);
         totalForms.value = index + 1;
         bindRow(row);
+        syncDisplayOrder();
       });
     }
+    if (form) form.addEventListener("submit", syncDisplayOrder);
+    syncDisplayOrder();
   })();
 </script>
 {% endblock %}

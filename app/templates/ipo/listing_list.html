@@ -86,13 +86,13 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_listing_table.html" with listings=listed_visible empty_text="暂无已上市新股。" %}
+      {% include "ipo/_listing_table.html" with listings=listed_visible empty_text="暂无已上市新股。" listed_mode=True %}
     </div>
     {% if listed_hidden %}
       <details class="ipo-more-listings">
         <summary>展开查看剩余 {{ listed_hidden|length }} 条已上市新股</summary>
         <div class="record-table-wrap ipo-table-wrap">
-          {% include "ipo/_listing_table.html" with listings=listed_hidden %}
+          {% include "ipo/_listing_table.html" with listings=listed_hidden listed_mode=True %}
         </div>
       </details>
     {% endif %}

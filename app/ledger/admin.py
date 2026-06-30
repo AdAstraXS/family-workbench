@@ -456,9 +456,9 @@ class AssetBalanceEntryInline(admin.TabularInline):
 
 @admin.register(AssetBalanceSnapshot)
 class AssetBalanceSnapshotAdmin(admin.ModelAdmin):
-    fields = ("family", "snapshot_date", "usd_to_base", "hkd_to_base", "remark")
-    list_display = ("snapshot_date", "family", "member_balance_summary", "total_balance", "updated_at")
-    list_filter = ("family", "snapshot_date")
+    fields = ("family", "snapshot_date", "is_draft", "usd_to_base", "hkd_to_base", "remark")
+    list_display = ("snapshot_date", "family", "is_draft", "member_balance_summary", "total_balance", "updated_at")
+    list_filter = ("family", "is_draft", "snapshot_date")
     search_fields = ("remark",)
     inlines = [AssetBalanceEntryInline]
 

@@ -5,14 +5,24 @@
       <th>股票代码</th>
       <th>股票名称</th>
       <th>类型</th>
-      <th>机制</th>
-      <th>招股截止</th>
-      <th>撞车</th>
-      <th>公配手数</th>
-      {% if show_expected_margin %}<th>预计孖展</th>{% endif %}
-      <th>最终定价</th>
-      <th>每手股数</th>
-      <th>入场费</th>
+      {% if listed_mode %}
+        <th>上市时间</th>
+        <th>行业</th>
+        <th>超额认购倍数</th>
+        <th>最终定价</th>
+        <th>首日开盘涨幅</th>
+        <th>首日收盘涨幅</th>
+        <th>上市至今累计涨幅</th>
+      {% else %}
+        <th>机制</th>
+        <th>招股截止</th>
+        <th>撞车</th>
+        <th>公配手数</th>
+        {% if show_expected_margin %}<th>预计孖展</th>{% endif %}
+        <th>最终定价</th>
+        <th>每手股数</th>
+        <th>入场费</th>
+      {% endif %}
       <th>港股通预期</th>
       <th>操作</th>
     </tr>
@@ -23,18 +33,42 @@
         <td><a href="{% url 'ipo:listing_detail' listing.pk %}">{{ listing.stock_code }}</a></td>
         <td>{{ listing.stock_name|default:listing.company_name }}</td>
         <td><span class="ipo-chip type-{{ listing.listing_type }}">{{ listing.get_listing_type_display }}</span></td>
-        <td><span class="ipo-chip mechanism-{{ listing.mechanism }}">{{ listing.get_mechanism_display }}</span></td>
-        <td>{{ listing.subscription_end_date|date:"Y-m-d"|default:"-" }}</td>
-        <td>
-          {% with collision_count=listing.collision_count %}
-            <span class="ipo-chip {% if collision_count <= 1 %}success{% elif collision_count == 2 %}collision-2{% elif collision_count == 3 %}collision-3{% elif collision_count == 4 %}collision-4{% else %}collision-5{% endif %}">{{ listing.collision_label }}</span>
-          {% endwith %}
-        </td>
-        <td class="number">{{ listing.public_offer_lots|lots }}</td>
-        {% if show_expected_margin %}<td class="number">{{ listing.expected_margin_multiple|default:"-" }}</td>{% endif %}
-        <td class="number">{{ listing.final_price|money2 }}</td>
-        <td class="number">{{ listing.lot_size|lots }}</td>
-        <td class="number">{{ listing.entry_fee|money2 }}</td>
+        {% if listed_mode %}
+          <td>{{ listing.listing_date|date:"Y-m-d"|default:"-" }}</td>
+          <td>{{ listing.industry|default:"-" }}</td>
+          <td class="number">
+            {% if listing.over_subscription_multiple == None %}
+              -
+            {% elif listing.over_subscription_multiple < 0 %}
+              认购不足
+            {% else %}
+              {{ listing.over_subscription_multiple|floatformat:2 }}倍
+            {% endif %}
+          </td>
+          <td class="number">{{ listing.final_price|money2 }}</td>
+          <td class="number {% if listing.first_day_open_change_pct > 0 %}positive{% elif listing.first_day_open_change_pct < 0 %}negative{% endif %}">
+            {% if listing.first_day_open_change_pct == None %}-{% else %}{{ listing.first_day_open_change_pct|floatformat:2 }}%{% endif %}
+          </td>
+          <td class="number {% if listing.first_day_close_change_pct > 0 %}positive{% elif listing.first_day_close_change_pct < 0 %}negative{% endif %}">
+            {% if listing.first_day_close_change_pct == None %}-{% else %}{{ listing.first_day_close_change_pct|floatformat:2 }}%{% endif %}
+          </td>
+          <td class="number {% if listing.cumulative_change_pct > 0 %}positive{% elif listing.cumulative_change_pct < 0 %}negative{% endif %}">
+            {% if listing.cumulative_change_pct == None %}-{% else %}{{ listing.cumulative_change_pct|floatformat:2 }}%{% endif %}
+          </td>
+        {% else %}
+          <td><span class="ipo-chip mechanism-{{ listing.mechanism }}">{{ listing.get_mechanism_display }}</span></td>
+          <td>{{ listing.subscription_end_date|date:"Y-m-d"|default:"-" }}</td>
+          <td>
+            {% with collision_count=listing.collision_count %}
+              <span class="ipo-chip {% if collision_count <= 1 %}success{% elif collision_count == 2 %}collision-2{% elif collision_count == 3 %}collision-3{% elif collision_count == 4 %}collision-4{% else %}collision-5{% endif %}">{{ listing.collision_label }}</span>
+            {% endwith %}
+          </td>
+          <td class="number">{{ listing.public_offer_lots|lots }}</td>
+          {% if show_expected_margin %}<td class="number">{{ listing.expected_margin_multiple|default:"-" }}</td>{% endif %}
+          <td class="number">{{ listing.final_price|money2 }}</td>
+          <td class="number">{{ listing.lot_size|lots }}</td>
+          <td class="number">{{ listing.entry_fee|money2 }}</td>
+        {% endif %}
         <td>{{ listing.hk_connect_expectation }}</td>
         <td>
           <span class="row-actions">
@@ -44,7 +78,7 @@
       </tr>
     {% empty %}
       <tr>
-        <td colspan="{% if show_expected_margin %}13{% else %}12{% endif %}">{{ empty_text|default:"暂无新股资料。" }}</td>
+        <td colspan="{% if listed_mode %}12{% elif show_expected_margin %}13{% else %}12{% endif %}">{{ empty_text|default:"暂无新股资料。" }}</td>
       </tr>
     {% endfor %}
   </tbody>

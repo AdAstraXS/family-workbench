@@ -1,5 +1,5 @@
 import base64
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from html import unescape
 import json
@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from django.utils import timezone
@@ -67,6 +68,10 @@ FIELD_SCHEMA = {
 
 VBKR_IPO_URL = "https://www.vbkr.com/ipo/hk/v2/ipo-hk-index"
 _vbkr_margin_cache = {"fetched_at": None, "data": {}}
+JESSE_LIVERMORE_IPO_URL = "https://www.jesselivermore.com/ipo.html"
+JESSE_LIVERMORE_IPO_API_URL = (
+    "https://h5stockserver.huanshoulv.com/aimapp/hkstock/newStockSearch"
+)
 HK_CONNECT_THRESHOLD_URL = (
     "https://cloudapi.livereport8.com/northsouthentrycheck/"
     "NorthSouthEntryCheckNew/GetNorthCheckSummary"
@@ -407,3 +412,172 @@ def fetch_vbkr_expected_margin_multiples():
     _vbkr_margin_cache["fetched_at"] = timezone.now()
     _vbkr_margin_cache["data"] = data
     return data
+
+
+def get_cached_vbkr_expected_margin_multiples():
+    return _vbkr_margin_cache["data"]
+
+
+def _normalize_hk_stock_code(value):
+    code = str(value or "").strip().upper()
+    code = code.removesuffix(".HK")
+    digits = re.sub(r"\D", "", code)
+    return digits.zfill(5) if digits else ""
+
+
+def _livermore_decimal(value):
+    if value in (None, "", "-"):
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _livermore_date(value):
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def fetch_jesselivermore_ipo_metrics(year):
+    if isinstance(year, (tuple, list)):
+        start_year, end_year = year
+    else:
+        start_year = end_year = year
+    query = urllib.parse.urlencode(
+        {
+            "page": 1,
+            "page_count": 1000,
+            "sort_field_name": "issue_date",
+            "sort_type": -1,
+            "issue_year": f"{start_year},{end_year}",
+        }
+    )
+    request = urllib.request.Request(
+        f"{JESSE_LIVERMORE_IPO_API_URL}?{query}",
+        headers={
+            "Accept": "application/json",
+            "Referer": JESSE_LIVERMORE_IPO_URL,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if str(payload.get("status")) != "200":
+            raise ValueError("unexpected API status")
+        data = payload.get("data") or {}
+        fields = data.get("fields") or []
+        rows = data.get("list") or []
+        indexes = {name: index for index, name in enumerate(fields)}
+        required_fields = {
+            "stock_code",
+            "issue_date",
+            "industry",
+            "over_subscribed_multiple",
+            "offering_price",
+            "px_open_rate",
+            "px_close_rate",
+            "inception_px_change_rate",
+        }
+        if not required_fields.issubset(indexes):
+            raise ValueError("missing expected IPO fields")
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+    ) as exc:
+        logger.warning("Jesse Livermore IPO metrics fetch failed: %s", exc)
+        return {}
+
+    metrics = {}
+    for row in rows:
+        if not isinstance(row, list):
+            continue
+
+        def value(field_name):
+            index = indexes[field_name]
+            return row[index] if index < len(row) else None
+
+        stock_code = _normalize_hk_stock_code(value("stock_code"))
+        if not stock_code:
+            continue
+        industry = str(value("industry") or "").strip()
+        metrics[stock_code] = {
+            "listing_date": _livermore_date(value("issue_date")),
+            "industry": "" if industry == "-" else industry,
+            "over_subscription_multiple": _livermore_decimal(
+                value("over_subscribed_multiple")
+            ),
+            "final_price": _livermore_decimal(value("offering_price")),
+            "first_day_open_change_pct": _livermore_decimal(
+                value("px_open_rate")
+            ),
+            "first_day_close_change_pct": _livermore_decimal(
+                value("px_close_rate")
+            ),
+            "cumulative_change_pct": _livermore_decimal(
+                value("inception_px_change_rate")
+            ),
+        }
+    return metrics
+
+
+def refresh_listed_market_data(listings, year):
+    listings = list(listings)
+    if not listings:
+        return 0
+    metrics = fetch_jesselivermore_ipo_metrics(year)
+    if not metrics:
+        return 0
+
+    static_fields = (
+        "listing_date",
+        "industry",
+        "over_subscription_multiple",
+        "final_price",
+        "first_day_open_change_pct",
+        "first_day_close_change_pct",
+    )
+    now = timezone.now()
+    changed = []
+    for listing in listings:
+        metric = metrics.get(_normalize_hk_stock_code(listing.stock_code))
+        if not metric:
+            continue
+        if listing.market_data_fetched_at is None:
+            for field_name in static_fields:
+                value = metric.get(field_name)
+                if value not in (None, ""):
+                    setattr(listing, field_name, value)
+            listing.market_data_fetched_at = now
+        else:
+            for field_name in static_fields:
+                current_value = getattr(listing, field_name)
+                value = metric.get(field_name)
+                if current_value in (None, "") and value not in (None, ""):
+                    setattr(listing, field_name, value)
+
+        cumulative_change = metric.get("cumulative_change_pct")
+        if cumulative_change is not None:
+            listing.cumulative_change_pct = cumulative_change
+        changed.append(listing)
+
+    if changed:
+        HkIpoListing.objects.bulk_update(
+            changed,
+            [
+                *static_fields,
+                "cumulative_change_pct",
+                "market_data_fetched_at",
+            ],
+        )
+    return len(changed)

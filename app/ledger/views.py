@@ -1,12 +1,14 @@
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.db.models import Q, Sum
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from datetime import date
 from decimal import Decimal
 import json
+from urllib.parse import quote
 
 from .forms import (
     AnnualBudgetForm,
@@ -21,6 +23,7 @@ from .forms import (
     make_asset_balance_entry_formset,
 )
 from .expense_import import ExpenseWorkbookError, import_expense_workbook
+from .asset_snapshot_export import build_asset_snapshot_workbook
 from .models import AnnualBudget, AnnualBudgetLine, AssetBalanceSnapshot, BankAccount, ExpenseCategory, ExpenseImportBatch, ExpenseRecord, IncomeCategory, IncomeRecord
 from family_core.models import Family, FamilyMember
 
@@ -624,10 +627,56 @@ BUDGET_CATEGORY_ORDER = [
 ]
 BUDGET_CATEGORY_ORDER_MAP = {item: index for index, item in enumerate(BUDGET_CATEGORY_ORDER)}
 
+LEGACY_EXPENSE_BUDGET_PATHS = {
+    "经营性-餐饮": ("经常性-餐饮",),
+    "经营性-交通": ("经常性-交通",),
+    "经营性-通信及订阅费": (
+        "经常性-生活服务-话费",
+        "经常性-知识付费-会员付费",
+    ),
+    "经营性-日用百货": ("经常性-生活日用",),
+    "经营性-母婴花费": ("经常性-养娃",),
+    "固定资产-电器、数码产品": ("固定资产-家居家电",),
+    "经营性-美容美发": (
+        "经常性-穿搭美容-护肤",
+        "经常性-穿搭美容-理发",
+    ),
+    "经营性-物业车位": (
+        "经常性-生活服务-物业及租金",
+        "经常性-生活服务-停车费",
+    ),
+    "经营性-水电燃气话费": (
+        "经常性-生活服务-水电费",
+        "经常性-生活服务-燃气费",
+        "经常性-生活服务-话费",
+    ),
+    "经营性-加油费": ("经常性-爱车-加油",),
+    "经营性-车辆保养": (
+        "经常性-爱车-车检",
+        "经常性-生活服务-洗车",
+        "经常性-生活服务-维修费",
+    ),
+    "经营性-保险": ("经常性-金融保险",),
+    "经营性-医疗保健": ("经常性-医疗保健",),
+    "经营性-知识付费、买书、会员卡": ("经常性-知识付费",),
+    "经营性-模型、游戏": ("经常性-休闲玩乐",),
+    "经营性-旅游/交通出行": (
+        "经常性-交通",
+        "经常性-酒店旅行",
+    ),
+    "经营性-服饰包包": (
+        "经常性-穿搭美容-衣服",
+        "经常性-穿搭美容-男装",
+    ),
+    "营业外-人情世故礼物等": ("经常性-人情社交",),
+}
+
 
 def budget_category_label(line):
     category = line.income_category if line.line_type == AnnualBudgetLine.LINE_TYPE_INCOME else line.expense_category
-    return str(category) if category else ""
+    if category:
+        return str(category)
+    return str((line.extra_data or {}).get("category_path", ""))
 
 
 def budget_line_sort_key(row):
@@ -658,14 +707,12 @@ def build_budget_total_row(label, rows, line_type):
 
 def expense_budget_group(row):
     category = row["category"]
-    if not category:
-        return "其他"
-    if category.parent:
+    if category and category.parent:
         return category.parent.name
-    label = str(category)
+    label = row.get("category_label") or (str(category) if category else "")
     if "-" in label:
         return label.split("-", 1)[0]
-    return label
+    return label or "其他"
 
 
 def get_latest_budget_line_initial():
@@ -709,6 +756,23 @@ def get_budget_actual_records(budget):
     return income_records, expense_records
 
 
+def budget_category_record_ids(category, categories, aliases=None, fallback_path=""):
+    category_path = str(category) if category else fallback_path
+    if not category_path:
+        return None
+    target_paths = {category_path}
+    if aliases:
+        target_paths.update(aliases.get(category_path, ()))
+    return {
+        item.id
+        for item in categories
+        if any(
+            str(item) == target_path or str(item).startswith(f"{target_path}-")
+            for target_path in target_paths
+        )
+    }
+
+
 def build_budget_report(budget):
     lines = list(
         budget.lines.select_related(
@@ -721,6 +785,15 @@ def build_budget_report(budget):
     income_records, expense_records = get_budget_actual_records(budget)
     income_records = list(income_records)
     expense_records = list(expense_records)
+    income_categories = list(
+        IncomeCategory.objects.filter(family=budget.family).select_related("parent")
+    )
+    expense_categories = list(
+        ExpenseCategory.objects.filter(family=budget.family).select_related(
+            "parent",
+            "parent__parent",
+        )
+    )
 
     total_income_budget = Decimal("0")
     total_expense_budget = Decimal("0")
@@ -732,14 +805,25 @@ def build_budget_report(budget):
         actual = Decimal("0")
         if line.line_type == AnnualBudgetLine.LINE_TYPE_INCOME:
             total_income_budget += line.annual_amount or Decimal("0")
+            category_ids = budget_category_record_ids(
+                line.income_category,
+                income_categories,
+                fallback_path=budget_category_label(line),
+            )
             for record in income_records:
-                if line.income_category_id and record.category_id != line.income_category_id:
+                if category_ids is not None and record.category_id not in category_ids:
                     continue
                 actual += record.amount or Decimal("0")
         else:
             total_expense_budget += line.annual_amount or Decimal("0")
+            category_ids = budget_category_record_ids(
+                line.expense_category,
+                expense_categories,
+                LEGACY_EXPENSE_BUDGET_PATHS,
+                fallback_path=budget_category_label(line),
+            )
             for record in expense_records:
-                if line.expense_category_id and record.category_id != line.expense_category_id:
+                if category_ids is not None and record.category_id not in category_ids:
                     continue
                 actual += record.amount or Decimal("0")
 
@@ -752,6 +836,7 @@ def build_budget_report(budget):
                 "line": line,
                 "type_label": "收入" if line.line_type == AnnualBudgetLine.LINE_TYPE_INCOME else "支出",
                 "category": category,
+                "category_label": budget_category_label(line),
                 "budget": budget_amount,
                 "monthly_budget": budget_amount / Decimal("12"),
                 "actual": actual,
@@ -837,13 +922,26 @@ def save_budget_formset(formset, budget):
             line.expense_category = None
         else:
             line.income_category = None
+        category = (
+            line.income_category
+            if line.line_type == AnnualBudgetLine.LINE_TYPE_INCOME
+            else line.expense_category
+        )
+        line.extra_data = {
+            **(line.extra_data or {}),
+            "category_path": str(category) if category else "",
+        }
         line.save()
 
 
 def save_asset_snapshot_formset(formset, snapshot):
     saved_ids = set()
     order = 1
-    for form in formset.forms:
+    ordered_forms = sorted(
+        formset.forms,
+        key=lambda item: item.cleaned_data.get("display_order") or 10**9,
+    )
+    for form in ordered_forms:
         if not form.cleaned_data:
             continue
         if form.cleaned_data.get("DELETE"):
@@ -859,6 +957,7 @@ def save_asset_snapshot_formset(formset, snapshot):
         entry = form.instance if form.instance.pk else form.save(commit=False)
         entry.snapshot = snapshot
         entry.display_order = order
+        entry.original_amount = original_amount or Decimal("0")
         if entry.account:
             entry.account_name = entry.account.account_name
         entry.base_amount = calculate_base_amount(snapshot, entry.currency, entry.original_amount)
@@ -867,6 +966,11 @@ def save_asset_snapshot_formset(formset, snapshot):
         order += 1
     if snapshot.pk and saved_ids:
         snapshot.entries.exclude(pk__in=saved_ids).delete()
+
+
+def allow_draft_blank_asset_amounts(formset):
+    for form in formset.forms:
+        form.fields["original_amount"].required = False
 
 
 def get_account_member_map():
@@ -889,7 +993,11 @@ def get_account_options():
 
 
 def get_latest_snapshot_entry_initial():
-    latest_snapshot = AssetBalanceSnapshot.objects.order_by("-snapshot_date", "-created_at").first()
+    latest_snapshot = (
+        AssetBalanceSnapshot.objects.filter(is_draft=False)
+        .order_by("-snapshot_date", "-created_at")
+        .first()
+    )
     if not latest_snapshot:
         return [{}]
     return [
@@ -899,6 +1007,7 @@ def get_latest_snapshot_entry_initial():
             "asset_category": entry.asset_category_id,
             "currency": entry.currency,
             "original_amount": None,
+            "display_order": entry.display_order,
             "remark": entry.remark,
         }
         for entry in latest_snapshot.entries.order_by("display_order", "account__account_name", "asset_category__name")
@@ -974,7 +1083,44 @@ def build_asset_snapshot_matrix(snapshot):
         "cells": [member_base_totals[member.id] for member in members],
         "total": base_grand_total,
     }
-    return members, rows.values(), currency_total_rows, base_total_row, grand_total
+    previous_snapshot = (
+        AssetBalanceSnapshot.objects.filter(
+            family=snapshot.family,
+            is_draft=False,
+            snapshot_date__lt=snapshot.snapshot_date,
+        )
+        .order_by("-snapshot_date", "-created_at")
+        .first()
+    )
+    previous_rates = {
+        "USD": previous_snapshot.usd_to_base if previous_snapshot else snapshot.usd_to_base,
+        "HKD": previous_snapshot.hkd_to_base if previous_snapshot else snapshot.hkd_to_base,
+    }
+    current_rates = {
+        "USD": snapshot.usd_to_base,
+        "HKD": snapshot.hkd_to_base,
+    }
+    member_exchange_gains = {member.id: Decimal("0") for member in members}
+    for entry in entries:
+        if entry.currency not in current_rates:
+            continue
+        member_exchange_gains[entry.member_id] += (
+            (entry.original_amount or Decimal("0"))
+            * (current_rates[entry.currency] - previous_rates[entry.currency])
+        )
+    exchange_gain_row = {
+        "label": "汇兑损益金额",
+        "cells": [member_exchange_gains[member.id] for member in members],
+        "total": sum(member_exchange_gains.values(), Decimal("0")),
+    }
+    return (
+        members,
+        rows.values(),
+        currency_total_rows,
+        base_total_row,
+        exchange_gain_row,
+        grand_total,
+    )
 
 
 def get_month_start(day):
@@ -1033,7 +1179,7 @@ def build_investment_return_report():
     family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
     members = list(FamilyMember.objects.filter(family=family, is_active=True).order_by("display_name")) if family else []
     latest_snapshot = (
-        AssetBalanceSnapshot.objects.filter(family=family)
+        AssetBalanceSnapshot.objects.filter(family=family, is_draft=False)
         .prefetch_related("entries")
         .order_by("-snapshot_date", "-created_at")
         .first()
@@ -1057,7 +1203,11 @@ def build_investment_return_report():
     previous_month_start = get_previous_month_start(latest_date)
 
     previous_year_snapshot = (
-        AssetBalanceSnapshot.objects.filter(family=family, snapshot_date__lte=previous_year_end)
+        AssetBalanceSnapshot.objects.filter(
+            family=family,
+            is_draft=False,
+            snapshot_date__lte=previous_year_end,
+        )
         .prefetch_related("entries")
         .order_by("-snapshot_date", "-created_at")
         .first()
@@ -1065,6 +1215,7 @@ def build_investment_return_report():
     previous_month_snapshot = (
         AssetBalanceSnapshot.objects.filter(
             family=family,
+            is_draft=False,
             snapshot_date__gte=year_start,
             snapshot_date__lt=month_start,
         )
@@ -1132,7 +1283,11 @@ def build_investment_return_report():
 
 @login_required
 def overview(request):
-    latest_snapshot = AssetBalanceSnapshot.objects.order_by("-snapshot_date", "-created_at").first()
+    latest_snapshot = (
+        AssetBalanceSnapshot.objects.filter(is_draft=False)
+        .order_by("-snapshot_date", "-created_at")
+        .first()
+    )
     bank_total = latest_snapshot.entries.aggregate(total=Sum("base_amount"))["total"] if latest_snapshot else 0
     bank_total = bank_total or 0
     month_income = IncomeRecord.objects.filter(
@@ -1177,6 +1332,13 @@ def annual_budget_list(request):
             if summary["expense_budget"]
             else None
         )
+        savings_budget = summary["income_budget"] - summary["expense_budget"]
+        savings_actual = summary["income_actual"] - summary["expense_actual"]
+        savings_rate = (
+            savings_actual / savings_budget * Decimal("100")
+            if savings_budget
+            else None
+        )
         rows.append(
             {
                 "budget": budget,
@@ -1186,6 +1348,9 @@ def annual_budget_list(request):
                 "expense_budget": summary["expense_budget"],
                 "expense_actual": summary["expense_actual"],
                 "expense_rate": expense_rate,
+                "savings_budget": savings_budget,
+                "savings_actual": savings_actual,
+                "savings_rate": savings_rate,
             }
         )
     return render(request, "ledger/annual_budget_list.html", {"rows": rows})
@@ -1260,7 +1425,9 @@ def asset_snapshot_list(request):
             }
         )
 
-    chronological_rows = list(reversed(rows))
+    chronological_rows = [
+        row for row in reversed(rows) if not row["snapshot"].is_draft
+    ]
     monthly_points = {}
     yearly_points = {}
     for row in chronological_rows:
@@ -1320,9 +1487,42 @@ def asset_snapshot_list(request):
 
 
 @login_required
+def asset_snapshot_export(request):
+    snapshots = list(
+        AssetBalanceSnapshot.objects.select_related("family")
+        .prefetch_related(
+            "entries__member",
+            "entries__account__account_region",
+            "entries__account__account_type_ref",
+            "entries__asset_category",
+        )
+        .order_by("-snapshot_date", "-created_at")
+    )
+    output = build_asset_snapshot_workbook(snapshots, build_asset_snapshot_matrix)
+    filename = f"家庭资产快照_{timezone.localdate():%Y%m%d}.xlsx"
+    response = HttpResponse(
+        output.getvalue(),
+        content_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+    )
+    response["Content-Disposition"] = (
+        f"attachment; filename*=UTF-8''{quote(filename)}"
+    )
+    return response
+
+
+@login_required
 def asset_snapshot_detail(request, pk):
     snapshot = get_object_or_404(AssetBalanceSnapshot.objects.select_related("family"), pk=pk)
-    members, rows, currency_totals, base_total_row, grand_total = build_asset_snapshot_matrix(snapshot)
+    (
+        members,
+        rows,
+        currency_totals,
+        base_total_row,
+        exchange_gain_row,
+        grand_total,
+    ) = build_asset_snapshot_matrix(snapshot)
     return render(
         request,
         "ledger/asset_snapshot_detail.html",
@@ -1332,6 +1532,7 @@ def asset_snapshot_detail(request, pk):
             "rows": rows,
             "currency_totals": currency_totals,
             "base_total_row": base_total_row,
+            "exchange_gain_row": exchange_gain_row,
             "grand_total": grand_total,
         },
     )
@@ -1341,13 +1542,26 @@ def asset_snapshot_detail(request, pk):
 def asset_snapshot_create(request):
     snapshot = AssetBalanceSnapshot()
     if request.method == "POST":
+        save_as_draft = request.POST.get("save_action") == "draft"
         form = AssetBalanceSnapshotForm(request.POST, instance=snapshot)
         formset = AssetBalanceEntryFormSet(request.POST, instance=snapshot)
+        if save_as_draft:
+            allow_draft_blank_asset_amounts(formset)
         if form.is_valid() and formset.is_valid():
-            snapshot = form.save()
+            snapshot = form.save(commit=False)
+            snapshot.is_draft = save_as_draft
+            snapshot.save()
             formset = AssetBalanceEntryFormSet(request.POST, instance=snapshot)
+            if save_as_draft:
+                allow_draft_blank_asset_amounts(formset)
             if formset.is_valid():
                 save_asset_snapshot_formset(formset, snapshot)
+                messages.success(
+                    request,
+                    "资产快照草稿已保存。"
+                    if snapshot.is_draft
+                    else "资产快照已保存。",
+                )
                 return redirect("ledger:asset_snapshot_detail", pk=snapshot.pk)
     else:
         initial_entries = get_latest_snapshot_entry_initial()
@@ -1371,11 +1585,22 @@ def asset_snapshot_create(request):
 def asset_snapshot_edit(request, pk):
     snapshot = get_object_or_404(AssetBalanceSnapshot, pk=pk)
     if request.method == "POST":
+        save_as_draft = request.POST.get("save_action") == "draft"
         form = AssetBalanceSnapshotForm(request.POST, instance=snapshot)
         formset = AssetBalanceEntryFormSet(request.POST, instance=snapshot)
+        if save_as_draft:
+            allow_draft_blank_asset_amounts(formset)
         if form.is_valid() and formset.is_valid():
-            snapshot = form.save()
+            snapshot = form.save(commit=False)
+            snapshot.is_draft = save_as_draft
+            snapshot.save()
             save_asset_snapshot_formset(formset, snapshot)
+            messages.success(
+                request,
+                "资产快照草稿已保存。"
+                if snapshot.is_draft
+                else "资产快照已保存。",
+            )
             return redirect("ledger:asset_snapshot_detail", pk=snapshot.pk)
     else:
         form = AssetBalanceSnapshotForm(instance=snapshot)

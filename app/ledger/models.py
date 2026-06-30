@@ -288,6 +288,7 @@ class AnnualBudgetLine(TimestampedModel):
 class AssetBalanceSnapshot(TimestampedModel):
     family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="asset_balance_snapshots")
     snapshot_date = models.DateField("快照日期")
+    is_draft = models.BooleanField("草稿", default=False)
     base_currency = models.CharField("本位币", max_length=10, default="CNY")
     usd_to_base = models.DecimalField("USD 汇率", max_digits=20, decimal_places=8, default=0)
     hkd_to_base = models.DecimalField("HKD 汇率", max_digits=20, decimal_places=8, default=0)
