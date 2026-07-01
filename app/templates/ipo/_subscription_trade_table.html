@@ -6,12 +6,16 @@
       <th>股票名称</th>
       <th>家庭成员</th>
       <th>申购账户</th>
-      <th>申购档位</th>
-      <th>申购手数</th>
+      {% if not closed_mode %}
+        <th>申购档位</th>
+        <th>申购手数</th>
+      {% endif %}
       <th>中签手数</th>
+      {% if closed_mode %}<th>最终定价</th>{% endif %}
       <th>卖出手数</th>
+      {% if closed_mode %}<th>卖出金额</th>{% endif %}
       <th>卖出日期</th>
-      <th>申购方式</th>
+      {% if not closed_mode %}<th>申购方式</th>{% endif %}
       <th>{% if amount_column == "holding" %}持有货值{% else %}费用合计{% endif %}</th>
       <th>盈利金额</th>
       <th>状态</th>
@@ -25,12 +29,16 @@
         <td>{{ trade.listing.stock_name|default:trade.listing.company_name }}</td>
         <td>{{ trade.member }}</td>
         <td>{{ trade.account.account_name|default:"-" }}</td>
-        <td>{{ trade.get_tranche_display }}</td>
-        <td class="number">{{ trade.applied_lots|lots }}</td>
+        {% if not closed_mode %}
+          <td>{{ trade.get_tranche_display }}</td>
+          <td class="number">{{ trade.applied_lots|lots }}</td>
+        {% endif %}
         <td class="number">{{ trade.allotted_lots|default:"-" }}</td>
+        {% if closed_mode %}<td class="number">{{ trade.listing.final_price|money2 }}</td>{% endif %}
         <td class="number">{{ trade.sold_lots|lots }}</td>
+        {% if closed_mode %}<td class="number">{{ trade.sell_price|money2 }}</td>{% endif %}
         <td>{{ trade.sell_date|date:"Y-m-d"|default:"-" }}</td>
-        <td>{{ trade.get_application_method_display }}</td>
+        {% if not closed_mode %}<td>{{ trade.get_application_method_display }}</td>{% endif %}
         <td class="number">
           {% if amount_column == "holding" %}
             {{ trade.holding_value|money2 }}
@@ -53,7 +61,7 @@
       </tr>
     {% empty %}
       <tr>
-        <td colspan="14">{{ empty_text|default:"暂无申购和交易记录。" }}</td>
+        <td colspan="{% if closed_mode %}13{% else %}14{% endif %}">{{ empty_text|default:"暂无申购和交易记录。" }}</td>
       </tr>
     {% endfor %}
   </tbody>

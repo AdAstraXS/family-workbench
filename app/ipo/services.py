@@ -289,7 +289,7 @@ def recognize_ipo_listing_from_image(uploaded_file):
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(request, timeout=90) as response:
+                with urllib.request.urlopen(request, timeout=25) as response:
                     response_data = json.loads(response.read().decode("utf-8"))
                 break
             except (urllib.error.URLError, TimeoutError) as exc:

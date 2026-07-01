@@ -12,7 +12,6 @@
 <section class="quick-actions">
   <a class="button" href="{% url 'ipo:subscription_trade_create' %}">新增申购</a>
   <a class="button ghost" href="{% url 'ipo:listing_list' %}">新股资料</a>
-  <a class="button ghost" href="https://livereport.tradegomart.com/#/enterprise/examination" target="_blank" rel="noopener noreferrer">港股通预测</a>
   <form method="get" class="ipo-year-filter">
     {% if profit_queries.selected_stock_id %}
       <input type="hidden" name="stock" value="{{ profit_queries.selected_stock_id }}">
@@ -217,13 +216,13 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_subscription_trade_table.html" with trades=closed_visible amount_column="fees" empty_text="暂无清仓新股。" %}
+      {% include "ipo/_subscription_trade_table.html" with trades=closed_visible amount_column="fees" empty_text="暂无清仓新股。" closed_mode=True %}
     </div>
     {% if closed_hidden %}
       <details class="ipo-more-listings">
         <summary>展开查看剩余 {{ closed_hidden|length }} 条清仓记录</summary>
         <div class="record-table-wrap ipo-table-wrap">
-          {% include "ipo/_subscription_trade_table.html" with trades=closed_hidden amount_column="fees" %}
+          {% include "ipo/_subscription_trade_table.html" with trades=closed_hidden amount_column="fees" closed_mode=True %}
         </div>
       </details>
     {% endif %}

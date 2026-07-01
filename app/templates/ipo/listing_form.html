@@ -78,18 +78,42 @@
     return true;
   }
 
+  async function optimizeImage(file) {
+    const bitmap = await createImageBitmap(file);
+    const maxDimension = 2200;
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#fff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (value) => value ? resolve(value) : reject(new Error("图片压缩失败")),
+        "image/jpeg",
+        0.88
+      );
+    });
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, "") || "ipo"}.jpg`, {
+      type: "image/jpeg",
+    });
+  }
+
   recognizeButton.addEventListener("click", async () => {
     const file = imageInput.files[0];
     if (!file) {
       setStatus("请先选择一张图片。", "error");
       return;
     }
-    const formData = new FormData();
-    formData.append("image", file);
-
     recognizeButton.disabled = true;
-    setStatus("正在识别图片内容，较大的截图可能需要等待几十秒...");
+    setStatus("正在优化并识别图片内容，可能需要等待几十秒...");
     try {
+      const optimizedFile = await optimizeImage(file);
+      const formData = new FormData();
+      formData.append("image", optimizedFile);
       const response = await fetch(recognizeUrl, {
         method: "POST",
         headers: {"X-CSRFToken": csrfToken},

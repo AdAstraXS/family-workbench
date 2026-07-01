@@ -8,6 +8,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -143,6 +144,31 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
         self.assertContains(response, "费用合计", count=2)
         self.assertContains(response, "持有货值", count=1)
         self.assertContains(response, "2,000.00")
+
+    def test_closed_trade_table_uses_sale_columns(self):
+        trade = self.make_trade(
+            allotted_lots=2,
+            sold_lots=2,
+            sell_price=Decimal("12"),
+            sell_date=date(2026, 6, 9),
+        )
+
+        html = render_to_string(
+            "ipo/_subscription_trade_table.html",
+            {
+                "trades": [trade],
+                "closed_mode": True,
+                "amount_column": "fees",
+            },
+        )
+
+        self.assertNotIn("申购档位", html)
+        self.assertNotIn("申购手数", html)
+        self.assertNotIn("申购方式", html)
+        self.assertIn("最终定价", html)
+        self.assertIn("10.00", html)
+        self.assertIn("卖出金额", html)
+        self.assertIn("12.00", html)
 
     def test_closed_stock_metric_excludes_zero_allotment_records(self):
         user = get_user_model().objects.create_user(
@@ -756,7 +782,9 @@ class HkIpoExpectedMarginTests(TestCase):
             response = self.client.get(reverse("ipo:listing_list"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "预计孖展", count=2)
+        self.assertContains(response, "预计孖展")
+        self.assertContains(response, "港股通预测")
+        self.assertContains(response, "后续涨幅")
         self.assertEqual(response.context["metrics"]["grey_market_today"], 1)
         self.assertEqual(response.context["current_date"], today)
         content = response.content.decode()
@@ -774,6 +802,22 @@ class HkIpoExpectedMarginTests(TestCase):
         self.assertNotContains(response, "甲尾信息")
         self.assertNotContains(response, "乙头信息")
         self.assertNotContains(response, "预测中签情况")
+
+    def test_expected_margin_endpoint_fetches_data_without_blocking_listing_page(self):
+        user = get_user_model().objects.create_user(
+            username="margin-endpoint-tester",
+            password="test-password",
+        )
+        self.client.force_login(user)
+
+        with patch(
+            "ipo.views.fetch_vbkr_expected_margin_multiples",
+            return_value={"02667.HK": "81.31倍"},
+        ):
+            response = self.client.get(reverse("ipo:expected_margin_data"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["02667.HK"], "81.31倍")
 
     def test_listing_page_year_filter_limits_metrics_and_tables(self):
         user = get_user_model().objects.create_user(

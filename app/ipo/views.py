@@ -15,6 +15,7 @@ from .forms import HkIpoListingForm, HkIpoSubscriptionTradeForm
 from .models import HkIpoListing, HkIpoSubscriptionTrade
 from .services import (
     IpoImageRecognitionError,
+    fetch_vbkr_expected_margin_multiples,
     get_cached_vbkr_expected_margin_multiples,
     refresh_hk_connect_threshold,
     refresh_listed_market_data,
@@ -367,6 +368,15 @@ def listing_list(request):
 def listing_detail(request, pk):
     listing = get_object_or_404(HkIpoListing, pk=pk)
     return render(request, "ipo/listing_detail.html", {"listing": listing})
+
+
+@login_required
+def expected_margin_data(request):
+    if request.method != "GET":
+        return JsonResponse({"ok": False, "error": "只支持 GET 请求。"}, status=405)
+    return JsonResponse(
+        {"ok": True, "data": fetch_vbkr_expected_margin_multiples()}
+    )
 
 
 @login_required

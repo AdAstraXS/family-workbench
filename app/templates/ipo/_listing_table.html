@@ -64,7 +64,11 @@
             {% endwith %}
           </td>
           <td class="number">{{ listing.public_offer_lots|lots }}</td>
-          {% if show_expected_margin %}<td class="number">{{ listing.expected_margin_multiple|default:"-" }}</td>{% endif %}
+          {% if show_expected_margin %}
+            <td class="number" data-expected-margin-code="{{ listing.stock_code }}">
+              {{ listing.expected_margin_multiple|default:"加载中…" }}
+            </td>
+          {% endif %}
           <td class="number">{{ listing.final_price|money2 }}</td>
           <td class="number">{{ listing.lot_size|lots }}</td>
           <td class="number">{{ listing.entry_fee|money2 }}</td>

@@ -8,6 +8,7 @@ app_name = "ipo"
 urlpatterns = [
     path("", views.index, name="index"),
     path("listings/", views.listing_list, name="listing_list"),
+    path("listings/expected-margin/", views.expected_margin_data, name="expected_margin_data"),
     path("subscriptions/", views.subscription_trade_list, name="subscription_trade_list"),
     path("subscriptions/create/", views.subscription_trade_create, name="subscription_trade_create"),
     path("subscriptions/<int:pk>/edit/", views.subscription_trade_edit, name="subscription_trade_edit"),
