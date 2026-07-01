@@ -2,10 +2,14 @@ import base64
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from html import unescape
+import http.client
+import io
 import json
 import logging
 import os
 import re
+import socket
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -67,6 +71,7 @@ FIELD_SCHEMA = {
 }
 
 VBKR_IPO_URL = "https://www.vbkr.com/ipo/hk/v2/ipo-hk-index"
+DNS_OVER_HTTPS_URL = "https://doh.pub/dns-query"
 _vbkr_margin_cache = {"fetched_at": None, "data": {}}
 JESSE_LIVERMORE_IPO_URL = "https://www.jesselivermore.com/ipo.html"
 JESSE_LIVERMORE_IPO_API_URL = (
@@ -170,6 +175,82 @@ def get_chat_completions_url(provider):
     if base_url.endswith("/chat/completions"):
         return base_url
     return f"{base_url}/chat/completions"
+
+
+def _resolve_ipv4_with_doh(hostname):
+    query = urllib.parse.urlencode({"name": hostname, "type": "A"})
+    request = urllib.request.Request(
+        f"{DNS_OVER_HTTPS_URL}?{query}",
+        headers={
+            "Accept": "application/dns-json",
+            "User-Agent": "FamilyWorkbench/1.0",
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=8) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    for answer in payload.get("Answer", []):
+        address = str(answer.get("data", "")).strip()
+        if answer.get("type") == 1:
+            socket.inet_aton(address)
+            return address
+    raise OSError(f"DoH 未返回 {hostname} 的 IPv4 地址")
+
+
+def _read_https_via_ipv4(request, ipv4_address, timeout):
+    parsed = urllib.parse.urlsplit(request.full_url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("IPv4 回退仅支持 HTTPS URL")
+
+    port = parsed.port or 443
+    connection = http.client.HTTPSConnection(parsed.hostname, port, timeout=timeout)
+    raw_socket = socket.create_connection((ipv4_address, port), timeout=timeout)
+    connection.sock = ssl.create_default_context().wrap_socket(
+        raw_socket,
+        server_hostname=parsed.hostname,
+    )
+    path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+    headers = dict(request.header_items())
+    headers.setdefault("Host", parsed.netloc)
+    try:
+        connection.request(
+            request.get_method(),
+            path,
+            body=request.data,
+            headers=headers,
+        )
+        response = connection.getresponse()
+        body = response.read()
+        if response.status >= 400:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                response.status,
+                response.reason,
+                response.headers,
+                io.BytesIO(body),
+            )
+        return body
+    finally:
+        connection.close()
+
+
+def _read_url_with_ipv4_doh_fallback(request, timeout):
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read()
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        hostname = urllib.parse.urlsplit(request.full_url).hostname
+        if not hostname:
+            raise
+        logger.warning(
+            "Direct request to %s failed, retrying through DoH IPv4 resolution: %s",
+            hostname,
+            exc,
+        )
+        ipv4_address = _resolve_ipv4_with_doh(hostname)
+        return _read_https_via_ipv4(request, ipv4_address, timeout)
 
 
 def strip_json_markdown(text):
@@ -289,9 +370,11 @@ def recognize_ipo_listing_from_image(uploaded_file):
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(request, timeout=25) as response:
+                with urllib.request.urlopen(request, timeout=45) as response:
                     response_data = json.loads(response.read().decode("utf-8"))
                 break
+            except urllib.error.HTTPError:
+                raise
             except (urllib.error.URLError, TimeoutError) as exc:
                 logger.warning("IPO image recognition request failed on attempt %s: %s", attempt + 1, exc)
                 if attempt == 1:
@@ -379,17 +462,12 @@ def fetch_vbkr_expected_margin_multiples():
         method="GET",
     )
     try:
-        html = ""
-        for attempt in range(2):
-            try:
-                with urllib.request.urlopen(request, timeout=12) as response:
-                    html = response.read().decode("utf-8", errors="replace")
-                break
-            except (urllib.error.URLError, TimeoutError) as exc:
-                logger.warning("VBKR expected margin fetch failed on attempt %s: %s", attempt + 1, exc)
-                if attempt == 1:
-                    raise
-    except (urllib.error.URLError, TimeoutError):
+        html = _read_url_with_ipv4_doh_fallback(request, timeout=12).decode(
+            "utf-8",
+            errors="replace",
+        )
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        logger.warning("VBKR expected margin fetch failed: %s", exc)
         return _vbkr_margin_cache["data"]
 
     text = re.sub(r"<[^>]+>", " ", html)

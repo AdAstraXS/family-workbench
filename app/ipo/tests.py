@@ -3,6 +3,7 @@ from decimal import Decimal
 import io
 import json
 import os
+import urllib.error
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -22,11 +23,14 @@ from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
 from .services import (
     IpoImageRecognitionError,
     _hk_connect_threshold_cache,
+    _vbkr_margin_cache,
     build_prompt,
     fetch_hk_connect_threshold_100m,
     fetch_jesselivermore_ipo_metrics,
+    fetch_vbkr_expected_margin_multiples,
     get_api_key,
     normalize_value,
+    recognize_ipo_listing_from_image,
     refresh_listed_market_data,
 )
 from .views import subscription_trade_list_url
@@ -546,6 +550,31 @@ class IpoImageRecognitionApiKeyTests(TestCase):
             with self.assertRaisesMessage(IpoImageRecognitionError, "不能保存在数据库"):
                 get_api_key(provider)
 
+    def test_http_authentication_error_is_not_retried_or_masked_by_timeout(self):
+        AiProvider.objects.create(
+            name="BigModel",
+            provider_type="openai_compatible",
+            base_url="https://open.bigmodel.cn/api/paas/v4",
+            model_name="glm-5v-turbo",
+        )
+        upload = SimpleUploadedFile("ipo.png", b"image", content_type="image/png")
+        error = urllib.error.HTTPError(
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            401,
+            "Unauthorized",
+            {},
+            io.BytesIO(b"invalid key"),
+        )
+
+        with (
+            patch.dict(os.environ, {"ZHIPU_API_KEY": "valid-looking-key"}, clear=True),
+            patch("ipo.services.urllib.request.urlopen", side_effect=error) as urlopen,
+        ):
+            with self.assertRaisesMessage(IpoImageRecognitionError, "HTTP 401"):
+                recognize_ipo_listing_from_image(upload)
+
+        self.assertEqual(urlopen.call_count, 1)
+
 
 class IpoUploadValidationTests(TestCase):
     def setUp(self):
@@ -736,6 +765,46 @@ class HkConnectExpectationTests(TestCase):
 
 
 class HkIpoExpectedMarginTests(TestCase):
+    def setUp(self):
+        _vbkr_margin_cache.update({"fetched_at": None, "data": {}})
+
+    def test_margin_fetch_uses_doh_ipv4_fallback_when_normal_dns_route_fails(self):
+        doh_payload = {
+            "Status": 0,
+            "Answer": [
+                {
+                    "name": "www.vbkr.com.",
+                    "type": 1,
+                    "TTL": 60,
+                    "data": "150.109.153.48",
+                }
+            ],
+        }
+        html = (
+            "02667.HK 同仁堂医养 最大10倍杠杆融资 84.19倍 "
+            "01770.HK 东方科脉 最大10倍杠杆融资 50.69倍"
+        ).encode()
+
+        with (
+            patch(
+                "ipo.services.urllib.request.urlopen",
+                side_effect=[
+                    urllib.error.URLError("direct route unavailable"),
+                    io.BytesIO(json.dumps(doh_payload).encode()),
+                ],
+            ),
+            patch(
+                "ipo.services._read_https_via_ipv4",
+                return_value=html,
+            ) as direct_ipv4,
+        ):
+            data = fetch_vbkr_expected_margin_multiples()
+
+        direct_ipv4.assert_called_once()
+        self.assertEqual(direct_ipv4.call_args.args[1], "150.109.153.48")
+        self.assertEqual(data["02667.HK"], "84.19倍")
+        self.assertEqual(data["01770"], "50.69倍")
+
     def test_listing_page_shows_expected_margin_for_subscribing_and_waiting_tables(self):
         user = get_user_model().objects.create_user(
             username="listing-metric-tester",
