@@ -23,6 +23,7 @@ from .forms import (
     make_asset_balance_entry_formset,
 )
 from .expense_import import ExpenseWorkbookError, import_expense_workbook
+from .expense_export import build_expense_workbook
 from .asset_snapshot_export import build_asset_snapshot_workbook
 from .models import AnnualBudget, AnnualBudgetLine, AssetBalanceSnapshot, BankAccount, ExpenseCategory, ExpenseImportBatch, ExpenseRecord, IncomeCategory, IncomeRecord
 from family_core.models import Family, FamilyMember
@@ -707,12 +708,13 @@ def build_budget_total_row(label, rows, line_type):
 
 def expense_budget_group(row):
     category = row["category"]
-    if category and category.parent:
-        return category.parent.name
-    label = row.get("category_label") or (str(category) if category else "")
-    if "-" in label:
-        return label.split("-", 1)[0]
-    return label or "其他"
+    if not category:
+        return None
+    visited = set()
+    while category.parent and category.pk not in visited:
+        visited.add(category.pk)
+        category = category.parent
+    return category
 
 
 def get_latest_budget_line_initial():
@@ -725,6 +727,7 @@ def get_latest_budget_line_initial():
             "income_category__parent",
             "expense_category",
             "expense_category__parent",
+            "expense_category__parent__parent",
         )
     )
     latest_lines.sort(
@@ -848,10 +851,27 @@ def build_budget_report(budget):
     line_rows.sort(key=budget_line_sort_key)
     income_line_rows = [row for row in line_rows if row["line"].line_type == AnnualBudgetLine.LINE_TYPE_INCOME]
     expense_line_rows = [row for row in line_rows if row["line"].line_type == AnnualBudgetLine.LINE_TYPE_EXPENSE]
+    active_expense_roots = list(
+        ExpenseCategory.objects.filter(
+            family=budget.family,
+            parent__isnull=True,
+            is_active=True,
+        ).order_by("name")
+    )
     expense_summary_rows = []
-    for group_name in ["经营性", "固定资产", "营业外"]:
-        group_rows = [row for row in expense_line_rows if expense_budget_group(row) == group_name]
-        expense_summary_rows.append(build_budget_total_row(f"{group_name}汇总", group_rows, AnnualBudgetLine.LINE_TYPE_EXPENSE))
+    for root in active_expense_roots:
+        group_rows = [
+            row
+            for row in expense_line_rows
+            if expense_budget_group(row) == root
+        ]
+        expense_summary_rows.append(
+            build_budget_total_row(
+                f"{root.name}汇总",
+                group_rows,
+                AnnualBudgetLine.LINE_TYPE_EXPENSE,
+            )
+        )
     expense_summary_rows.append(build_budget_total_row("支出汇总", expense_line_rows, AnnualBudgetLine.LINE_TYPE_EXPENSE))
 
     for record in income_records:
@@ -1730,6 +1750,37 @@ def cashflow_summary(request, year=None):
             ),
         },
     )
+
+
+@login_required
+def expense_year_export(request, year):
+    default_family, _, expense_records = get_default_family_records()
+    records = list(
+        expense_records.filter(
+            Q(period_start__year=year)
+            | Q(period_start__isnull=True, expense_date__year=year)
+        )
+        .select_related("import_batch")
+        .order_by(
+            "expense_date",
+            "occurred_at",
+            "member__display_name",
+            "created_at",
+        )
+    )
+    output = build_expense_workbook(records, year)
+    family_name = default_family.name if default_family else "家庭"
+    filename = f"{family_name}_{year}年支出明细.xlsx"
+    response = HttpResponse(
+        output.getvalue(),
+        content_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+    )
+    response["Content-Disposition"] = (
+        f"attachment; filename*=UTF-8''{quote(filename)}"
+    )
+    return response
 
 
 @login_required

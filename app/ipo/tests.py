@@ -785,9 +785,13 @@ class HkIpoExpectedMarginTests(TestCase):
         self.assertContains(response, "预计孖展")
         self.assertContains(response, "港股通预测")
         self.assertContains(response, "后续涨幅")
+        self.assertContains(response, "external-link-button", count=3)
         self.assertEqual(response.context["metrics"]["grey_market_today"], 1)
         self.assertEqual(response.context["current_date"], today)
         content = response.content.decode()
+        self.assertLess(content.index("当前日期"), content.index("港股通预测"))
+        self.assertLess(content.index("港股通预测"), content.index("预计孖展"))
+        self.assertLess(content.index("预计孖展"), content.index("后续涨幅"))
         metric_labels = [
             "今日上市数量",
             "今日暗盘数量",

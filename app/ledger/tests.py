@@ -314,6 +314,57 @@ class LedgerExpenseImportTests(TestCase):
         self.assertEqual(sum(item["value"] for item in annual_pies["secondary"]), 30000.0)
         self.assertEqual(sum(item["value"] for item in annual_pies["tertiary"]), 30000.0)
 
+    def test_year_expense_export_contains_every_record_and_category_level(self):
+        primary = ExpenseCategory.objects.create(family=self.family, name="经常性")
+        secondary = ExpenseCategory.objects.create(
+            family=self.family,
+            name="餐饮",
+            parent=primary,
+        )
+        tertiary = ExpenseCategory.objects.create(
+            family=self.family,
+            name="食堂",
+            parent=secondary,
+        )
+        ExpenseRecord.objects.create(
+            family=self.family,
+            member=self.me,
+            bank_account=self.accounts[("我", "微信")],
+            category=tertiary,
+            expense_date=date(2026, 6, 20),
+            period_start=date(2026, 6, 1),
+            period_end=date(2026, 6, 30),
+            amount=Decimal("25.50"),
+            merchant="家庭食堂",
+            remark="午餐",
+        )
+        ExpenseRecord.objects.create(
+            family=self.family,
+            member=self.me,
+            expense_date=date(2025, 12, 20),
+            amount=Decimal("99"),
+            remark="其他年份",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("ledger:expense_year_export", args=[2026])
+        )
+        workbook = load_workbook(BytesIO(response.content), data_only=False)
+        worksheet = workbook["2026年支出明细"]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment;", response["Content-Disposition"])
+        self.assertEqual(worksheet.max_row, 3)
+        self.assertEqual(worksheet["A2"].value, "记录ID")
+        self.assertEqual(worksheet["H3"].value, "经常性")
+        self.assertEqual(worksheet["I3"].value, "餐饮")
+        self.assertEqual(worksheet["J3"].value, "食堂")
+        self.assertEqual(worksheet["K3"].value, 25.5)
+        self.assertEqual(worksheet["K3"].number_format, "#,##0.00")
+        self.assertEqual(worksheet["O3"].value, "午餐")
+        workbook.close()
+
     def test_expense_index_cashflow_chart_supports_single_year_and_all_years(self):
         recurring = ExpenseCategory.objects.create(family=self.family, name="经常性")
         dining = ExpenseCategory.objects.create(
@@ -1016,6 +1067,71 @@ class AnnualBudgetReportTests(TestCase):
         self.assertContains(response, "攒钱计划")
         self.assertEqual(response.context["rows"][0]["savings_budget"], Decimal("60"))
 
+    def test_expense_summary_rows_follow_current_primary_categories(self):
+        recurring = ExpenseCategory.objects.create(
+            family=self.family,
+            name="经常性",
+        )
+        recurring_child = ExpenseCategory.objects.create(
+            family=self.family,
+            name="餐饮",
+            parent=recurring,
+        )
+        non_recurring = ExpenseCategory.objects.create(
+            family=self.family,
+            name="非经常性",
+        )
+        non_recurring_child = ExpenseCategory.objects.create(
+            family=self.family,
+            name="大额支出",
+            parent=non_recurring,
+        )
+        old_root = ExpenseCategory.objects.create(
+            family=self.family,
+            name="经营性",
+        )
+        old_child = ExpenseCategory.objects.create(
+            family=self.family,
+            name="旧分类",
+            parent=old_root,
+        )
+        budget = AnnualBudget.objects.create(family=self.family, year=2026)
+        AnnualBudgetLine.objects.create(
+            budget=budget,
+            line_type=AnnualBudgetLine.LINE_TYPE_EXPENSE,
+            expense_category=recurring_child,
+            annual_amount=Decimal("100"),
+        )
+        AnnualBudgetLine.objects.create(
+            budget=budget,
+            line_type=AnnualBudgetLine.LINE_TYPE_EXPENSE,
+            expense_category=non_recurring_child,
+            annual_amount=Decimal("200"),
+        )
+        old_line = AnnualBudgetLine.objects.create(
+            budget=budget,
+            line_type=AnnualBudgetLine.LINE_TYPE_EXPENSE,
+            expense_category=old_child,
+            annual_amount=Decimal("300"),
+            extra_data={"category_path": "经营性-旧分类"},
+        )
+        old_child.delete()
+        old_root.delete()
+        old_line.refresh_from_db()
+
+        report = build_budget_report(budget)
+        summary_rows = {
+            row["label"]: row for row in report["expense_summary_rows"]
+        }
+
+        self.assertEqual(
+            set(summary_rows),
+            {"经常性汇总", "非经常性汇总", "支出汇总"},
+        )
+        self.assertEqual(summary_rows["经常性汇总"]["budget"], Decimal("100"))
+        self.assertEqual(summary_rows["非经常性汇总"]["budget"], Decimal("200"))
+        self.assertNotIn("经营性汇总", summary_rows)
+
 
 class CategoryManagementTests(TestCase):
     def setUp(self):
@@ -1226,20 +1342,37 @@ class LedgerNavigationAndRedirectTests(TestCase):
         )
         self.assertNotContains(response, 'class="button page-nav-module"')
 
-    def test_month_detail_parent_is_year_detail_not_browser_history(self):
-        response = self.client.get(
+    def test_expense_pages_follow_annual_monthly_record_hierarchy(self):
+        monthly_summary = self.client.get(
+            reverse("ledger:cashflow_summary_year", args=[2026])
+        )
+        month_detail = self.client.get(
             reverse(
                 "ledger:expense_month_detail",
                 kwargs={"year": 2026, "month": 6},
             )
         )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(
-            response,
-            f'href="{reverse("ledger:expense_year_detail", args=[2026])}"',
+        year_detail = self.client.get(
+            reverse("ledger:expense_year_detail", args=[2026])
         )
-        self.assertNotContains(response, "data-page-back")
+
+        self.assertEqual(
+            monthly_summary.context["page_parent_url"],
+            reverse("ledger:expense_list"),
+        )
+        expected_detail_parent = reverse(
+            "ledger:cashflow_summary_year",
+            args=[2026],
+        )
+        self.assertEqual(
+            month_detail.context["page_parent_url"],
+            expected_detail_parent,
+        )
+        self.assertEqual(
+            year_detail.context["page_parent_url"],
+            expected_detail_parent,
+        )
+        self.assertNotContains(month_detail, "data-page-back")
 
     def test_delete_redirect_does_not_accept_scheme_relative_external_url(self):
         record = ExpenseRecord.objects.create(

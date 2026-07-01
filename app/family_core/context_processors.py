@@ -15,15 +15,15 @@ def page_navigation(request):
     if app_name == "ledger":
         if url_name == "overview":
             parent_url = reverse("dashboard:home")
-        elif url_name == "expense_month_detail":
+        elif url_name in {"expense_month_detail", "expense_year_detail"}:
             parent_url = reverse(
-                "ledger:expense_year_detail",
+                "ledger:cashflow_summary_year",
                 kwargs={"year": kwargs["year"]},
             )
-        elif url_name == "expense_year_detail":
-            parent_url = reverse("ledger:expense_list")
         elif url_name == "cashflow_summary_year":
-            parent_url = reverse("ledger:cashflow_summary")
+            parent_url = reverse("ledger:expense_list")
+        elif url_name == "cashflow_summary":
+            parent_url = reverse("ledger:expense_list")
         elif url_name in {"asset_snapshot_detail"}:
             parent_url = reverse("ledger:asset_snapshot_list")
         elif url_name == "asset_snapshot_edit":

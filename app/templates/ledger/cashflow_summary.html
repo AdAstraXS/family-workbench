@@ -11,6 +11,9 @@
     <h1>{% if year %}{{ year }}年月度收支汇总{% else %}月度收支汇总{% endif %}</h1>
   </div>
   <div class="inline-actions">
+    {% if year %}
+      <a class="button export-button" href="{% url 'ledger:expense_year_export' year %}">导出全年支出 Excel</a>
+    {% endif %}
     <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
     <a class="button" href="{% url 'ledger:expense_create' %}">新增支出</a>
   </div>

@@ -12,13 +12,13 @@
 <section class="quick-actions">
   <a class="button" href="{% url 'ipo:listing_create' %}">新增新股资料</a>
   <a class="button ghost" href="{% url 'ipo:subscription_trade_list' %}">申购和交易</a>
-  <a class="button ghost" href="https://livereport.tradegomart.com/#/enterprise/examination" target="_blank" rel="noopener noreferrer">港股通预测</a>
-  <a class="button ghost" href="https://www.vbkr.com/ipo/hk/v2/ipo-hk-index" target="_blank" rel="noopener noreferrer">预计孖展</a>
-  <a class="button ghost" href="https://www.jesselivermore.com/ipo.html" target="_blank" rel="noopener noreferrer">后续涨幅</a>
   <time class="quick-action-date" datetime="{{ current_date|date:'Y-m-d' }}">
     <span>当前日期</span>
     <strong>{{ current_date|date:"Y年m月d日" }}</strong>
   </time>
+  <a class="button external-link-button" href="https://livereport.tradegomart.com/#/enterprise/examination" target="_blank" rel="noopener noreferrer">港股通预测</a>
+  <a class="button external-link-button" href="https://www.vbkr.com/ipo/hk/v2/ipo-hk-index" target="_blank" rel="noopener noreferrer">预计孖展</a>
+  <a class="button external-link-button" href="https://www.jesselivermore.com/ipo.html" target="_blank" rel="noopener noreferrer">后续涨幅</a>
   <form method="get" class="ipo-year-filter">
     <label for="ipo-listing-year">统计年份</label>
     <select id="ipo-listing-year" name="year" onchange="this.form.submit()">

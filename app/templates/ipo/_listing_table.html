@@ -35,7 +35,7 @@
         <td><span class="ipo-chip type-{{ listing.listing_type }}">{{ listing.get_listing_type_display }}</span></td>
         {% if listed_mode %}
           <td>{{ listing.listing_date|date:"Y-m-d"|default:"-" }}</td>
-          <td>{{ listing.industry|default:"-" }}</td>
+          <td class="ipo-industry-cell"><span>{{ listing.industry|default:"-" }}</span></td>
           <td class="number">
             {% if listing.over_subscription_multiple == None %}
               -

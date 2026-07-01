@@ -645,6 +645,35 @@ button {
   color: #1f2937;
 }
 
+.button.external-link-button {
+  gap: 5px;
+  border: 1px solid #0891b2;
+  background: #ecfeff;
+  color: #155e75;
+  box-shadow: 0 1px 2px rgba(8, 145, 178, 0.12);
+}
+
+.button.external-link-button::after {
+  content: "↗";
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.button.external-link-button:hover {
+  border-color: #0e7490;
+  background: #cffafe;
+}
+
+.button.export-button {
+  border: 1px solid #15803d;
+  background: #ecfdf3;
+  color: #166534;
+}
+
+.button.export-button:hover {
+  background: #dcfce7;
+}
+
 input,
 select,
 textarea {
@@ -2094,6 +2123,23 @@ textarea {
 
 .ipo-listing-table .number {
   text-align: center;
+}
+
+.ipo-listing-table .ipo-industry-cell {
+  height: 38px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.ipo-listing-table .ipo-industry-cell span {
+  display: -webkit-box;
+  max-height: 28px;
+  overflow: hidden;
+  line-height: 14px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .ipo-listing-table .row-actions {
