@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% load money %}
 
 {% block title %}家庭账本{% endblock %}
@@ -17,8 +18,57 @@
 </section>
 <section class="metrics">
   <div class="metric"><span>最新资产快照</span><strong>{{ bank_total|thousands }}</strong></div>
-  <div class="metric"><span>本月收入</span><strong>{{ month_income|thousands }}</strong></div>
-  <div class="metric"><span>本月支出</span><strong>{{ month_expense|thousands }}</strong></div>
-  <div class="metric"><span>本月结余</span><strong>{{ month_net|thousands }}</strong></div>
+  <div class="metric"><span>本年收入</span><strong>{{ year_income|thousands }}</strong></div>
+  <div class="metric"><span>本年支出</span><strong>{{ year_expense|thousands }}</strong></div>
+  <div class="metric"><span>本年结余</span><strong>{{ year_net|thousands }}</strong></div>
 </section>
+
+<section class="panel ledger-chart-panel">
+  <div class="ledger-chart-head">
+    <div>
+      <span class="asset-trend-eyebrow">LATEST ASSET ALLOCATION</span>
+      <h2>最近期资产类别分布</h2>
+      <p>
+        {% if latest_snapshot %}
+          {{ latest_snapshot.snapshot_date|date:"Y年n月j日" }}资产快照 · 本位币金额 · 单位：元
+        {% else %}
+          暂无资产快照
+        {% endif %}
+      </p>
+    </div>
+  </div>
+  <div id="overview-asset-pies" class="overview-pie-grid"></div>
+</section>
+
+<section class="overview-chart-grid">
+  <article class="panel ledger-chart-panel">
+    <div class="ledger-chart-head">
+      <div>
+        <span class="asset-trend-eyebrow">ANNUAL BUDGET</span>
+        <h2>年度预算执行</h2>
+        <p>{% if budget %}{{ budget.year }}年 · 单位：元{% else %}{{ year }}年暂无年度预算{% endif %}</p>
+      </div>
+    </div>
+    <svg id="overview-budget-chart" class="overview-bar-chart" viewBox="0 0 720 350" role="img" aria-label="年度预算与实际执行横向柱状图"></svg>
+    <div id="overview-budget-empty" class="asset-trend-empty" hidden>暂无本年度预算数据</div>
+  </article>
+
+  <article class="panel ledger-chart-panel">
+    <div class="ledger-chart-head">
+      <div>
+        <span class="asset-trend-eyebrow">INVESTMENT RETURN</span>
+        <h2>本年投资收益</h2>
+        <p>家庭合计与成员对比 · 单位：元</p>
+      </div>
+    </div>
+    <svg id="overview-return-chart" class="overview-bar-chart" viewBox="0 0 720 350" role="img" aria-label="家庭及成员本年投资收益柱状图"></svg>
+    <div id="overview-return-empty" class="asset-trend-empty" hidden>暂无投资收益数据</div>
+  </article>
+</section>
+
+{{ chart_data|json_script:"ledger-overview-chart-data" }}
+{% endblock %}
+
+{% block scripts %}
+  <script src="{% static 'js/ledger_overview.js' %}"></script>
 {% endblock %}

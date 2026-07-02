@@ -699,7 +699,6 @@ def build_budget_total_row(label, rows, line_type):
         "label": label,
         "line_type": line_type,
         "budget": budget_amount,
-        "monthly_budget": budget_amount / Decimal("12"),
         "actual": actual,
         "variance": variance,
         "execution_rate": execution_rate,
@@ -841,7 +840,6 @@ def build_budget_report(budget):
                 "category": category,
                 "category_label": budget_category_label(line),
                 "budget": budget_amount,
-                "monthly_budget": budget_amount / Decimal("12"),
                 "actual": actual,
                 "variance": variance,
                 "execution_rate": execution_rate,
@@ -879,41 +877,12 @@ def build_budget_report(budget):
     for record in expense_records:
         total_expense_actual += record.amount or Decimal("0")
 
-    month_rows = []
-    for month in range(1, 13):
-        income_actual = sum(
-            (record.amount or Decimal("0"))
-            for record in income_records
-            if get_period_month(record, "income_date") == month
-        )
-        expense_actual = sum(
-            (record.amount or Decimal("0"))
-            for record in expense_records
-            if get_period_month(record, "expense_date") == month
-        )
-        income_budget = total_income_budget / Decimal("12")
-        expense_budget = total_expense_budget / Decimal("12")
-        month_rows.append(
-            {
-                "label": f"{budget.year}年{month}月",
-                "income_budget": income_budget,
-                "income_actual": income_actual,
-                "income_variance": income_actual - income_budget,
-                "expense_budget": expense_budget,
-                "expense_actual": expense_actual,
-                "expense_variance": expense_actual - expense_budget,
-                "net_budget": income_budget - expense_budget,
-                "net_actual": income_actual - expense_actual,
-            }
-        )
-
     return {
         "line_rows": line_rows,
         "income_line_rows": income_line_rows,
         "income_summary_row": build_budget_total_row("收入汇总", income_line_rows, AnnualBudgetLine.LINE_TYPE_INCOME),
         "expense_line_rows": expense_line_rows,
         "expense_summary_rows": expense_summary_rows,
-        "month_rows": month_rows,
         "summary": {
             "income_budget": total_income_budget,
             "income_actual": total_income_actual,
@@ -1301,30 +1270,105 @@ def build_investment_return_report():
     }
 
 
+def build_overview_asset_charts(snapshot):
+    if not snapshot:
+        return []
+    members = list(
+        FamilyMember.objects.filter(family=snapshot.family, is_active=True).order_by("id")
+    )
+    member_totals = {member.id: {} for member in members}
+    family_totals = {}
+    for entry in snapshot.entries.select_related("asset_category", "member"):
+        category = entry.asset_category.name if entry.asset_category else "未分类"
+        amount = entry.base_amount or Decimal("0")
+        family_totals[category] = family_totals.get(category, Decimal("0")) + amount
+        if entry.member_id in member_totals:
+            totals = member_totals[entry.member_id]
+            totals[category] = totals.get(category, Decimal("0")) + amount
+
+    def chart(label, totals):
+        return {
+            "label": label,
+            "items": [
+                {"name": name, "value": float(amount)}
+                for name, amount in sorted(totals.items())
+                if amount > 0
+            ],
+        }
+
+    return [chart("家庭合计", family_totals)] + [
+        chart(member.display_name, member_totals[member.id])
+        for member in members
+    ]
+
+
 @login_required
 def overview(request):
+    today = timezone.localdate()
+    family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
     latest_snapshot = (
-        AssetBalanceSnapshot.objects.filter(is_draft=False)
+        AssetBalanceSnapshot.objects.filter(family=family, is_draft=False)
         .order_by("-snapshot_date", "-created_at")
         .first()
+        if family
+        else None
     )
     bank_total = latest_snapshot.entries.aggregate(total=Sum("base_amount"))["total"] if latest_snapshot else 0
     bank_total = bank_total or 0
-    month_income = IncomeRecord.objects.filter(
-        current_month_record_filter("income_date", "period_start", "period_end")
+    year_income = IncomeRecord.objects.filter(family=family).filter(
+        Q(period_start__year=today.year)
+        | Q(period_start__isnull=True, income_date__year=today.year)
     ).aggregate(total=Sum("amount"))["total"] or 0
-    month_expense = ExpenseRecord.objects.filter(
-        current_month_record_filter("expense_date", "period_start", "period_end")
+    year_expense = ExpenseRecord.objects.filter(family=family).filter(
+        Q(period_start__year=today.year)
+        | Q(period_start__isnull=True, expense_date__year=today.year)
     ).aggregate(total=Sum("amount"))["total"] or 0
+    budget = (
+        AnnualBudget.objects.filter(family=family, year=today.year).first()
+        if family
+        else None
+    )
+    budget_summary = build_budget_report(budget)["summary"] if budget else None
+    investment_report = build_investment_return_report()
+    investment_rows = investment_report["rows"]
+    chart_data = {
+        "unit": "元",
+        "asset_charts": build_overview_asset_charts(latest_snapshot),
+        "budget": {
+            "year": budget.year,
+            "items": [
+                {"name": "收入预算", "value": float(budget_summary["income_budget"])},
+                {"name": "实际收入", "value": float(budget_summary["income_actual"])},
+                {"name": "支出预算", "value": float(budget_summary["expense_budget"])},
+                {"name": "实际支出", "value": float(budget_summary["expense_actual"])},
+                {"name": "预算结余", "value": float(budget_summary["net_budget"])},
+                {"name": "实际结余", "value": float(budget_summary["net_actual"])},
+            ],
+        } if budget else None,
+        "investment_returns": [
+            {"name": row["label"], "value": float(row["year_investment_return"])}
+            for row in sorted(
+                investment_rows,
+                key=lambda row: {
+                    "家庭合计": 0,
+                    "我": 1,
+                    "孙秘书": 2,
+                }.get(row["label"], 3),
+            )
+        ],
+    }
     return render(
         request,
         "ledger/overview.html",
         {
             "bank_total": bank_total,
-            "month_income": month_income,
-            "month_expense": month_expense,
-            "month_net": month_income - month_expense,
+            "year": today.year,
+            "year_income": year_income,
+            "year_expense": year_expense,
+            "year_net": year_income - year_expense,
             "latest_snapshot": latest_snapshot,
+            "budget": budget,
+            "chart_data": chart_data,
         },
     )
 

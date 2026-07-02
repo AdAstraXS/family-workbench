@@ -92,37 +92,4 @@
   </div>
 </section>
 
-<section class="panel record-panel budget-month-panel">
-  <div class="section-head inner-head">
-    <h2>月度节奏对比</h2>
-  </div>
-  <div class="record-table-wrap">
-    <table class="record-table budget-table budget-month-table">
-      <thead>
-        <tr>
-          <th>月份</th>
-          <th>实际收入</th>
-          <th>支出预算</th>
-          <th>实际支出</th>
-          <th>支出偏差</th>
-          <th>预算结余</th>
-          <th>实际结余</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in report.month_rows %}
-          <tr>
-            <td>{{ row.label }}</td>
-            <td class="number income">{{ row.income_actual|thousands }}</td>
-            <td class="number">{{ row.expense_budget|thousands }}</td>
-            <td class="number expense">{{ row.expense_actual|thousands }}</td>
-            <td class="number">{{ row.expense_variance|thousands }}</td>
-            <td class="number net">{{ row.net_budget|thousands }}</td>
-            <td class="number net">{{ row.net_actual|thousands }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
 {% endblock %}

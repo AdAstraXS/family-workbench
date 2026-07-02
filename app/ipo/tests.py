@@ -610,6 +610,13 @@ class IpoUploadValidationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("8 MB", response.json()["error"])
 
+    def test_listing_form_uploads_original_image_without_lossy_optimization(self):
+        response = self.client.get(reverse("ipo:listing_create"))
+
+        self.assertContains(response, 'formData.append("image", file)')
+        self.assertNotContains(response, "createImageBitmap")
+        self.assertNotContains(response, "canvas.toBlob")
+
     def test_prospectus_accepts_pdf_and_rejects_other_file_types(self):
         form = HkIpoListingForm()
         pdf = SimpleUploadedFile("prospectus.pdf", b"%PDF-1.7", content_type="application/pdf")

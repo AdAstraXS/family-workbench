@@ -987,6 +987,122 @@ class AssetSnapshotWorkspaceTests(TestCase):
         workbook.close()
 
 
+class LedgerOverviewChartTests(TestCase):
+    def test_overview_uses_latest_assets_current_year_budget_and_investment_returns(self):
+        today = timezone.localdate()
+        family = Family.objects.create(name="我的家庭")
+        me = FamilyMember.objects.create(family=family, display_name="我")
+        secretary = FamilyMember.objects.create(family=family, display_name="孙秘书")
+        cash = AssetCategory.objects.create(family=family, name="现金")
+        fund = AssetCategory.objects.create(family=family, name="基金")
+        income_category = IncomeCategory.objects.create(family=family, name="工资")
+        expense_category = ExpenseCategory.objects.create(family=family, name="生活")
+
+        previous = AssetBalanceSnapshot.objects.create(
+            family=family,
+            snapshot_date=date(today.year - 1, 12, 31),
+        )
+        latest = AssetBalanceSnapshot.objects.create(
+            family=family,
+            snapshot_date=today,
+        )
+        for snapshot, member, category, amount in (
+            (previous, me, cash, "100"),
+            (previous, secretary, cash, "200"),
+            (latest, me, cash, "180"),
+            (latest, me, fund, "20"),
+            (latest, secretary, cash, "250"),
+        ):
+            AssetBalanceEntry.objects.create(
+                snapshot=snapshot,
+                member=member,
+                asset_category=category,
+                base_amount=Decimal(amount),
+                original_amount=Decimal(amount),
+            )
+
+        IncomeRecord.objects.create(
+            family=family,
+            member=me,
+            category=income_category,
+            income_date=today,
+            amount=Decimal("30"),
+        )
+        IncomeRecord.objects.create(
+            family=family,
+            member=secretary,
+            category=income_category,
+            income_date=today,
+            amount=Decimal("10"),
+        )
+        ExpenseRecord.objects.create(
+            family=family,
+            member=me,
+            category=expense_category,
+            expense_date=today,
+            amount=Decimal("5"),
+        )
+        ExpenseRecord.objects.create(
+            family=family,
+            member=secretary,
+            category=expense_category,
+            expense_date=today,
+            amount=Decimal("5"),
+        )
+        budget = AnnualBudget.objects.create(family=family, year=today.year)
+        AnnualBudgetLine.objects.create(
+            budget=budget,
+            line_type=AnnualBudgetLine.LINE_TYPE_INCOME,
+            income_category=income_category,
+            annual_amount=Decimal("1000"),
+        )
+        AnnualBudgetLine.objects.create(
+            budget=budget,
+            line_type=AnnualBudgetLine.LINE_TYPE_EXPENSE,
+            expense_category=expense_category,
+            annual_amount=Decimal("400"),
+        )
+        user = get_user_model().objects.create_user(
+            username="overview-chart-tester",
+            password="password",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("ledger:overview"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["year_income"], Decimal("40"))
+        self.assertEqual(response.context["year_expense"], Decimal("10"))
+        asset_charts = response.context["chart_data"]["asset_charts"]
+        self.assertEqual([chart["label"] for chart in asset_charts], ["家庭合计", "我", "孙秘书"])
+        self.assertEqual(
+            {item["name"]: item["value"] for item in asset_charts[0]["items"]},
+            {"基金": 20.0, "现金": 430.0},
+        )
+        budget_items = response.context["chart_data"]["budget"]["items"]
+        self.assertEqual(
+            [item["value"] for item in budget_items],
+            [1000.0, 40.0, 400.0, 10.0, 600.0, 30.0],
+        )
+        self.assertEqual(
+            response.context["chart_data"]["investment_returns"],
+            [
+                {"name": "家庭合计", "value": 120.0},
+                {"name": "我", "value": 75.0},
+                {"name": "孙秘书", "value": 45.0},
+            ],
+        )
+        self.assertContains(response, "本年收入")
+        self.assertNotContains(response, "本月收入")
+        self.assertContains(response, "js/ledger_overview.js")
+
+        budget_response = self.client.get(
+            reverse("ledger:annual_budget_detail", args=[budget.pk])
+        )
+        self.assertNotContains(budget_response, "月度节奏对比")
+        self.assertNotContains(budget_response, "budget-month-table")
+
+
 class AnnualBudgetReportTests(TestCase):
     def setUp(self):
         self.family = Family.objects.create(name="我的家庭")
