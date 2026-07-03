@@ -18,6 +18,11 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 
 `.env` 只保存在部署设备，不应提交到 Git。AI API Key 也只通过环境变量配置。
 
+图片识别支持在“新增新股资料”页面选择不同模型。智谱使用
+`ZHIPU_API_KEY`；豆包使用火山方舟的 `ARK_API_KEY`。豆包默认配置调用
+`https://ark.cn-beijing.volces.com/api/v3` 的
+`doubao-seed-2-0-lite-260215`，可在 Django 后台的“AI 服务商”中调整模型。
+
 2. 启动容器：
 
 ```bash

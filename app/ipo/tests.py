@@ -28,6 +28,7 @@ from .services import (
     fetch_hk_connect_threshold_100m,
     fetch_jesselivermore_ipo_metrics,
     fetch_vbkr_expected_margin_multiples,
+    get_active_vision_provider,
     get_api_key,
     normalize_value,
     recognize_ipo_listing_from_image,
@@ -575,6 +576,65 @@ class IpoImageRecognitionApiKeyTests(TestCase):
 
         self.assertEqual(urlopen.call_count, 1)
 
+    def test_explicit_provider_selection_is_used_for_recognition(self):
+        zhipu = AiProvider.objects.create(
+            name="智谱视觉",
+            provider_type="vision",
+            base_url="https://open.bigmodel.cn/api/paas/v4",
+            model_name="glm-5v-turbo",
+        )
+        doubao = AiProvider.objects.create(
+            name="豆包视觉",
+            provider_type="vision",
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            model_name="doubao-seed-2-0-lite-260215",
+            extra_data={"api_key_env_var": "ARK_API_KEY", "image_detail": "high"},
+        )
+
+        self.assertEqual(get_active_vision_provider(zhipu.pk), zhipu)
+        self.assertEqual(get_active_vision_provider(doubao.pk), doubao)
+
+    def test_disabled_provider_cannot_be_selected(self):
+        provider = AiProvider.objects.create(
+            name="已停用视觉服务",
+            provider_type="vision",
+            model_name="vision-model",
+            is_active=False,
+        )
+
+        with self.assertRaisesMessage(IpoImageRecognitionError, "不可用"):
+            get_active_vision_provider(provider.pk)
+
+    def test_doubao_request_uses_selected_model_and_high_detail_image(self):
+        provider = AiProvider.objects.create(
+            name="豆包视觉",
+            provider_type="vision",
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            model_name="doubao-seed-2-0-lite-260215",
+            extra_data={"api_key_env_var": "ARK_API_KEY", "image_detail": "high"},
+        )
+        upload = SimpleUploadedFile("ipo.png", b"image", content_type="image/png")
+        response_body = io.BytesIO(
+            json.dumps(
+                {"choices": [{"message": {"content": '{"stock_code":"09999.HK"}'}}]}
+            ).encode("utf-8")
+        )
+
+        with (
+            patch.dict(os.environ, {"ARK_API_KEY": "ark-test-key"}, clear=True),
+            patch("ipo.services.urllib.request.urlopen", return_value=response_body) as urlopen,
+        ):
+            fields = recognize_ipo_listing_from_image(upload, provider_id=provider.pk)
+
+        request = urlopen.call_args.args[0]
+        payload = json.loads(request.data)
+        image_url = payload["messages"][0]["content"][1]["image_url"]
+        self.assertEqual(request.full_url, "https://ark.cn-beijing.volces.com/api/v3/chat/completions")
+        self.assertEqual(payload["model"], "doubao-seed-2-0-lite-260215")
+        self.assertEqual(image_url["detail"], "high")
+        self.assertTrue(image_url["url"].startswith("data:image/png;base64,"))
+        self.assertEqual(fields["stock_code"], "09999.HK")
+
 
 class IpoUploadValidationTests(TestCase):
     def setUp(self):
@@ -614,6 +674,7 @@ class IpoUploadValidationTests(TestCase):
         response = self.client.get(reverse("ipo:listing_create"))
 
         self.assertContains(response, 'formData.append("image", file)')
+        self.assertContains(response, 'formData.append("provider", providerSelect.value)')
         self.assertNotContains(response, "createImageBitmap")
         self.assertNotContains(response, "canvas.toBlob")
 

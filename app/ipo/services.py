@@ -27,7 +27,13 @@ class IpoImageRecognitionError(Exception):
     pass
 
 
-DEFAULT_API_KEY_ENV_VARS = ("ZHIPU_API_KEY", "OPENAI_API_KEY", "AI_API_KEY")
+DEFAULT_API_KEY_ENV_VARS = (
+    "ZHIPU_API_KEY",
+    "ARK_API_KEY",
+    "VOLCENGINE_API_KEY",
+    "OPENAI_API_KEY",
+    "AI_API_KEY",
+)
 SENSITIVE_PROVIDER_EXTRA_KEYS = {"api_key", "apikey", "secret_key", "access_token", "token"}
 
 
@@ -137,13 +143,26 @@ BOOLEAN_ALIASES = {
 }
 
 
-def get_active_vision_provider():
-    provider = (
-        AiProvider.objects.filter(is_active=True)
-        .filter(provider_type__in=["openai", "openai_compatible", "vision"])
-        .order_by("-updated_at")
-        .first()
+def get_vision_providers():
+    return (
+        AiProvider.objects.filter(
+            is_active=True,
+            provider_type__in=["openai", "openai_compatible", "vision"],
+        )
+        .exclude(model_name__in=["", "待配置"])
+        .order_by("name", "model_name")
     )
+
+
+def get_active_vision_provider(provider_id=None):
+    providers = get_vision_providers()
+    if provider_id not in (None, ""):
+        try:
+            provider = providers.get(pk=int(provider_id))
+        except (TypeError, ValueError, AiProvider.DoesNotExist) as exc:
+            raise IpoImageRecognitionError("所选图片识别服务不可用，请刷新页面后重试。") from exc
+    else:
+        provider = providers.order_by("-updated_at").first()
     if not provider:
         raise IpoImageRecognitionError("未找到已启用的 AI 视觉服务商，请先在后台配置 AI 服务商。")
     return provider
@@ -160,12 +179,13 @@ def get_api_key(provider):
         if unsafe_keys:
             raise IpoImageRecognitionError(
                 "AI 服务商 API Key 不能保存在数据库 extra_data 中。"
-                "请迁移到环境变量 ZHIPU_API_KEY / OPENAI_API_KEY / AI_API_KEY，"
+                "请迁移到环境变量，"
                 "并删除 extra_data 中的敏感字段。"
             )
+        expected_env_var = configured_env_var or " / ".join(DEFAULT_API_KEY_ENV_VARS)
         raise IpoImageRecognitionError(
-            "AI 服务商未配置 API Key。请在环境变量 ZHIPU_API_KEY / OPENAI_API_KEY / AI_API_KEY 中配置；"
-            "如需自定义变量名，可在服务商 extra_data.api_key_env_var 中填写环境变量名。"
+            f"{provider.name} 未配置 API Key。请设置环境变量 {expected_env_var}；"
+            "如需自定义变量名，可在服务商 extra_data.api_key_env_var 中填写。"
         )
     return api_key
 
@@ -329,8 +349,8 @@ def build_prompt():
     )
 
 
-def recognize_ipo_listing_from_image(uploaded_file):
-    provider = get_active_vision_provider()
+def recognize_ipo_listing_from_image(uploaded_file, provider_id=None):
+    provider = get_active_vision_provider(provider_id)
     api_key = get_api_key(provider)
     model_name = provider.model_name
     if not model_name or model_name == "待配置":
@@ -342,6 +362,11 @@ def recognize_ipo_listing_from_image(uploaded_file):
     mime_type = uploaded_file.content_type or "image/png"
     data_url = f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
 
+    image_url = {"url": data_url}
+    image_detail = (provider.extra_data or {}).get("image_detail")
+    if image_detail in {"low", "high", "xhigh"}:
+        image_url["detail"] = image_detail
+
     payload = {
         "model": model_name,
         "temperature": 0,
@@ -350,7 +375,7 @@ def recognize_ipo_listing_from_image(uploaded_file):
                 "role": "user",
                 "content": [
                     {"type": "text", "text": build_prompt()},
-                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "image_url", "image_url": image_url},
                 ],
             }
         ],
