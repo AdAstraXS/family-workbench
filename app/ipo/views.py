@@ -17,6 +17,7 @@ from .services import (
     IpoImageRecognitionError,
     fetch_vbkr_expected_margin_multiples,
     get_cached_vbkr_expected_margin_multiples,
+    get_vision_providers,
     refresh_hk_connect_threshold,
     refresh_listed_market_data,
     recognize_ipo_listing_from_image,
@@ -393,7 +394,15 @@ def save_listing_form(request, title, instance=None):
             return redirect("ipo:listing_detail", pk=listing.pk)
     else:
         form = HkIpoListingForm(instance=instance)
-    return render(request, "ipo/listing_form.html", {"form": form, "title": title})
+    return render(
+        request,
+        "ipo/listing_form.html",
+        {
+            "form": form,
+            "title": title,
+            "vision_providers": get_vision_providers(),
+        },
+    )
 
 
 @login_required
@@ -772,7 +781,10 @@ def recognize_listing_image(request):
     if image.size > max_image_size:
         return JsonResponse({"ok": False, "error": "图片不能超过 8 MB。"}, status=400)
     try:
-        fields = recognize_ipo_listing_from_image(image)
+        fields = recognize_ipo_listing_from_image(
+            image,
+            provider_id=request.POST.get("provider"),
+        )
     except IpoImageRecognitionError as exc:
         return JsonResponse({"ok": False, "error": str(exc)}, status=400)
     return JsonResponse({"ok": True, "fields": fields})

@@ -2523,17 +2523,29 @@ textarea {
 }
 
 .image-recognition-controls {
-  display: flex;
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) minmax(220px, 1fr) auto;
   gap: 10px;
   align-items: center;
 }
 
 .image-recognition-controls input[type="file"] {
   min-width: 0;
+  width: 100%;
+}
+
+.image-recognition-controls label {
+  color: #6b7280;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.image-recognition-controls select {
+  min-width: 220px;
 }
 
 .image-recognition-controls button {
-  flex: 0 0 auto;
   white-space: nowrap;
 }
 

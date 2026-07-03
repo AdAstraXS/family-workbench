@@ -13,6 +13,14 @@
       <p>上传招股资料截图，系统会识别可匹配字段并填入下方表单，保存前请人工核对。</p>
     </div>
     <div class="image-recognition-controls">
+      <label for="ipo-vision-provider">识别模型</label>
+      <select id="ipo-vision-provider">
+        {% for provider in vision_providers %}
+          <option value="{{ provider.pk }}">{{ provider.name }}{% if provider.model_name %} · {{ provider.model_name }}{% endif %}</option>
+        {% empty %}
+          <option value="">尚未配置可用模型</option>
+        {% endfor %}
+      </select>
       <input id="ipo-image-input" type="file" accept="image/*">
       <button id="ipo-image-recognize" type="button">识别并填入</button>
     </div>
@@ -54,6 +62,7 @@
 <script>
 (() => {
   const imageInput = document.getElementById("ipo-image-input");
+  const providerSelect = document.getElementById("ipo-vision-provider");
   const recognizeButton = document.getElementById("ipo-image-recognize");
   const statusBox = document.getElementById("ipo-image-status");
   const recognizeUrl = "{% url 'ipo:recognize_listing_image' %}";
@@ -89,6 +98,7 @@
     try {
       const formData = new FormData();
       formData.append("image", file);
+      formData.append("provider", providerSelect.value);
       const response = await fetch(recognizeUrl, {
         method: "POST",
         headers: {"X-CSRFToken": csrfToken},
