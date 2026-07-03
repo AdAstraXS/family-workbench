@@ -171,8 +171,7 @@ def get_active_vision_provider(provider_id=None):
 def get_api_key(provider):
     extra_data = provider.extra_data or {}
     configured_env_var = extra_data.get("api_key_env_var")
-    env_var_names = [configured_env_var] if configured_env_var else []
-    env_var_names.extend(name for name in DEFAULT_API_KEY_ENV_VARS if name not in env_var_names)
+    env_var_names = [configured_env_var] if configured_env_var else DEFAULT_API_KEY_ENV_VARS
     api_key = next((os.getenv(name) for name in env_var_names if name and os.getenv(name)), None)
     if not api_key:
         unsafe_keys = sorted(SENSITIVE_PROVIDER_EXTRA_KEYS.intersection(extra_data))
@@ -395,8 +394,9 @@ def recognize_ipo_listing_from_image(uploaded_file, provider_id=None):
                 method="POST",
             )
             try:
-                with urllib.request.urlopen(request, timeout=45) as response:
-                    response_data = json.loads(response.read().decode("utf-8"))
+                response_data = json.loads(
+                    _read_url_with_ipv4_doh_fallback(request, timeout=45).decode("utf-8")
+                )
                 break
             except urllib.error.HTTPError:
                 raise

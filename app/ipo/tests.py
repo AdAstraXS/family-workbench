@@ -540,6 +540,17 @@ class IpoImageRecognitionApiKeyTests(TestCase):
         with patch.dict(os.environ, {"CUSTOM_BIGMODEL_KEY": "env-secret"}, clear=True):
             self.assertEqual(get_api_key(provider), "env-secret")
 
+    def test_configured_environment_variable_does_not_fall_back_to_another_provider_key(self):
+        provider = AiProvider.objects.create(
+            name="豆包视觉",
+            provider_type="vision",
+            extra_data={"api_key_env_var": "ARK_API_KEY"},
+        )
+
+        with patch.dict(os.environ, {"ZHIPU_API_KEY": "zhipu-secret"}, clear=True):
+            with self.assertRaisesMessage(IpoImageRecognitionError, "ARK_API_KEY"):
+                get_api_key(provider)
+
     def test_get_api_key_rejects_database_api_key(self):
         provider = AiProvider.objects.create(
             name="BigModel",
@@ -633,6 +644,50 @@ class IpoImageRecognitionApiKeyTests(TestCase):
         self.assertEqual(payload["model"], "doubao-seed-2-0-lite-260215")
         self.assertEqual(image_url["detail"], "high")
         self.assertTrue(image_url["url"].startswith("data:image/png;base64,"))
+        self.assertEqual(fields["stock_code"], "09999.HK")
+
+    def test_doubao_request_uses_ipv4_doh_fallback_after_connection_reset(self):
+        provider = AiProvider.objects.create(
+            name="豆包视觉",
+            provider_type="vision",
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            model_name="doubao-seed-2-0-lite-260215",
+            extra_data={"api_key_env_var": "ARK_API_KEY"},
+        )
+        upload = SimpleUploadedFile("ipo.png", b"image", content_type="image/png")
+        doh_payload = {
+            "Status": 0,
+            "Answer": [
+                {
+                    "name": "ark.cn-beijing.volces.com.",
+                    "type": 1,
+                    "TTL": 60,
+                    "data": "14.103.169.114",
+                }
+            ],
+        }
+        response_body = json.dumps(
+            {"choices": [{"message": {"content": '{"stock_code":"09999.HK"}'}}]}
+        ).encode()
+
+        with (
+            patch.dict(os.environ, {"ARK_API_KEY": "ark-test-key"}, clear=True),
+            patch(
+                "ipo.services.urllib.request.urlopen",
+                side_effect=[
+                    urllib.error.URLError(ConnectionResetError(104, "reset")),
+                    io.BytesIO(json.dumps(doh_payload).encode()),
+                ],
+            ),
+            patch(
+                "ipo.services._read_https_via_ipv4",
+                return_value=response_body,
+            ) as direct_ipv4,
+        ):
+            fields = recognize_ipo_listing_from_image(upload, provider_id=provider.pk)
+
+        direct_ipv4.assert_called_once()
+        self.assertEqual(direct_ipv4.call_args.args[1], "14.103.169.114")
         self.assertEqual(fields["stock_code"], "09999.HK")
 
 
