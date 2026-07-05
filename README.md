@@ -104,6 +104,45 @@ docker compose exec -T web python manage.py showmigrations
 
 若 Docker Hub 无法访问，可在 `.env` 中把 `PYTHON_IMAGE` 改为 NAS 可访问的 Python 3.12 镜像。
 
+## NAS 上运行 Futu OpenD
+
+自选股实时查询需要 Futu OpenD。NAS 使用独立的 `opend` Compose profile，
+与网站共享 Docker 私有网络，端口 `11111` 不映射到宿主机或公网。
+
+1. 从富途官网下载 Ubuntu 命令行 OpenD，将命令行目录完整解压到：
+
+```text
+opend/runtime/
+```
+
+其中至少应包含 `FutuOpenD`、`FutuOpenD.xml` 和 `AppData.dat`。该目录包含
+富途专有程序，不进入 Git。
+
+2. 在 NAS 的 `.env` 中设置：
+
+```dotenv
+FUTU_OPEND_HOST=opend
+FUTU_OPEND_PORT=11111
+FUTU_LOGIN_ACCOUNT=数字牛牛号
+FUTU_LOGIN_PWD_MD5=登录密码的32位小写MD5
+```
+
+`.env` 应设置为仅部署管理员可读，不要提交到 Git，也不要通过在线网站计算
+密码 MD5。
+
+3. 启动并检查：
+
+```bash
+docker compose --profile futu up -d --build opend
+docker compose --profile futu ps
+docker compose --profile futu logs --tail=100 opend
+docker compose exec -T web python manage.py check
+```
+
+OpenD 的设备信息和日志保存在 `opend/state/`，升级或重建容器时应保留该目录，
+否则可能再次触发设备锁验证。当前配置只供行情查询使用，且不主动抢占手机或
+桌面端的最高行情权限。
+
 ## 更换开发电脑
 
 建议把代码推送到私有 Git 仓库，新电脑克隆仓库后单独创建 `.env`。NAS 上的正式数据库继续由网页使用，不通过 Git 同步；如需本地调试真实问题，使用脱敏后的数据库备份。

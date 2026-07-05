@@ -40,3 +40,28 @@ services:
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
              gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2 --timeout 120"
+
+  opend:
+    profiles:
+      - futu
+    build:
+      context: ./opend
+      args:
+        OPEND_BASE_IMAGE: ${OPEND_BASE_IMAGE:-docker.1ms.run/library/ubuntu:22.04}
+        SUPPORT_IMAGE: ${OPEND_SUPPORT_IMAGE:-docker.m.daocloud.io/library/python:3.12-slim}
+    container_name: family_finance_opend
+    restart: unless-stopped
+    environment:
+      FUTU_LOGIN_ACCOUNT: ${FUTU_LOGIN_ACCOUNT:-}
+      FUTU_LOGIN_PWD_MD5: ${FUTU_LOGIN_PWD_MD5:-}
+    volumes:
+      - ./opend/runtime:/opt/futu:ro
+      - ./opend/state:/var/lib/futu
+    expose:
+      - "11111"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/11111'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s

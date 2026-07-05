@@ -20,3 +20,8 @@ import_asset_snapshot_*.json
 /outputs/**/*.docx
 /outputs/**/*.pdf
 /outputs/**/~$*
+
+# Futu OpenD proprietary runtime and local state
+/opend/runtime/*
+!/opend/runtime/.gitkeep
+/opend/state/
