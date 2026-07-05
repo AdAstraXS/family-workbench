@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}投资账户页面原型{% endblock %}
+
+{% block content %}
+<section class="headline account-prototype-head">
+  <div>
+    <span class="prototype-badge">界面原型 · 演示数据</span>
+    <h1>投资账户</h1>
+    <p>统一查看家庭、成员和证券账户的现金、持仓与盈亏。</p>
+  </div>
+  <div class="prototype-filters">
+    <label class="prototype-currency">展示币种
+      <select data-currency-select>
+        <option value="CNY">人民币 CNY</option>
+        <option value="HKD">港币 HKD</option>
+        <option value="USD">美元 USD</option>
+      </select>
+    </label>
+    <label class="prototype-currency">统计年份
+      <select>
+        <option>全部年份</option>
+        <option selected>2026 年</option>
+        <option>2025 年</option>
+        <option>2024 年</option>
+      </select>
+    </label>
+  </div>
+</section>
+
+<section class="panel account-summary-panel">
+  <div class="section-head">
+    <div>
+      <h2>资产汇总</h2>
+      <p>同一行查看总资产构成与收益情况。</p>
+    </div>
+    <span class="quote-time">数据时间：07-04 15:30</span>
+  </div>
+  <div class="account-summary-grid summary-grid-head">
+    <span>统计范围</span><span>总资产</span><span>现金余额</span><span>持仓市值</span><span>今日盈亏</span><span>累计浮动盈亏</span><span>累计已实现盈亏</span>
+  </div>
+  <div class="account-summary-grid summary-family">
+    <strong>家庭汇总</strong>
+    <strong data-money="2868500">¥2,868,500</strong>
+    <span data-money="628500">¥628,500</span>
+    <span data-money="2240000">¥2,240,000</span>
+    <span class="positive" data-money="18620" data-signed>+¥18,620</span>
+    <span class="positive" data-money="328600" data-signed>+¥328,600</span>
+    <span class="positive" data-money="143800" data-signed>+¥143,800</span>
+  </div>
+  <div class="account-summary-grid">
+    <strong>成员甲</strong>
+    <strong data-money="1880000">¥1,880,000</strong>
+    <span data-money="380000">¥380,000</span>
+    <span data-money="1500000">¥1,500,000</span>
+    <span class="positive" data-money="12680" data-signed>+¥12,680</span>
+    <span class="positive" data-money="268000" data-signed>+¥268,000</span>
+    <span class="positive" data-money="101200" data-signed>+¥101,200</span>
+  </div>
+  <div class="account-summary-grid">
+    <strong>成员乙</strong>
+    <strong data-money="988500">¥988,500</strong>
+    <span data-money="248500">¥248,500</span>
+    <span data-money="740000">¥740,000</span>
+    <span class="positive" data-money="5940" data-signed>+¥5,940</span>
+    <span class="positive" data-money="60600" data-signed>+¥60,600</span>
+    <span class="positive" data-money="42600" data-signed>+¥42,600</span>
+  </div>
+</section>
+
+<section class="panel account-prototype-table-panel">
+  <div class="section-head">
+    <div>
+      <h2>证券账户</h2>
+      <p>所有金额按顶部选定币种统一折算。</p>
+    </div>
+    <div class="table-actions">
+      <button type="button" class="button ghost">入金 / 出金</button>
+      <button type="button" class="button">新增账户</button>
+    </div>
+  </div>
+  <div class="account-table-wrap">
+    <table class="account-prototype-table">
+      <thead>
+        <tr><th>成员</th><th>券商账户</th><th>现金余额</th><th>持仓市值</th><th>持仓占比</th><th>总资产</th><th>今日盈亏</th><th>累计浮动盈亏</th><th>累计已实现盈亏</th><th>操作</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>成员甲</td><td><strong>富途证券</strong><small>港美股主账户</small></td>
+          <td data-money="260000">¥260,000</td><td data-money="1240000">¥1,240,000</td><td>82.67%</td><td data-money="1500000">¥1,500,000</td>
+          <td class="positive" data-money="10820" data-signed>+¥10,820</td><td class="positive" data-money="221000" data-signed>+¥221,000</td><td class="positive" data-money="68200" data-signed>+¥68,200</td>
+          <td><a class="button compact" href="{% url 'portfolio:account_detail_prototype' 1 %}">查看账户</a></td>
+        </tr>
+        <tr>
+          <td>成员甲</td><td><strong>华泰证券</strong><small>A 股账户</small></td>
+          <td data-money="120000">¥120,000</td><td data-money="260000">¥260,000</td><td>68.42%</td><td data-money="380000">¥380,000</td>
+          <td class="positive" data-money="1860" data-signed>+¥1,860</td><td class="positive" data-money="47000" data-signed>+¥47,000</td><td class="positive" data-money="33000" data-signed>+¥33,000</td>
+          <td><a class="button compact" href="{% url 'portfolio:account_detail_prototype' 2 %}">查看账户</a></td>
+        </tr>
+        <tr>
+          <td>成员乙</td><td><strong>盈透证券</strong><small>美股长期账户</small></td>
+          <td data-money="248500">¥248,500</td><td data-money="740000">¥740,000</td><td>74.86%</td><td data-money="988500">¥988,500</td>
+          <td class="negative" data-money="-2940" data-signed>-¥2,940</td><td class="positive" data-money="60600" data-signed>+¥60,600</td><td class="positive" data-money="42600" data-signed>+¥42,600</td>
+          <td><a class="button compact" href="{% url 'portfolio:account_detail_prototype' 3 %}">查看账户</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-head">
+    <div><h2>持仓明细</h2><p>跨成员、跨券商账户统一查看当前非现金资产。</p></div>
+    <span class="quote-time">行情时间：07-04 15:30</span>
+  </div>
+  <div class="account-table-wrap">
+    <table class="account-prototype-table holdings-prototype-table">
+      <thead><tr><th>证券代码</th><th>证券名称</th><th>成员</th><th>券商账户</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>浮动盈亏</th><th>累计已实现盈亏</th></tr></thead>
+      <tbody>
+        <tr><td>00700</td><td>腾讯控股</td><td>成员甲</td><td>富途证券 · 港美股主账户</td><td>2,000</td><td>HK$431.20</td><td>HK$862,400</td><td>HK$365.50</td><td class="positive"><span class="money-stack">+HK$131,400<small>本位币 +¥121,667</small></span></td><td class="positive"><span class="money-stack">+HK$45,200<small>本位币 +¥41,852</small></span></td></tr>
+        <tr><td>AAPL</td><td>苹果</td><td>成员甲</td><td>富途证券 · 港美股主账户</td><td>800</td><td>US$67.62</td><td>US$54,096</td><td>US$51.45</td><td class="positive"><span class="money-stack">+US$12,936<small>本位币 +¥89,600</small></span></td><td class="positive"><span class="money-stack">+US$3,320<small>本位币 +¥23,000</small></span></td></tr>
+        <tr><td>600519</td><td>贵州茅台</td><td>成员甲</td><td>华泰证券 · A 股账户</td><td>200</td><td>¥1,300.00</td><td>¥260,000</td><td>¥1,065.00</td><td class="positive"><span class="money-stack">+¥47,000<small>本位币 +¥47,000</small></span></td><td class="positive"><span class="money-stack">+¥33,000<small>本位币 +¥33,000</small></span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (() => {
+    const rates = { CNY: 1, HKD: 1.08, USD: 0.138 };
+    const locales = { CNY: "zh-CN", HKD: "zh-HK", USD: "en-US" };
+    const select = document.querySelector("[data-currency-select]");
+    select.addEventListener("change", () => {
+      document.querySelectorAll("[data-money]").forEach((node) => {
+        const value = Number(node.dataset.money) * rates[select.value];
+        const precision = Number(node.dataset.precision || 0);
+        const text = new Intl.NumberFormat(locales[select.value], {
+          style: "currency", currency: select.value,
+          minimumFractionDigits: precision, maximumFractionDigits: precision
+        }).format(Math.abs(value));
+        node.textContent = node.hasAttribute("data-signed") ? `${value > 0 ? "+" : value < 0 ? "-" : ""}${text}` : text;
+      });
+    });
+  })();
+</script>
+{% endblock %}

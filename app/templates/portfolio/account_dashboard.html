@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}证券账户与持仓{% endblock %}
+
+{% block content %}
+<section class="headline account-prototype-head">
+  <div>
+    <h1>证券账户与持仓</h1>
+    <p>统一查看家庭、成员和证券账户的现金、持仓与盈亏。</p>
+  </div>
+  <div class="account-header-controls">
+    <div class="exchange-rate-strip">
+      {% if rate_info.status == "success" %}
+        <span>美元兑换人民币 {{ rate_info.usd_cny|floatformat:4 }}</span>
+        <span>港币兑换人民币 {{ rate_info.hkd_cny|floatformat:5 }}</span>
+        <small>中间价日期 {{ rate_info.source_date }} · <a href="{{ rate_info.source_url }}" target="_blank" rel="noopener">中国货币网</a></small>
+      {% else %}
+        <span class="negative">汇率抓取失败，保留已有缓存</span>
+      {% endif %}
+    </div>
+    <form method="get" class="prototype-filters">
+      <label class="prototype-currency">展示币种
+        <select name="currency" onchange="this.form.submit()">
+          {% for item in currency_options %}<option value="{{ item.code }}"{% if item.code == selected_currency %} selected{% endif %}>{{ item }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="prototype-currency">统计年份
+        <select name="year" onchange="this.form.submit()">
+          <option value="all"{% if selected_year == "all" %} selected{% endif %}>全部年份</option>
+          {% for year in year_options %}<option value="{{ year }}"{% if selected_year == year|stringformat:"s" %} selected{% endif %}>{{ year }} 年</option>{% endfor %}
+        </select>
+      </label>
+    </form>
+  </div>
+</section>
+
+<section class="panel account-summary-panel">
+  <div class="section-head"><div><h2>证券账户资产汇总</h2><p>资产和账户按 {{ selected_currency }} 统一折算。</p></div></div>
+  {% if missing_exchange_rates %}<p class="form-error">部分原币缺少兑 {{ selected_currency }} 的汇率，相关统一币种金额暂显示“-”，未按 1:1 错误合并。</p>{% endif %}
+  <div class="account-summary-grid summary-grid-head">
+    <span>统计范围</span><span>总资产</span><span>现金余额</span><span>持仓市值</span><span>今日盈亏</span><span>累计浮动盈亏</span><span>累计已实现盈亏</span>
+  </div>
+  {% for row in summary_rows %}
+    <div class="account-summary-grid{% if forloop.first %} summary-family{% endif %}">
+      <strong>{{ row.label }}</strong>
+      <strong>{{ row.total_asset|currency0:selected_currency }}</strong>
+      <span>{{ row.cash|currency0:selected_currency }}</span>
+      <span>{{ row.market_value|currency0:selected_currency }}</span>
+      <span class="{% if row.today_pnl > 0 %}positive{% elif row.today_pnl < 0 %}negative{% endif %}">{{ row.today_pnl|signed_currency0:selected_currency }}</span>
+      <span class="{% if row.unrealized > 0 %}positive{% elif row.unrealized < 0 %}negative{% endif %}">{{ row.unrealized|signed_currency0:selected_currency }}</span>
+      <span class="{% if row.realized > 0 %}positive{% elif row.realized < 0 %}negative{% endif %}">{{ row.realized|signed_currency0:selected_currency }}</span>
+    </div>
+  {% empty %}
+    <p class="empty-state">暂无投资账户数据。</p>
+  {% endfor %}
+</section>
+
+<section class="panel account-prototype-table-panel">
+  <div class="section-head">
+    <div><h2>证券账户明细</h2><p>所有金额按选定币种统一折算。</p></div>
+  </div>
+  <div class="account-table-wrap account-table-scroll">
+    <table class="account-prototype-table">
+      <thead><tr><th>成员</th><th>账户名称</th><th>现金余额</th><th>持仓市值</th><th>持仓占比</th><th>总资产</th><th>今日盈亏</th><th>累计浮动盈亏</th><th>累计已实现盈亏</th><th>操作</th></tr></thead>
+      <tbody>
+        {% for row in account_rows %}
+          <tr>
+            <td>{{ row.account.member }}</td>
+            <td><strong>{{ row.account.account_name }}</strong>{% if row.account.account_no_masked %}<small>{{ row.account.account_no_masked }}</small>{% endif %}</td>
+            <td>{{ row.cash|currency0:selected_currency }}</td>
+            <td>{{ row.market_value|currency0:selected_currency }}</td>
+            <td>{{ row.position_ratio|floatformat:2 }}%</td>
+            <td>{{ row.total_asset|currency0:selected_currency }}</td>
+            <td class="{% if row.today_pnl > 0 %}positive{% elif row.today_pnl < 0 %}negative{% endif %}">{{ row.today_pnl|signed_currency0:selected_currency }}</td>
+            <td class="{% if row.unrealized > 0 %}positive{% elif row.unrealized < 0 %}negative{% endif %}">{{ row.unrealized|signed_currency0:selected_currency }}</td>
+            <td class="{% if row.realized > 0 %}positive{% elif row.realized < 0 %}negative{% endif %}">{{ row.realized|signed_currency0:selected_currency }}</td>
+            <td><a class="button compact" href="{% url 'portfolio:account_detail' row.account.pk %}?currency={{ selected_currency }}&year={{ selected_year }}">查看账户</a></td>
+          </tr>
+        {% empty %}<tr><td colspan="10">暂无证券账户。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel" id="holdings">
+  <div class="section-head"><div><h2>持仓明细</h2><p>持仓按交易原币展示，盈亏同时显示家庭本位币。</p></div></div>
+  <div class="account-table-wrap">
+    <table class="account-prototype-table holdings-prototype-table">
+      <thead><tr><th>证券代码</th><th>证券名称</th><th>成员</th><th>券商账户</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>浮动盈亏</th><th>累计已实现盈亏</th></tr></thead>
+      <tbody>
+        {% for item in positions %}
+          <tr>
+            <td>{{ item.security.symbol }}</td><td>{{ item.security.name }}</td><td>{{ item.account.member }}</td><td>{{ item.account.account_name }}</td>
+            <td>{{ item.quantity|floatformat:"-4" }}</td><td>{{ item.display_price|currency2:item.original_currency }}</td><td>{{ item.market_value_live|currency0:item.original_currency }}</td><td>{{ item.display_cost|currency2:item.original_currency }}</td>
+            <td class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}"><span class="money-stack">{{ item.unrealized_live|signed_currency0:item.original_currency }}<small>本位币 {{ item.unrealized_base|signed_currency0:item.account.family.base_currency }}</small></span></td>
+            <td class="{% if item.realized_for_year > 0 %}positive{% elif item.realized_for_year < 0 %}negative{% endif %}"><span class="money-stack">{{ item.realized_for_year|signed_currency0:item.original_currency }}<small>本位币 {{ item.realized_base|signed_currency0:item.account.family.base_currency }}</small></span></td>
+          </tr>
+        {% empty %}<tr><td colspan="10">该统计年份暂无持仓记录。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

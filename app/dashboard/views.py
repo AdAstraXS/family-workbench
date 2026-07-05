@@ -4,14 +4,20 @@ from django.shortcuts import render
 from django.utils import timezone
 
 from ledger.models import AssetBalanceSnapshot, ExpenseRecord, IncomeRecord
-from portfolio.models import InvestmentAccount, InvestmentPosition, InvestmentTransaction
+from portfolio.models import (
+    InvestmentCashMovement,
+    InvestmentPosition,
+    InvestmentTransaction,
+)
 
 
 @login_required
 def home(request):
     today = timezone.localdate()
     month_start = today.replace(day=1)
-    total_cash = InvestmentAccount.objects.filter(is_active=True).aggregate(total=Sum("cash_balance"))["total"] or 0
+    total_cash = InvestmentCashMovement.objects.filter(
+        account__is_active=True,
+    ).aggregate(total=Sum("amount"))["total"] or 0
     total_market_value = InvestmentPosition.objects.aggregate(total=Sum("market_value"))["total"] or 0
     latest_snapshot = AssetBalanceSnapshot.objects.order_by("-snapshot_date", "-created_at").first()
     asset_snapshot_total = latest_snapshot.entries.aggregate(total=Sum("base_amount"))["total"] if latest_snapshot else 0

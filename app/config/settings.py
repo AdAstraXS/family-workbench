@@ -107,6 +107,9 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+FUTU_OPEND_HOST = os.getenv("FUTU_OPEND_HOST", "host.docker.internal")
+FUTU_OPEND_PORT = int(os.getenv("FUTU_OPEND_PORT", "11111"))
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LOGIN_URL = "/accounts/login/"

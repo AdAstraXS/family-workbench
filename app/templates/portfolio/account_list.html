@@ -7,13 +7,15 @@
 <section class="panel">
   <div class="section-head">
     <h1>投资账户</h1>
-    <a class="button" href="{% url 'portfolio:account_create' %}">新增投资账户</a>
+    <div class="table-actions">
+      <a class="button ghost" href="{% url 'portfolio:account_prototype' %}">查看新版页面原型</a>
+    </div>
   </div>
   <table>
-    <thead><tr><th>成员</th><th>券商</th><th>账户</th><th>币种</th><th>现金余额</th><th>操作</th></tr></thead>
+    <thead><tr><th>家庭</th><th>成员</th><th>账户</th><th>脱敏账号</th><th>账户地区</th><th>操作</th></tr></thead>
     <tbody>
       {% for account in accounts %}
-        <tr><td>{{ account.member }}</td><td>{{ account.broker_name }}</td><td>{{ account.account_name }}</td><td>{{ account.currency }}</td><td>{{ account.cash_balance|thousands }}</td><td><a href="{% url 'portfolio:account_edit' account.id %}">编辑</a></td></tr>
+        <tr><td>{{ account.family }}</td><td>{{ account.member }}</td><td>{{ account.account_name }}</td><td>{{ account.account_no_masked|default:"-" }}</td><td>{{ account.account_region|default:"-" }}</td><td><a href="{{ account.get_absolute_url }}">查看</a></td></tr>
       {% empty %}
         <tr><td colspan="6">暂无数据</td></tr>
       {% endfor %}

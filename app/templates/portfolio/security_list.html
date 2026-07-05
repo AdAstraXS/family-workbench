@@ -1,20 +1,121 @@
 {% extends "base.html" %}
+{% load money %}
 
-{% block title %}证券标的{% endblock %}
+{% block title %}自选股{% endblock %}
 
 {% block content %}
-<section class="panel">
+<section class="headline">
+  <h1>自选股</h1>
+  <p>通过 Futu OpenD 查询证券资料，确认后保存到家庭自选列表。</p>
+</section>
+
+<section class="panel watchlist-search">
   <div class="section-head">
-    <h1>证券标的</h1>
-    <a class="button" href="{% url 'portfolio:security_create' %}">新增证券标的</a>
+    <div>
+      <h2>查询股票</h2>
+      <p>支持港股、美股和 A 股的代码或名称。</p>
+    </div>
+    <a class="button ghost" href="{% url 'portfolio:security_create' %}">手工添加</a>
+  </div>
+  <form method="get">
+    <label>市场
+      <select name="market">
+        <option value="HK"{% if selected_market == "HK" %} selected{% endif %}>港股</option>
+        <option value="US"{% if selected_market == "US" %} selected{% endif %}>美股</option>
+        <option value="CN"{% if selected_market == "CN" %} selected{% endif %}>A 股</option>
+      </select>
+    </label>
+    <label>代码或名称
+      <input name="q" value="{{ query }}" placeholder="例如：00700、腾讯、AAPL">
+    </label>
+    <button type="submit">查询 Futu</button>
+  </form>
+  {% if query_error %}
+    <p class="form-error">{{ query_error }}</p>
+  {% endif %}
+</section>
+
+{% if query %}
+<section class="panel watchlist-results">
+  <div class="section-head">
+    <h2>查询结果</h2>
+    <span>{{ search_results|length }} 条</span>
   </div>
   <table>
-    <thead><tr><th>代码</th><th>名称</th><th>市场</th><th>类型</th><th>币种</th><th>操作</th></tr></thead>
+    <thead>
+      <tr><th>代码</th><th>名称</th><th>行情时间</th><th>最新价</th><th>当日涨跌幅</th><th>总市值</th><th>市盈率（静）</th><th>市盈率（TTM）</th><th>市净率</th><th>市销率</th><th>操作</th></tr>
+    </thead>
     <tbody>
-      {% for security in securities %}
-        <tr><td>{{ security.symbol }}</td><td>{{ security.name }}</td><td>{{ security.market }}</td><td>{{ security.asset_type }}</td><td>{{ security.currency }}</td><td><a href="{% url 'portfolio:security_edit' security.id %}">编辑</a></td></tr>
+      {% for item in search_results %}
+        <tr>
+          <td>{{ item.symbol }}</td>
+          <td class="watchlist-name">{{ item.name }}</td>
+          <td>{{ item.quote_time|slice:"5:10"|default:"-" }}</td>
+          <td class="{% if item.change_rate > 0 %}positive{% elif item.change_rate < 0 %}negative{% endif %}">{{ item.last_price|money2 }}</td>
+          <td class="{% if item.change_rate > 0 %}positive{% elif item.change_rate < 0 %}negative{% endif %}">
+            {% if item.change_rate is not None %}{{ item.change_rate|floatformat:2 }}%{% else %}-{% endif %}
+          </td>
+          <td>{{ item.total_market_value|cn_market_cap }}</td>
+          <td>{{ item.pe_ratio|floatformat:2|default:"-" }}</td>
+          <td>{{ item.pe_ttm_ratio|floatformat:2|default:"-" }}</td>
+          <td>{{ item.pb_ratio|floatformat:2|default:"-" }}</td>
+          <td>{{ item.ps_ratio|floatformat:2|default:"-" }}</td>
+          <td class="table-actions">
+            <a class="button external-link-button compact" href="{{ item.futu_url }}" target="_blank" rel="noopener noreferrer">查看</a>
+            {% if item.is_watched %}
+              <span class="status-chip">已添加</span>
+            {% elif has_member %}
+              <form method="post" action="{% url 'portfolio:watchlist_add' %}">
+                {% csrf_token %}
+                <input type="hidden" name="token" value="{{ item.add_token }}">
+                <button type="submit" class="button compact">添加到自选股</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
       {% empty %}
-        <tr><td colspan="6">暂无数据</td></tr>
+        <tr><td colspan="11">没有找到匹配的股票。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<section class="panel watchlist-existing">
+  <div class="section-head">
+    <h2>已有自选股</h2>
+    <span>{{ watchlist_items|length }} 只</span>
+  </div>
+  <table class="watchlist-compact-table">
+    <thead>
+      <tr><th>代码</th><th>名称</th><th>行情时间</th><th>最新价</th><th>当日涨跌幅</th><th>总市值</th><th>市盈率（静）</th><th>市盈率（TTM）</th><th>市净率</th><th>市销率</th><th>股息率（TTM）</th><th>52 周区间</th><th>操作</th></tr>
+    </thead>
+    <tbody>
+      {% for item in watchlist_items %}
+        {% with security=item.security snapshot=item.security.market_snapshot %}
+        <tr>
+          <td>{{ security.symbol }}</td>
+          <td class="watchlist-name">{{ security.name }}</td>
+          <td>{{ snapshot.quote_time|slice:"5:10"|default:"-" }}</td>
+          <td class="{% if snapshot.change_rate > 0 %}positive{% elif snapshot.change_rate < 0 %}negative{% endif %}">{{ snapshot.last_price|money2 }}</td>
+          <td class="{% if snapshot.change_rate > 0 %}positive{% elif snapshot.change_rate < 0 %}negative{% endif %}">
+            {% if snapshot.change_rate is not None %}{{ snapshot.change_rate|floatformat:2 }}%{% else %}-{% endif %}
+          </td>
+          <td>{{ snapshot.total_market_value|cn_market_cap }}</td>
+          <td>{{ snapshot.pe_ratio|floatformat:2|default:"-" }}</td>
+          <td>{{ snapshot.pe_ttm_ratio|floatformat:2|default:"-" }}</td>
+          <td>{{ snapshot.pb_ratio|floatformat:2|default:"-" }}</td>
+          <td>{{ snapshot.ps_ratio|floatformat:2|default:"-" }}</td>
+          <td>{{ snapshot.dividend_yield_ttm|floatformat:2|default:"-" }}</td>
+          <td>{{ snapshot.low_52_week|money2 }} – {{ snapshot.high_52_week|money2 }}</td>
+          <td class="table-actions">
+            <a class="button external-link-button compact" href="{{ security.futu_url }}" target="_blank" rel="noopener noreferrer">查看</a>
+            <a href="{% url 'portfolio:security_edit' security.id %}">编辑</a>
+          </td>
+        </tr>
+        {% endwith %}
+      {% empty %}
+        <tr><td colspan="13">暂无自选股，请先在上方查询并添加。</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -4,28 +4,114 @@
 {% block title %}投资组合{% endblock %}
 
 {% block content %}
-<section class="headline">
-  <h1>投资组合</h1>
-  <p>投资账户、持仓和交易记录的第一版入口。</p>
-</section>
-<section class="metrics">
-  <div class="metric"><span>现金余额</span><strong>{{ total_cash|thousands }}</strong></div>
-  <div class="metric"><span>持仓市值</span><strong>{{ total_market_value|thousands }}</strong></div>
-</section>
-<section class="panel">
-  <div class="section-head">
-    <h2>最近持仓</h2>
-    <a class="button" href="{% url 'portfolio:position_create' %}">新增持仓</a>
+<section class="portfolio-overview-head">
+  <div>
+    <h1>投资组合</h1>
+    <p>{{ selected_scope_label|default:"家庭成员" }}的证券账户资产概览，金额统一折算为人民币。</p>
   </div>
-  <table>
-    <thead><tr><th>日期</th><th>账户</th><th>标的</th><th>数量</th><th>市值</th><th>盈亏</th></tr></thead>
-    <tbody>
-      {% for item in positions %}
-        <tr><td>{{ item.position_date }}</td><td>{{ item.account.account_name }}</td><td>{{ item.security }}</td><td>{{ item.quantity|thousands }}</td><td>{{ item.market_value|thousands }}</td><td>{{ item.unrealized_pnl|thousands }}</td></tr>
-      {% empty %}
-        <tr><td colspan="6">暂无数据，请先到后台录入。</td></tr>
+</section>
+
+<section class="portfolio-module-nav">
+  <div class="quick-actions">
+    <a class="button ghost" href="{% url 'portfolio:account_list' %}">证券账户和持仓</a>
+    <a class="button ghost" href="{% url 'portfolio:security_list' %}">自选股</a>
+    <a class="button ghost" href="{% url 'portfolio:transaction_list' %}">交易记录</a>
+  </div>
+  <form method="get" class="portfolio-member-filter">
+    <label>成员
+      <select name="member" onchange="this.form.submit()">
+        <option value="all"{% if selected_member_value == "all" %} selected{% endif %}>全部成员</option>
+        {% for member in members %}
+          <option value="{{ member.pk }}"{% if selected_member_value == member.pk|stringformat:"s" %} selected{% endif %}>{{ member.display_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+</section>
+
+{% if missing_rates %}
+  <p class="form-error">部分资产缺少兑换人民币的汇率，暂未计入下列图表。</p>
+{% endif %}
+
+<section class="panel portfolio-trend-card">
+  <div class="portfolio-card-head">
+    <div>
+      <span>{{ selected_scope_label|default:"家庭成员" }} · 投资账户总资产</span>
+      <strong>{{ total_asset|currency0:base_currency }}</strong>
+      <small class="{% if change_amount > 0 %}positive{% elif change_amount < 0 %}negative{% endif %}">
+        较首个快照 {{ change_amount|signed_currency0:base_currency }}
+        （{{ change_ratio|floatformat:2 }}%）
+      </small>
+    </div>
+    <span class="portfolio-snapshot-count">{{ trend_snapshots|length }} 个每日快照</span>
+  </div>
+  <div class="portfolio-trend-chart" aria-label="投资账户总资产走势">
+    <svg viewBox="0 0 1000 180" role="img" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="portfolioTrendFill" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stop-color="#22c55e" stop-opacity="0.18"/>
+          <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <line x1="0" y1="165" x2="1000" y2="165" class="portfolio-chart-axis"/>
+      {% if trend_points %}
+        <polygon points="0,165 {{ trend_points }} 1000,165" fill="url(#portfolioTrendFill)"/>
+        <polyline points="{{ trend_points }}" class="portfolio-trend-line"/>
+      {% endif %}
+    </svg>
+    <div class="portfolio-trend-dates">
+      <span>{{ trend_start|date:"Y年n月j日" }}</span>
+      <span>{{ trend_end|date:"Y年n月j日" }}</span>
+    </div>
+  </div>
+</section>
+
+<section class="panel portfolio-assets-card">
+  <div class="portfolio-card-head">
+    <div>
+      <h2>资产分布</h2>
+      <strong>{{ total_asset|currency0:base_currency }}</strong>
+    </div>
+    <small>按资产类别汇总，可展开查看账户</small>
+  </div>
+
+  {% if asset_groups %}
+    <div class="portfolio-allocation-bar" aria-label="资产类别占比">
+      {% for group in asset_groups %}
+        <span style="width:{{ group.bar_ratio|floatformat:4 }}%;background:{{ group.color }}" title="{{ group.name }} {{ group.ratio|floatformat:2 }}%"></span>
       {% endfor %}
-    </tbody>
-  </table>
+    </div>
+    <div class="portfolio-allocation-legend">
+      {% for group in asset_groups %}
+        <span><i style="background:{{ group.color }}"></i>{{ group.name }} {{ group.ratio|floatformat:2 }}%</span>
+      {% endfor %}
+    </div>
+
+    <div class="portfolio-asset-table">
+      <div class="portfolio-asset-table-head">
+        <span>资产类别 / 账户</span><span>占比</span><span>金额</span>
+      </div>
+      {% for group in asset_groups %}
+        <details class="portfolio-asset-group">
+          <summary>
+            <span class="portfolio-category-name"><i style="background:{{ group.color }}"></i>{{ group.name }}</span>
+            <span>{{ group.ratio|floatformat:2 }}%</span>
+            <strong>{{ group.amount|currency0:base_currency }}</strong>
+          </summary>
+          <div class="portfolio-account-breakdown">
+            {% for row in group.accounts %}
+              <a href="{{ row.account.get_absolute_url }}">
+                <span>{{ row.account.member }} · {{ row.account.account_name }}</span>
+                <span>{{ row.ratio|floatformat:2 }}%</span>
+                <strong>{{ row.amount|currency0:base_currency }}</strong>
+              </a>
+            {% endfor %}
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state">该成员尚无可统计的证券账户资产。</div>
+  {% endif %}
 </section>
 {% endblock %}

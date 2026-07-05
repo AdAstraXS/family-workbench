@@ -1,0 +1,62 @@
+{% extends "form.html" %}
+
+{% block scripts %}
+<script>
+  (() => {
+    const family = document.getElementById("id_family");
+    const member = document.getElementById("id_member");
+    const account = document.getElementById("id_bank_account");
+    const category = document.getElementById("id_asset_category");
+    const security = document.getElementById("id_security");
+    const currency = document.getElementById("id_currency");
+    const quantity = document.getElementById("id_quantity");
+    const price = document.getElementById("id_price");
+    const amount = document.getElementById("id_amount");
+    const strategy = document.getElementById("id_strategy_option");
+    const strategyOther = document.getElementById("id_strategy_other");
+
+    const replaceOptions = (select, rows, blankLabel) => {
+      const current = select.value;
+      select.replaceChildren(new Option(blankLabel, ""));
+      rows.forEach((row) => select.add(new Option(row.name, row.id)));
+      if ([...select.options].some((option) => option.value === current)) select.value = current;
+    };
+
+    const refresh = async (resetMember = false) => {
+      if (!family.value) return;
+      const url = new URL("{% url 'portfolio:transaction_form_options' %}", location.origin);
+      url.searchParams.set("family", family.value);
+      if (!resetMember && member.value) url.searchParams.set("member", member.value);
+      const data = await fetch(url).then((response) => response.json());
+      if (resetMember) replaceOptions(member, data.members, "---------");
+      replaceOptions(account, data.accounts, "---------");
+      replaceOptions(category, data.categories, "---------");
+      replaceOptions(security, data.securities, "---------");
+      data.securities.forEach((row) => {
+        const option = [...security.options].find((item) => item.value === String(row.id));
+        if (option) option.dataset.currency = row.currency;
+      });
+    };
+
+    const updateAmount = () => {
+      const value = Number(quantity.value || 0) * Number(price.value || 0);
+      amount.value = value ? value.toFixed(4) : "0";
+    };
+    const updateStrategyOther = () => {
+      const selected = strategy.options[strategy.selectedIndex];
+      strategyOther.closest(".form-row").hidden = !selected || !selected.text.includes("其他");
+    };
+
+    family.addEventListener("change", () => refresh(true));
+    member.addEventListener("change", () => refresh(false));
+    security.addEventListener("change", () => {
+      if (!currency.value) currency.value = security.options[security.selectedIndex]?.dataset.currency || "";
+    });
+    quantity.addEventListener("input", updateAmount);
+    price.addEventListener("input", updateAmount);
+    strategy.addEventListener("change", updateStrategyOther);
+    updateAmount();
+    updateStrategyOther();
+  })();
+</script>
+{% endblock %}

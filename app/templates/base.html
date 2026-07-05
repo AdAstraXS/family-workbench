@@ -5,14 +5,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}家庭投资与记账工作台{% endblock %}</title>
-  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260703-1320">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260705-6">
 </head>
 <body>
   <header class="topbar">
     <a class="brand" href="{% url 'dashboard:home' %}">家庭工作台</a>
     <nav>
       <a href="{% url 'portfolio:overview' %}">投资组合</a>
-      <a href="{% url 'portfolio:position_list' %}">持仓</a>
       <a href="{% url 'ledger:overview' %}">家庭账本</a>
       <a href="{% url 'ipo:index' %}">港股打新</a>
       <a href="{% url 'notes:index' %}">投资复盘</a>

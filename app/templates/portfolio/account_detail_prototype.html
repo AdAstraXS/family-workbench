@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}账户详情页面原型{% endblock %}
+
+{% block content %}
+<section class="headline account-detail-head">
+  <div>
+    <a class="prototype-back" href="{% url 'portfolio:account_prototype' %}">← 返回投资账户</a>
+    <span class="prototype-badge">界面原型 · 演示数据</span>
+    <h1>{% if account_id == 2 %}华泰证券 · A 股账户{% elif account_id == 3 %}盈透证券 · 美股长期账户{% else %}富途证券 · 港美股主账户{% endif %}</h1>
+    <p>成员甲 · 尾号 8821 · 行情时间 07-04 15:30</p>
+  </div>
+  <div class="table-actions"><button class="button ghost">入金 / 出金</button><button class="button">新增交易</button></div>
+</section>
+
+<section class="panel account-metric-panel">
+  <div class="section-head">
+    <h2>资产卡片</h2>
+    <div class="prototype-filters compact-filters">
+      <label class="prototype-currency">展示币种
+        <select data-detail-currency>
+          <option value="CNY">人民币 CNY</option><option value="HKD">港币 HKD</option><option value="USD">美元 USD</option>
+        </select>
+      </label>
+      <label class="prototype-currency">统计年份
+        <select><option>全部年份</option><option selected>2026 年</option><option>2025 年</option></select>
+      </label>
+    </div>
+  </div>
+  <div class="account-detail-metrics">
+    <div class="metric"><span>账户总资产</span><strong data-card-money="1500000">¥1,500,000</strong></div>
+    <div class="metric"><span>现金余额</span><strong data-card-money="260000">¥260,000</strong></div>
+    <div class="metric"><span>持仓市值</span><strong data-card-money="1240000">¥1,240,000</strong></div>
+    <div class="metric"><span>持仓占比</span><strong>82.67%</strong></div>
+    <div class="metric"><span>今日盈亏</span><strong class="positive" data-card-money="10820" data-signed>+¥10,820</strong></div>
+    <div class="metric"><span>累计浮动盈亏</span><strong class="positive" data-card-money="221000" data-signed>+¥221,000</strong></div>
+  </div>
+</section>
+
+<nav class="account-tabs" aria-label="账户详情标签页">
+  <a class="{% if active_tab == 'overview' %}active{% endif %}" href="?tab=overview">账户概览</a>
+  <a class="{% if active_tab == 'positions' %}active{% endif %}" href="?tab=positions">持仓资产</a>
+  <a class="{% if active_tab == 'cashflows' %}active{% endif %}" href="?tab=cashflows">现金流水</a>
+  <a class="{% if active_tab == 'transactions' %}active{% endif %}" href="?tab=transactions">交易记录</a>
+</nav>
+
+<section class="panel account-tab-content">
+  {% if active_tab == "positions" %}
+    <div class="section-head"><h2>持仓资产</h2><span>移动平均成本 ▾</span></div>
+    <table><thead><tr><th>标的</th><th>资产类别</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>浮动盈亏</th><th>累计已实现盈亏</th><th>仓位</th></tr></thead>
+      <tbody><tr><td>腾讯控股 00700</td><td>权益 / 腾讯控股</td><td>2,000</td><td>HK$431.20</td><td>HK$862,400</td><td>HK$365.50</td><td class="positive"><span class="money-stack">+HK$131,400<small>本位币 +¥121,667</small></span></td><td class="positive"><span class="money-stack">+HK$45,200<small>本位币 +¥41,852</small></span></td><td>57.49%</td></tr>
+      <tr><td>苹果 AAPL</td><td>权益 / 苹果</td><td>800</td><td>US$67.62</td><td>US$54,096</td><td>US$51.45</td><td class="positive"><span class="money-stack">+US$12,936<small>本位币 +¥89,600</small></span></td><td class="positive"><span class="money-stack">+US$3,320<small>本位币 +¥23,000</small></span></td><td>25.17%</td></tr></tbody>
+    </table>
+  {% elif active_tab == "cashflows" %}
+    <div class="section-head"><h2>现金流水</h2><button class="button compact">新增现金变动</button></div>
+    <table><thead><tr><th>日期</th><th>标的</th><th>类型</th><th>变动金额</th><th>变动后现金余额</th><th>变动后本位币余额</th></tr></thead>
+      <tbody><tr><td>2026-07-03</td><td>腾讯控股</td><td>卖出</td><td class="positive">+HK$86,120</td><td>HK$286,420</td><td>¥265,204</td></tr>
+      <tr><td>2026-06-28</td><td>苹果</td><td>买入</td><td class="negative">-US$24,860</td><td>US$32,280</td><td>¥223,647</td></tr></tbody>
+    </table>
+  {% elif active_tab == "transactions" %}
+    <div class="section-head"><h2>交易记录</h2><button class="button compact">新增交易</button></div>
+    <p class="table-hint">点击任意一行查看交易逻辑、信息来源、退出条件和备注。</p>
+    <table class="clickable-trade-table"><thead><tr><th>日期</th><th>标的</th><th>方向</th><th>数量</th><th>价格</th><th>手续费等</th><th>成交金额</th><th>本次卖出损益</th><th>本次卖出收益率</th><th>策略</th></tr></thead>
+      <tbody><tr tabindex="0" role="button" data-trade-row data-title="腾讯控股 · 卖出" data-logic="估值回到合理区间，按原计划分批止盈。" data-source="A级：公司财报、公告及券商研报" data-exit="剩余仓位在核心逻辑证伪或跌破 HK$390 时退出。" data-note="计划内交易，卖出后继续保留核心仓位。"><td>2026-07-03</td><td>腾讯控股</td><td><span class="trade-tag sell">卖出</span></td><td>200</td><td>HK$430.00</td><td>HK$180</td><td>HK$85,820</td><td class="positive">+HK$12,700</td><td class="positive">17.37%</td><td>中期波段</td></tr>
+      <tr tabindex="0" role="button" data-trade-row data-title="苹果 · 买入" data-logic="长期价值配置，盈利能力稳定，分批建立底仓。" data-source="A级：公司财报及公开公告" data-exit="基本面恶化、增长逻辑证伪或仓位超过组合上限。" data-note="首次建仓，后续按计划分两次加仓。"><td>2026-06-28</td><td>苹果</td><td><span class="trade-tag buy">买入</span></td><td>100</td><td>US$245.00</td><td>US$18</td><td>US$24,518</td><td>-</td><td>-</td><td>长期价值</td></tr></tbody>
+    </table>
+    <dialog class="trade-detail-drawer" data-trade-dialog>
+      <div class="drawer-head"><div><span class="prototype-badge">交易详情</span><h2 data-detail-title></h2></div><button type="button" class="drawer-close" data-dialog-close aria-label="关闭">×</button></div>
+      <dl class="trade-detail-list"><div><dt>交易逻辑</dt><dd data-detail-logic></dd></div><div><dt>信息来源</dt><dd data-detail-source></dd></div><div><dt>退出条件</dt><dd data-detail-exit></dd></div><div><dt>备注</dt><dd data-detail-note></dd></div></dl>
+    </dialog>
+  {% else %}
+    <div class="section-head"><h2>账户概览</h2><span>统一折算为 CNY</span></div>
+    <div class="account-overview-grid">
+      <article><span>现金构成</span><strong>HKD 286,420</strong><strong>USD 32,280</strong><strong>CNY 18,600</strong></article>
+      <article><span>资产构成</span><strong>现金 17.33%</strong><strong>股票 82.67%</strong><div class="asset-breakdown"><span>腾讯控股 57.49%</span><span>苹果 25.17%</span></div></article>
+      <article><span>收益概览</span><strong class="positive">本位币浮动 +¥221,000</strong><strong class="positive">本位币已实现 +¥68,200</strong><span class="original-currency-return">原币浮动 +HK$238,400</span><span class="original-currency-return">原币已实现 +HK$73,500</span></article>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (() => {
+    const rates = { CNY: 1, HKD: 1.08, USD: 0.138 };
+    const locales = { CNY: "zh-CN", HKD: "zh-HK", USD: "en-US" };
+    const currency = document.querySelector("[data-detail-currency]");
+    currency.addEventListener("change", () => {
+      document.querySelectorAll("[data-card-money]").forEach((node) => {
+        const value = Number(node.dataset.cardMoney) * rates[currency.value];
+        const text = new Intl.NumberFormat(locales[currency.value], {
+          style: "currency", currency: currency.value, maximumFractionDigits: 0
+        }).format(Math.abs(value));
+        node.textContent = node.hasAttribute("data-signed") ? `${value > 0 ? "+" : value < 0 ? "-" : ""}${text}` : text;
+      });
+    });
+
+    const dialog = document.querySelector("[data-trade-dialog]");
+    if (dialog) {
+      const open = (row) => {
+        ["title", "logic", "source", "exit", "note"].forEach((key) => {
+          dialog.querySelector(`[data-detail-${key}]`).textContent = row.dataset[key];
+        });
+        dialog.showModal();
+      };
+      document.querySelectorAll("[data-trade-row]").forEach((row) => {
+        row.addEventListener("click", () => open(row));
+        row.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") open(row);
+        });
+      });
+      dialog.querySelector("[data-dialog-close]").addEventListener("click", () => dialog.close());
+    }
+  })();
+</script>
+{% endblock %}
