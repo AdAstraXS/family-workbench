@@ -13,3 +13,10 @@ env/
 .pytest_cache/
 .mypy_cache/
 import_asset_snapshot_*.json
+
+# Local generation workspace and reproducible exported artifacts
+/work/
+/outputs/**/*.xlsx
+/outputs/**/*.docx
+/outputs/**/*.pdf
+/outputs/**/~$*
