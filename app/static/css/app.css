@@ -2661,3 +2661,471 @@ textarea {
     animation: none;
   }
 }
+
+/* Investment notes */
+.notes-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+  padding: 28px 30px;
+  border: 1px solid #dce8e5;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 92% 10%, rgba(20, 184, 166, 0.13), transparent 34%),
+    linear-gradient(135deg, #ffffff 0%, #f1faf8 100%);
+  box-shadow: 0 12px 30px rgba(15, 118, 110, 0.07);
+}
+
+.notes-eyebrow {
+  display: block;
+  margin-bottom: 8px;
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.notes-hero h1,
+.notes-form-heading h1 {
+  margin: 0 0 8px;
+  color: #102a2a;
+  font-size: clamp(28px, 4vw, 40px);
+  letter-spacing: -0.04em;
+}
+
+.notes-hero p,
+.notes-form-heading p {
+  margin: 0;
+  color: #64748b;
+}
+
+.notes-primary-action {
+  min-height: 42px;
+  border-color: #0f766e;
+  background: #0f766e;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.notes-primary-action:hover {
+  background: #115e59;
+  color: #ffffff;
+}
+
+.notes-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.notes-metrics article {
+  position: relative;
+  min-height: 102px;
+  padding: 18px 20px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.notes-metrics article::after {
+  position: absolute;
+  right: -15px;
+  bottom: -25px;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: #e6f6f3;
+  content: "";
+}
+
+.notes-metrics span {
+  display: block;
+  margin-bottom: 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.notes-metrics strong {
+  position: relative;
+  z-index: 1;
+  color: #0f3d3a;
+  font-size: 28px;
+}
+
+.notes-toolbar {
+  margin-bottom: 18px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.notes-search-form {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 180px auto auto;
+  gap: 10px;
+}
+
+.notes-search {
+  position: relative;
+}
+
+.notes-search span {
+  position: absolute;
+  top: 50%;
+  left: 13px;
+  color: #94a3b8;
+  font-size: 22px;
+  transform: translateY(-54%);
+}
+
+.notes-search input {
+  width: 100%;
+  padding-left: 40px;
+}
+
+.notes-search-form select {
+  width: 100%;
+}
+
+.notes-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.note-card {
+  display: flex;
+  min-width: 0;
+  min-height: 270px;
+  padding: 22px;
+  flex-direction: column;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.035);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.note-card:hover {
+  border-color: #b7d9d4;
+  box-shadow: 0 14px 32px rgba(15, 118, 110, 0.09);
+  transform: translateY(-2px);
+}
+
+.note-card-top,
+.note-card footer,
+.note-detail-meta,
+.note-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.note-card-top {
+  justify-content: space-between;
+}
+
+.note-category {
+  display: inline-flex;
+  min-height: 26px;
+  padding: 3px 10px;
+  align-items: center;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.note-category-trade {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.note-category-strategy {
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.note-category-research {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.note-category-psychology {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.note-date {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.note-card h2 {
+  margin: 18px 0 10px;
+  color: #172033;
+  font-size: 20px;
+  line-height: 1.4;
+}
+
+.note-card h2 a:hover {
+  color: #0f766e;
+  text-decoration: none;
+}
+
+.note-excerpt {
+  margin: 0 0 16px;
+  color: #64748b;
+  line-height: 1.75;
+}
+
+.note-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.note-tags span {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.note-card footer {
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 18px;
+  border-top: 1px solid #eef2f7;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.note-card footer a {
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.notes-empty {
+  padding: 64px 24px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 16px;
+  background: #ffffff;
+  text-align: center;
+}
+
+.notes-empty > div {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: #e6f6f3;
+  color: #0f766e;
+  font-size: 26px;
+  place-items: center;
+}
+
+.notes-empty h1,
+.notes-empty h2 {
+  margin: 0 0 8px;
+  color: #172033;
+}
+
+.notes-empty p {
+  margin: 0 auto 20px;
+  color: #64748b;
+}
+
+.notes-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 22px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.notes-form-shell,
+.note-detail {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.notes-form-heading {
+  margin-bottom: 20px;
+}
+
+.notes-editor,
+.note-detail {
+  border: 1px solid #dfe7ee;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.05);
+}
+
+.notes-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 28px;
+}
+
+.notes-form-row {
+  min-width: 0;
+}
+
+.notes-form-row label {
+  display: block;
+  margin-bottom: 7px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.notes-form-row input,
+.notes-form-row select,
+.notes-form-row textarea {
+  width: 100%;
+}
+
+.notes-form-row small {
+  display: block;
+  margin-top: 6px;
+  color: #94a3b8;
+}
+
+.notes-form-wide,
+.notes-visibility-row,
+.notes-editor-actions {
+  grid-column: 1 / -1;
+}
+
+.notes-editor textarea {
+  min-height: 320px;
+  resize: vertical;
+  line-height: 1.7;
+}
+
+.notes-visibility-row {
+  max-width: 300px;
+}
+
+.notes-editor-actions {
+  display: flex;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.note-detail {
+  padding: clamp(26px, 5vw, 52px);
+}
+
+.note-detail header {
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.note-detail-meta {
+  flex-wrap: wrap;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.note-detail h1 {
+  margin: 18px 0 14px;
+  color: #172033;
+  font-size: clamp(28px, 5vw, 42px);
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+}
+
+.note-detail-content {
+  min-height: 260px;
+  padding: 30px 0;
+  color: #334155;
+  font-size: 16px;
+  line-height: 1.9;
+}
+
+.note-detail-content p {
+  margin: 0 0 1.2em;
+  color: inherit;
+}
+
+.note-detail-actions {
+  flex-wrap: wrap;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.note-detail-actions form {
+  margin: 0 0 0 auto;
+}
+
+.note-delete-button {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+@media (max-width: 820px) {
+  .notes-hero {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 22px;
+  }
+
+  .notes-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .notes-search-form,
+  .notes-grid,
+  .notes-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .notes-form-wide,
+  .notes-visibility-row,
+  .notes-editor-actions {
+    grid-column: auto;
+  }
+
+  .notes-editor {
+    padding: 20px;
+  }
+
+  .note-card {
+    min-height: 240px;
+  }
+
+  .note-detail-actions form {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  .notes-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .notes-metrics article {
+    min-height: 90px;
+    padding: 15px;
+  }
+
+  .note-card footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

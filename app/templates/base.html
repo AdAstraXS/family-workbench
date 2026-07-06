@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}家庭投资与记账工作台{% endblock %}</title>
-  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260703-1320">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260706-notes">
 </head>
 <body>
   <header class="topbar">
@@ -15,7 +15,7 @@
       <a href="{% url 'portfolio:position_list' %}">持仓</a>
       <a href="{% url 'ledger:overview' %}">家庭账本</a>
       <a href="{% url 'ipo:index' %}">港股打新</a>
-      <a href="{% url 'notes:index' %}">投资复盘</a>
+      <a href="{% url 'notes:index' %}">投资笔记</a>
       <a href="{% url 'macro:index' %}">宏观数据</a>
       <a href="{% url 'ai_analysis:index' %}">AI 分析</a>
       <a href="{% url 'admin:index' %}">后台</a>
@@ -38,6 +38,8 @@
           <a class="button page-nav-module" href="{% url 'ledger:overview' %}">家庭账本首页</a>
         {% elif request.resolver_match.app_name == "ipo" and request.resolver_match.url_name != "index" %}
           <a class="button page-nav-module" href="{% url 'ipo:index' %}">港股打新首页</a>
+        {% elif request.resolver_match.app_name == "notes" and request.resolver_match.url_name != "index" %}
+          <a class="button page-nav-module" href="{% url 'notes:index' %}">投资笔记首页</a>
         {% endif %}
         {% if request.resolver_match.app_name != "dashboard" %}
           <a class="button page-nav-home" href="{% url 'dashboard:home' %}">工作台首页</a>

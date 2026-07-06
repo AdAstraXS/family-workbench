@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<section class="notes-form-shell">
+  <div class="notes-form-heading">
+    <span class="notes-eyebrow">INVESTMENT JOURNAL</span>
+    <h1>{{ title }}</h1>
+    <p>先忠实记录当时的想法，答案可以留给未来的复盘。</p>
+  </div>
+
+  <form method="post" class="notes-editor">
+    {% csrf_token %}
+    {% if form.non_field_errors %}
+      <div class="form-errors">{{ form.non_field_errors }}</div>
+    {% endif %}
+
+    <div class="notes-form-row notes-form-wide">
+      <label for="{{ form.title.id_for_label }}">{{ form.title.label }}</label>
+      {{ form.title }}
+      {% for error in form.title.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    </div>
+
+    <div class="notes-form-row">
+      <label for="{{ form.note_type.id_for_label }}">{{ form.note_type.label }}</label>
+      {{ form.note_type }}
+      {% for error in form.note_type.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    </div>
+    <div class="notes-form-row">
+      <label for="{{ form.note_date.id_for_label }}">{{ form.note_date.label }}</label>
+      {{ form.note_date }}
+      {% for error in form.note_date.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    </div>
+    <div class="notes-form-row notes-form-wide">
+      <label for="{{ form.tags_text.id_for_label }}">{{ form.tags_text.label }}</label>
+      {{ form.tags_text }}
+      <small>{{ form.tags_text.help_text }}</small>
+      {% for error in form.tags_text.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    </div>
+    <div class="notes-form-row notes-form-wide">
+      <label for="{{ form.content.id_for_label }}">{{ form.content.label }}</label>
+      {{ form.content }}
+      {% for error in form.content.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    </div>
+    <div class="notes-form-row notes-visibility-row">
+      <label for="{{ form.visibility.id_for_label }}">{{ form.visibility.label }}</label>
+      {{ form.visibility }}
+      <small>“仅自己”不会被其他家庭成员看到。</small>
+      {% for error in form.visibility.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    </div>
+
+    <div class="notes-editor-actions">
+      <button type="submit">{{ submit_label }}</button>
+      {% if note %}
+        <a class="button ghost" href="{% url 'notes:detail' note.pk %}">取消</a>
+      {% else %}
+        <a class="button ghost" href="{% url 'notes:index' %}">取消</a>
+      {% endif %}
+    </div>
+  </form>
+</section>
+{% endblock %}
