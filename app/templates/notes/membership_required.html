@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}尚未绑定家庭成员{% endblock %}
+
+{% block content %}
+<section class="notes-empty">
+  <div aria-hidden="true">!</div>
+  <h1>当前账号尚未绑定家庭成员</h1>
+  <p>请在“后台 → 家庭成员”中，把当前登录用户绑定到一个有效的家庭成员后再使用投资笔记。</p>
+  <a class="button notes-primary-action" href="{% url 'admin:family_core_familymember_changelist' %}">前往后台设置</a>
+</section>
+{% endblock %}

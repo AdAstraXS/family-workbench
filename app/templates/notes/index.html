@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}投资笔记{% endblock %}
+
+{% block content %}
+<section class="notes-hero">
+  <div>
+    <span class="notes-eyebrow">INVESTMENT JOURNAL</span>
+    <h1>投资笔记</h1>
+    <p>记录判断，复盘执行，把零散想法沉淀成自己的投资体系。</p>
+  </div>
+  {% if can_write %}
+    <a class="button notes-primary-action" href="{% url 'notes:create' %}">＋ 新建笔记</a>
+  {% endif %}
+</section>
+
+<section class="notes-metrics" aria-label="投资笔记统计">
+  <article>
+    <span>全部笔记</span>
+    <strong>{{ stats.total }}</strong>
+  </article>
+  <article>
+    <span>本月新增</span>
+    <strong>{{ stats.this_month }}</strong>
+  </article>
+  <article>
+    <span>交易记录</span>
+    <strong>{{ stats.trade }}</strong>
+  </article>
+  <article>
+    <span>研究分析</span>
+    <strong>{{ stats.research }}</strong>
+  </article>
+</section>
+
+<section class="notes-toolbar">
+  <form method="get" class="notes-search-form">
+    <label class="notes-search">
+      <span aria-hidden="true">⌕</span>
+      <input type="search" name="q" value="{{ query }}" placeholder="搜索标题、内容或标签">
+    </label>
+    <select name="category" aria-label="笔记分类">
+      <option value="">全部分类</option>
+      {% for value, label in category_choices %}
+        <option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">搜索</button>
+    {% if query or selected_category %}
+      <a class="button ghost" href="{% url 'notes:index' %}">清除</a>
+    {% endif %}
+  </form>
+</section>
+
+{% if page_obj.object_list %}
+  <section class="notes-grid">
+    {% for note in page_obj %}
+      <article class="note-card">
+        <div class="note-card-top">
+          <span class="note-category note-category-{{ note.note_type }}">{{ note.get_note_type_display }}</span>
+          <span class="note-date">{{ note.note_date|date:"Y-m-d" }}</span>
+        </div>
+        <h2><a href="{% url 'notes:detail' note.pk %}">{{ note.title }}</a></h2>
+        <p class="note-excerpt">{{ note.content|truncatechars:180|linebreaksbr }}</p>
+        {% if note.tags %}
+          <div class="note-tags">
+            {% for tag in note.tags %}
+              <span># {{ tag }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+        <footer>
+          <span>
+            {{ note.member.display_name }}
+            {% if note.visibility == "family" %} · 家庭共享{% else %} · 仅自己{% endif %}
+          </span>
+          <a href="{% url 'notes:detail' note.pk %}">查看全文 →</a>
+        </footer>
+      </article>
+    {% endfor %}
+  </section>
+
+  {% if page_obj.has_other_pages %}
+    <nav class="notes-pagination" aria-label="笔记分页">
+      {% if page_obj.has_previous %}
+        <a class="button ghost" href="?page={{ page_obj.previous_page_number }}&q={{ query|urlencode }}&category={{ selected_category|urlencode }}">上一页</a>
+      {% endif %}
+      <span>第 {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} 页</span>
+      {% if page_obj.has_next %}
+        <a class="button ghost" href="?page={{ page_obj.next_page_number }}&q={{ query|urlencode }}&category={{ selected_category|urlencode }}">下一页</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+{% else %}
+  <section class="notes-empty">
+    <div aria-hidden="true">✎</div>
+    <h2>{% if query or selected_category %}没有找到匹配的笔记{% else %}还没有投资笔记{% endif %}</h2>
+    <p>{% if query or selected_category %}换个关键词或分类试试。{% else %}写下第一篇，让每一次判断都有迹可循。{% endif %}</p>
+    {% if can_write and not query and not selected_category %}
+      <a class="button notes-primary-action" href="{% url 'notes:create' %}">新建第一篇笔记</a>
+    {% endif %}
+  </section>
+{% endif %}
+{% endblock %}

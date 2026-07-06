@@ -104,4 +104,13 @@ def page_navigation(request):
             parent_url = reverse("portfolio:overview")
         return {"page_parent_url": parent_url}
 
+    if app_name == "notes":
+        if url_name == "index":
+            parent_url = reverse("dashboard:home")
+        elif url_name in {"edit", "delete"}:
+            parent_url = reverse("notes:detail", kwargs={"pk": kwargs["pk"]})
+        else:
+            parent_url = reverse("notes:index")
+        return {"page_parent_url": parent_url}
+
     return {"page_parent_url": reverse("dashboard:home")}

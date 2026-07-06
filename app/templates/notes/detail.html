@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}{{ note.title }}{% endblock %}
+
+{% block content %}
+<article class="note-detail">
+  <header>
+    <div class="note-detail-meta">
+      <span class="note-category note-category-{{ note.note_type }}">{{ note.get_note_type_display }}</span>
+      <span>{{ note.note_date|date:"Y年m月d日" }}</span>
+      <span>{{ note.member.display_name }}</span>
+      <span>{% if note.visibility == "family" %}家庭共享{% else %}仅自己{% endif %}</span>
+    </div>
+    <h1>{{ note.title }}</h1>
+    {% if note.tags %}
+      <div class="note-tags">
+        {% for tag in note.tags %}<span># {{ tag }}</span>{% endfor %}
+      </div>
+    {% endif %}
+  </header>
+
+  <div class="note-detail-content">{{ note.content|linebreaks }}</div>
+
+  <footer class="note-detail-actions">
+    <a class="button ghost" href="{% url 'notes:index' %}">返回笔记列表</a>
+    {% if can_edit %}
+      <a class="button" href="{% url 'notes:edit' note.pk %}">编辑笔记</a>
+      <form method="post" action="{% url 'notes:delete' note.pk %}" onsubmit="return confirm('确定删除这篇笔记吗？删除后无法恢复。');">
+        {% csrf_token %}
+        <button class="button note-delete-button" type="submit">删除</button>
+      </form>
+    {% endif %}
+  </footer>
+</article>
+{% endblock %}
