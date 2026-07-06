@@ -10,7 +10,7 @@ from django.views.decorators.http import require_POST
 from family_core.models import FamilyMember
 
 from .forms import InvestmentNoteForm
-from .models import InvestmentNote
+from .models import InvestmentNote, InvestmentNoteType
 
 
 def _current_member(request):
@@ -32,7 +32,7 @@ def _membership_required_response(request):
 def _accessible_notes(member):
     return InvestmentNote.objects.filter(family=member.family).filter(
         Q(member=member) | Q(visibility=InvestmentNote.VISIBILITY_FAMILY)
-    ).select_related("member")
+    ).select_related("member", "note_type")
 
 
 def _accessible_note_or_404(member, pk):
@@ -41,7 +41,7 @@ def _accessible_note_or_404(member, pk):
 
 def _editable_note_or_404(member, pk):
     note = get_object_or_404(
-        InvestmentNote.objects.select_related("member"),
+        InvestmentNote.objects.select_related("member", "note_type"),
         pk=pk,
         family=member.family,
     )
@@ -62,15 +62,23 @@ def index(request):
 
     category = request.GET.get("category", "").strip()
     query = request.GET.get("q", "").strip()
-    valid_categories = {value for value, _label in InvestmentNote.TYPE_CHOICES}
+
+    accessible = _accessible_notes(member)
+    category_types = list(
+        InvestmentNoteType.objects.filter(
+            Q(is_active=True) | Q(investment_notes__in=accessible)
+        )
+        .distinct()
+        .order_by("sort_order", "id")
+    )
+    valid_categories = {note_type.code for note_type in category_types}
     if category not in valid_categories:
         category = ""
 
-    accessible = _accessible_notes(member)
     today = timezone.localdate()
     category_counts = {
-        value: accessible.filter(note_type=value).count()
-        for value, _label in InvestmentNote.TYPE_CHOICES
+        note_type.code: accessible.filter(note_type=note_type).count()
+        for note_type in category_types
     }
     stats = {
         "total": accessible.count(),
@@ -78,13 +86,13 @@ def index(request):
             note_date__year=today.year,
             note_date__month=today.month,
         ).count(),
-        "trade": category_counts[InvestmentNote.TYPE_TRADE],
-        "research": category_counts[InvestmentNote.TYPE_RESEARCH],
+        "trade": category_counts.get(InvestmentNote.TYPE_TRADE, 0),
+        "research": category_counts.get(InvestmentNote.TYPE_RESEARCH, 0),
     }
 
     notes = accessible
     if category:
-        notes = notes.filter(note_type=category)
+        notes = notes.filter(note_type__code=category)
     notes = list(notes)
     if query:
         normalized_query = query.casefold()
@@ -104,7 +112,7 @@ def index(request):
             "page_obj": page_obj,
             "query": query,
             "selected_category": category,
-            "category_choices": InvestmentNote.TYPE_CHOICES,
+            "category_choices": category_types,
             "category_counts": category_counts,
             "stats": stats,
             "can_write": _can_write(member),

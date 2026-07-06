@@ -6,7 +6,7 @@
 <article class="note-detail">
   <header>
     <div class="note-detail-meta">
-      <span class="note-category note-category-{{ note.note_type }}">{{ note.get_note_type_display }}</span>
+      <span class="note-category note-category-{{ note.note_type.code }}">{{ note.note_type.name }}</span>
       <span>{{ note.note_date|date:"Y年m月d日" }}</span>
       <span>{{ note.member.display_name }}</span>
       <span>{% if note.visibility == "family" %}家庭共享{% else %}仅自己{% endif %}</span>

@@ -1,12 +1,13 @@
 from datetime import date
 
 from django.contrib.auth import get_user_model
+from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.urls import reverse
 
 from family_core.models import Family, FamilyMember
 
-from .models import InvestmentNote
+from .models import InvestmentNote, InvestmentNoteType
 
 
 class InvestmentNoteViewsTests(TestCase):
@@ -31,16 +32,27 @@ class InvestmentNoteViewsTests(TestCase):
             family=self.other_family,
             display_name="外部成员",
         )
+        self.trade_type = InvestmentNoteType.objects.get(code=InvestmentNote.TYPE_TRADE)
+        self.strategy_type = InvestmentNoteType.objects.get(code=InvestmentNote.TYPE_STRATEGY)
+        self.research_type = InvestmentNoteType.objects.get(code=InvestmentNote.TYPE_RESEARCH)
         self.client.force_login(self.user)
 
-    def make_note(self, *, member=None, visibility="private", title="投资笔记", tags=None):
+    def make_note(
+        self,
+        *,
+        member=None,
+        visibility="private",
+        title="投资笔记",
+        tags=None,
+        note_type=None,
+    ):
         member = member or self.member
         return InvestmentNote.objects.create(
             family=member.family,
             member=member,
             title=title,
             content="记录投资判断与执行结果。",
-            note_type=InvestmentNote.TYPE_RESEARCH,
+            note_type=note_type or self.research_type,
             note_date=date(2026, 7, 6),
             visibility=visibility,
             tags=tags or [],
@@ -72,7 +84,7 @@ class InvestmentNoteViewsTests(TestCase):
             reverse("notes:create"),
             {
                 "title": "港股打新复盘",
-                "note_type": InvestmentNote.TYPE_TRADE,
+                "note_type": self.trade_type.pk,
                 "note_date": "2026-07-05",
                 "visibility": InvestmentNote.VISIBILITY_PRIVATE,
                 "tags_text": "港股，复盘、港股",
@@ -117,7 +129,7 @@ class InvestmentNoteViewsTests(TestCase):
             reverse("notes:edit", kwargs={"pk": note.pk}),
             {
                 "title": "修改后的标题",
-                "note_type": InvestmentNote.TYPE_STRATEGY,
+                "note_type": self.strategy_type.pk,
                 "note_date": "2026-07-06",
                 "visibility": InvestmentNote.VISIBILITY_FAMILY,
                 "tags_text": "长期",
@@ -160,3 +172,24 @@ class InvestmentNoteViewsTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertContains(response, "尚未绑定家庭成员", status_code=403)
+
+    def test_inactive_type_is_hidden_for_new_notes_but_kept_for_existing_note(self):
+        inactive_type = InvestmentNoteType.objects.create(
+            name="已停用类型",
+            code="inactive",
+            sort_order=99,
+            is_active=False,
+        )
+        note = self.make_note(note_type=inactive_type)
+
+        create_response = self.client.get(reverse("notes:create"))
+        edit_response = self.client.get(reverse("notes:edit", kwargs={"pk": note.pk}))
+
+        self.assertNotContains(create_response, inactive_type.name)
+        self.assertContains(edit_response, inactive_type.name)
+
+    def test_used_type_cannot_be_deleted(self):
+        self.make_note()
+
+        with self.assertRaises(ProtectedError):
+            self.research_type.delete()

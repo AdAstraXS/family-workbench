@@ -41,8 +41,8 @@
     </label>
     <select name="category" aria-label="笔记分类">
       <option value="">全部分类</option>
-      {% for value, label in category_choices %}
-        <option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>
+      {% for note_type in category_choices %}
+        <option value="{{ note_type.code }}" {% if selected_category == note_type.code %}selected{% endif %}>{{ note_type.name }}</option>
       {% endfor %}
     </select>
     <button type="submit">搜索</button>
@@ -57,7 +57,7 @@
     {% for note in page_obj %}
       <article class="note-card">
         <div class="note-card-top">
-          <span class="note-category note-category-{{ note.note_type }}">{{ note.get_note_type_display }}</span>
+          <span class="note-category note-category-{{ note.note_type.code }}">{{ note.note_type.name }}</span>
           <span class="note-date">{{ note.note_date|date:"Y-m-d" }}</span>
         </div>
         <h2><a href="{% url 'notes:detail' note.pk %}">{{ note.title }}</a></h2>

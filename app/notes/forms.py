@@ -1,8 +1,9 @@
 import re
 
 from django import forms
+from django.db.models import Q
 
-from .models import InvestmentNote
+from .models import InvestmentNote, InvestmentNoteType
 
 
 class InvestmentNoteForm(forms.ModelForm):
@@ -29,6 +30,13 @@ class InvestmentNoteForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        current_type_id = self.instance.note_type_id if self.instance and self.instance.pk else None
+        type_query = Q(is_active=True)
+        if current_type_id:
+            type_query |= Q(pk=current_type_id)
+        self.fields["note_type"].queryset = InvestmentNoteType.objects.filter(
+            type_query
+        ).order_by("sort_order", "id")
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
         if self.instance and self.instance.pk:
