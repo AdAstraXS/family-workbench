@@ -2957,8 +2957,8 @@ textarea {
 
 .ipo-trade-table th,
 .ipo-trade-table td {
-  height: 38px;
-  padding: 7px 5px;
+  height: 32px;
+  padding: 5px 4px;
   text-align: center;
   white-space: normal;
   word-break: keep-all;
@@ -2970,6 +2970,58 @@ textarea {
 
 .ipo-trade-table .row-actions {
   justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  line-height: 1.2;
+}
+
+.ipo-trade-table .text-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 20px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.ipo-trade-table th:last-child,
+.ipo-trade-table td:last-child {
+  width: 112px;
+}
+
+.ipo-trade-table .action-view {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.ipo-trade-table .action-edit {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+  color: #374151;
+}
+
+.ipo-trade-table .action-sell {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.ipo-trade-table .action-allot {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #047857;
+}
+
+.ipo-trade-table .action-cancel {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
 }
 
 .ipo-trade-table .ipo-chip {
@@ -3189,6 +3241,12 @@ textarea {
   border-color: #fde68a;
   background: #fffbeb;
   color: #92400e;
+}
+
+.ipo-chip.trade-partial {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #c2410c;
 }
 
 .image-recognition-box {

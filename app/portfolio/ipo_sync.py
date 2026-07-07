@@ -180,6 +180,10 @@ def sync_ipo_trade(ipo_trade_id):
         and lot_size > 0
         and ipo_trade.sell_price
         and ipo_trade.sell_date
+        and not InvestmentTransaction.objects.filter(
+            source=TransactionSourceChoices.IMPORT,
+            external_id__startswith=f"{prefix}sell:",
+        ).exists()
     ):
         external_id = f"{prefix}sell"
         desired_ids.append(external_id)
@@ -211,6 +215,10 @@ def sync_ipo_trade(ipo_trade_id):
     stale = InvestmentTransaction.objects.filter(
         source=TransactionSourceChoices.IMPORT,
         external_id__startswith=prefix,
+    )
+    desired_ids.extend(
+        stale.filter(external_id__startswith=f"{prefix}sell:")
+        .values_list("external_id", flat=True)
     )
     if desired_ids:
         stale = stale.exclude(external_id__in=desired_ids)

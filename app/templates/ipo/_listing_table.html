@@ -15,7 +15,15 @@
         <th>上市至今累计涨幅</th>
       {% else %}
         <th>机制</th>
-        <th>招股截止</th>
+        <th>
+          {% if schedule_date == "listing" %}
+            上市日期
+          {% elif schedule_date == "allotment" %}
+            公布结果
+          {% else %}
+            招股截止
+          {% endif %}
+        </th>
         <th>撞车</th>
         <th>公配手数</th>
         {% if show_expected_margin %}<th>预计孖展</th>{% endif %}
@@ -57,7 +65,15 @@
           </td>
         {% else %}
           <td><span class="ipo-chip mechanism-{{ listing.mechanism }}">{{ listing.get_mechanism_display }}</span></td>
-          <td>{{ listing.subscription_end_date|date:"Y-m-d"|default:"-" }}</td>
+          <td>
+            {% if schedule_date == "listing" %}
+              {{ listing.listing_date|date:"Y-m-d"|default:"-" }}
+            {% elif schedule_date == "allotment" %}
+              {{ listing.allotment_result_date|date:"Y-m-d"|default:"-" }}
+            {% else %}
+              {{ listing.subscription_end_date|date:"Y-m-d"|default:"-" }}
+            {% endif %}
+          </td>
           <td>
             {% with collision_count=listing.collision_count %}
               <span class="ipo-chip {% if collision_count <= 1 %}success{% elif collision_count == 2 %}collision-2{% elif collision_count == 3 %}collision-3{% elif collision_count == 4 %}collision-4{% else %}collision-5{% endif %}">{{ listing.collision_label }}</span>

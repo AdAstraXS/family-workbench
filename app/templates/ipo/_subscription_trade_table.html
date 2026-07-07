@@ -14,7 +14,11 @@
       {% if closed_mode %}<th>最终定价</th>{% endif %}
       <th>卖出手数</th>
       {% if closed_mode %}<th>卖出金额</th>{% endif %}
-      <th>卖出日期</th>
+      {% if amount_column == "holding" %}
+        <th>剩余手数</th>
+      {% else %}
+        <th>卖出日期</th>
+      {% endif %}
       {% if not closed_mode %}<th>申购方式</th>{% endif %}
       <th>{% if amount_column == "holding" %}持有货值{% else %}费用合计{% endif %}</th>
       <th>盈利金额</th>
@@ -25,37 +29,88 @@
   <tbody>
     {% for trade in trades %}
       <tr>
-        <td>{{ trade.listing.stock_code }}</td>
-        <td>{{ trade.listing.stock_name|default:trade.listing.company_name }}</td>
-        <td>{{ trade.member }}</td>
-        <td>{{ trade.account.account_name|default:"-" }}</td>
+        {% if closed_mode %}
+          <td>{{ trade.ipo_trade.listing.stock_code }}</td>
+          <td>{{ trade.ipo_trade.listing.stock_name|default:trade.ipo_trade.listing.company_name }}</td>
+          <td>{{ trade.ipo_trade.member }}</td>
+          <td>{{ trade.ipo_trade.account.account_name|default:"-" }}</td>
+        {% else %}
+          <td>{{ trade.listing.stock_code }}</td>
+          <td>{{ trade.listing.stock_name|default:trade.listing.company_name }}</td>
+          <td>{{ trade.member }}</td>
+          <td>{{ trade.account.account_name|default:"-" }}</td>
+        {% endif %}
         {% if not closed_mode %}
           <td>{{ trade.get_tranche_display }}</td>
           <td class="number">{{ trade.applied_lots|lots }}</td>
         {% endif %}
-        <td class="number">{{ trade.allotted_lots|default:"-" }}</td>
-        {% if closed_mode %}<td class="number">{{ trade.listing.final_price|money2 }}</td>{% endif %}
-        <td class="number">{{ trade.sold_lots|lots }}</td>
-        {% if closed_mode %}<td class="number">{{ trade.sell_price|money2 }}</td>{% endif %}
-        <td>{{ trade.sell_date|date:"Y-m-d"|default:"-" }}</td>
+        {% if closed_mode %}
+          <td class="number">{{ trade.ipo_trade.allotted_lots|default:"-" }}</td>
+          <td class="number">{{ trade.ipo_trade.listing.final_price|money2 }}</td>
+          <td class="number">{{ trade.display_sold_lots|lots }}</td>
+          <td class="number">{{ trade.price|money2 }}</td>
+          <td>{{ trade.trade_date|date:"Y-m-d"|default:"-" }}</td>
+        {% else %}
+          <td class="number">{{ trade.allotted_lots|default:"-" }}</td>
+          <td class="number">{{ trade.sold_lots|lots }}</td>
+          {% if amount_column == "holding" %}
+            <td class="number">{{ trade.display_remaining_lots|default:"-" }}</td>
+          {% else %}
+            <td>{{ trade.sell_date|date:"Y-m-d"|default:"-" }}</td>
+          {% endif %}
+        {% endif %}
         {% if not closed_mode %}<td>{{ trade.get_application_method_display }}</td>{% endif %}
         <td class="number">
           {% if amount_column == "holding" %}
-            {{ trade.holding_value|money2 }}
+            {% if trade.display_holding_value is not None %}
+              {{ trade.display_holding_value|money2 }}
+            {% else %}
+              {{ trade.holding_value|money2 }}
+            {% endif %}
           {% else %}
-            {{ trade.total_fees|money2 }}
+            {% if closed_mode %}{{ trade.fee|money2 }}{% else %}{{ trade.total_fees|money2 }}{% endif %}
           {% endif %}
         </td>
-        <td class="number {% if trade.realized_profit > 0 %}positive{% elif trade.realized_profit < 0 %}negative{% endif %}">{{ trade.realized_profit|money2 }}</td>
-        <td><span class="ipo-chip trade-{{ trade.trade_status }}">{{ trade.get_trade_status_display }}</span></td>
+        {% if closed_mode %}
+          <td class="number {% if trade.realized_pnl > 0 %}positive{% elif trade.realized_pnl < 0 %}negative{% endif %}">{{ trade.realized_pnl|money2 }}</td>
+        {% else %}
+          <td class="number {% if trade.realized_profit > 0 %}positive{% elif trade.realized_profit < 0 %}negative{% endif %}">{{ trade.realized_profit|money2 }}</td>
+        {% endif %}
+        <td>
+          {% if closed_mode %}
+            <span class="ipo-chip trade-{{ trade.display_status_class|default:"closed" }}">{{ trade.display_status_label|default:"清仓" }}</span>
+          {% elif trade.display_status_label %}
+            <span class="ipo-chip trade-{{ trade.display_status_class }}">{{ trade.display_status_label }}</span>
+          {% else %}
+            <span class="ipo-chip trade-{{ trade.trade_status }}">{{ trade.get_trade_status_display }}</span>
+          {% endif %}
+        </td>
         <td>
           <span class="row-actions">
-            <a class="text-action" href="{% url 'ipo:subscription_trade_edit' trade.pk %}">编辑</a>
-            <form method="post" action="{% url 'ipo:subscription_trade_delete' trade.pk %}" class="inline-delete-form" onsubmit="return confirm('确定删除这条申购记录吗？');">
-              {% csrf_token %}
-              <input type="hidden" name="next" value="{{ request.get_full_path }}">
-              <button type="submit" class="text-action danger">删除</button>
-            </form>
+            {% if closed_mode %}
+              <a class="text-action action-view" href="{% url 'ipo:subscription_trade_detail' trade.ipo_trade.pk %}">查看</a>
+              {% if trade.display_status_class == "unallotted" %}
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_allotment' trade.ipo_trade.pk %}">编辑</a>
+              {% elif trade.legacy_sale_row %}
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_sale' trade.ipo_trade.pk %}">编辑</a>
+              {% else %}
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_sale_edit' trade.ipo_trade.pk trade.pk %}">编辑</a>
+                <form method="post" action="{% url 'ipo:subscription_trade_sale_cancel' trade.ipo_trade.pk trade.pk %}" class="inline-delete-form" onsubmit="return confirm('确认撤销这笔卖出记录吗？撤销后持仓和现金流水会重新计算。');">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                  <button type="submit" class="text-action action-cancel">撤销</button>
+                </form>
+              {% endif %}
+            {% else %}
+              <a class="text-action action-view" href="{% url 'ipo:subscription_trade_detail' trade.pk %}">查看</a>
+              {% if trade.trade_status == "applying" %}
+                <a class="text-action action-allot" href="{% url 'ipo:subscription_trade_allotment' trade.pk %}">中签</a>
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_edit' trade.pk %}">编辑</a>
+              {% elif trade.trade_status == "holding" %}
+                <a class="text-action action-sell" href="{% url 'ipo:subscription_trade_sale' trade.pk %}">卖出</a>
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_allotment' trade.pk %}">编辑</a>
+              {% endif %}
+            {% endif %}
           </span>
         </td>
       </tr>

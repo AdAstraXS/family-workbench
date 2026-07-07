@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}申购详情{% endblock %}
+
+{% block content %}
+<section class="headline">
+  <h1>申购详情</h1>
+  <p>{{ trade.listing.stock_code }} {{ trade.listing.stock_name|default:trade.listing.company_name }}</p>
+</section>
+
+<section class="quick-actions">
+  <a class="button ghost" href="{% url 'ipo:subscription_trade_list' %}">返回申购和交易</a>
+  <a class="button ghost" href="{% url 'ipo:subscription_trade_edit' trade.pk %}">编辑申购情况</a>
+  <a class="button ghost" href="{% url 'ipo:subscription_trade_allotment' trade.pk %}">编辑中签情况</a>
+  {% if trade.trade_status == "holding" %}
+    <a class="button" href="{% url 'ipo:subscription_trade_sale' trade.pk %}">录入卖出</a>
+  {% endif %}
+</section>
+
+<section class="grid two basics-grid">
+  <div class="panel">
+    <div class="section-head"><h2>申购信息</h2></div>
+    <dl class="detail-grid">
+      <dt>股票代码</dt><dd>{{ trade.listing.stock_code }}</dd>
+      <dt>股票名称</dt><dd>{{ trade.listing.stock_name|default:trade.listing.company_name }}</dd>
+      <dt>家庭成员</dt><dd>{{ trade.member }}</dd>
+      <dt>申购账户</dt><dd>{{ trade.account.account_name|default:"-" }}</dd>
+      <dt>申购日期</dt><dd>{{ trade.application_date|date:"Y-m-d" }}</dd>
+      <dt>申购档位</dt><dd>{{ trade.get_tranche_display }}</dd>
+      <dt>申购手数</dt><dd>{{ trade.applied_lots|lots }}</dd>
+      <dt>申购方式</dt><dd>{{ trade.get_application_method_display }}</dd>
+    </dl>
+  </div>
+  <div class="panel">
+    <div class="section-head"><h2>中签和持有</h2></div>
+    <dl class="detail-grid">
+      <dt>最终定价</dt><dd>{{ trade.listing.final_price|money2 }}</dd>
+      <dt>每手股数</dt><dd>{{ trade.listing.lot_size|lots }}</dd>
+      <dt>中签手数</dt><dd>{{ trade.allotted_lots|default:"-" }}</dd>
+      <dt>已卖出手数</dt><dd>{{ trade.sold_lots|lots }}</dd>
+      <dt>剩余手数</dt><dd>{{ trade.display_remaining_lots|lots }}</dd>
+      <dt>状态</dt><dd><span class="ipo-chip trade-{{ trade.trade_status }}">{{ trade.get_trade_status_display }}</span></dd>
+      <dt>备注</dt><dd>{{ trade.remark|linebreaksbr|default:"-" }}</dd>
+    </dl>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-head"><h2>卖出交易记录</h2></div>
+  <div class="record-table-wrap ipo-table-wrap">
+    <table class="record-table ipo-trade-table">
+      <thead>
+        <tr>
+          <th>卖出日期</th>
+          <th>卖出手数</th>
+          <th>卖出价格</th>
+          <th>成交金额</th>
+          <th>交易费用</th>
+          <th>本次卖出损益</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sale in sale_transactions %}
+          <tr>
+            <td>{{ sale.trade_date|date:"Y-m-d" }}</td>
+            <td class="number">{{ sale.display_sold_lots|lots }}</td>
+            <td class="number">{{ sale.price|money2 }}</td>
+            <td class="number">{{ sale.amount|money2 }}</td>
+            <td class="number">{{ sale.fee|money2 }}</td>
+            <td class="number {% if sale.realized_pnl > 0 %}positive{% elif sale.realized_pnl < 0 %}negative{% endif %}">{{ sale.realized_pnl|money2 }}</td>
+            <td>
+              <span class="row-actions">
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_sale_edit' trade.pk sale.pk %}">编辑</a>
+                <form method="post" action="{% url 'ipo:subscription_trade_sale_cancel' trade.pk sale.pk %}" class="inline-delete-form" onsubmit="return confirm('确认撤销这笔卖出记录吗？撤销后持仓和现金流水会重新计算。');">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                  <button type="submit" class="text-action action-cancel">撤销</button>
+                </form>
+              </span>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="7">暂无卖出交易。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

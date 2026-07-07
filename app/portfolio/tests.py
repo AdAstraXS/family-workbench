@@ -509,6 +509,17 @@ class PortfolioOverviewTests(TestCase):
         self.assertEqual(response.context["base_currency"], "CNY")
         self.assertEqual(PortfolioSnapshot.objects.count(), 1)
 
+    def test_account_page_converts_hkd_to_usd_through_cny_rates(self):
+        response = self.client.get(reverse("portfolio:account_list"), {"currency": "USD"})
+
+        self.assertEqual(response.status_code, 200)
+        hkd_cny = ExchangeRate.objects.filter(base_currency="HKD", quote_currency="CNY").order_by("-rate_date").first()
+        usd_cny = ExchangeRate.objects.filter(base_currency="USD", quote_currency="CNY").order_by("-rate_date").first()
+        summary = response.context["summary_rows"][0]
+        self.assertEqual(summary["cash"], Decimal("1000") * hkd_cny.rate / usd_cny.rate)
+        self.assertEqual(summary["market_value"], Decimal("7000") * hkd_cny.rate / usd_cny.rate)
+        self.assertFalse(response.context["missing_exchange_rates"])
+
     def test_overview_member_selector_updates_all_content(self):
         second = FamilyMember.objects.create(
             family=self.member.family,

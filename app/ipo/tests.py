@@ -15,8 +15,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from ai_analysis.models import AiProvider
-from family_core.models import Family, FamilyMember
+from family_core.models import AccountType, Family, FamilyMember
 from ledger.models import BankAccount
+from portfolio.models import InvestmentTransaction, TradeTypeChoices
 
 from .forms import HkIpoListingForm
 from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
@@ -148,7 +149,75 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "费用合计", count=2)
         self.assertContains(response, "持有货值", count=1)
-        self.assertContains(response, "2,000.00")
+        self.assertContains(response, "1,000.00")
+
+    def test_partial_sale_is_shown_as_remaining_holding_and_closed_sale(self):
+        user = get_user_model().objects.create_user(
+            username="ipo-partial-sale-tester",
+            password="test-password",
+        )
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        trade = self.make_trade(
+            allotted_lots=2,
+            sold_lots=1,
+            sell_price=Decimal("12"),
+            sell_date=date(2026, 6, 9),
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("ipo:subscription_trade_list"),
+            {"year": "2026"},
+        )
+
+        holding_trades = response.context["holding_trades"]
+        closed_trades = response.context["closed_visible"] + response.context["closed_hidden"]
+        self.assertEqual([item.pk for item in holding_trades], [trade.pk])
+        self.assertEqual([item.pk for item in closed_trades], [trade.pk])
+        self.assertEqual(holding_trades[0].display_remaining_lots, 1)
+        self.assertEqual(closed_trades[0].ipo_trade.allotted_lots, 2)
+        self.assertEqual(closed_trades[0].display_sold_lots, 1)
+        self.assertEqual(response.context["metrics"]["realized_profit_total"], trade.realized_profit)
+        self.assertEqual(response.context["metrics"]["closed"], 1)
+
+    def test_cancel_sale_transaction_returns_trade_to_holding(self):
+        user = get_user_model().objects.create_user(
+            username="ipo-cancel-sale-tester",
+            password="test-password",
+        )
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        broker_type = AccountType.objects.create(family=self.family, name="券商")
+        self.account.account_type_ref = broker_type
+        self.account.save(update_fields=["account_type_ref"])
+        trade = self.make_trade(allotted_lots=2)
+        self.client.force_login(user)
+
+        self.client.post(
+            reverse("ipo:subscription_trade_sale", args=[trade.pk]),
+            {
+                "sell_price": "12",
+                "sell_date": "2026-06-09",
+                "sold_lots": "1",
+                "trading_fee": "10",
+            },
+        )
+        sale = InvestmentTransaction.objects.get(
+            trade_type=TradeTypeChoices.SELL,
+            extra_data__ipo_subscription_trade_id=trade.pk,
+        )
+
+        response = self.client.post(
+            reverse("ipo:subscription_trade_sale_cancel", args=[trade.pk, sale.pk]),
+        )
+
+        trade.refresh_from_db()
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(InvestmentTransaction.objects.filter(pk=sale.pk).exists())
+        self.assertEqual(trade.sold_lots, 0)
+        self.assertEqual(trade.trade_status, HkIpoSubscriptionTrade.STATUS_HOLDING)
+        self.assertEqual(trade.realized_profit, Decimal("0"))
 
     def test_closed_trade_table_uses_sale_columns(self):
         trade = self.make_trade(
@@ -157,6 +226,13 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
             sell_price=Decimal("12"),
             sell_date=date(2026, 6, 9),
         )
+        trade.ipo_trade = trade
+        trade.display_sold_lots = trade.sold_lots
+        trade.price = trade.sell_price
+        trade.trade_date = trade.sell_date
+        trade.fee = trade.trading_fee
+        trade.realized_pnl = trade.realized_profit
+        trade.legacy_sale_row = True
 
         html = render_to_string(
             "ipo/_subscription_trade_table.html",

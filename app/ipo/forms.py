@@ -178,9 +178,6 @@ class HkIpoSubscriptionTradeForm(forms.ModelForm):
             account_queryset = account_queryset.filter(member_id=member_id)
         self.fields["account"].queryset = account_queryset
         self.fields["account"].label_from_instance = lambda obj: f"{obj.member} - {obj.account_name}"
-        self.fields["sell_date"].widget = forms.DateInput(
-            attrs={"class": "form-control", "type": "date"}
-        )
 
     def clean_listing(self):
         value = self.cleaned_data["listing"].strip()
@@ -230,21 +227,48 @@ class HkIpoSubscriptionTradeForm(forms.ModelForm):
             "financing_rate",
             "financing_days",
             "subscription_fee",
-            "allotted_lots",
-            "sell_price",
-            "sell_date",
-            "sold_lots",
-            "trading_fee",
             "remark",
         ]
 
-    def clean(self):
-        cleaned_data = super().clean()
-        allotted_lots = cleaned_data.get("allotted_lots")
-        sold_lots = cleaned_data.get("sold_lots") or 0
-        sell_date = cleaned_data.get("sell_date")
-        if allotted_lots is not None and sold_lots > allotted_lots:
-            raise forms.ValidationError("卖出手数不能大于中签手数。")
-        if sold_lots and not sell_date:
-            self.add_error("sell_date", "录入卖出手数时，请同时填写卖出日期。")
-        return cleaned_data
+
+class HkIpoAllotmentForm(forms.ModelForm):
+    class Meta:
+        model = HkIpoSubscriptionTrade
+        fields = ["allotted_lots"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+
+
+class HkIpoSaleForm(forms.Form):
+    sell_price = forms.DecimalField(label="卖出金额", max_digits=20, decimal_places=4)
+    sell_date = forms.DateField(
+        label="卖出日期",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+    )
+    sold_lots = forms.IntegerField(label="卖出手数", min_value=1)
+    trading_fee = forms.DecimalField(
+        label="交易费用",
+        max_digits=20,
+        decimal_places=4,
+        initial=0,
+    )
+
+    def __init__(self, *args, ipo_trade=None, **kwargs):
+        self.ipo_trade = ipo_trade
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+
+    def clean_sold_lots(self):
+        sold_lots = self.cleaned_data["sold_lots"]
+        if not self.ipo_trade:
+            return sold_lots
+        already_sold = self.ipo_trade.sold_lots or 0
+        allotted_lots = self.ipo_trade.allotted_lots or 0
+        current_lots = self.initial.get("sold_lots") or 0
+        if already_sold - current_lots + sold_lots > allotted_lots:
+            raise forms.ValidationError("卖出手数不能大于剩余持有手数。")
+        return sold_lots

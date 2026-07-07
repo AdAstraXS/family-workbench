@@ -4,14 +4,16 @@ from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.db.models import F, Max, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.views.decorators.http import require_POST
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 
-from .forms import HkIpoListingForm, HkIpoSubscriptionTradeForm
+from .forms import HkIpoAllotmentForm, HkIpoListingForm, HkIpoSaleForm, HkIpoSubscriptionTradeForm
 from .models import HkIpoListing, HkIpoSubscriptionTrade
 from .services import (
     IpoImageRecognitionError,
@@ -23,6 +25,15 @@ from .services import (
     recognize_ipo_listing_from_image,
 )
 from ledger.models import BankAccount
+from portfolio.ipo_sync import sync_ipo_trade
+from portfolio.models import (
+    InvestmentOption,
+    InvestmentTransaction,
+    TradeStatusChoices,
+    TradeTypeChoices,
+    TransactionSourceChoices,
+)
+from portfolio.services import rebuild_position
 
 
 def load_current_ipo_listings():
@@ -62,6 +73,117 @@ def load_current_ipo_listings():
 
 def ipo_profit_date(trade):
     return trade.sell_date or trade.listing.subscription_end_date
+
+
+def ipo_profit_queryset(queryset):
+    return queryset.filter(
+        Q(trade_status__in=HkIpoSubscriptionTrade.TERMINAL_STATUSES)
+        | Q(sold_lots__gt=0)
+    )
+
+
+def decorate_ipo_rows(trades, *, holding=False):
+    for trade in trades:
+        if holding:
+            remaining_lots = max((trade.allotted_lots or 0) - (trade.sold_lots or 0), 0)
+            trade.display_remaining_lots = remaining_lots
+            trade.display_holding_value = Decimal(remaining_lots) * (
+                trade.listing.entry_fee
+                or (trade.listing.final_price or Decimal("0")) * (trade.listing.lot_size or 0)
+            )
+    return trades
+
+
+def ipo_sale_transactions(ipo_trade_ids):
+    return list(
+        InvestmentTransaction.objects.select_related("account", "security")
+        .filter(
+            source=TransactionSourceChoices.IMPORT,
+            trade_type=TradeTypeChoices.SELL,
+            external_id__startswith="ipo:",
+            extra_data__ipo_subscription_trade_id__in=ipo_trade_ids,
+        )
+        .order_by(F("trade_date").desc(nulls_last=True), "-created_at", "-pk")
+    )
+
+
+def save_ipo_sale_transaction(ipo_trade, form, transaction=None):
+    sync_ipo_trade(ipo_trade.pk)
+    buy_transaction = InvestmentTransaction.objects.filter(
+        source=TransactionSourceChoices.IMPORT,
+        external_id=f"ipo:{ipo_trade.pk}:buy",
+    ).first()
+    if not buy_transaction:
+        return None
+    lot_size = ipo_trade.listing.lot_size or 0
+    sold_lots = form.cleaned_data["sold_lots"]
+    quantity = Decimal(sold_lots * lot_size)
+    if not transaction:
+        serial = (
+            InvestmentTransaction.objects.filter(
+                source=TransactionSourceChoices.IMPORT,
+                external_id__startswith=f"ipo:{ipo_trade.pk}:sell:",
+            ).count()
+            + 1
+        )
+        transaction = InvestmentTransaction(
+            source=TransactionSourceChoices.IMPORT,
+            external_id=f"ipo:{ipo_trade.pk}:sell:{serial}",
+        )
+    transaction.account = buy_transaction.account
+    transaction.security = buy_transaction.security
+    transaction.asset_category = buy_transaction.asset_category
+    transaction.trade_date = form.cleaned_data["sell_date"]
+    transaction.trade_type = TradeTypeChoices.SELL
+    transaction.trade_type_option = InvestmentOption.objects.filter(
+        category=InvestmentOption.CATEGORY_TRANSACTION_TYPE,
+        code=TradeTypeChoices.SELL,
+        is_active=True,
+    ).first()
+    transaction.status = TradeStatusChoices.COMPLETED
+    transaction.quantity = quantity
+    transaction.price = form.cleaned_data["sell_price"]
+    transaction.amount = quantity * transaction.price
+    transaction.fee = form.cleaned_data["trading_fee"]
+    transaction.tax = Decimal("0")
+    transaction.currency = buy_transaction.currency
+    transaction.remark = ipo_trade.remark
+    transaction.extra_data = {"ipo_subscription_trade_id": ipo_trade.pk}
+    transaction.save()
+    rebuild_position(transaction.account, transaction.security)
+    refresh_ipo_sale_summary(ipo_trade)
+    return transaction
+
+
+def refresh_ipo_sale_summary(ipo_trade):
+    lot_size = ipo_trade.listing.lot_size or 0
+    sold_total = (
+        InvestmentTransaction.objects.filter(
+            source=TransactionSourceChoices.IMPORT,
+            trade_type=TradeTypeChoices.SELL,
+            extra_data__ipo_subscription_trade_id=ipo_trade.pk,
+        ).aggregate(total=Sum("quantity"))["total"]
+        or Decimal("0")
+    )
+    realized_profit = (
+        InvestmentTransaction.objects.filter(
+            source=TransactionSourceChoices.IMPORT,
+            trade_type=TradeTypeChoices.SELL,
+            extra_data__ipo_subscription_trade_id=ipo_trade.pk,
+        ).aggregate(total=Sum("realized_pnl"))["total"]
+        or Decimal("0")
+    )
+    total_lots = int(sold_total / Decimal(lot_size)) if lot_size else 0
+    status = (
+        HkIpoSubscriptionTrade.STATUS_CLOSED
+        if ipo_trade.allotted_lots and total_lots >= ipo_trade.allotted_lots
+        else HkIpoSubscriptionTrade.STATUS_HOLDING
+    )
+    HkIpoSubscriptionTrade.objects.filter(pk=ipo_trade.pk).update(
+        sold_lots=total_lots,
+        realized_profit=realized_profit,
+        trade_status=status,
+    )
 
 
 def build_ipo_chart_data(trades, selected_year, current_year):
@@ -157,9 +279,7 @@ def index(request):
 
     metric_listings = listings
     trade_metric_queryset = trade_queryset
-    profit_queryset = trade_queryset.filter(
-        trade_status__in=HkIpoSubscriptionTrade.TERMINAL_STATUSES
-    )
+    profit_queryset = ipo_profit_queryset(trade_queryset)
     if selected_year != "all":
         year = int(selected_year)
         metric_listings = [
@@ -201,7 +321,8 @@ def index(request):
     ]
     closed_trade_count = (
         trade_metric_queryset.filter(
-            trade_status=HkIpoSubscriptionTrade.STATUS_CLOSED,
+            Q(trade_status=HkIpoSubscriptionTrade.STATUS_CLOSED)
+            | Q(sold_lots__gt=0),
             allotted_lots__gt=0,
         )
         .values("listing_id")
@@ -451,14 +572,13 @@ def subscription_trade_list(request):
         selected_status = ""
 
     metric_queryset = HkIpoSubscriptionTrade.objects.all()
-    profit_queryset = HkIpoSubscriptionTrade.objects.filter(
-        trade_status__in=HkIpoSubscriptionTrade.TERMINAL_STATUSES
-    )
+    profit_queryset = ipo_profit_queryset(HkIpoSubscriptionTrade.objects.all())
     active_queryset = trade_queryset.exclude(
         trade_status__in=HkIpoSubscriptionTrade.TERMINAL_STATUSES
     )
     closed_queryset = trade_queryset.filter(
-        trade_status__in=HkIpoSubscriptionTrade.TERMINAL_STATUSES
+        Q(trade_status__in=HkIpoSubscriptionTrade.TERMINAL_STATUSES)
+        | Q(sold_lots__gt=0)
     )
     if selected_year != "all":
         year = int(selected_year)
@@ -532,8 +652,9 @@ def subscription_trade_list(request):
         profit_queryset.aggregate(total=Sum("realized_profit"))["total"]
         or Decimal("0")
     )
-    stock_option_filter = Q(
-        subscription_trades__trade_status__in=HkIpoSubscriptionTrade.TERMINAL_STATUSES
+    stock_option_filter = (
+        Q(subscription_trades__trade_status__in=HkIpoSubscriptionTrade.TERMINAL_STATUSES)
+        | Q(subscription_trades__sold_lots__gt=0)
     )
     if selected_year != "all":
         stock_option_filter &= (
@@ -624,8 +745,72 @@ def subscription_trade_list(request):
             filtered_closed_trades = [trade for trade in filtered_closed_trades if trade.sell_date and trade.sell_date >= period_start_date]
         if period_end_date:
             filtered_closed_trades = [trade for trade in filtered_closed_trades if trade.sell_date and trade.sell_date <= period_end_date]
-    closed_visible = filtered_closed_trades[:10]
-    closed_hidden = filtered_closed_trades[10:]
+    ipo_trade_map = {trade.pk: trade for trade in filtered_closed_trades}
+    closed_rows = []
+    for transaction in ipo_sale_transactions(ipo_trade_map):
+        ipo_trade = ipo_trade_map.get(transaction.extra_data.get("ipo_subscription_trade_id"))
+        if not ipo_trade:
+            continue
+        transaction.ipo_trade = ipo_trade
+        transaction.display_sold_lots = (
+            transaction.quantity / (ipo_trade.listing.lot_size or 1)
+            if transaction.quantity
+            else 0
+        )
+        transaction.display_status_label = (
+            "部分卖出"
+            if ipo_trade.trade_status == HkIpoSubscriptionTrade.STATUS_HOLDING
+            else "清仓"
+        )
+        transaction.display_status_class = (
+            "partial"
+            if ipo_trade.trade_status == HkIpoSubscriptionTrade.STATUS_HOLDING
+            else "closed"
+        )
+        closed_rows.append(transaction)
+    transaction_trade_ids = {
+        row.ipo_trade.pk for row in closed_rows if getattr(row, "ipo_trade", None)
+    }
+    for trade in filtered_closed_trades:
+        is_unallotted = trade.trade_status == HkIpoSubscriptionTrade.STATUS_UNALLOTTED
+        if trade.pk in transaction_trade_ids or (not is_unallotted and not (trade.sold_lots or 0)):
+            continue
+        trade.ipo_trade = trade
+        trade.display_sold_lots = trade.sold_lots
+        trade.price = trade.sell_price
+        trade.trade_date = trade.sell_date or trade.listing.allotment_result_date
+        trade.fee = trade.trading_fee
+        trade.realized_pnl = trade.realized_profit
+        trade.legacy_sale_row = True
+        trade.display_status_label = (
+            "未中签"
+            if is_unallotted
+            else (
+                "部分卖出"
+                if trade.trade_status == HkIpoSubscriptionTrade.STATUS_HOLDING
+                else "清仓"
+            )
+        )
+        trade.display_status_class = (
+            "unallotted"
+            if is_unallotted
+            else (
+                "partial"
+                if trade.trade_status == HkIpoSubscriptionTrade.STATUS_HOLDING
+                else "closed"
+            )
+        )
+        closed_rows.append(trade)
+    closed_rows.sort(
+        key=lambda row: (
+            row.trade_date or date.min,
+            getattr(row, "updated_at", None) or getattr(row, "created_at", None),
+            row.pk,
+        ),
+        reverse=True,
+    )
+    closed_visible = closed_rows[:10]
+    closed_hidden = closed_rows[10:]
     return render(
         request,
         "ipo/subscription_trade_list.html",
@@ -644,7 +829,8 @@ def subscription_trade_list(request):
                 .distinct()
                 .count(),
                 "closed": metric_queryset.filter(
-                    trade_status=HkIpoSubscriptionTrade.STATUS_CLOSED,
+                    Q(trade_status=HkIpoSubscriptionTrade.STATUS_CLOSED)
+                    | Q(sold_lots__gt=0),
                     allotted_lots__gt=0,
                 )
                 .values("listing_id")
@@ -662,10 +848,10 @@ def subscription_trade_list(request):
                 "status_choices": HkIpoSubscriptionTrade.STATUS_CHOICES,
             },
             "applying_trades": applying_trades,
-            "holding_trades": holding_trades,
+            "holding_trades": decorate_ipo_rows(holding_trades, holding=True),
             "closed_visible": closed_visible,
             "closed_hidden": closed_hidden,
-            "closed_count": len(filtered_closed_trades),
+            "closed_count": len(closed_rows),
             "profit_queries": {
                 "stock_options": stock_options,
                 "selected_stock": selected_stock,
@@ -696,7 +882,7 @@ def subscription_trade_create(request):
     return render(
         request,
         "ipo/subscription_trade_form.html",
-        {"form": form, "title": "新增申购", "account_member_map": get_ipo_account_member_map()},
+        {"form": form, "title": "编辑申购情况", "account_member_map": get_ipo_account_member_map()},
     )
 
 
@@ -713,9 +899,104 @@ def subscription_trade_edit(request, pk):
     return render(
         request,
         "ipo/subscription_trade_form.html",
-        {"form": form, "title": "编辑申购和交易", "account_member_map": get_ipo_account_member_map()},
+        {"form": form, "title": "编辑申购情况", "account_member_map": get_ipo_account_member_map()},
     )
 
+
+
+@login_required
+def subscription_trade_detail(request, pk):
+    trade = get_object_or_404(
+        HkIpoSubscriptionTrade.objects.select_related("listing", "member", "account"),
+        pk=pk,
+    )
+    sale_transactions = ipo_sale_transactions([trade.pk])
+    trade.display_remaining_lots = max((trade.allotted_lots or 0) - (trade.sold_lots or 0), 0)
+    for transaction in sale_transactions:
+        transaction.display_sold_lots = (
+            transaction.quantity / (trade.listing.lot_size or 1)
+            if transaction.quantity
+            else 0
+        )
+    return render(
+        request,
+        "ipo/subscription_trade_detail.html",
+        {"trade": trade, "sale_transactions": sale_transactions},
+    )
+
+
+@login_required
+def subscription_trade_allotment(request, pk):
+    trade = get_object_or_404(HkIpoSubscriptionTrade, pk=pk)
+    if request.method == "POST":
+        form = HkIpoAllotmentForm(request.POST, instance=trade)
+        if form.is_valid():
+            trade = form.save()
+            return redirect(subscription_trade_list_url(trade))
+    else:
+        form = HkIpoAllotmentForm(instance=trade)
+    return render(
+        request,
+        "ipo/subscription_trade_form.html",
+        {"form": form, "title": "编辑中签情况", "account_member_map": get_ipo_account_member_map()},
+    )
+
+
+@login_required
+def subscription_trade_sale(request, pk, transaction_id=None):
+    trade = get_object_or_404(HkIpoSubscriptionTrade, pk=pk)
+    transaction = None
+    initial = {}
+    if transaction_id:
+        transaction = get_object_or_404(
+            InvestmentTransaction,
+            pk=transaction_id,
+            source=TransactionSourceChoices.IMPORT,
+            trade_type=TradeTypeChoices.SELL,
+            extra_data__ipo_subscription_trade_id=trade.pk,
+        )
+        initial = {
+            "sell_price": transaction.price,
+            "sell_date": transaction.trade_date,
+            "sold_lots": transaction.quantity / (trade.listing.lot_size or 1),
+            "trading_fee": transaction.fee,
+        }
+    if request.method == "POST":
+        form = HkIpoSaleForm(request.POST, ipo_trade=trade, initial=initial)
+        if form.is_valid():
+            save_ipo_sale_transaction(trade, form, transaction)
+            return redirect(subscription_trade_list_url(trade))
+    else:
+        form = HkIpoSaleForm(ipo_trade=trade, initial=initial)
+    return render(
+        request,
+        "ipo/subscription_trade_form.html",
+        {"form": form, "title": "编辑卖出情况", "account_member_map": get_ipo_account_member_map()},
+    )
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def subscription_trade_sale_cancel(request, pk, transaction_id):
+    trade = get_object_or_404(HkIpoSubscriptionTrade, pk=pk)
+    sale = get_object_or_404(
+        InvestmentTransaction,
+        pk=transaction_id,
+        source=TransactionSourceChoices.IMPORT,
+        trade_type=TradeTypeChoices.SELL,
+        extra_data__ipo_subscription_trade_id=trade.pk,
+    )
+    account = sale.account
+    security = sale.security
+    sale.delete()
+    rebuild_position(account, security)
+    refresh_ipo_sale_summary(trade)
+    messages.success(request, "卖出记录已撤销，持仓状态已重新计算。")
+    next_url = request.POST.get("next") or ""
+    if url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}):
+        return redirect(next_url)
+    return redirect(subscription_trade_list_url(trade))
 
 def subscription_trade_list_url(trade):
     relevant_date = (

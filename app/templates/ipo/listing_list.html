@@ -44,7 +44,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_listing_table.html" with listings=today_listings empty_text="暂无今日上市新股。" %}
+      {% include "ipo/_listing_table.html" with listings=today_listings empty_text="暂无今日上市新股。" schedule_date="listing" %}
     </div>
   </div>
 </section>
@@ -55,7 +55,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_listing_table.html" with listings=grey_market_listings empty_text="暂无今日暗盘新股。" %}
+      {% include "ipo/_listing_table.html" with listings=grey_market_listings empty_text="暂无今日暗盘新股。" schedule_date="listing" %}
     </div>
   </div>
 </section>
@@ -77,7 +77,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_listing_table.html" with listings=waiting_listings empty_text="暂无待上市新股。" show_expected_margin=True %}
+      {% include "ipo/_listing_table.html" with listings=waiting_listings empty_text="暂无待上市新股。" show_expected_margin=True schedule_date="allotment" %}
     </div>
   </div>
 </section>

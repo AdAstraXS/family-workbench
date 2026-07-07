@@ -71,19 +71,30 @@ def _convert_currency(amount, source, target, on_date=None):
     if source == target:
         return amount
     rates = ExchangeRate.objects.filter(rate_date__lte=on_date or date.today())
+
+    def latest_rate(base, quote):
+        return (
+            rates.filter(base_currency=base, quote_currency=quote)
+            .order_by("-rate_date")
+            .first()
+        )
+
     direct = (
-        rates.filter(base_currency=source, quote_currency=target)
-        .order_by("-rate_date")
-        .first()
+        latest_rate(source, target)
     )
     if direct:
         return amount * direct.rate
     inverse = (
-        rates.filter(base_currency=target, quote_currency=source)
-        .order_by("-rate_date")
-        .first()
+        latest_rate(target, source)
     )
-    return amount / inverse.rate if inverse and inverse.rate else None
+    if inverse and inverse.rate:
+        return amount / inverse.rate
+
+    source_cny = latest_rate(source, "CNY")
+    target_cny = latest_rate(target, "CNY")
+    if source_cny and target_cny and target_cny.rate:
+        return amount * source_cny.rate / target_cny.rate
+    return None
 
 
 def _latest_positions(accounts, year):
