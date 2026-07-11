@@ -83,7 +83,7 @@
           {% endif %}
         </td>
         {% if amount_column == "holding" %}
-          <td class="number negative"><strong>{{ trade.display_holding_profit|money2 }}</strong></td>
+          <td class="number negative">{{ trade.display_holding_profit|money2 }}</td>
         {% elif closed_mode %}
           <td class="number {% if trade.display_net_pnl > 0 %}positive{% elif trade.display_net_pnl < 0 %}negative{% endif %}">{{ trade.display_net_pnl|money2 }}</td>
         {% else %}
