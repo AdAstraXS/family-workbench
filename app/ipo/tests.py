@@ -204,6 +204,8 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
         self.assertEqual([item.pk for item in holding_trades], [trade.pk])
         self.assertEqual([item.pk for item in closed_trades], [trade.pk])
         self.assertEqual(holding_trades[0].display_remaining_lots, 1)
+        self.assertEqual(holding_trades[0].display_status_label, "部分卖出")
+        self.assertEqual(holding_trades[0].display_status_class, "partial")
         self.assertEqual(closed_trades[0].ipo_trade.allotted_lots, 2)
         self.assertEqual(closed_trades[0].display_sold_lots, 1)
         self.assertEqual(response.context["metrics"]["realized_profit_total"], trade.realized_profit)

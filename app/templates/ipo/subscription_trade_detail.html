@@ -81,12 +81,12 @@
             <td class="number {% if sale.display_net_pnl > 0 %}positive{% elif sale.display_net_pnl < 0 %}negative{% endif %}">{{ sale.display_net_pnl|money2 }}</td>
             <td>
               <span class="row-actions">
-                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_sale_edit' trade.pk sale.pk %}">编辑</a>
                 <form method="post" action="{% url 'ipo:subscription_trade_sale_cancel' trade.pk sale.pk %}" class="inline-delete-form" onsubmit="return confirm('确认撤销这笔卖出记录吗？撤销后持仓和现金流水会重新计算。');">
                   {% csrf_token %}
                   <input type="hidden" name="next" value="{{ request.get_full_path }}">
                   <button type="submit" class="text-action action-cancel">撤销</button>
                 </form>
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_sale_edit' trade.pk sale.pk %}">编辑卖出</a>
               </span>
             </td>
           </tr>

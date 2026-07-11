@@ -92,6 +92,9 @@ def decorate_ipo_rows(trades, *, holding=False):
         if holding:
             remaining_lots = max((trade.allotted_lots or 0) - (trade.sold_lots or 0), 0)
             trade.display_remaining_lots = remaining_lots
+            if (trade.sold_lots or 0) > 0:
+                trade.display_status_label = "部分卖出"
+                trade.display_status_class = "partial"
             trade.display_holding_value = Decimal(remaining_lots) * (
                 trade.listing.entry_fee
                 or (trade.listing.final_price or Decimal("0")) * (trade.listing.lot_size or 0)

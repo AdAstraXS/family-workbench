@@ -103,25 +103,25 @@
             {% if closed_mode %}
               <a class="text-action action-view" href="{% url 'ipo:subscription_trade_detail' trade.ipo_trade.pk %}">查看</a>
               {% if trade.display_status_class == "unallotted" %}
-                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_allotment' trade.ipo_trade.pk %}">编辑</a>
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_allotment' trade.ipo_trade.pk %}">编辑中签</a>
               {% elif trade.legacy_sale_row %}
-                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_sale' trade.ipo_trade.pk %}">编辑</a>
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_sale' trade.ipo_trade.pk %}">编辑卖出</a>
               {% else %}
-                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_sale_edit' trade.ipo_trade.pk trade.pk %}">编辑</a>
                 <form method="post" action="{% url 'ipo:subscription_trade_sale_cancel' trade.ipo_trade.pk trade.pk %}" class="inline-delete-form" onsubmit="return confirm('确认撤销这笔卖出记录吗？撤销后持仓和现金流水会重新计算。');">
                   {% csrf_token %}
                   <input type="hidden" name="next" value="{{ request.get_full_path }}">
                   <button type="submit" class="text-action action-cancel">撤销</button>
                 </form>
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_sale_edit' trade.ipo_trade.pk trade.pk %}">编辑卖出</a>
               {% endif %}
             {% else %}
               <a class="text-action action-view" href="{% url 'ipo:subscription_trade_detail' trade.pk %}">查看</a>
               {% if trade.trade_status == "applying" %}
                 <a class="text-action action-allot" href="{% url 'ipo:subscription_trade_allotment' trade.pk %}">中签</a>
-                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_edit' trade.pk %}">编辑</a>
+                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_edit' trade.pk %}">编辑申购</a>
               {% elif trade.trade_status == "holding" %}
                 <a class="text-action action-sell" href="{% url 'ipo:subscription_trade_sale' trade.pk %}">卖出</a>
-                {% if not trade.sold_lots %}<a class="text-action action-edit" href="{% url 'ipo:subscription_trade_allotment' trade.pk %}">编辑</a>{% endif %}
+                {% if not trade.sold_lots %}<a class="text-action action-edit" href="{% url 'ipo:subscription_trade_allotment' trade.pk %}">编辑中签</a>{% endif %}
               {% endif %}
             {% endif %}
           </span>
