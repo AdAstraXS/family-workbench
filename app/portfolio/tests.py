@@ -472,6 +472,63 @@ class AccountDashboardTests(TestCase):
         self.assertEqual(all_years.context["account_rows"][0]["cash"], Decimal("10500"))
         self.assertEqual(current_year.context["account_rows"][0]["cash"], Decimal("10500"))
 
+    def test_year_filter_only_lists_snapshot_years_and_uses_year_end_snapshot(self):
+        for snapshot_date, cash in (
+            (date(2024, 12, 31), Decimal("8000")),
+            (date(2026, 7, 10), Decimal("12000")),
+        ):
+            snapshot = PortfolioSnapshot.objects.create(
+                family=self.account.family,
+                snapshot_date=snapshot_date,
+                total_cash=cash,
+                total_asset=cash,
+                currency="CNY",
+            )
+            PortfolioSnapshotPositionLine.objects.create(
+                snapshot=snapshot,
+                account=self.account,
+                asset_type="cash",
+                asset_name="现金",
+                currency="CNY",
+                market_value_original=cash,
+                market_value=cash,
+            )
+
+        latest = self.client.get(reverse("portfolio:account_list"), {"year": "all"})
+        historical = self.client.get(reverse("portfolio:account_list"), {"year": "2024"})
+
+        self.assertEqual(latest.context["year_options"], [2026, 2024])
+        self.assertNotContains(latest, "2025 年")
+        self.assertEqual(latest.context["account_rows"][0]["cash"], Decimal("12000"))
+        self.assertEqual(historical.context["account_rows"][0]["cash"], Decimal("8000"))
+
+    def test_zero_positions_are_hidden_and_profit_tab_renders(self):
+        security = Security.objects.create(
+            symbol="ZERO",
+            name="零持仓",
+            market="US",
+            currency="USD",
+        )
+        InvestmentPosition.objects.create(
+            account=self.account,
+            security=security,
+            quantity=0,
+            position_date=date(2026, 7, 5),
+        )
+
+        positions = self.client.get(
+            reverse("portfolio:account_detail", args=[self.account.pk]),
+            {"tab": "positions"},
+        )
+        profit = self.client.get(
+            reverse("portfolio:account_detail", args=[self.account.pk]),
+            {"tab": "individual-profit"},
+        )
+
+        self.assertNotContains(positions, "零持仓")
+        self.assertContains(profit, "个股盈亏")
+        self.assertNotContains(profit, "统计年份")
+
     def test_detail_can_switch_to_diluted_cost_and_has_no_duplicate_actions(self):
         security = Security.objects.create(
             symbol="TEST",

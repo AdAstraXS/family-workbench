@@ -2964,6 +2964,21 @@ textarea {
   word-break: keep-all;
 }
 
+.account-detail-metrics .metric small { display: block; margin-top: .3rem; color: #6b7280; }
+.market-badge { display: inline-block; min-width: 2.4rem; padding: .18rem .45rem; border-radius: .45rem; background: #e8eef8; color: #31527d; font-size: .78rem; font-weight: 700; text-align: center; }
+.market-hk { background: #fff1e8; color: #ad4e00; }
+.market-us { background: #e8f4ff; color: #0969a8; }
+.market-cn { background: #f7eaff; color: #722ed1; }
+.trade-tag.ipo { background: #ffebe6; color: #c2410c; }
+.currency-overview-grid { display: grid; gap: 1rem; }
+.currency-overview-card { border: 1px solid #e5e7eb; border-radius: .8rem; padding: 1rem; }
+.currency-overview-card h3 { margin-top: 0; }
+.currency-totals { display: flex; gap: 2rem; margin-bottom: .8rem; }
+.currency-totals span, .currency-totals strong { display: block; }
+.contract-breakdown { display: grid; gap: .35rem; margin-top: .5rem; font-size: .85rem; }
+.profit-filters { align-items: end; margin-bottom: 1rem; }
+.profit-filters label { display: grid; gap: .3rem; }
+
 .ipo-trade-table .number {
   text-align: center;
 }

@@ -27,7 +27,7 @@
       </label>
       <label class="prototype-currency">统计年份
         <select name="year" onchange="this.form.submit()">
-          <option value="all"{% if selected_year == "all" %} selected{% endif %}>全部年份</option>
+          <option value="all"{% if selected_year == "all" %} selected{% endif %}>所有年份（最近余额）</option>
           {% for year in year_options %}<option value="{{ year }}"{% if selected_year == year|stringformat:"s" %} selected{% endif %}>{{ year }} 年</option>{% endfor %}
         </select>
       </label>
@@ -36,7 +36,7 @@
 </section>
 
 <section class="panel account-summary-panel">
-  <div class="section-head"><div><h2>证券账户资产汇总</h2><p>资产和账户按 {{ selected_currency }} 统一折算。</p></div></div>
+  <div class="section-head"><div><h2>证券账户资产汇总</h2><p>资产和账户按 {{ selected_currency }} 统一折算{% if balance_snapshot_date %}，余额日期 {{ balance_snapshot_date }}{% endif %}。</p></div></div>
   {% if missing_exchange_rates %}<p class="form-error">部分原币缺少兑 {{ selected_currency }} 的汇率，相关统一币种金额暂显示“-”，未按 1:1 错误合并。</p>{% endif %}
   <div class="account-summary-grid summary-grid-head">
     <span>统计范围</span><span>总资产</span><span>现金余额</span><span>持仓市值</span><span>今日盈亏</span><span>累计浮动盈亏</span><span>累计已实现盈亏</span>
@@ -75,7 +75,7 @@
             <td class="{% if row.today_pnl > 0 %}positive{% elif row.today_pnl < 0 %}negative{% endif %}">{{ row.today_pnl|signed_currency0:selected_currency }}</td>
             <td class="{% if row.unrealized > 0 %}positive{% elif row.unrealized < 0 %}negative{% endif %}">{{ row.unrealized|signed_currency0:selected_currency }}</td>
             <td class="{% if row.realized > 0 %}positive{% elif row.realized < 0 %}negative{% endif %}">{{ row.realized|signed_currency0:selected_currency }}</td>
-            <td><a class="button compact" href="{% url 'portfolio:account_detail' row.account.pk %}?currency={{ selected_currency }}&year={{ selected_year }}">查看账户</a></td>
+            <td><a class="button compact" href="{% url 'portfolio:account_detail' row.account.pk %}?currency={{ selected_currency }}">查看账户</a></td>
           </tr>
         {% empty %}<tr><td colspan="10">暂无证券账户。</td></tr>{% endfor %}
       </tbody>

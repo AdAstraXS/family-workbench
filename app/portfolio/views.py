@@ -38,6 +38,7 @@ from .models import (
     PortfolioSnapshot,
     Security,
     SecurityMarketSnapshot,
+    TradeTypeChoices,
     TransactionSourceChoices,
     WatchlistItem,
 )
@@ -51,6 +52,106 @@ ZERO = Decimal("0")
 def _sum_or_none(values):
     values = list(values)
     return sum(values, ZERO) if all(value is not None for value in values) else None
+
+
+def _snapshot_balance_data(accounts, family, selected_currency, requested_year):
+    snapshots = PortfolioSnapshot.objects.filter(
+        family=family,
+        member=None,
+        account=None,
+    ).order_by("-snapshot_date", "-pk")
+    years = sorted(
+        {item.year for item in snapshots.values_list("snapshot_date", flat=True)},
+        reverse=True,
+    )
+    selected_year = requested_year if requested_year.isdigit() and int(requested_year) in years else "all"
+    if selected_year != "all":
+        snapshots = snapshots.filter(snapshot_date__year=int(selected_year))
+    snapshot = snapshots.first()
+    if not snapshot:
+        return None, years, selected_year
+
+    rows = {account.pk: {"account": account, "cash": ZERO, "market_value": ZERO, "unrealized": ZERO} for account in accounts}
+    for line in snapshot.position_lines.filter(account__in=accounts):
+        value = _convert_currency(
+            line.market_value,
+            snapshot.currency,
+            selected_currency,
+            snapshot.snapshot_date,
+        )
+        unrealized = _convert_currency(
+            line.unrealized_pnl,
+            snapshot.currency,
+            selected_currency,
+            snapshot.snapshot_date,
+        )
+        row = rows[line.account_id]
+        if value is None:
+            row["cash"] = row["market_value"] = None
+            continue
+        if line.asset_type == "cash":
+            if row["cash"] is not None:
+                row["cash"] += value
+        elif row["market_value"] is not None:
+            row["market_value"] += value
+            row["unrealized"] += unrealized or ZERO
+
+    realized_by_account = defaultdict(Decimal)
+    for item in InvestmentTransaction.objects.filter(
+        account__in=accounts,
+        trade_date__lte=snapshot.snapshot_date,
+    ).exclude(realized_pnl=0):
+        converted = _convert_currency(
+            item.realized_pnl,
+            item.currency,
+            selected_currency,
+            snapshot.snapshot_date,
+        )
+        if converted is not None:
+            realized_by_account[item.account_id] += converted
+
+    account_rows = []
+    for row in rows.values():
+        row["total_asset"] = (
+            row["cash"] + row["market_value"]
+            if row["cash"] is not None and row["market_value"] is not None
+            else None
+        )
+        row["position_ratio"] = (
+            row["market_value"] / row["total_asset"] * 100
+            if row["market_value"] is not None and row["total_asset"]
+            else ZERO
+        )
+        row["cash_ratio"] = Decimal("100") - row["position_ratio"]
+        row["today_pnl"] = ZERO
+        row["realized"] = realized_by_account[row["account"].pk]
+        account_rows.append(row)
+    account_rows.sort(key=lambda row: row["total_asset"] or ZERO, reverse=True)
+    return (snapshot, account_rows), years, selected_year
+
+
+def _summary_rows(account_rows):
+    scopes = [("家庭汇总", account_rows)]
+    members = []
+    for row in account_rows:
+        if row["account"].member not in members:
+            members.append(row["account"].member)
+    scopes.extend(
+        (member.display_name, [row for row in account_rows if row["account"].member_id == member.pk])
+        for member in members
+    )
+    return [
+        {
+            "label": label,
+            "cash": _sum_or_none(row["cash"] for row in rows),
+            "market_value": _sum_or_none(row["market_value"] for row in rows),
+            "total_asset": _sum_or_none(row["total_asset"] for row in rows),
+            "today_pnl": _sum_or_none(row["today_pnl"] for row in rows),
+            "unrealized": _sum_or_none(row["unrealized"] for row in rows),
+            "realized": _sum_or_none(row["realized"] for row in rows),
+        }
+        for label, rows in scopes
+    ]
 
 
 def _visible_accounts(request):
@@ -71,7 +172,7 @@ def _visible_accounts(request):
 
 def _latest_positions(accounts, year):
     return list(
-        InvestmentPosition.objects.filter(account__in=accounts)
+        InvestmentPosition.objects.filter(account__in=accounts).exclude(quantity=0)
         .select_related(
             "account",
             "account__bank_account__member",
@@ -97,7 +198,7 @@ def _account_dashboard_data(request, account=None):
     selected_currency = request.GET.get(
         "currency", site_base_currency
     ).upper()
-    year_value = request.GET.get("year", str(date.today().year))
+    year_value = "all" if account else request.GET.get("year", "all")
     year = int(year_value) if year_value.isdigit() else "all"
     cost_method = request.GET.get("cost_method", "moving_average")
     if cost_method not in {"moving_average", "diluted"}:
@@ -210,28 +311,7 @@ def _account_dashboard_data(request, account=None):
         reverse=True,
     )
 
-    summary_rows = []
-    scopes = [("家庭汇总", account_rows)]
-    members = []
-    for row in account_rows:
-        if row["account"].member not in members:
-            members.append(row["account"].member)
-    scopes.extend(
-        (member.display_name, [r for r in account_rows if r["account"].member_id == member.pk])
-        for member in members
-    )
-    for label, rows in scopes:
-        summary_rows.append(
-            {
-                "label": label,
-                "cash": _sum_or_none(r["cash"] for r in rows),
-                "market_value": _sum_or_none(r["market_value"] for r in rows),
-                "total_asset": _sum_or_none(r["total_asset"] for r in rows),
-                "today_pnl": _sum_or_none(r["today_pnl"] for r in rows),
-                "unrealized": _sum_or_none(r["unrealized"] for r in rows),
-                "realized": _sum_or_none(r["realized"] for r in rows),
-            }
-        )
+    summary_rows = _summary_rows(account_rows)
     return {
         "accounts": accounts,
         "account_rows": account_rows,
@@ -241,7 +321,7 @@ def _account_dashboard_data(request, account=None):
         "selected_year": year_value,
         "cost_method": cost_method,
         "currency_options": Currency.objects.filter(is_active=True),
-        "year_options": range(date.today().year, date.today().year - 6, -1),
+        "year_options": [],
         "family": family,
         "missing_exchange_rates": any(
             row[field] is None
@@ -477,12 +557,249 @@ def overview(request):
 def account_list(request):
     rate_info = ensure_daily_exchange_rates()
     context = _account_dashboard_data(request)
+    snapshot_data, years, selected_year = _snapshot_balance_data(
+        context["accounts"],
+        context["family"],
+        context["selected_currency"],
+        request.GET.get("year", "all"),
+    )
+    if snapshot_data:
+        snapshot, account_rows = snapshot_data
+        context["account_rows"] = account_rows
+        context["summary_rows"] = _summary_rows(account_rows)
+        context["balance_snapshot_date"] = snapshot.snapshot_date
+    context["year_options"] = years
+    context["selected_year"] = selected_year
     context["rate_info"] = rate_info
     return render(
         request,
         "portfolio/account_dashboard.html",
         context,
     )
+
+
+def _account_asset_cards(account_row, positions, balances, selected_currency):
+    type_labels = {
+        Security.TYPE_STOCK: "股票",
+        Security.TYPE_OPTION: "期权",
+        Security.TYPE_ETF: "指数基金",
+    }
+    values = defaultdict(Decimal)
+    for position in positions:
+        converted = _convert_currency(
+            position.market_value_live,
+            position.original_currency,
+            selected_currency,
+            date.today(),
+        )
+        if converted is not None:
+            values[position.security.asset_type] += converted
+    cash = sum(
+        (
+            _convert_currency(amount, currency, selected_currency, date.today()) or ZERO
+            for currency, amount in balances.items()
+        ),
+        ZERO,
+    )
+    total = account_row["total_asset"] if account_row else ZERO
+    cards = [{"label": "现金", "amount": cash}]
+    cards.extend(
+        {"label": label, "amount": values[asset_type]}
+        for asset_type, label in type_labels.items()
+    )
+    for card in cards:
+        card["ratio"] = card["amount"] / total * 100 if total else ZERO
+    return cards
+
+
+def _currency_sections(account, positions, balances):
+    base_currency = account.family.base_currency
+    base_total = ZERO
+    for currency, amount in balances.items():
+        base_total += _convert_currency(amount, currency, base_currency, date.today()) or ZERO
+    base_total += sum((position.market_value_base or ZERO for position in positions), ZERO)
+    grouped = defaultdict(list)
+    for position in positions:
+        position.base_ratio = (
+            (position.market_value_base or ZERO) / base_total * 100 if base_total else ZERO
+        )
+        grouped[position.original_currency].append(position)
+    currencies = ["HKD", "USD", "CNY"] + sorted(
+        (set(balances) | set(grouped)) - {"HKD", "USD", "CNY"}
+    )
+    return [
+        {
+            "currency": currency,
+            "cash": balances[currency],
+            "holding": sum((item.market_value_live for item in grouped[currency]), ZERO),
+            "holding_pnl": sum((item.unrealized_live for item in grouped[currency]), ZERO),
+            "positions": grouped[currency],
+        }
+        for currency in currencies
+    ]
+
+
+def _close_holding_days(transactions):
+    long_lots = []
+    short_lots = []
+    result = {}
+
+    def add_lot(lots, quantity, trade_date):
+        lots.append([quantity, trade_date])
+
+    def consume(lots, quantity, close_date):
+        remaining = quantity
+        weighted_days = ZERO
+        while remaining > 0 and lots:
+            lot_quantity, open_date = lots[0]
+            used = min(lot_quantity, remaining)
+            weighted_days += Decimal(max((close_date - open_date).days, 0)) * used
+            lot_quantity -= used
+            remaining -= used
+            if lot_quantity:
+                lots[0][0] = lot_quantity
+            else:
+                lots.pop(0)
+        return weighted_days, quantity - remaining
+
+    for item in transactions:
+        security = item.security
+        if not security or not item.quantity:
+            continue
+        if security.asset_type == Security.TYPE_OPTION:
+            if item.position_effect == InvestmentTransaction.EFFECT_OPEN:
+                add_lot(long_lots if item.trade_type == TradeTypeChoices.BUY else short_lots, item.quantity, item.trade_date)
+            elif item.position_effect == InvestmentTransaction.EFFECT_CLOSE:
+                result[item.pk] = consume(
+                    short_lots if item.trade_type == TradeTypeChoices.BUY else long_lots,
+                    item.quantity,
+                    item.trade_date,
+                )
+        elif item.trade_type in {TradeTypeChoices.BUY, TradeTypeChoices.IPO}:
+            add_lot(long_lots, item.quantity, item.trade_date)
+        elif item.trade_type == TradeTypeChoices.SELL:
+            result[item.pk] = consume(long_lots, item.quantity, item.trade_date)
+    return result
+
+
+def _individual_profit_data(request, account, transactions):
+    date_start = parse_date(request.GET.get("date_start", ""))
+    date_end = parse_date(request.GET.get("date_end", ""))
+    selected_stock = request.GET.get("stock", "")
+    day_maps = {}
+    by_security = defaultdict(list)
+    for item in transactions:
+        if item.security_id:
+            by_security[item.security_id].append(item)
+    for security_id, rows in by_security.items():
+        day_maps[security_id] = _close_holding_days(rows)
+
+    groups = {}
+    options = {}
+    for item in transactions:
+        security = item.security
+        if not security:
+            continue
+        option = getattr(security, "option_contract", None)
+        root = option.underlying if option else security
+        key = f"option:{root.pk}" if option else f"security:{security.pk}"
+        options[key] = f"{root.name}（{'期权' if option else security.get_asset_type_display()}）"
+        if selected_stock and key != selected_stock:
+            continue
+        in_range = (
+            (not date_start or item.trade_date >= date_start)
+            and (not date_end or item.trade_date <= date_end)
+        )
+        if not in_range:
+            continue
+        row = groups.setdefault(
+            key,
+            {
+                "key": key,
+                "market": root.market,
+                "name": root.name,
+                "currency": root.currency,
+                "asset_type": "期权" if option else security.get_asset_type_display(),
+                "total_pnl": ZERO,
+                "income": ZERO,
+                "trade_count": 0,
+                "day_weight": ZERO,
+                "closed_quantity": ZERO,
+                "has_realized": False,
+                "contracts": {},
+            },
+        )
+        row["trade_count"] += 1
+        is_income = item.trade_type in {TradeTypeChoices.DIVIDEND, TradeTypeChoices.INTEREST}
+        is_close = (
+            item.position_effect == InvestmentTransaction.EFFECT_CLOSE
+            if option
+            else item.trade_type == TradeTypeChoices.SELL
+        )
+        if is_income:
+            row["income"] += item.realized_pnl
+            row["total_pnl"] += item.realized_pnl
+            row["has_realized"] = True
+        elif is_close:
+            row["total_pnl"] += item.realized_pnl
+            row["has_realized"] = True
+            days, quantity = day_maps.get(security.pk, {}).get(item.pk, (ZERO, ZERO))
+            row["day_weight"] += days
+            row["closed_quantity"] += quantity
+        if option:
+            child = row["contracts"].setdefault(
+                security.pk,
+                {
+                    "symbol": security.symbol,
+                    "currency": security.currency,
+                    "total_pnl": ZERO,
+                    "income": ZERO,
+                    "trade_count": 0,
+                    "day_weight": ZERO,
+                    "closed_quantity": ZERO,
+                    "has_realized": False,
+                },
+            )
+            child["trade_count"] += 1
+            if is_income:
+                child["income"] += item.realized_pnl
+                child["total_pnl"] += item.realized_pnl
+                child["has_realized"] = True
+            elif is_close:
+                child["total_pnl"] += item.realized_pnl
+                child["has_realized"] = True
+                days, quantity = day_maps.get(security.pk, {}).get(item.pk, (ZERO, ZERO))
+                child["day_weight"] += days
+                child["closed_quantity"] += quantity
+
+    rows = []
+    for row in groups.values():
+        if not row["has_realized"]:
+            continue
+        row["holding_days"] = (
+            row["day_weight"] / row["closed_quantity"] if row["closed_quantity"] else ZERO
+        )
+        row["contracts"] = [
+            {
+                **child,
+                "holding_days": (
+                    child["day_weight"] / child["closed_quantity"]
+                    if child["closed_quantity"]
+                    else ZERO
+                ),
+            }
+            for child in row["contracts"].values()
+            if child["has_realized"]
+        ]
+        rows.append(row)
+    rows.sort(key=lambda row: row["total_pnl"], reverse=True)
+    return {
+        "rows": rows,
+        "stock_options": sorted(options.items(), key=lambda item: item[1]),
+        "selected_stock": selected_stock,
+        "date_start": request.GET.get("date_start", ""),
+        "date_end": request.GET.get("date_end", ""),
+    }
 
 
 @login_required
@@ -501,7 +818,6 @@ def account_detail(request, pk):
     )
     balances = defaultdict(Decimal)
     display_movements = []
-    selected_year = context["selected_year"]
     for movement in movements:
         balances[movement.currency] += movement.amount
         movement.balance_after = balances[movement.currency]
@@ -511,8 +827,7 @@ def account_detail(request, pk):
             account.family.base_currency,
             movement.movement_date,
         )
-        if selected_year == "all" or str(movement.movement_date.year) == selected_year:
-            display_movements.append(movement)
+        display_movements.append(movement)
     context["cash_movements"] = list(reversed(display_movements))
     symbols = {
         item.code: item.symbol or item.code
@@ -530,14 +845,17 @@ def account_detail(request, pk):
         for currency in balance_currencies
     ]
 
-    transactions = InvestmentTransaction.objects.filter(account=account).select_related(
-        "security"
+    transactions = list(
+        InvestmentTransaction.objects.filter(account=account)
+        .select_related(
+            "security",
+            "security__asset_category",
+            "security__option_contract__underlying",
+            "ipo_subscription_trade",
+        )
+        .order_by("trade_date", "created_at", "pk")
     )
-    if selected_year != "all":
-        transactions = transactions.filter(trade_date__year=selected_year)
-    context["transactions"] = list(
-        transactions.order_by("-trade_date", "-created_at", "-pk")
-    )
+    context["transactions"] = list(reversed(transactions))
     for item in context["transactions"]:
         item.total_fee = item.fee + item.tax
     account_row = context["account_rows"][0] if context["account_rows"] else None
@@ -555,6 +873,15 @@ def account_detail(request, pk):
             and account_row["total_asset"]
             else ZERO
         )
+    context["asset_cards"] = _account_asset_cards(
+        account_row, context["positions"], balances, context["selected_currency"]
+    )
+    context["currency_sections"] = _currency_sections(
+        account, context["positions"], balances
+    )
+    context["individual_profit"] = _individual_profit_data(
+        request, account, transactions
+    )
     return render(request, "portfolio/account_detail.html", context)
 
 
