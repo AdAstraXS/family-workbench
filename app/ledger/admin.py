@@ -257,9 +257,15 @@ def prepare_asset_entry(entry, snapshot, display_order=None):
 
 @admin.register(BankAccount)
 class BankAccountAdmin(admin.ModelAdmin):
-    list_display = ("account_name", "member", "account_type_ref", "account_region", "account_no_masked", "is_active")
-    list_filter = ("family", "member", "account_type_ref", "account_region", "is_active")
+    list_display = ("account_name", "member", "account_type_ref", "account_region", "supports_investment", "supports_ipo", "is_active")
+    list_filter = ("family", "member", "account_type_ref", "account_region", "supports_investment", "supports_ipo", "is_active")
     search_fields = ("account_name", "account_no_masked", "remark")
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        from portfolio.account_sync import sync_investment_account
+
+        sync_investment_account(obj)
 
 
 @admin.register(IncomeCategory)

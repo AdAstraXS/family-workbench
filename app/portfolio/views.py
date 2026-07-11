@@ -7,7 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.core import signing
 from django.db import transaction
-from django.db.models import OuterRef, Q, Subquery, Sum
+from django.db.models import Q, Sum
 from django.http import HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -17,7 +17,7 @@ from django.views.decorators.http import require_POST
 
 from family_core.audit import stamp_actor
 from family_core.household import get_site_setting
-from family_core.models import AssetCategory, Currency, ExchangeRate, FamilyMember
+from family_core.models import AssetCategory, Currency, FamilyMember
 from ledger.models import BankAccount
 
 from .forms import (
@@ -39,7 +39,8 @@ from .models import (
     SecurityMarketSnapshot,
     WatchlistItem,
 )
-from .services import rebuild_position
+from .services import rebuild_cash_only_transaction, rebuild_position
+from .valuation import convert_currency as _convert_currency, value_portfolio
 
 
 ZERO = Decimal("0")
@@ -52,76 +53,32 @@ def _sum_or_none(values):
 
 def _visible_accounts(request):
     accounts = InvestmentAccount.objects.select_related(
-        "family",
-        "member",
         "bank_account",
-        "account_region",
+        "bank_account__family",
+        "bank_account__member",
+        "bank_account__account_region",
     ).filter(
-        is_active=True,
         bank_account__is_active=True,
-        bank_account__account_type_ref__name="券商",
+        bank_account__supports_investment=True,
     )
     if request.user.is_superuser:
         return accounts
     member = FamilyMember.objects.filter(user=request.user, is_active=True).first()
-    return accounts.filter(family=member.family) if member else accounts.none()
-
-
-def _convert_currency(amount, source, target, on_date=None):
-    amount = amount or ZERO
-    source, target = source.upper(), target.upper()
-    if source == target:
-        return amount
-    rates = ExchangeRate.objects.filter(rate_date__lte=on_date or date.today())
-
-    def latest_rate(base, quote):
-        return (
-            rates.filter(base_currency=base, quote_currency=quote)
-            .order_by("-rate_date")
-            .first()
-        )
-
-    direct = (
-        latest_rate(source, target)
-    )
-    if direct:
-        return amount * direct.rate
-    inverse = (
-        latest_rate(target, source)
-    )
-    if inverse and inverse.rate:
-        return amount / inverse.rate
-
-    source_cny = latest_rate(source, "CNY")
-    target_cny = latest_rate(target, "CNY")
-    if source_cny and target_cny and target_cny.rate:
-        return amount * source_cny.rate / target_cny.rate
-    return None
+    return accounts.filter(bank_account__family=member.family) if member else accounts.none()
 
 
 def _latest_positions(accounts, year):
-    positions = InvestmentPosition.objects.filter(account__in=accounts)
-    if year != "all":
-        positions = positions.filter(position_date__year=year)
-    latest_id = (
-        positions.filter(
-            account_id=OuterRef("account_id"),
-            security_id=OuterRef("security_id"),
-        )
-        .order_by("-position_date", "-updated_at", "-pk")
-        .values("pk")[:1]
-    )
     return list(
-        positions.filter(pk=Subquery(latest_id))
+        InvestmentPosition.objects.filter(account__in=accounts)
         .select_related(
             "account",
-            "account__member",
-            "account__family",
+            "account__bank_account__member",
+            "account__bank_account__family",
             "security",
             "security__asset_category",
             "security__market_snapshot",
         )
-        .order_by("account__member__display_name", "account__account_name", "security__symbol")
+        .order_by("account__bank_account__member__display_name", "account__bank_account__account_name", "security__symbol")
     )
 
 
@@ -130,11 +87,12 @@ def _account_dashboard_data(request, account=None):
     if account:
         accounts = accounts.filter(pk=account.pk)
     accounts = list(
-        accounts.order_by("member__display_name", "account_name")
+        accounts.order_by("bank_account__member__display_name", "bank_account__account_name")
     )
     family = accounts[0].family if accounts else None
+    site_base_currency = get_site_setting().base_currency
     selected_currency = request.GET.get(
-        "currency", family.base_currency if family else "CNY"
+        "currency", site_base_currency
     ).upper()
     year_value = request.GET.get("year", str(date.today().year))
     year = int(year_value) if year_value.isdigit() else "all"
@@ -175,15 +133,15 @@ def _account_dashboard_data(request, account=None):
         )
         item.realized_for_year = realized.get((item.account_id, item.security_id), ZERO)
         item.original_currency = item.security.currency
-        base_currency = item.account.family.base_currency
+        base_currency = site_base_currency
         item.unrealized_base = _convert_currency(
-            item.unrealized_live, item.original_currency, base_currency
+            item.unrealized_live, item.original_currency, base_currency, date.today()
         )
         item.realized_base = _convert_currency(
-            item.realized_for_year, item.original_currency, base_currency
+            item.realized_for_year, item.original_currency, base_currency, date.today()
         )
         item.market_value_base = _convert_currency(
-            item.market_value_live, item.original_currency, base_currency
+            item.market_value_live, item.original_currency, base_currency, date.today()
         )
         change_rate = snapshot.change_rate if snapshot else None
         item.today_pnl = (
@@ -340,32 +298,12 @@ def overview(request):
 
     accounts = _visible_accounts(request)
     if selected_member:
-        accounts = accounts.filter(member=selected_member)
+        accounts = accounts.filter(bank_account__member=selected_member)
     accounts = list(accounts)
 
-    latest_position_id = (
-        InvestmentPosition.objects.filter(
-            account_id=OuterRef("account_id"),
-            security_id=OuterRef("security_id"),
-        )
-        .order_by("-position_date", "-updated_at", "-pk")
-        .values("pk")[:1]
-    )
-    positions = (
-        InvestmentPosition.objects.filter(
-            pk=Subquery(latest_position_id),
-            account__in=accounts,
-        )
-        .select_related(
-            "account",
-            "account__member",
-            "security",
-            "security__asset_category",
-            "security__market_snapshot",
-        )
-        .order_by("security__asset_category__display_order", "security__symbol")
-    )
-    positions = list(positions)
+    today = timezone.localdate()
+    valuation = value_portfolio(accounts, base_currency, today)
+    positions = valuation["positions"]
 
     groups = {}
     missing_rates = False
@@ -381,26 +319,13 @@ def overview(request):
         group["accounts"][account] += amount
 
     account_map = {item.pk: item for item in accounts}
-    cash_rows = (
-        InvestmentCashMovement.objects.filter(account__in=accounts)
-        .values("account_id", "currency")
-        .annotate(total=Sum("amount"))
-    )
-    total_cash = ZERO
-    for row in cash_rows:
-        converted = _convert_currency(
-            row["total"] or ZERO,
-            row["currency"],
-            base_currency,
-        )
-        if converted is None:
-            missing_rates = True
-            continue
-        total_cash += converted
-        add_asset("现金", account_map[row["account_id"]], converted)
+    total_cash = valuation["total_cash"]
+    missing_rates = valuation["missing_rates"]
+    for row in valuation["cash_lines"]:
+        add_asset("现金", account_map[row["account_id"]], row["converted"])
 
-    total_market_value = ZERO
-    total_cost = ZERO
+    total_market_value = valuation["total_market_value"]
+    total_cost = valuation["total_cost"]
     asset_type_names = {
         "stock": "股票",
         "fund": "基金",
@@ -409,24 +334,8 @@ def overview(request):
         "other": "其他资产",
     }
     for item in positions:
-        snapshot = getattr(item.security, "market_snapshot", None)
-        price = (
-            snapshot.last_price
-            if snapshot and snapshot.last_price is not None
-            else item.current_price
-        )
-        market_value = item.quantity * price
-        cost = item.quantity * item.avg_cost
-        market_cny = _convert_currency(
-            market_value,
-            item.security.currency,
-            base_currency,
-        )
-        cost_cny = _convert_currency(
-            cost,
-            item.security.currency,
-            base_currency,
-        )
+        market_cny = item.valuation_market_value
+        cost_cny = item.valuation_cost
         if market_cny is None or cost_cny is None:
             missing_rates = True
             continue
@@ -438,38 +347,10 @@ def overview(request):
                 item.security.asset_type,
             )
         )
-        total_market_value += market_cny
-        total_cost += cost_cny
         add_asset(category, item.account, market_cny)
 
-    total_asset = total_cash + total_market_value
-    total_pnl = total_market_value - total_cost
-    today = timezone.localdate()
-    daily_snapshot = (
-        PortfolioSnapshot.objects.filter(
-            family=family,
-            member=selected_member,
-            account=None,
-            snapshot_date=today,
-            currency=base_currency,
-        )
-        .order_by("pk")
-        .first()
-    )
-    if not daily_snapshot:
-        daily_snapshot = PortfolioSnapshot(
-            family=family,
-            member=selected_member,
-            snapshot_date=today,
-            currency=base_currency,
-        )
-    daily_snapshot.total_cash = total_cash
-    daily_snapshot.total_market_value = total_market_value
-    daily_snapshot.total_asset = total_asset
-    daily_snapshot.total_cost = total_cost
-    daily_snapshot.total_pnl = total_pnl
-    daily_snapshot.pnl_ratio = total_pnl / total_cost if total_cost else ZERO
-    daily_snapshot.save()
+    total_asset = valuation["total_asset"]
+    total_pnl = valuation["total_pnl"]
 
     trend_snapshots = list(
         PortfolioSnapshot.objects.filter(
@@ -941,7 +822,7 @@ def transaction_form_options(request):
     accounts = BankAccount.objects.filter(
         family_id=family_id,
         is_active=True,
-        account_type_ref__name="券商",
+        supports_investment=True,
     )
     if member_id:
         accounts = accounts.filter(member_id=member_id)
@@ -997,9 +878,11 @@ def save_transaction_form(request, title, instance=None):
                     for account_id, security_id in {
                         pair for pair in pairs if pair and pair[1]
                     }:
-                        account = InvestmentAccount.objects.get(pk=account_id)
+                        account = InvestmentAccount.objects.select_related("bank_account").get(pk=account_id)
                         security = Security.objects.get(pk=security_id)
                         rebuild_position(account, security)
+                    if not item.security_id:
+                        rebuild_cash_only_transaction(item)
             except ValidationError as exc:
                 form.add_error(None, exc)
             else:

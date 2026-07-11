@@ -6,7 +6,6 @@ from family_core.models import Family, SiteSetting
 from ipo.models import HkIpoSubscriptionTrade
 from ledger.models import BankAccount, ExpenseRecord, IncomeRecord
 from portfolio.models import (
-    InvestmentAccount,
     InvestmentPosition,
     PortfolioSnapshot,
     WatchlistItem,
@@ -43,15 +42,6 @@ class Command(BaseCommand):
                 Q(bank_account__family_id=F("family_id"))
                 & Q(bank_account__member_id=F("member_id"))
             ).count(),
-            "investment_account_member_family_mismatch": InvestmentAccount.objects.exclude(
-                family_id=F("member__family_id")
-            ).count(),
-            "investment_bank_account_owner_mismatch": InvestmentAccount.objects.filter(
-                bank_account__isnull=False
-            ).exclude(
-                Q(bank_account__family_id=F("family_id"))
-                & Q(bank_account__member_id=F("member_id"))
-            ).count(),
             "watchlist_member_family_mismatch": WatchlistItem.objects.filter(
                 member__isnull=False
             ).exclude(family_id=F("member__family_id")).count(),
@@ -60,12 +50,12 @@ class Command(BaseCommand):
             ).exclude(family_id=F("member__family_id")).count(),
             "snapshot_account_family_mismatch": PortfolioSnapshot.objects.filter(
                 account__isnull=False
-            ).exclude(family_id=F("account__family_id")).count(),
+            ).exclude(family_id=F("account__bank_account__family_id")).count(),
             "ipo_account_owner_mismatch": HkIpoSubscriptionTrade.objects.filter(
                 account__isnull=False
             ).exclude(account__member_id=F("member_id")).count(),
             "duplicate_position_rows": InvestmentPosition.objects.values(
-                "account_id", "security_id", "position_date"
+                "account_id", "security_id"
             ).annotate(row_count=Count("id")).filter(row_count__gt=1).count(),
         }
         if site_setting_table_exists:

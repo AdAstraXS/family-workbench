@@ -194,6 +194,10 @@ class HkIpoSubscriptionTradeAdmin(admin.ModelAdmin):
         "trade_status",
         "allotted_value",
         "allotment_fee",
+        "sell_price",
+        "sell_date",
+        "sold_lots",
+        "trading_fee",
         "realized_profit",
         "created_at",
         "updated_at",
@@ -232,3 +236,15 @@ class HkIpoSubscriptionTradeAdmin(admin.ModelAdmin):
         }),
         ("备注", {"fields": ("remark", "extra_data", "created_at", "updated_at")}),
     )
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        from portfolio.ipo_sync import sync_ipo_trade
+
+        sync_ipo_trade(obj.pk)
+
+    def delete_model(self, request, obj):
+        from portfolio.ipo_sync import delete_synced_ipo_transactions
+
+        delete_synced_ipo_transactions(obj.pk)
+        super().delete_model(request, obj)

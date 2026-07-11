@@ -71,6 +71,8 @@ class BankAccountForm(BaseModelForm):
             "account_no_masked",
             "account_region",
             "account_type_ref",
+            "supports_investment",
+            "supports_ipo",
             "is_active",
             "remark",
         ]
@@ -166,7 +168,7 @@ class IncomeRecordForm(CurrencyChoiceMixin, BaseModelForm):
 
 class ExpenseRecordForm(CurrencyChoiceMixin, BaseModelForm):
     date_fields = ("expense_date",)
-    ALLOWED_ACCOUNT_TYPES = ("银行", "微信", "支付宝")
+    ALLOWED_ACCOUNT_TYPE_CODES = ("bank", "wechat", "alipay")
     primary_category = ExpenseCategoryChoiceField(
         label="一级分类",
         queryset=ExpenseCategory.objects.none(),
@@ -192,7 +194,7 @@ class ExpenseRecordForm(CurrencyChoiceMixin, BaseModelForm):
         default_family = get_default_family()
         account_queryset = BankAccount.objects.filter(
             is_active=True,
-            account_type_ref__name__in=self.ALLOWED_ACCOUNT_TYPES,
+            account_type_ref__code__in=self.ALLOWED_ACCOUNT_TYPE_CODES,
             account_type_ref__is_active=True,
         ).select_related("member", "account_type_ref").order_by(
             "member__display_name",
@@ -258,7 +260,7 @@ class ExpenseRecordForm(CurrencyChoiceMixin, BaseModelForm):
         secondary_category = cleaned_data.get("secondary_category")
         tertiary_category = cleaned_data.get("tertiary_category")
         if account:
-            if account.account_type_ref is None or account.account_type_ref.name not in self.ALLOWED_ACCOUNT_TYPES:
+            if account.account_type_ref is None or account.account_type_ref.code not in self.ALLOWED_ACCOUNT_TYPE_CODES:
                 self.add_error("bank_account", "支出账户仅限银行、微信或支付宝账户。")
             if family and account.family_id != family.id:
                 self.add_error("bank_account", "支出账户必须属于所选家庭。")

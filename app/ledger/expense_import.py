@@ -30,7 +30,7 @@ EXPECTED_HEADERS = (
     "金额",
     "备注",
 )
-ALLOWED_ACCOUNT_TYPES = ("银行", "微信", "支付宝")
+ALLOWED_ACCOUNT_TYPE_CODES = ("bank", "wechat", "alipay")
 MAX_IMPORT_ROWS = 20_000
 
 
@@ -236,7 +236,7 @@ def import_expense_workbook(*, family, uploaded_file, imported_by=None) -> Expen
         for account in BankAccount.objects.filter(
             family=family,
             is_active=True,
-            account_type_ref__name__in=ALLOWED_ACCOUNT_TYPES,
+            account_type_ref__code__in=ALLOWED_ACCOUNT_TYPE_CODES,
             account_type_ref__is_active=True,
         ).select_related("member", "account_type_ref")
     }

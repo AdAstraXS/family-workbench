@@ -26,7 +26,11 @@ from .services import (
     recognize_ipo_listing_from_image,
 )
 from ledger.models import BankAccount
-from portfolio.ipo_sync import sync_ipo_trade
+from portfolio.ipo_sync import (
+    delete_synced_ipo_transactions,
+    refresh_ipo_sale_summary,
+    sync_ipo_trade,
+)
 from portfolio.models import (
     InvestmentOption,
     InvestmentTransaction,
@@ -99,20 +103,21 @@ def ipo_sale_transactions(ipo_trade_ids):
     return list(
         InvestmentTransaction.objects.select_related("account", "security")
         .filter(
-            source=TransactionSourceChoices.IMPORT,
+            source=TransactionSourceChoices.IPO,
             trade_type=TradeTypeChoices.SELL,
-            external_id__startswith="ipo:",
-            extra_data__ipo_subscription_trade_id__in=ipo_trade_ids,
+            ipo_subscription_trade_id__in=ipo_trade_ids,
         )
         .order_by(F("trade_date").desc(nulls_last=True), "-created_at", "-pk")
     )
 
 
+@transaction.atomic
 def save_ipo_sale_transaction(ipo_trade, form, transaction=None, user=None):
     sync_ipo_trade(ipo_trade.pk)
     buy_transaction = InvestmentTransaction.objects.filter(
-        source=TransactionSourceChoices.IMPORT,
-        external_id=f"ipo:{ipo_trade.pk}:buy",
+        source=TransactionSourceChoices.IPO,
+        ipo_subscription_trade=ipo_trade,
+        trade_type=TradeTypeChoices.IPO,
     ).first()
     if not buy_transaction:
         return None
@@ -122,15 +127,16 @@ def save_ipo_sale_transaction(ipo_trade, form, transaction=None, user=None):
     if not transaction:
         serial = (
             InvestmentTransaction.objects.filter(
-                source=TransactionSourceChoices.IMPORT,
+                source=TransactionSourceChoices.IPO,
                 external_id__startswith=f"ipo:{ipo_trade.pk}:sell:",
             ).count()
             + 1
         )
         transaction = InvestmentTransaction(
-            source=TransactionSourceChoices.IMPORT,
+            source=TransactionSourceChoices.IPO,
             external_id=f"ipo:{ipo_trade.pk}:sell:{serial}",
         )
+    transaction.ipo_subscription_trade = ipo_trade
     transaction.account = buy_transaction.account
     transaction.security = buy_transaction.security
     transaction.asset_category = buy_transaction.asset_category
@@ -149,44 +155,13 @@ def save_ipo_sale_transaction(ipo_trade, form, transaction=None, user=None):
     transaction.tax = Decimal("0")
     transaction.currency = buy_transaction.currency
     transaction.remark = ipo_trade.remark
-    transaction.extra_data = {"ipo_subscription_trade_id": ipo_trade.pk}
+    transaction.extra_data = {}
     if user:
         stamp_actor(transaction, user)
     transaction.save()
     rebuild_position(transaction.account, transaction.security)
     refresh_ipo_sale_summary(ipo_trade)
     return transaction
-
-
-def refresh_ipo_sale_summary(ipo_trade):
-    lot_size = ipo_trade.listing.lot_size or 0
-    sold_total = (
-        InvestmentTransaction.objects.filter(
-            source=TransactionSourceChoices.IMPORT,
-            trade_type=TradeTypeChoices.SELL,
-            extra_data__ipo_subscription_trade_id=ipo_trade.pk,
-        ).aggregate(total=Sum("quantity"))["total"]
-        or Decimal("0")
-    )
-    realized_profit = (
-        InvestmentTransaction.objects.filter(
-            source=TransactionSourceChoices.IMPORT,
-            trade_type=TradeTypeChoices.SELL,
-            extra_data__ipo_subscription_trade_id=ipo_trade.pk,
-        ).aggregate(total=Sum("realized_pnl"))["total"]
-        or Decimal("0")
-    )
-    total_lots = int(sold_total / Decimal(lot_size)) if lot_size else 0
-    status = (
-        HkIpoSubscriptionTrade.STATUS_CLOSED
-        if ipo_trade.allotted_lots and total_lots >= ipo_trade.allotted_lots
-        else HkIpoSubscriptionTrade.STATUS_HOLDING
-    )
-    HkIpoSubscriptionTrade.objects.filter(pk=ipo_trade.pk).update(
-        sold_lots=total_lots,
-        realized_profit=realized_profit,
-        trade_status=status,
-    )
 
 
 def build_ipo_chart_data(trades, selected_year, current_year):
@@ -874,12 +849,14 @@ def subscription_trade_list(request):
 
 
 @login_required
+@transaction.atomic
 def subscription_trade_create(request):
     if request.method == "POST":
         form = HkIpoSubscriptionTradeForm(request.POST)
         if form.is_valid():
             trade = stamp_actor(form.save(commit=False), request.user)
             trade.save()
+            sync_ipo_trade(trade.pk)
             return redirect(subscription_trade_list_url(trade))
     else:
         form = HkIpoSubscriptionTradeForm()
@@ -891,6 +868,7 @@ def subscription_trade_create(request):
 
 
 @login_required
+@transaction.atomic
 def subscription_trade_edit(request, pk):
     trade = get_object_or_404(HkIpoSubscriptionTrade, pk=pk)
     if request.method == "POST":
@@ -898,6 +876,7 @@ def subscription_trade_edit(request, pk):
         if form.is_valid():
             trade = stamp_actor(form.save(commit=False), request.user)
             trade.save()
+            sync_ipo_trade(trade.pk)
             return redirect(subscription_trade_list_url(trade))
     else:
         form = HkIpoSubscriptionTradeForm(instance=trade)
@@ -931,6 +910,7 @@ def subscription_trade_detail(request, pk):
 
 
 @login_required
+@transaction.atomic
 def subscription_trade_allotment(request, pk):
     trade = get_object_or_404(HkIpoSubscriptionTrade, pk=pk)
     if request.method == "POST":
@@ -938,6 +918,7 @@ def subscription_trade_allotment(request, pk):
         if form.is_valid():
             trade = stamp_actor(form.save(commit=False), request.user)
             trade.save()
+            sync_ipo_trade(trade.pk)
             return redirect(subscription_trade_list_url(trade))
     else:
         form = HkIpoAllotmentForm(instance=trade)
@@ -949,6 +930,7 @@ def subscription_trade_allotment(request, pk):
 
 
 @login_required
+@transaction.atomic
 def subscription_trade_sale(request, pk, transaction_id=None):
     trade = get_object_or_404(HkIpoSubscriptionTrade, pk=pk)
     transaction = None
@@ -957,9 +939,9 @@ def subscription_trade_sale(request, pk, transaction_id=None):
         transaction = get_object_or_404(
             InvestmentTransaction,
             pk=transaction_id,
-            source=TransactionSourceChoices.IMPORT,
+            source=TransactionSourceChoices.IPO,
             trade_type=TradeTypeChoices.SELL,
-            extra_data__ipo_subscription_trade_id=trade.pk,
+            ipo_subscription_trade=trade,
         )
         initial = {
             "sell_price": transaction.price,
@@ -989,9 +971,9 @@ def subscription_trade_sale_cancel(request, pk, transaction_id):
     sale = get_object_or_404(
         InvestmentTransaction,
         pk=transaction_id,
-        source=TransactionSourceChoices.IMPORT,
+        source=TransactionSourceChoices.IPO,
         trade_type=TradeTypeChoices.SELL,
-        extra_data__ipo_subscription_trade_id=trade.pk,
+        ipo_subscription_trade=trade,
     )
     account = sale.account
     security = sale.security
@@ -1015,9 +997,11 @@ def subscription_trade_list_url(trade):
 
 
 @login_required
+@transaction.atomic
 def subscription_trade_delete(request, pk):
     trade = get_object_or_404(HkIpoSubscriptionTrade, pk=pk)
     if request.method == "POST":
+        delete_synced_ipo_transactions(trade.pk)
         trade.delete()
         messages.success(request, "申购记录已删除。")
         next_url = request.POST.get("next") or ""
@@ -1030,7 +1014,7 @@ def subscription_trade_delete(request, pk):
 def get_ipo_account_member_map():
     return {
         str(account.id): account.member_id
-        for account in BankAccount.objects.filter(remark__icontains="打新账户", is_active=True)
+        for account in BankAccount.objects.filter(supports_ipo=True, is_active=True)
     }
 
 

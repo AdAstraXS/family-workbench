@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
@@ -40,6 +42,7 @@ class TransactionSourceChoices(models.TextChoices):
     MANUAL = "manual", "手工录入"
     IMPORT = "import", "文件导入"
     FUTU = "futu", "Futu 同步"
+    IPO = "ipo", "港股打新"
 
 
 class InvestmentOption(TimestampedModel):
@@ -93,35 +96,56 @@ class InvestmentAccount(TimestampedModel):
     bank_account = models.OneToOneField(
         "ledger.BankAccount",
         verbose_name="关联账户",
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         related_name="investment_profile",
-        null=True,
-        blank=True,
+        null=False,
+        blank=False,
     )
-    family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="investment_accounts")
-    member = models.ForeignKey(FamilyMember, verbose_name="所属成员", on_delete=models.CASCADE, related_name="investment_accounts")
-    account_region = models.ForeignKey(
-        "family_core.AccountRegion",
-        verbose_name="账户地区",
-        on_delete=models.SET_NULL,
-        related_name="investment_accounts",
-        null=True,
-        blank=True,
-    )
-    account_name = models.CharField("账户名称", max_length=100)
-    account_no_masked = models.CharField("脱敏账号", max_length=100, blank=True)
-    visibility = models.CharField("可见范围", max_length=20, choices=VisibilityChoices.choices, default=VisibilityChoices.PRIVATE)
-    is_active = models.BooleanField("是否有效", default=True)
-    remark = models.TextField("备注", blank=True)
     extra_data = models.JSONField("扩展字段", default=dict, blank=True)
 
     class Meta:
         verbose_name = "投资账户"
         verbose_name_plural = "投资账户"
-        indexes = [
-            models.Index(fields=["family", "member"]),
-            models.Index(fields=["is_active"]),
-        ]
+
+    @property
+    def family(self):
+        return self.bank_account.family
+
+    @property
+    def family_id(self):
+        return self.bank_account.family_id
+
+    @property
+    def member(self):
+        return self.bank_account.member
+
+    @property
+    def member_id(self):
+        return self.bank_account.member_id
+
+    @property
+    def account_region(self):
+        return self.bank_account.account_region
+
+    @property
+    def account_name(self):
+        return self.bank_account.account_name
+
+    @property
+    def account_no_masked(self):
+        return self.bank_account.account_no_masked
+
+    @property
+    def visibility(self):
+        return VisibilityChoices.FAMILY
+
+    @property
+    def is_active(self):
+        return self.bank_account.is_active
+
+    @property
+    def remark(self):
+        return self.bank_account.remark
 
     def __str__(self):
         return f"{self.member} - {self.account_name}"
@@ -272,6 +296,12 @@ class InvestmentPosition(TimestampedModel):
             models.Index(fields=["account", "security", "position_date"]),
             models.Index(fields=["position_date"]),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "security"],
+                name="unique_current_investment_position",
+            )
+        ]
 
     def __str__(self):
         return f"{self.account} - {self.security} - {self.position_date}"
@@ -322,6 +352,14 @@ class InvestmentTransaction(TimestampedModel):
     realized_return_ratio = models.DecimalField("已实现收益率", max_digits=12, decimal_places=6, default=0)
     source = models.CharField("数据来源", max_length=20, choices=TransactionSourceChoices.choices, default=TransactionSourceChoices.MANUAL)
     external_id = models.CharField("外部流水号", max_length=200, blank=True)
+    ipo_subscription_trade = models.ForeignKey(
+        "ipo.HkIpoSubscriptionTrade",
+        verbose_name="港股打新申购",
+        on_delete=models.SET_NULL,
+        related_name="investment_transactions",
+        null=True,
+        blank=True,
+    )
     trade_logic = models.TextField("交易逻辑", blank=True)
     information_source = models.CharField("信息来源", max_length=200, blank=True)
     information_source_option = models.ForeignKey(
@@ -379,17 +417,8 @@ class InvestmentTransaction(TimestampedModel):
         return f"{self.trade_date} {self.trade_type} {target}"
 
     def save(self, *args, **kwargs):
-        if not self.transaction_no and self.trade_date and self.trade_type:
-            prefix = f"{self.trade_date:%Y%m%d}-{self.trade_type.upper()}"
-            last_number = (
-                type(self)
-                .objects.filter(transaction_no__startswith=f"{prefix}-")
-                .order_by("-transaction_no")
-                .values_list("transaction_no", flat=True)
-                .first()
-            )
-            serial = int(last_number.rsplit("-", 1)[-1]) + 1 if last_number else 1
-            self.transaction_no = f"{prefix}-{serial:04d}"
+        if not self.transaction_no:
+            self.transaction_no = f"TXN-{uuid.uuid4().hex}"
         super().save(*args, **kwargs)
 
 
@@ -493,9 +522,56 @@ class PortfolioSnapshot(models.Model):
             models.Index(fields=["family", "member", "snapshot_date"]),
             models.Index(fields=["account", "snapshot_date"]),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["family", "member", "account", "snapshot_date", "currency"],
+                name="unique_portfolio_snapshot_scope_date_currency",
+                nulls_distinct=False,
+            )
+        ]
 
     def __str__(self):
         return f"{self.family} {self.snapshot_date} {self.total_asset}"
+
+
+class PortfolioSnapshotPositionLine(models.Model):
+    snapshot = models.ForeignKey(
+        PortfolioSnapshot,
+        verbose_name="组合快照",
+        on_delete=models.CASCADE,
+        related_name="position_lines",
+    )
+    account = models.ForeignKey(
+        InvestmentAccount,
+        verbose_name="投资账户",
+        on_delete=models.PROTECT,
+        related_name="snapshot_position_lines",
+    )
+    security = models.ForeignKey(
+        Security,
+        verbose_name="证券标的",
+        on_delete=models.PROTECT,
+        related_name="snapshot_position_lines",
+        null=True,
+        blank=True,
+    )
+    asset_type = models.CharField("资产类型", max_length=30)
+    asset_name = models.CharField("资产名称", max_length=200)
+    quantity = models.DecimalField("数量", max_digits=24, decimal_places=6, default=0)
+    price = models.DecimalField("快照价格", max_digits=20, decimal_places=6, default=0)
+    currency = models.CharField("原币", max_length=10)
+    fx_rate = models.DecimalField("折算汇率", max_digits=20, decimal_places=8, default=1)
+    market_value_original = models.DecimalField("原币市值", max_digits=20, decimal_places=4, default=0)
+    market_value = models.DecimalField("本位币市值", max_digits=20, decimal_places=4, default=0)
+    cost_original = models.DecimalField("原币成本", max_digits=20, decimal_places=4, default=0)
+    cost = models.DecimalField("本位币成本", max_digits=20, decimal_places=4, default=0)
+    unrealized_pnl = models.DecimalField("本位币浮动盈亏", max_digits=20, decimal_places=4, default=0)
+
+    class Meta:
+        verbose_name = "组合快照持仓明细"
+        verbose_name_plural = "组合快照持仓明细"
+        ordering = ["account_id", "asset_type", "asset_name"]
+        indexes = [models.Index(fields=["snapshot", "asset_type"])]
 
 
 class SecurityNews(models.Model):

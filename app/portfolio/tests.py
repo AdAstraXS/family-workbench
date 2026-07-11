@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 from unittest.mock import MagicMock, patch
@@ -15,11 +16,14 @@ from family_core.models import (
     ExchangeRate,
     Family,
     FamilyMember,
+    SiteSetting,
 )
 from ipo.models import HkIpoListing, HkIpoSubscriptionTrade
 from ledger.models import BankAccount
 
 from .exchange_rate_service import ensure_daily_exchange_rates
+from .account_sync import sync_investment_account
+from .ipo_sync import sync_ipo_trade
 from .models import (
     DailyExchangeRateFetch,
     InvestmentAccount,
@@ -28,6 +32,7 @@ from .models import (
     InvestmentPosition,
     InvestmentTransaction,
     PortfolioSnapshot,
+    PortfolioSnapshotPositionLine,
     Security,
     SecurityMarketSnapshot,
     TradeTypeChoices,
@@ -52,8 +57,9 @@ def create_broker_investment_account(
         member=member,
         account_name=account_name,
         account_type_ref=account_type,
+        supports_investment=True,
     )
-    account = InvestmentAccount.objects.get(bank_account=bank_account)
+    account = sync_investment_account(bank_account)
     if currency and cash_balance is not None:
         InvestmentCashMovement.objects.create(
             account=account,
@@ -106,6 +112,7 @@ class IpoPortfolioSyncTests(TestCase):
             member=member,
             account_name="港股打新账户",
             account_type_ref=account_type,
+            supports_ipo=True,
         )
         listing = HkIpoListing.objects.create(
             stock_code="02500.HK",
@@ -134,29 +141,27 @@ class IpoPortfolioSyncTests(TestCase):
             trading_fee=Decimal("15"),
             remark="来自打新申购表",
         )
+        sync_ipo_trade(ipo_trade.pk)
 
         transactions = InvestmentTransaction.objects.filter(
             external_id__startswith=f"ipo:{ipo_trade.pk}:"
         ).order_by("trade_date")
-        self.assertEqual(transactions.count(), 2)
-        buy, sale = transactions
+        self.assertEqual(transactions.count(), 1)
+        buy = transactions.get()
         self.assertEqual(buy.trade_type, TradeTypeChoices.IPO)
         self.assertEqual(buy.quantity, Decimal("200"))
         self.assertEqual(buy.currency, "HKD")
         self.assertEqual(buy.trade_date, date(2026, 7, 3))
-        self.assertEqual(sale.trade_type, TradeTypeChoices.SELL)
-        self.assertEqual(sale.quantity, Decimal("100"))
-        self.assertEqual(sale.fee, Decimal("15"))
-        self.assertEqual(sale.remark, "来自打新申购表")
         self.assertTrue(buy.transaction_no)
 
         ipo_trade.remark = "更新后的备注"
         ipo_trade.save()
+        sync_ipo_trade(ipo_trade.pk)
         self.assertEqual(
             InvestmentTransaction.objects.filter(
                 external_id__startswith=f"ipo:{ipo_trade.pk}:"
             ).count(),
-            2,
+            1,
         )
         self.assertFalse(
             InvestmentTransaction.objects.filter(
@@ -183,6 +188,7 @@ class TransactionFormTests(TestCase):
             member=member,
             account_type_ref=account_type,
             account_name="测试券商账户",
+            supports_investment=True,
         )
         security = Security.objects.create(
             symbol="00700",
@@ -307,6 +313,7 @@ class InvestmentCashMovementFormTests(TestCase):
             account_no_masked="***8888",
             account_type_ref=broker_type,
             account_region=overseas,
+            supports_investment=True,
         )
         foreign_bank = BankAccount.objects.create(
             family=family,
@@ -322,7 +329,7 @@ class InvestmentCashMovementFormTests(TestCase):
             account_type_ref=bank_type,
             account_region=domestic,
         )
-        account = InvestmentAccount.objects.get(bank_account=broker)
+        account = sync_investment_account(broker)
         self.assertEqual(account.account_name, "富途证券")
         self.assertEqual(account.account_no_masked, "***8888")
         self.assertEqual(account.account_region, overseas)
@@ -334,6 +341,12 @@ class InvestmentCashMovementFormTests(TestCase):
         self.assertContains(page, "富途证券")
         self.assertContains(page, "中银香港")
         self.assertNotContains(page, "招商银行")
+        movement_choices = {
+            value for value, _label in page.context["form"].fields["movement_type"].choices
+        }
+        self.assertIn("exchange", movement_choices)
+        self.assertIn("transfer", movement_choices)
+        self.assertNotIn("buy", movement_choices)
 
         response = self.client.post(
             reverse("portfolio:cash_movement_create", args=[account.pk]),
@@ -479,17 +492,6 @@ class PortfolioOverviewTests(TestCase):
             market="HK",
             currency="HKD",
         )
-        InvestmentPosition.objects.create(
-            account=self.account,
-            security=self.security,
-            quantity=Decimal("10"),
-            avg_cost=Decimal("300"),
-            current_price=Decimal("320"),
-            market_value=Decimal("3200"),
-            unrealized_pnl=Decimal("200"),
-            pnl_ratio=Decimal("0.066667"),
-            position_date=date(2026, 6, 30),
-        )
         self.latest_position = InvestmentPosition.objects.create(
             account=self.account,
             security=self.security,
@@ -503,7 +505,7 @@ class PortfolioOverviewTests(TestCase):
         )
         self.client.force_login(self.user)
 
-    def test_overview_uses_only_latest_position_for_each_account_and_security(self):
+    def test_overview_uses_unique_current_position_for_each_account_and_security(self):
         response = self.client.get(reverse("portfolio:overview"))
 
         self.assertEqual(response.status_code, 200)
@@ -513,7 +515,7 @@ class PortfolioOverviewTests(TestCase):
         self.assertEqual(response.context["total_pnl"], Decimal("900"))
         self.assertEqual(response.context["total_asset"], Decimal("7200"))
         self.assertEqual(response.context["base_currency"], "CNY")
-        self.assertEqual(PortfolioSnapshot.objects.count(), 1)
+        self.assertEqual(PortfolioSnapshot.objects.count(), 0)
 
     def test_account_page_converts_hkd_to_usd_through_cny_rates(self):
         response = self.client.get(reverse("portfolio:account_list"), {"currency": "USD"})
@@ -523,7 +525,10 @@ class PortfolioOverviewTests(TestCase):
         usd_cny = ExchangeRate.objects.filter(base_currency="USD", quote_currency="CNY").order_by("-rate_date").first()
         summary = response.context["summary_rows"][0]
         self.assertEqual(summary["cash"], Decimal("1000") * hkd_cny.rate / usd_cny.rate)
-        self.assertEqual(summary["market_value"], Decimal("7000") * hkd_cny.rate / usd_cny.rate)
+        self.assertEqual(
+            summary["market_value"].quantize(Decimal("0.0001")),
+            (Decimal("7000") * hkd_cny.rate / usd_cny.rate).quantize(Decimal("0.0001")),
+        )
         self.assertFalse(response.context["missing_exchange_rates"])
 
     def test_overview_member_selector_updates_all_content(self):
@@ -559,9 +564,68 @@ class PortfolioOverviewTests(TestCase):
 
         response = self.client.get(reverse("portfolio:overview"))
 
-        self.assertEqual(len(response.context["trend_snapshots"]), 2)
-        self.assertEqual(response.context["change_amount"], Decimal("2200"))
+        self.assertEqual(len(response.context["trend_snapshots"]), 1)
+        self.assertEqual(response.context["change_amount"], Decimal("0"))
         self.assertTrue(response.context["trend_points"])
+
+
+class PortfolioSnapshotCommandTests(TestCase):
+    def test_command_uses_cached_quote_and_is_idempotent(self):
+        family = Family.objects.create(name="Snapshot Family")
+        member = FamilyMember.objects.create(family=family, display_name="Member")
+        SiteSetting.objects.update_or_create(
+            pk=1,
+            defaults={"household_name": "Snapshot Family", "base_currency": "CNY"},
+        )
+        ExchangeRate.objects.create(
+            base_currency="HKD",
+            quote_currency="CNY",
+            rate=Decimal("0.9"),
+            rate_date=date.today(),
+        )
+        account = create_broker_investment_account(
+            family,
+            member,
+            "Snapshot Account",
+            currency="HKD",
+            cash_balance=Decimal("1000"),
+        )
+        security = Security.objects.create(
+            symbol="SNAP",
+            name="Snapshot ETF",
+            market="HK",
+            asset_type="etf",
+            currency="HKD",
+        )
+        SecurityMarketSnapshot.objects.create(
+            security=security,
+            last_price=Decimal("400"),
+        )
+        position = InvestmentPosition.objects.create(
+            account=account,
+            security=security,
+            quantity=Decimal("10"),
+            avg_cost=Decimal("300"),
+            current_price=Decimal("350"),
+            position_date=date.today(),
+        )
+
+        call_command("create_portfolio_snapshots")
+        call_command("create_portfolio_snapshots")
+
+        self.assertEqual(PortfolioSnapshot.objects.count(), 2)
+        family_snapshot = PortfolioSnapshot.objects.get(member=None)
+        self.assertEqual(family_snapshot.total_asset, Decimal("4500"))
+        self.assertEqual(family_snapshot.position_lines.count(), 2)
+        self.assertTrue(
+            PortfolioSnapshotPositionLine.objects.filter(
+                snapshot=family_snapshot,
+                asset_type="etf",
+                price=Decimal("400"),
+            ).exists()
+        )
+        position.refresh_from_db()
+        self.assertEqual(position.current_price, Decimal("400"))
 
 
 class PositionAccountingTests(TestCase):
@@ -636,6 +700,34 @@ class PositionAccountingTests(TestCase):
 
         with self.assertRaisesMessage(ValidationError, "超过当时持仓"):
             rebuild_position(self.account, self.security)
+
+    def test_transaction_numbers_are_unique_without_max_plus_one(self):
+        first = self.add_trade(date(2026, 1, 1), TradeTypeChoices.BUY, "1", "100")
+        second = self.add_trade(date(2026, 1, 1), TradeTypeChoices.BUY, "1", "100")
+
+        self.assertTrue(first.transaction_no.startswith("TXN-"))
+        self.assertNotEqual(first.transaction_no, second.transaction_no)
+
+    def test_dividend_and_tax_create_cash_and_realized_income(self):
+        self.add_trade(date(2026, 1, 1), TradeTypeChoices.BUY, "10", "100")
+        dividend = InvestmentTransaction.objects.create(
+            account=self.account,
+            security=self.security,
+            trade_date=date(2026, 1, 2),
+            trade_type=TradeTypeChoices.DIVIDEND,
+            amount=Decimal("100"),
+            fee=Decimal("2"),
+            tax=Decimal("5"),
+            currency="HKD",
+        )
+
+        position = rebuild_position(self.account, self.security)
+        dividend.refresh_from_db()
+
+        self.assertEqual(dividend.cash_change, Decimal("93"))
+        self.assertEqual(dividend.realized_pnl, Decimal("93"))
+        self.assertEqual(position.realized_pnl, Decimal("93"))
+        self.assertEqual(dividend.cash_movement.amount, Decimal("93"))
 
 
 class WatchlistPageTests(TestCase):

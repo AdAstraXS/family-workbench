@@ -47,6 +47,7 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
             member=self.member,
             account_name="IPO Account",
             remark="打新账户",
+            supports_ipo=True,
         )
         self.listing = HkIpoListing.objects.create(
             stock_code="09999.HK",
@@ -205,7 +206,7 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
         )
         sale = InvestmentTransaction.objects.get(
             trade_type=TradeTypeChoices.SELL,
-            extra_data__ipo_subscription_trade_id=trade.pk,
+            ipo_subscription_trade=trade,
         )
 
         response = self.client.post(
@@ -478,6 +479,7 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
             member=self.member,
             account_name="Second IPO Account",
             remark="打新账户",
+            supports_ipo=True,
         )
         HkIpoSubscriptionTrade.objects.create(
             listing=self.listing,

@@ -1,5 +1,8 @@
+import uuid
+
 from django.conf import settings
 from django.db import models
+from django.utils.text import slugify
 
 
 class TimestampedModel(models.Model):
@@ -142,12 +145,31 @@ class BaseLookup(TimestampedModel):
 
 
 class AccountType(BaseLookup):
+    code = models.SlugField("稳定代码", max_length=50, blank=True)
+
     class Meta(BaseLookup.Meta):
         verbose_name = "账户类型"
         verbose_name_plural = "账户类型"
         constraints = [
             models.UniqueConstraint(fields=["family", "name"], name="unique_account_type_per_family"),
+            models.UniqueConstraint(fields=["family", "code"], name="unique_account_type_code_per_family"),
         ]
+
+    def save(self, *args, **kwargs):
+        if not self.code:
+            known_codes = {
+                "银行": "bank",
+                "券商": "broker",
+                "支付宝": "alipay",
+                "微信": "wechat",
+                "养老金": "pension",
+            }
+            self.code = (
+                known_codes.get(self.name)
+                or slugify(self.name)
+                or f"account-type-{uuid.uuid4().hex[:12]}"
+            )
+        super().save(*args, **kwargs)
 
 
 class AssetCategory(BaseLookup):

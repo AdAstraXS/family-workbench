@@ -16,7 +16,8 @@ from family_core.models import (
     SiteSetting,
 )
 from ledger.models import BankAccount, ExpenseCategory, ExpenseRecord, IncomeCategory, IncomeRecord
-from portfolio.models import InvestmentAccount, InvestmentPosition, InvestmentTransaction, Security
+from portfolio.account_sync import sync_investment_account
+from portfolio.models import InvestmentCashMovement, InvestmentPosition, InvestmentTransaction, Security
 
 
 class Command(BaseCommand):
@@ -111,18 +112,27 @@ class Command(BaseCommand):
                 defaults={"display_order": order},
             )
 
-        investment_account, _ = InvestmentAccount.objects.get_or_create(
+        broker_account, _ = BankAccount.objects.get_or_create(
             family=family,
             member=member,
-            broker_name="示例券商",
             account_name="示例证券账户",
             defaults={
-                "market_scope": "综合",
-                "currency": "HKD",
-                "cash_balance": Decimal("50000.00"),
-                "visibility": "private",
+                "account_type_ref": account_types["券商"],
+                "account_region": account_regions["境外"],
+                "supports_investment": True,
                 "remark": "可在后台改成你的真实券商账户",
             },
+        )
+        if not broker_account.supports_investment:
+            broker_account.supports_investment = True
+            broker_account.save(update_fields=["supports_investment", "updated_at"])
+        investment_account = sync_investment_account(broker_account)
+        InvestmentCashMovement.objects.get_or_create(
+            account=investment_account,
+            movement_date=timezone.localdate(),
+            movement_type="deposit",
+            currency="HKD",
+            defaults={"amount": Decimal("50000.00"), "remark": "示例初始资金"},
         )
         security, _ = Security.objects.get_or_create(
             symbol="00700",

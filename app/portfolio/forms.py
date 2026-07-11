@@ -35,17 +35,7 @@ class BaseModelForm(forms.ModelForm):
 class InvestmentAccountForm(BaseModelForm):
     class Meta:
         model = InvestmentAccount
-        fields = [
-            "bank_account",
-            "family",
-            "member",
-            "account_name",
-            "account_no_masked",
-            "account_region",
-            "visibility",
-            "is_active",
-            "remark",
-        ]
+        fields = ["bank_account", "extra_data"]
 
 
 class SecurityForm(BaseModelForm):
@@ -160,8 +150,7 @@ class InvestmentTransactionForm(BaseModelForm):
                 for item in Currency.objects.filter(is_active=True)
             ]
         )
-        self.fields["amount"].disabled = True
-        self.fields["amount"].help_text = "根据数量 × 价格自动计算"
+        self.fields["amount"].help_text = "买入/卖出按数量 × 价格自动计算；股息、利息和费用请直接填写金额。"
 
         login_member = (
             FamilyMember.objects.filter(user=user, is_active=True)
@@ -206,7 +195,7 @@ class InvestmentTransactionForm(BaseModelForm):
             family_id=family_id,
             member_id=member_id,
             is_active=True,
-            account_type_ref__name="券商",
+            supports_investment=True,
         ).order_by("account_name", "pk")
         if self.instance.pk and bank_account_id:
             account_queryset = BankAccount.objects.filter(
@@ -224,7 +213,7 @@ class InvestmentTransactionForm(BaseModelForm):
         ).values_list("security_id", flat=True)
         security_queryset = Security.objects.filter(
             Q(pk__in=watched_ids)
-            | Q(positions__account__family_id=family_id)
+            | Q(positions__account__bank_account__family_id=family_id)
         ).distinct().order_by("market", "symbol")
         if self.instance.pk and self.instance.security_id:
             security_queryset = Security.objects.filter(
@@ -353,11 +342,15 @@ class InvestmentCashMovementForm(BaseModelForm):
             in {
                 CashMovementTypeChoices.DEPOSIT,
                 CashMovementTypeChoices.WITHDRAWAL,
+                CashMovementTypeChoices.EXCHANGE,
+                CashMovementTypeChoices.TRANSFER,
+                CashMovementTypeChoices.ADJUSTMENT,
             }
         ]
         self.fields["movement_type"].label = "操作类型"
         self.fields["amount"].label = "金额"
         self.fields["movement_date"].label = "日期"
+        self.fields["amount"].help_text = "入金填正数、出金自动记为负数；换汇需按卖出和买入币种分别录入两条流水。"
         self.fields["currency"].widget = forms.Select(
             choices=[(item.code, str(item)) for item in Currency.objects.filter(is_active=True)]
         )
@@ -378,7 +371,7 @@ class InvestmentCashMovementForm(BaseModelForm):
             self.fields["counterparty_account"].queryset = (
                 BankAccount.objects.filter(
                     family=bank_account.family,
-                    account_type_ref__name="银行",
+                    account_type_ref__code="bank",
                     account_region__name="境外",
                     is_active=True,
                 )

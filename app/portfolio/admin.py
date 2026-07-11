@@ -8,6 +8,7 @@ from .models import (
     InvestmentTransaction,
     InvestmentOption,
     PortfolioSnapshot,
+    PortfolioSnapshotPositionLine,
     Security,
     SecurityMarketSnapshot,
     SecurityNews,
@@ -24,16 +25,9 @@ class InvestmentAccountAdmin(admin.ModelAdmin):
         "account_region",
         "is_active",
     )
-    list_filter = ("family", "member", "account_region", "is_active")
-    search_fields = ("account_name", "account_no_masked", "remark")
-    readonly_fields = (
-        "bank_account",
-        "family",
-        "member",
-        "account_name",
-        "account_no_masked",
-        "account_region",
-    )
+    list_filter = ("bank_account__family", "bank_account__member", "bank_account__account_region", "bank_account__is_active")
+    search_fields = ("bank_account__account_name", "bank_account__account_no_masked", "bank_account__remark")
+    readonly_fields = ("bank_account",)
 
     def has_add_permission(self, request):
         return False
@@ -62,15 +56,24 @@ class SecurityMarketSnapshotAdmin(admin.ModelAdmin):
 @admin.register(InvestmentPosition)
 class InvestmentPositionAdmin(admin.ModelAdmin):
     list_display = ("account", "security", "quantity", "avg_cost", "diluted_cost", "current_price", "market_value", "position_date")
-    list_filter = ("account__family", "account__member", "security__market", "position_date")
-    search_fields = ("account__account_name", "security__symbol", "security__name", "remark")
+    list_filter = ("account__bank_account__family", "account__bank_account__member", "security__market", "position_date")
+    search_fields = ("account__bank_account__account_name", "security__symbol", "security__name", "remark")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(InvestmentTransaction)
 class InvestmentTransactionAdmin(admin.ModelAdmin):
     list_display = ("transaction_no", "trade_date", "account", "security", "trade_type_option", "quantity", "price", "amount", "realized_pnl", "currency")
-    list_filter = ("account__family", "account__member", "trade_type_option", "currency", "trade_date")
-    search_fields = ("transaction_no", "account__account_name", "security__symbol", "security__name", "remark")
+    list_filter = ("account__bank_account__family", "account__bank_account__member", "trade_type_option", "currency", "trade_date")
+    search_fields = ("transaction_no", "account__bank_account__account_name", "security__symbol", "security__name", "remark")
 
 
 @admin.register(InvestmentOption)
@@ -90,14 +93,21 @@ class DailyExchangeRateFetchAdmin(admin.ModelAdmin):
 @admin.register(InvestmentCashMovement)
 class InvestmentCashMovementAdmin(admin.ModelAdmin):
     list_display = ("movement_date", "account", "movement_type", "currency", "amount", "counterparty_account", "transaction", "source")
-    list_filter = ("account__family", "account__member", "movement_type", "currency", "source", "movement_date")
-    search_fields = ("account__account_name", "counterparty_account__account_name", "transaction__security__symbol", "external_id", "remark")
+    list_filter = ("account__bank_account__family", "account__bank_account__member", "movement_type", "currency", "source", "movement_date")
+    search_fields = ("account__bank_account__account_name", "counterparty_account__account_name", "transaction__security__symbol", "external_id", "remark")
 
 
 @admin.register(PortfolioSnapshot)
 class PortfolioSnapshotAdmin(admin.ModelAdmin):
     list_display = ("snapshot_date", "family", "member", "account", "total_asset", "total_pnl", "currency")
     list_filter = ("family", "member", "currency", "snapshot_date")
+
+
+@admin.register(PortfolioSnapshotPositionLine)
+class PortfolioSnapshotPositionLineAdmin(admin.ModelAdmin):
+    list_display = ("snapshot", "account", "asset_type", "asset_name", "quantity", "price", "market_value")
+    list_filter = ("asset_type", "currency", "snapshot__snapshot_date")
+    search_fields = ("asset_name", "security__symbol", "account__bank_account__account_name")
 
 
 @admin.register(SecurityNews)

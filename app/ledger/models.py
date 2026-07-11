@@ -14,6 +14,8 @@ class BankAccount(TimestampedModel):
     account_no_masked = models.CharField("脱敏账号", max_length=100, blank=True)
     account_type_ref = models.ForeignKey(AccountType, verbose_name="账户类型", on_delete=models.SET_NULL, null=True, blank=True, related_name="accounts")
     account_region = models.ForeignKey(AccountRegion, verbose_name="账户地区", on_delete=models.SET_NULL, null=True, blank=True, related_name="accounts")
+    supports_investment = models.BooleanField("用于投资", default=False)
+    supports_ipo = models.BooleanField("用于港股打新", default=False)
     is_active = models.BooleanField("是否有效", default=True)
     remark = models.TextField("备注", blank=True)
     extra_data = models.JSONField("扩展字段", default=dict, blank=True)
@@ -28,6 +30,11 @@ class BankAccount(TimestampedModel):
 
     def __str__(self):
         return f"{self.member} - {self.account_name}"
+
+    def save(self, *args, **kwargs):
+        if self.supports_ipo:
+            self.supports_investment = True
+        super().save(*args, **kwargs)
 
 
 class IncomeCategory(models.Model):

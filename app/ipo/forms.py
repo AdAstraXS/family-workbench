@@ -172,7 +172,7 @@ class HkIpoSubscriptionTradeForm(forms.ModelForm):
             ).strip()
 
         self.fields["member"].queryset = FamilyMember.objects.filter(is_active=True).order_by("display_name")
-        account_queryset = BankAccount.objects.filter(remark__icontains="打新账户", is_active=True).select_related("member").order_by("member__display_name", "account_name")
+        account_queryset = BankAccount.objects.filter(supports_ipo=True, is_active=True).select_related("member").order_by("member__display_name", "account_name")
         member_id = self.data.get("member") if self.is_bound else self.initial.get("member") or self.instance.member_id
         if member_id:
             account_queryset = account_queryset.filter(member_id=member_id)

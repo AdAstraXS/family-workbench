@@ -29,6 +29,7 @@ from .models import AnnualBudget, AnnualBudgetLine, AssetBalanceSnapshot, BankAc
 from family_core.audit import stamp_actor
 from family_core.household import get_household_family
 from family_core.models import Family, FamilyMember
+from portfolio.account_sync import sync_investment_account
 
 
 def save_form(request, form_class, template_name, success_url_name, title, instance=None):
@@ -40,6 +41,7 @@ def save_form(request, form_class, template_name, success_url_name, title, insta
             obj.save()
             form.save_m2m()
             if isinstance(obj, BankAccount):
+                sync_investment_account(obj)
                 request.session["last_account_member_id"] = obj.member_id
             elif isinstance(obj, IncomeRecord):
                 request.session["last_income_member_id"] = obj.member_id

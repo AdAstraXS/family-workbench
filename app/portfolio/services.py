@@ -70,8 +70,21 @@ def calculate_transactions(transactions):
             updates.append(
                 (item, amount - fee_and_tax, sell_cost, realized_pnl, realized_return)
             )
+        elif item.trade_type in {
+            TradeTypeChoices.DIVIDEND,
+            TradeTypeChoices.INTEREST,
+        }:
+            cash_change = amount - fee_and_tax
+            result.realized_pnl += cash_change
+            updates.append((item, cash_change, ZERO, cash_change, ZERO))
+        elif item.trade_type == TradeTypeChoices.OTHER_FEE_ADJUSTMENT:
+            cash_change = -(abs(amount) + fee_and_tax)
+            result.realized_pnl += cash_change
+            updates.append((item, cash_change, ZERO, cash_change, ZERO))
         else:
-            updates.append((item, ZERO, ZERO, ZERO, ZERO))
+            cash_change = amount - fee_and_tax
+            result.realized_pnl += cash_change
+            updates.append((item, cash_change, ZERO, cash_change, ZERO))
 
     return result, updates
 
@@ -92,23 +105,22 @@ def rebuild_position(account, security):
             realized_pnl=realized_pnl,
             realized_return_ratio=realized_return,
         )
-        if (
-            item.trade_type
-            in {TradeTypeChoices.BUY, TradeTypeChoices.IPO, TradeTypeChoices.SELL}
-            and item.status
-            in {TradeStatusChoices.PARTIAL, TradeStatusChoices.COMPLETED}
-        ):
+        if item.status in {TradeStatusChoices.PARTIAL, TradeStatusChoices.COMPLETED}:
+            movement_types = {
+                TradeTypeChoices.BUY: CashMovementTypeChoices.BUY,
+                TradeTypeChoices.IPO: CashMovementTypeChoices.BUY,
+                TradeTypeChoices.SELL: CashMovementTypeChoices.SELL,
+                TradeTypeChoices.DIVIDEND: CashMovementTypeChoices.DIVIDEND,
+                TradeTypeChoices.INTEREST: CashMovementTypeChoices.INTEREST,
+                TradeTypeChoices.OTHER_FEE_ADJUSTMENT: CashMovementTypeChoices.FEE,
+                TradeTypeChoices.OTHER: CashMovementTypeChoices.ADJUSTMENT,
+            }
             InvestmentCashMovement.objects.update_or_create(
                 transaction=item,
                 defaults={
                     "account": item.account,
                     "movement_date": item.trade_date,
-                    "movement_type": (
-                        CashMovementTypeChoices.BUY
-                        if item.trade_type
-                        in {TradeTypeChoices.BUY, TradeTypeChoices.IPO}
-                        else CashMovementTypeChoices.SELL
-                    ),
+                    "movement_type": movement_types[item.trade_type],
                     "currency": item.currency,
                     "amount": cash_change,
                     "source": item.source,
@@ -118,11 +130,10 @@ def rebuild_position(account, security):
         else:
             InvestmentCashMovement.objects.filter(transaction=item).delete()
 
-    position = (
-        InvestmentPosition.objects.filter(account=account, security=security)
-        .order_by("-position_date", "-updated_at", "-pk")
-        .first()
-    )
+    position = InvestmentPosition.objects.filter(
+        account=account,
+        security=security,
+    ).first()
     latest_trade = transactions[-1] if transactions else None
     if not position and not latest_trade:
         return None
@@ -147,3 +158,39 @@ def rebuild_position(account, security):
     position.position_date = latest_trade.trade_date if latest_trade else position.position_date
     position.save()
     return position
+
+
+@transaction.atomic
+def rebuild_cash_only_transaction(item):
+    if item.security_id:
+        return rebuild_position(item.account, item.security)
+    _, updates = calculate_transactions([item])
+    _, cash_change, sell_cost, realized_pnl, realized_return = updates[0]
+    InvestmentTransaction.objects.filter(pk=item.pk).update(
+        cash_change=cash_change,
+        sell_cost=sell_cost,
+        realized_pnl=realized_pnl,
+        realized_return_ratio=realized_return,
+    )
+    movement_types = {
+        TradeTypeChoices.DIVIDEND: CashMovementTypeChoices.DIVIDEND,
+        TradeTypeChoices.INTEREST: CashMovementTypeChoices.INTEREST,
+        TradeTypeChoices.OTHER_FEE_ADJUSTMENT: CashMovementTypeChoices.FEE,
+        TradeTypeChoices.OTHER: CashMovementTypeChoices.ADJUSTMENT,
+    }
+    if item.status in {TradeStatusChoices.PARTIAL, TradeStatusChoices.COMPLETED}:
+        InvestmentCashMovement.objects.update_or_create(
+            transaction=item,
+            defaults={
+                "account": item.account,
+                "movement_date": item.trade_date,
+                "movement_type": movement_types[item.trade_type],
+                "currency": item.currency,
+                "amount": cash_change,
+                "source": item.source,
+                "external_id": item.external_id,
+            },
+        )
+    else:
+        InvestmentCashMovement.objects.filter(transaction=item).delete()
+    return item
