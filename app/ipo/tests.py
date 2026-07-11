@@ -155,6 +155,28 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
         self.assertEqual(trade.get_trade_status_display(), "未中签")
         self.assertEqual(trade.sell_date, self.listing.allotment_result_date)
 
+    def test_unallotted_closed_row_shows_all_upfront_fees_as_loss(self):
+        user = get_user_model().objects.create_user(username="ipo-unallotted-fee-tester")
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        trade = self.make_trade(allotted_lots=0, financing_interest=Decimal("5"))
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("ipo:subscription_trade_list"),
+            {"year": "2026"},
+        )
+
+        row = next(
+            item
+            for item in response.context["closed_visible"] + response.context["closed_hidden"]
+            if item.ipo_trade.pk == trade.pk
+        )
+        self.assertEqual(row.display_total_fee, Decimal("105"))
+        self.assertEqual(row.display_net_pnl, Decimal("-105"))
+        self.assertEqual(trade.realized_profit, Decimal("-105"))
+        self.assertFalse(trade.investment_transactions.exists())
+
     def test_subscription_page_uses_status_specific_amount_columns(self):
         user = get_user_model().objects.create_user(
             username="ipo-tester",

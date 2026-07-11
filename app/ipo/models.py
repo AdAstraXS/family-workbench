@@ -613,13 +613,16 @@ class HkIpoSubscriptionTrade(models.Model):
                     else self.STATUS_HOLDING
                 )
 
-        self.realized_profit = (
-            ((self.sell_price or Decimal("0")) - final_price)
-            * Decimal(sold_lots)
-            * Decimal(lot_size)
-            - self.upfront_fees_for_lots(sold_lots)
-            - (self.trading_fee or Decimal("0"))
-        )
+        if allotted_lots == 0:
+            self.realized_profit = -self.upfront_fees
+        else:
+            self.realized_profit = (
+                ((self.sell_price or Decimal("0")) - final_price)
+                * Decimal(sold_lots)
+                * Decimal(lot_size)
+                - self.upfront_fees_for_lots(sold_lots)
+                - (self.trading_fee or Decimal("0"))
+            )
 
     def save(self, *args, **kwargs):
         old_sell_date = self.sell_date

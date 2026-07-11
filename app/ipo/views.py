@@ -803,6 +803,10 @@ def subscription_trade_list(request):
                 else "closed"
             )
         )
+        if is_unallotted:
+            trade.display_upfront_fee = trade.upfront_fees
+            trade.display_total_fee = trade.upfront_fees
+            trade.display_net_pnl = -trade.upfront_fees
         closed_rows.append(trade)
     closed_rows.sort(
         key=lambda row: (
