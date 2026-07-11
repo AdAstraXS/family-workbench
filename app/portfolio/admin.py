@@ -7,6 +7,7 @@ from .models import (
     InvestmentPosition,
     InvestmentTransaction,
     InvestmentOption,
+    OptionContract,
     PortfolioSnapshot,
     PortfolioSnapshotPositionLine,
     Security,
@@ -14,6 +15,7 @@ from .models import (
     SecurityNews,
     WatchlistItem,
 )
+from .services import rebuild_cash_only_transaction, rebuild_position
 
 
 @admin.register(InvestmentAccount)
@@ -38,6 +40,13 @@ class SecurityAdmin(admin.ModelAdmin):
     list_display = ("symbol", "name", "market", "exchange", "asset_type", "currency", "lot_size", "data_source", "is_active")
     list_filter = ("market", "exchange", "asset_type", "currency", "data_source", "is_active")
     search_fields = ("symbol", "name", "industry")
+
+
+@admin.register(OptionContract)
+class OptionContractAdmin(admin.ModelAdmin):
+    list_display = ("security", "underlying", "option_type", "strike_price", "expiration_date", "multiplier")
+    list_filter = ("option_type", "expiration_date")
+    search_fields = ("security__symbol", "underlying__symbol", "underlying__name")
 
 
 @admin.register(WatchlistItem)
@@ -74,6 +83,48 @@ class InvestmentTransactionAdmin(admin.ModelAdmin):
     list_display = ("transaction_no", "trade_date", "account", "security", "trade_type_option", "quantity", "price", "amount", "realized_pnl", "currency")
     list_filter = ("account__bank_account__family", "account__bank_account__member", "trade_type_option", "currency", "trade_date")
     search_fields = ("transaction_no", "account__bank_account__account_name", "security__symbol", "security__name", "remark")
+
+    @staticmethod
+    def _rebuild(account_id, security_id):
+        item = InvestmentTransaction.objects.filter(
+            account_id=account_id,
+            security_id=security_id,
+        ).select_related("account", "security").first()
+        if item:
+            rebuild_position(item.account, item.security)
+            return
+        from .models import InvestmentAccount, Security
+
+        rebuild_position(
+            InvestmentAccount.objects.get(pk=account_id),
+            Security.objects.get(pk=security_id),
+        )
+
+    def save_model(self, request, obj, form, change):
+        old_pair = None
+        if change:
+            old = InvestmentTransaction.objects.filter(pk=obj.pk).first()
+            if old and old.security_id:
+                old_pair = (old.account_id, old.security_id)
+        super().save_model(request, obj, form, change)
+        if obj.security_id:
+            self._rebuild(obj.account_id, obj.security_id)
+        else:
+            rebuild_cash_only_transaction(obj)
+        if old_pair and old_pair != (obj.account_id, obj.security_id):
+            self._rebuild(*old_pair)
+
+    def delete_model(self, request, obj):
+        pair = (obj.account_id, obj.security_id) if obj.security_id else None
+        super().delete_model(request, obj)
+        if pair:
+            self._rebuild(*pair)
+
+    def delete_queryset(self, request, queryset):
+        pairs = set(queryset.exclude(security=None).values_list("account_id", "security_id"))
+        super().delete_queryset(request, queryset)
+        for pair in pairs:
+            self._rebuild(*pair)
 
 
 @admin.register(InvestmentOption)

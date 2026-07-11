@@ -25,6 +25,7 @@ urlpatterns = [
     path("securities/", views.security_list, name="security_list"),
     path("securities/watchlist/add/", views.watchlist_add, name="watchlist_add"),
     path("securities/create/", views.security_create, name="security_create"),
+    path("securities/options/create/", views.option_contract_create, name="option_contract_create"),
     path("securities/<int:pk>/edit/", views.security_edit, name="security_edit"),
     path("positions/", views.position_list, name="position_list"),
     path("positions/create/", views.position_create, name="position_create"),
@@ -37,4 +38,5 @@ urlpatterns = [
     ),
     path("transactions/create/", views.transaction_create, name="transaction_create"),
     path("transactions/<int:pk>/edit/", views.transaction_edit, name="transaction_edit"),
+    path("transactions/<int:pk>/delete/", views.transaction_delete, name="transaction_delete"),
 ]

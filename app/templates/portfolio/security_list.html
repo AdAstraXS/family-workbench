@@ -15,7 +15,10 @@
       <h2>查询股票</h2>
       <p>支持港股、美股和 A 股的代码或名称。</p>
     </div>
-    <a class="button ghost" href="{% url 'portfolio:security_create' %}">手工添加</a>
+    <div class="row-actions">
+      <a class="button ghost" href="{% url 'portfolio:security_create' %}">手工添加</a>
+      <a class="button ghost" href="{% url 'portfolio:option_contract_create' %}">新增期权合约</a>
+    </div>
   </div>
   <form method="get">
     <label>市场

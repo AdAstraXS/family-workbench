@@ -1,0 +1,17 @@
+{% extends "form.html" %}
+
+{% block scripts %}
+<script>
+  (() => {
+    const type = document.getElementById("id_asset_type");
+    const toggle = () => {
+      const exchangeListed = ["stock", "etf"].includes(type.value);
+      ["id_lot_size", "id_listing_date", "id_is_delisted"].forEach((id) => {
+        document.getElementById(id)?.closest(".form-row").toggleAttribute("hidden", !exchangeListed);
+      });
+    };
+    type.addEventListener("change", toggle);
+    toggle();
+  })();
+</script>
+{% endblock %}

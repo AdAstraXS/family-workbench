@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
@@ -155,6 +156,20 @@ class InvestmentAccount(TimestampedModel):
 
 
 class Security(TimestampedModel):
+    TYPE_STOCK = "stock"
+    TYPE_ETF = "etf"
+    TYPE_BOND = "bond"
+    TYPE_OPTION = "option"
+    TYPE_FUND = "fund"
+    TYPE_OTHER = "other"
+    ASSET_TYPE_CHOICES = [
+        (TYPE_STOCK, "股票"),
+        (TYPE_ETF, "ETF"),
+        (TYPE_BOND, "债券"),
+        (TYPE_OPTION, "期权"),
+        (TYPE_FUND, "基金"),
+        (TYPE_OTHER, "其他"),
+    ]
     asset_category = models.ForeignKey(
         AssetCategory,
         verbose_name="一级资产类别",
@@ -167,7 +182,7 @@ class Security(TimestampedModel):
     name = models.CharField("名称", max_length=200)
     market = models.CharField("市场", max_length=20)
     exchange = models.CharField("交易所", max_length=30, blank=True)
-    asset_type = models.CharField("资产类型", max_length=30, default="stock")
+    asset_type = models.CharField("金融品种", max_length=30, choices=ASSET_TYPE_CHOICES, default=TYPE_STOCK)
     currency = models.CharField("交易币种", max_length=10, default="CNY")
     industry = models.CharField("行业", max_length=100, blank=True)
     lot_size = models.PositiveIntegerField("每手股数", default=0)
@@ -198,6 +213,47 @@ class Security(TimestampedModel):
         suffix = self.exchange or self.market
         prefix = "/hk" if self.market == "HK" else ""
         return f"https://www.futunn.com{prefix}/stock/{self.symbol}-{suffix}"
+
+    @property
+    def contract_multiplier(self):
+        option = getattr(self, "option_contract", None)
+        return option.multiplier if option else Decimal("1")
+
+
+class OptionContract(TimestampedModel):
+    CALL = "call"
+    PUT = "put"
+    OPTION_TYPE_CHOICES = [(CALL, "看涨"), (PUT, "看跌")]
+
+    security = models.OneToOneField(
+        Security,
+        verbose_name="期权合约标的",
+        on_delete=models.CASCADE,
+        related_name="option_contract",
+    )
+    underlying = models.ForeignKey(
+        Security,
+        verbose_name="正股标的",
+        on_delete=models.PROTECT,
+        related_name="option_contracts",
+    )
+    option_type = models.CharField("期权类型", max_length=10, choices=OPTION_TYPE_CHOICES)
+    strike_price = models.DecimalField("行权价", max_digits=20, decimal_places=6)
+    expiration_date = models.DateField("到期日")
+    multiplier = models.PositiveIntegerField("合约乘数", default=100)
+
+    class Meta:
+        verbose_name = "期权合约"
+        verbose_name_plural = "期权合约"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["underlying", "option_type", "strike_price", "expiration_date"],
+                name="unique_option_contract_terms",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.underlying.symbol} {self.expiration_date} {self.get_option_type_display()} {self.strike_price}"
 
 
 class WatchlistItem(TimestampedModel):
@@ -308,6 +364,9 @@ class InvestmentPosition(TimestampedModel):
 
 
 class InvestmentTransaction(TimestampedModel):
+    EFFECT_OPEN = "open"
+    EFFECT_CLOSE = "close"
+    POSITION_EFFECT_CHOICES = [(EFFECT_OPEN, "开仓"), (EFFECT_CLOSE, "平仓")]
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     account = models.ForeignKey(InvestmentAccount, verbose_name="投资账户", on_delete=models.CASCADE, related_name="transactions")
@@ -331,6 +390,7 @@ class InvestmentTransaction(TimestampedModel):
         blank=True,
         limit_choices_to={"category": InvestmentOption.CATEGORY_TRANSACTION_TYPE},
     )
+    position_effect = models.CharField("开平仓", max_length=10, choices=POSITION_EFFECT_CHOICES, blank=True)
     transaction_no = models.CharField(
         "交易编号",
         max_length=40,

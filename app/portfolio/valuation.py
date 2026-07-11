@@ -48,7 +48,7 @@ def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=Fal
     accounts = list(accounts)
     positions = list(
         InvestmentPosition.objects.filter(account__in=accounts)
-        .select_related("account__bank_account", "security", "security__market_snapshot")
+        .select_related("account__bank_account", "security", "security__market_snapshot", "security__option_contract")
         .order_by("account_id", "security__symbol")
     )
     missing_rates = False
@@ -84,8 +84,9 @@ def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=Fal
         rate = exchange_rate(position.security.currency, target_currency, on_date)
         position.valuation_price = price
         position.valuation_fx_rate = rate
-        position.valuation_market_value_original = position.quantity * price
-        position.valuation_cost_original = position.quantity * position.avg_cost
+        multiplier = position.security.contract_multiplier
+        position.valuation_market_value_original = position.quantity * price * multiplier
+        position.valuation_cost_original = position.quantity * position.avg_cost * multiplier
         if rate is None:
             position.valuation_market_value = None
             position.valuation_cost = None

@@ -12,6 +12,7 @@
     const quantity = document.getElementById("id_quantity");
     const price = document.getElementById("id_price");
     const amount = document.getElementById("id_amount");
+    const positionEffect = document.getElementById("id_position_effect");
     const strategy = document.getElementById("id_strategy_option");
     const strategyOther = document.getElementById("id_strategy_other");
 
@@ -35,12 +36,20 @@
       data.securities.forEach((row) => {
         const option = [...security.options].find((item) => item.value === String(row.id));
         if (option) option.dataset.currency = row.currency;
+        if (option) option.dataset.assetType = row.asset_type;
+        if (option) option.dataset.multiplier = row.multiplier;
       });
     };
 
     const updateAmount = () => {
-      const value = Number(quantity.value || 0) * Number(price.value || 0);
+      const selected = security.options[security.selectedIndex];
+      const multiplier = Number(selected?.dataset.multiplier || 1);
+      const value = Number(quantity.value || 0) * Number(price.value || 0) * multiplier;
       amount.value = value ? value.toFixed(4) : "0";
+    };
+    const updatePositionEffect = () => {
+      const selected = security.options[security.selectedIndex];
+      positionEffect.closest(".form-row").hidden = selected?.dataset.assetType !== "option";
     };
     const updateStrategyOther = () => {
       const selected = strategy.options[strategy.selectedIndex];
@@ -51,12 +60,18 @@
     member.addEventListener("change", () => refresh(false));
     security.addEventListener("change", () => {
       if (!currency.value) currency.value = security.options[security.selectedIndex]?.dataset.currency || "";
+      updatePositionEffect();
+      updateAmount();
     });
     quantity.addEventListener("input", updateAmount);
     price.addEventListener("input", updateAmount);
     strategy.addEventListener("change", updateStrategyOther);
     updateAmount();
     updateStrategyOther();
+    refresh(false).then(() => {
+      updatePositionEffect();
+      updateAmount();
+    });
   })();
 </script>
 {% endblock %}

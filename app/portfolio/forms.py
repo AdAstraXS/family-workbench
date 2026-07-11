@@ -12,6 +12,7 @@ from .models import (
     InvestmentPosition,
     InvestmentTransaction,
     InvestmentOption,
+    OptionContract,
     Security,
     TradeTypeChoices,
     WatchlistItem,
@@ -58,6 +59,96 @@ class SecurityForm(BaseModelForm):
             "is_active",
         ]
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["currency"].widget = forms.Select(
+            choices=[(item.code, str(item)) for item in Currency.objects.filter(is_active=True)]
+        )
+
+    def clean_asset_type(self):
+        asset_type = self.cleaned_data["asset_type"]
+        if asset_type == Security.TYPE_OPTION:
+            raise forms.ValidationError("期权请使用“新增期权合约”页面录入，避免与正股合并。")
+        return asset_type
+
+
+class OptionContractForm(forms.Form):
+    underlying = forms.ModelChoiceField(label="正股标的", queryset=Security.objects.none())
+    contract_symbol = forms.CharField(label="完整合约代码", max_length=30)
+    option_type = forms.ChoiceField(label="期权类型", choices=OptionContract.OPTION_TYPE_CHOICES)
+    strike_price = forms.DecimalField(label="行权价", max_digits=20, decimal_places=6)
+    expiration_date = forms.DateField(
+        label="到期日",
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+    )
+    multiplier = forms.IntegerField(label="合约乘数", min_value=1, initial=100)
+    market = forms.CharField(label="市场", max_length=20, initial="US")
+    currency = forms.ChoiceField(label="交易币种")
+    asset_category = forms.ModelChoiceField(
+        label="一级资产类别", queryset=AssetCategory.objects.none(), required=False
+    )
+
+    def __init__(self, *args, family=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.family = family
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+        self.fields["underlying"].queryset = Security.objects.exclude(
+            asset_type=Security.TYPE_OPTION
+        ).order_by("market", "symbol")
+        self.fields["currency"].choices = [
+            (item.code, str(item)) for item in Currency.objects.filter(is_active=True)
+        ]
+        self.fields["asset_category"].queryset = AssetCategory.objects.filter(
+            Q(family=family) | Q(family=None), is_active=True
+        ).order_by("display_order", "name")
+
+    def clean_contract_symbol(self):
+        symbol = self.cleaned_data["contract_symbol"].strip().upper()
+        market = (self.data.get("market") or "US").strip().upper()
+        if Security.objects.filter(symbol=symbol, market=market).exists():
+            raise forms.ValidationError("该市场已存在相同代码；期权必须使用完整且唯一的合约代码。")
+        return symbol
+
+    def clean(self):
+        cleaned = super().clean()
+        underlying = cleaned.get("underlying")
+        currency = cleaned.get("currency")
+        if underlying and currency and underlying.currency != currency:
+            self.add_error("currency", "期权币种应与正股标的一致。")
+        return cleaned
+
+    def save(self, member):
+        underlying = self.cleaned_data["underlying"]
+        security = Security.objects.create(
+            asset_category=self.cleaned_data.get("asset_category") or underlying.asset_category,
+            symbol=self.cleaned_data["contract_symbol"],
+            name=(
+                f"{underlying.name} {self.cleaned_data['expiration_date']} "
+                f"{dict(OptionContract.OPTION_TYPE_CHOICES)[self.cleaned_data['option_type']]} "
+                f"{self.cleaned_data['strike_price']}"
+            ),
+            market=self.cleaned_data["market"].strip().upper(),
+            exchange=underlying.exchange,
+            asset_type=Security.TYPE_OPTION,
+            currency=self.cleaned_data["currency"],
+            data_source="manual",
+        )
+        OptionContract.objects.create(
+            security=security,
+            underlying=underlying,
+            option_type=self.cleaned_data["option_type"],
+            strike_price=self.cleaned_data["strike_price"],
+            expiration_date=self.cleaned_data["expiration_date"],
+            multiplier=self.cleaned_data["multiplier"],
+        )
+        WatchlistItem.objects.update_or_create(
+            family=member.family,
+            security=security,
+            defaults={"member": member, "is_active": True},
+        )
+        return security
+
 
 class InvestmentPositionForm(BaseModelForm):
     date_fields = ("position_date",)
@@ -96,6 +187,7 @@ class InvestmentTransactionForm(BaseModelForm):
             "security",
             "trade_date",
             "trade_type_option",
+            "position_effect",
             "currency",
             "quantity",
             "price",
@@ -122,6 +214,7 @@ class InvestmentTransactionForm(BaseModelForm):
                 "security",
                 "trade_date",
                 "trade_type_option",
+                "position_effect",
                 "currency",
                 "quantity",
                 "price",
@@ -139,6 +232,8 @@ class InvestmentTransactionForm(BaseModelForm):
         )
         self.fields["security"].label = "交易标的"
         self.fields["trade_type_option"].label = "交易类型"
+        self.fields["position_effect"].label = "开平仓（期权）"
+        self.fields["position_effect"].required = False
         self.fields["information_source_option"].label = "信息来源"
         self.fields["strategy_option"].label = "交易类型（策略）"
         self.fields["emotion_option"].label = "交易情绪"
@@ -259,8 +354,14 @@ class InvestmentTransactionForm(BaseModelForm):
             cleaned_data["currency"] = security.currency
         if security and not cleaned_data.get("asset_category"):
             cleaned_data["asset_category"] = security.asset_category
+        if security and security.asset_type == Security.TYPE_OPTION:
+            if not cleaned_data.get("position_effect"):
+                self.add_error("position_effect", "期权交易必须选择开仓或平仓。")
+        else:
+            cleaned_data["position_effect"] = ""
         if cleaned_data.get("quantity") and cleaned_data.get("price"):
-            cleaned_data["amount"] = cleaned_data["quantity"] * cleaned_data["price"]
+            multiplier = security.contract_multiplier if security else 1
+            cleaned_data["amount"] = cleaned_data["quantity"] * cleaned_data["price"] * multiplier
         strategy = cleaned_data.get("strategy_option")
         if strategy and strategy.code == "other" and not cleaned_data.get("strategy_other"):
             self.add_error("strategy_other", "选择“其他”时请填写具体交易策略。")

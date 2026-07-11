@@ -1,4 +1,5 @@
 import json
+from io import StringIO
 from datetime import date
 from decimal import Decimal
 
@@ -31,6 +32,7 @@ from .models import (
     InvestmentOption,
     InvestmentPosition,
     InvestmentTransaction,
+    OptionContract,
     PortfolioSnapshot,
     PortfolioSnapshotPositionLine,
     Security,
@@ -250,6 +252,46 @@ class TransactionFormTests(TestCase):
         self.assertEqual(transaction.account.bank_account, bank_account)
         self.assertEqual(transaction.currency, "HKD")
 
+    def test_option_contract_form_keeps_option_distinct_from_underlying(self):
+        user = get_user_model().objects.create_user(username="option-form-tester")
+        family = Family.objects.create(name="期权家庭")
+        member = FamilyMember.objects.create(family=family, user=user, display_name="成员")
+        Currency.objects.update_or_create(
+            code="USD", defaults={"name": "美元", "symbol": "$", "is_active": True}
+        )
+        underlying = Security.objects.create(
+            symbol="MSFT",
+            name="微软",
+            market="US",
+            asset_type=Security.TYPE_STOCK,
+            currency="USD",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("portfolio:option_contract_create"),
+            {
+                "underlying": underlying.pk,
+                "contract_symbol": "MSFT260717P00300000",
+                "option_type": OptionContract.PUT,
+                "strike_price": "300",
+                "expiration_date": "2026-07-17",
+                "multiplier": "100",
+                "market": "US",
+                "currency": "USD",
+                "asset_category": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Security.objects.filter(symbol="MSFT", market="US").count(), 1)
+        contract = OptionContract.objects.get()
+        self.assertEqual(contract.security.symbol, "MSFT260717P00300000")
+        self.assertEqual(contract.underlying, underlying)
+        self.assertTrue(
+            WatchlistItem.objects.filter(family=family, security=contract.security).exists()
+        )
+
 
 class AccountPrototypeTests(TestCase):
     def test_prototype_and_detail_pages_are_reviewable(self):
@@ -411,6 +453,21 @@ class AccountDashboardTests(TestCase):
             second,
         )
 
+    def test_balance_is_current_and_not_limited_to_selected_year(self):
+        InvestmentCashMovement.objects.create(
+            account=self.account,
+            movement_date=date(2025, 12, 31),
+            movement_type="deposit",
+            currency="CNY",
+            amount=Decimal("500"),
+        )
+
+        all_years = self.client.get(reverse("portfolio:account_list"), {"year": "all"})
+        current_year = self.client.get(reverse("portfolio:account_list"), {"year": "2026"})
+
+        self.assertEqual(all_years.context["account_rows"][0]["cash"], Decimal("10500"))
+        self.assertEqual(current_year.context["account_rows"][0]["cash"], Decimal("10500"))
+
     def test_detail_can_switch_to_diluted_cost_and_has_no_duplicate_actions(self):
         security = Security.objects.create(
             symbol="TEST",
@@ -450,6 +507,85 @@ class AccountDashboardTests(TestCase):
         self.assertEqual(
             transactions.content.decode().count("新增交易"),
             1,
+        )
+
+    def test_manual_transaction_can_be_deleted_and_position_is_rebuilt(self):
+        security = Security.objects.create(
+            symbol="DELETE",
+            name="删除测试",
+            market="HK",
+            currency="HKD",
+        )
+        item = InvestmentTransaction.objects.create(
+            account=self.account,
+            security=security,
+            trade_date=date(2026, 7, 5),
+            trade_type=TradeTypeChoices.BUY,
+            quantity=Decimal("1"),
+            price=Decimal("10"),
+            amount=Decimal("10"),
+            fee=Decimal("0.25"),
+            currency="HKD",
+        )
+        rebuild_position(self.account, security)
+
+        page = self.client.get(
+            reverse("portfolio:account_detail", args=[self.account.pk]),
+            {"tab": "transactions"},
+        )
+        self.assertEqual(page.context["transactions"][0].total_fee, Decimal("0.25"))
+        self.assertContains(page, reverse("portfolio:transaction_edit", args=[item.pk]))
+        response = self.client.post(reverse("portfolio:transaction_delete", args=[item.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(InvestmentTransaction.objects.filter(pk=item.pk).exists())
+        self.assertEqual(
+            InvestmentPosition.objects.get(account=self.account, security=security).quantity,
+            Decimal("0"),
+        )
+
+
+class HistoricalIpoBackfillTests(TestCase):
+    def test_command_is_dry_run_by_default_and_idempotent_on_apply(self):
+        family = Family.objects.create(name="历史回填家庭")
+        member = FamilyMember.objects.create(family=family, display_name="成员")
+        account = create_broker_investment_account(family, member, "历史券商").bank_account
+        listing = HkIpoListing.objects.create(
+            stock_code="09988.HK",
+            stock_name="历史新股",
+            subscription_end_date=date(2025, 1, 2),
+            allotment_result_date=date(2025, 1, 4),
+            final_price=Decimal("10"),
+            lot_size=100,
+        )
+        ipo_trade = HkIpoSubscriptionTrade.objects.create(
+            listing=listing,
+            member=member,
+            account=account,
+            allotted_lots=1,
+            sold_lots=1,
+            sell_date=date(2025, 1, 5),
+            sell_price=Decimal("12"),
+            subscription_fee=Decimal("100"),
+            trading_fee=Decimal("10"),
+        )
+        self.assertEqual(ipo_trade.realized_profit, Decimal("80"))
+
+        output = StringIO()
+        call_command("backfill_ipo_transactions", stdout=output)
+        self.assertIn("DRY-RUN", output.getvalue())
+        self.assertFalse(ipo_trade.investment_transactions.exists())
+
+        call_command("backfill_ipo_transactions", apply=True, stdout=StringIO())
+        call_command("backfill_ipo_transactions", apply=True, stdout=StringIO())
+
+        self.assertEqual(ipo_trade.investment_transactions.count(), 2)
+        self.assertEqual(
+            InvestmentTransaction.objects.get(
+                ipo_subscription_trade=ipo_trade,
+                trade_type=TradeTypeChoices.SELL,
+            ).realized_pnl,
+            Decimal("80"),
         )
 
 
@@ -698,6 +834,63 @@ class PositionAccountingTests(TestCase):
 
         with self.assertRaisesMessage(ValidationError, "超过当时持仓"):
             rebuild_position(self.account, self.security)
+
+    def test_option_short_open_and_buy_close(self):
+        underlying = Security.objects.create(
+            symbol="MSFT",
+            name="微软",
+            market="US",
+            currency="USD",
+        )
+        option = Security.objects.create(
+            symbol="MSFT260717P00300000",
+            name="微软看跌期权",
+            market="US",
+            asset_type=Security.TYPE_OPTION,
+            currency="USD",
+        )
+        OptionContract.objects.create(
+            security=option,
+            underlying=underlying,
+            option_type=OptionContract.PUT,
+            strike_price=Decimal("300"),
+            expiration_date=date(2026, 7, 17),
+            multiplier=100,
+        )
+        open_short = InvestmentTransaction.objects.create(
+            account=self.account,
+            security=option,
+            trade_date=date(2026, 1, 1),
+            trade_type=TradeTypeChoices.SELL,
+            position_effect=InvestmentTransaction.EFFECT_OPEN,
+            quantity=Decimal("1"),
+            price=Decimal("5"),
+            amount=Decimal("500"),
+            fee=Decimal("1"),
+            currency="USD",
+        )
+        close_short = InvestmentTransaction.objects.create(
+            account=self.account,
+            security=option,
+            trade_date=date(2026, 1, 2),
+            trade_type=TradeTypeChoices.BUY,
+            position_effect=InvestmentTransaction.EFFECT_CLOSE,
+            quantity=Decimal("1"),
+            price=Decimal("2"),
+            amount=Decimal("200"),
+            fee=Decimal("1"),
+            currency="USD",
+        )
+
+        position = rebuild_position(self.account, option)
+        open_short.refresh_from_db()
+        close_short.refresh_from_db()
+
+        self.assertEqual(position.quantity, Decimal("0"))
+        self.assertEqual(position.realized_pnl, Decimal("298"))
+        self.assertEqual(open_short.cash_change, Decimal("499"))
+        self.assertEqual(close_short.cash_change, Decimal("-201"))
+        self.assertEqual(close_short.realized_pnl, Decimal("298"))
 
     def test_transaction_numbers_are_unique_without_max_plus_one(self):
         first = self.add_trade(date(2026, 1, 1), TradeTypeChoices.BUY, "1", "100")

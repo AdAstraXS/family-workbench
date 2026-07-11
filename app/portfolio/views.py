@@ -25,6 +25,7 @@ from .forms import (
     InvestmentCashMovementForm,
     InvestmentPositionForm,
     InvestmentTransactionForm,
+    OptionContractForm,
     SecurityForm,
 )
 from .futu_service import FutuQueryError, search_futu_securities
@@ -37,6 +38,7 @@ from .models import (
     PortfolioSnapshot,
     Security,
     SecurityMarketSnapshot,
+    TransactionSourceChoices,
     WatchlistItem,
 )
 from .services import rebuild_cash_only_transaction, rebuild_position
@@ -77,6 +79,7 @@ def _latest_positions(accounts, year):
             "security",
             "security__asset_category",
             "security__market_snapshot",
+            "security__option_contract",
         )
         .order_by("account__bank_account__member__display_name", "account__bank_account__account_name", "security__symbol")
     )
@@ -105,7 +108,6 @@ def _account_dashboard_data(request, account=None):
     cash_filter = InvestmentCashMovement.objects.filter(account__in=accounts)
     if year != "all":
         transaction_filter = transaction_filter.filter(trade_date__year=year)
-        cash_filter = cash_filter.filter(movement_date__year=year)
 
     realized = {
         (row["account_id"], row["security_id"]): row["total"] or ZERO
@@ -127,9 +129,10 @@ def _account_dashboard_data(request, account=None):
             if cost_method == "diluted"
             else item.avg_cost
         )
-        item.market_value_live = item.quantity * item.display_price
+        multiplier = item.security.contract_multiplier
+        item.market_value_live = item.quantity * item.display_price * multiplier
         item.unrealized_live = (
-            item.market_value_live - item.quantity * item.display_cost
+            item.market_value_live - item.quantity * item.display_cost * multiplier
         )
         item.realized_for_year = realized.get((item.account_id, item.security_id), ZERO)
         item.original_currency = item.security.currency
@@ -147,6 +150,7 @@ def _account_dashboard_data(request, account=None):
         item.today_pnl = (
             item.quantity
             * (item.display_price - item.display_price / (1 + change_rate / 100))
+            * multiplier
             if change_rate not in (None, -100)
             else ZERO
         )
@@ -747,13 +751,30 @@ def watchlist_add(request):
 
 @login_required
 def security_create(request):
-    return save_form(request, SecurityForm, "form.html", "portfolio:security_list", "新增证券标的")
+    return save_form(request, SecurityForm, "portfolio/security_form.html", "portfolio:security_list", "新增证券标的")
 
 
 @login_required
 def security_edit(request, pk):
     security = get_object_or_404(Security, pk=pk)
-    return save_form(request, SecurityForm, "form.html", "portfolio:security_list", "编辑证券标的", security)
+    return save_form(request, SecurityForm, "portfolio/security_form.html", "portfolio:security_list", "编辑证券标的", security)
+
+
+@login_required
+def option_contract_create(request):
+    member = FamilyMember.objects.filter(user=request.user, is_active=True).select_related("family").first()
+    if not member:
+        messages.error(request, "当前登录用户尚未关联家庭成员。")
+        return redirect("portfolio:security_list")
+    form = OptionContractForm(
+        request.POST or None,
+        family=member.family,
+    )
+    if request.method == "POST" and form.is_valid():
+        form.save(member)
+        messages.success(request, "期权合约已创建并加入自选标的。")
+        return redirect("portfolio:security_list")
+    return render(request, "form.html", {"form": form, "title": "新增期权合约"})
 
 
 @login_required
@@ -793,6 +814,26 @@ def transaction_edit(request, pk):
         pk=pk,
     )
     return save_transaction_form(request, "编辑交易记录", transaction)
+
+
+@login_required
+@require_POST
+@transaction.atomic
+def transaction_delete(request, pk):
+    item = get_object_or_404(
+        InvestmentTransaction.objects.filter(account__in=_visible_accounts(request)),
+        pk=pk,
+    )
+    if item.source != TransactionSourceChoices.MANUAL:
+        messages.error(request, "同步交易不能在投资组合中删除，请回到来源模块撤销。")
+        return redirect(f"{item.account.get_absolute_url()}?tab=transactions")
+    account = item.account
+    security = item.security
+    item.delete()
+    if security:
+        rebuild_position(account, security)
+    messages.success(request, "交易记录已删除，持仓和现金流水已重新计算。")
+    return redirect(f"{account.get_absolute_url()}?tab=transactions")
 
 
 @login_required
@@ -850,6 +891,8 @@ def transaction_form_options(request):
                     "id": item.pk,
                     "name": f"{item.symbol} {item.name}",
                     "currency": item.currency,
+                    "asset_type": item.asset_type,
+                    "multiplier": str(item.contract_multiplier),
                 }
                 for item in securities
             ],

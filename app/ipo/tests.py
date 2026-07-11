@@ -295,6 +295,33 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
         self.assertEqual(trade.trade_status, HkIpoSubscriptionTrade.STATUS_HOLDING)
         self.assertEqual(trade.realized_profit, Decimal("0"))
 
+    def test_grey_market_sale_moves_buy_date_before_sale_rebuild(self):
+        user = get_user_model().objects.create_user(username="ipo-grey-sale-tester")
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        broker_type = AccountType.objects.create(family=self.family, name="券商")
+        self.account.account_type_ref = broker_type
+        self.account.save(update_fields=["account_type_ref"])
+        trade = self.make_trade(allotted_lots=1)
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("ipo:subscription_trade_sale", args=[trade.pk]),
+            {
+                "sell_price": "12",
+                "sell_date": "2026-06-07",
+                "sold_lots": "1",
+                "trading_fee": "10",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        buy = InvestmentTransaction.objects.get(
+            trade_type=TradeTypeChoices.IPO,
+            ipo_subscription_trade=trade,
+        )
+        self.assertEqual(buy.trade_date, date(2026, 6, 7))
+
     def test_closed_trade_table_uses_sale_columns(self):
         trade = self.make_trade(
             allotted_lots=2,

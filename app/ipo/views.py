@@ -181,6 +181,9 @@ def save_ipo_sale_transaction(ipo_trade, form, transaction=None, user=None):
     if user:
         stamp_actor(transaction, user)
     transaction.save()
+    if buy_transaction.trade_date > transaction.trade_date:
+        buy_transaction.trade_date = transaction.trade_date
+        buy_transaction.save(update_fields=["trade_date", "updated_at"])
     rebuild_position(transaction.account, transaction.security)
     refresh_ipo_sale_summary(ipo_trade)
     return transaction

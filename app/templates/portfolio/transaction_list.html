@@ -27,7 +27,7 @@
           <td>{{ item.amount|thousands }}</td>
           <td>{{ item.cash_change|thousands }}</td>
           <td>{{ item.realized_pnl|thousands }}</td>
-          <td><a href="{% url 'portfolio:transaction_edit' item.id %}">编辑</a></td>
+          <td>{% if item.source == 'manual' %}<span class="row-actions"><a href="{% url 'portfolio:transaction_edit' item.id %}">编辑</a><form method="post" action="{% url 'portfolio:transaction_delete' item.id %}" onsubmit="return confirm('确认删除这笔交易吗？');">{% csrf_token %}<button class="text-action danger" type="submit">删除</button></form></span>{% else %}-{% endif %}</td>
         </tr>
       {% empty %}
         <tr><td colspan="9">暂无数据</td></tr>
