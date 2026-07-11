@@ -4,12 +4,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}家庭投资与记账工作台{% endblock %}</title>
+  <title>{% block title %}{{ site_household_name }}{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260706-1">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="{% url 'dashboard:home' %}">家庭工作台</a>
+    <a class="brand" href="{% url 'dashboard:home' %}">{{ site_household_name }}</a>
     <nav>
       <a href="{% url 'portfolio:overview' %}">投资组合</a>
       <a href="{% url 'ledger:overview' %}">家庭账本</a>
@@ -17,7 +17,7 @@
       <a href="{% url 'notes:index' %}">投资笔记</a>
       <a href="{% url 'macro:index' %}">宏观数据</a>
       <a href="{% url 'ai_analysis:index' %}">AI 分析</a>
-      <a href="{% url 'admin:index' %}">后台</a>
+      {% if user.is_staff %}<a href="{% url 'admin:index' %}">后台</a>{% endif %}
     </nav>
     {% if user.is_authenticated %}
       <div class="topbar-user">

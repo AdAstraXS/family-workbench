@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
 from django.urls import reverse
@@ -277,6 +278,8 @@ class InvestmentPosition(TimestampedModel):
 
 
 class InvestmentTransaction(TimestampedModel):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     account = models.ForeignKey(InvestmentAccount, verbose_name="投资账户", on_delete=models.CASCADE, related_name="transactions")
     security = models.ForeignKey(Security, verbose_name="证券标的", on_delete=models.CASCADE, related_name="transactions", null=True, blank=True)
     asset_category = models.ForeignKey(
@@ -406,6 +409,8 @@ class DailyExchangeRateFetch(models.Model):
 
 
 class InvestmentCashMovement(TimestampedModel):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     account = models.ForeignKey(
         InvestmentAccount,
         verbose_name="投资账户",

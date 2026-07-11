@@ -31,6 +31,7 @@ EXPECTED_HEADERS = (
     "备注",
 )
 ALLOWED_ACCOUNT_TYPES = ("银行", "微信", "支付宝")
+MAX_IMPORT_ROWS = 20_000
 
 
 class ExpenseWorkbookError(ValueError):
@@ -118,6 +119,9 @@ def parse_expense_workbook(file_bytes: bytes) -> tuple[str, list[ParsedExpenseRo
     if len(workbook.sheetnames) != 1:
         raise ExpenseWorkbookError("固定格式支出文件必须且只能包含 1 个工作表。")
     worksheet = workbook[workbook.sheetnames[0]]
+    if worksheet.max_row > MAX_IMPORT_ROWS + 1:
+        workbook.close()
+        raise ExpenseWorkbookError(f"Excel 文件不能超过 {MAX_IMPORT_ROWS} 条支出记录。")
     actual_headers = tuple(_text(cell.value) for cell in worksheet[1][: len(EXPECTED_HEADERS)])
     if actual_headers != EXPECTED_HEADERS:
         expected = "、".join(EXPECTED_HEADERS)
@@ -255,9 +259,10 @@ def import_expense_workbook(*, family, uploaded_file, imported_by=None) -> Expen
     )
 
     with transaction.atomic():
+        actor = imported_by if getattr(imported_by, "is_authenticated", False) else None
         batch = ExpenseImportBatch.objects.create(
             family=family,
-            imported_by=imported_by if getattr(imported_by, "is_authenticated", False) else None,
+            imported_by=actor,
             source_filename=source_filename,
             source_sha256=source_sha256,
             worksheet_name=worksheet_name,
@@ -282,6 +287,8 @@ def import_expense_workbook(*, family, uploaded_file, imported_by=None) -> Expen
             local_date = timezone.localtime(row.occurred_at).date()
             records.append(
                 ExpenseRecord(
+                    created_by=actor,
+                    updated_by=actor,
                     family=family,
                     member=member,
                     bank_account=account,

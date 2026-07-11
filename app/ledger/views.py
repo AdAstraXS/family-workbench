@@ -26,6 +26,8 @@ from .expense_import import ExpenseWorkbookError, import_expense_workbook
 from .expense_export import build_expense_workbook
 from .asset_snapshot_export import build_asset_snapshot_workbook
 from .models import AnnualBudget, AnnualBudgetLine, AssetBalanceSnapshot, BankAccount, ExpenseCategory, ExpenseImportBatch, ExpenseRecord, IncomeCategory, IncomeRecord
+from family_core.audit import stamp_actor
+from family_core.household import get_household_family
 from family_core.models import Family, FamilyMember
 
 
@@ -34,7 +36,9 @@ def save_form(request, form_class, template_name, success_url_name, title, insta
     if request.method == "POST":
         form = form_class(request.POST, instance=instance, request=request) if form_class in request_aware_forms else form_class(request.POST, instance=instance)
         if form.is_valid():
-            obj = form.save()
+            obj = stamp_actor(form.save(commit=False), request.user)
+            obj.save()
+            form.save_m2m()
             if isinstance(obj, BankAccount):
                 request.session["last_account_member_id"] = obj.member_id
             elif isinstance(obj, IncomeRecord):
@@ -72,7 +76,7 @@ def get_record_year_month_label(record, fallback_field):
 
 
 def build_cashflow_monthly_rows(target_year=None):
-    default_family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
+    default_family = get_household_family()
     members_query = FamilyMember.objects.filter(is_active=True)
     if default_family:
         members_query = members_query.filter(family=default_family)
@@ -170,7 +174,7 @@ def build_cashflow_monthly_rows(target_year=None):
 
 
 def get_default_family_records():
-    default_family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
+    default_family = get_household_family()
     income_records = IncomeRecord.objects.select_related("family", "member", "category", "category__parent")
     expense_records = ExpenseRecord.objects.select_related(
         "family",
@@ -1165,7 +1169,7 @@ def get_cashflow_member_totals(family, members, start_date, end_date):
 
 
 def build_investment_return_report():
-    family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
+    family = get_household_family()
     members = list(FamilyMember.objects.filter(family=family, is_active=True).order_by("display_name")) if family else []
     latest_snapshot = (
         AssetBalanceSnapshot.objects.filter(family=family, is_draft=False)
@@ -1222,6 +1226,8 @@ def build_investment_return_report():
     rows = []
     total_row = {
         "label": "家庭合计",
+        "display_order": -1,
+        "member_id": 0,
         "previous_year_balance": Decimal("0"),
         "previous_month_balance": Decimal("0"),
         "current_balance": Decimal("0"),
@@ -1241,6 +1247,8 @@ def build_investment_return_report():
         month_net_cashflow = month_net_totals[member.id]
         row = {
             "label": member.display_name,
+            "display_order": member.display_order,
+            "member_id": member.pk,
             "previous_year_balance": previous_year_balance,
             "previous_month_balance": previous_month_balance,
             "current_balance": current_balance,
@@ -1254,7 +1262,7 @@ def build_investment_return_report():
         }
         rows.append(row)
         for key in total_row:
-            if key not in {"label", "is_total"}:
+            if key not in {"label", "display_order", "member_id", "is_total"}:
                 total_row[key] += row[key]
     rows.append(total_row)
 
@@ -1305,7 +1313,7 @@ def build_overview_asset_charts(snapshot):
 @login_required
 def overview(request):
     today = timezone.localdate()
-    family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
+    family = get_household_family()
     latest_snapshot = (
         AssetBalanceSnapshot.objects.filter(family=family, is_draft=False)
         .order_by("-snapshot_date", "-created_at")
@@ -1349,11 +1357,10 @@ def overview(request):
             {"name": row["label"], "value": float(row["year_investment_return"])}
             for row in sorted(
                 investment_rows,
-                key=lambda row: {
-                    "家庭合计": 0,
-                    "我": 1,
-                    "孙秘书": 2,
-                }.get(row["label"], 3),
+                key=lambda row: (
+                    row.get("display_order", 0),
+                    row.get("member_id", 0),
+                ),
             )
         ],
     }
@@ -1434,7 +1441,8 @@ def annual_budget_create(request):
         form = AnnualBudgetForm(request.POST, instance=budget)
         formset = AnnualBudgetLineFormSet(request.POST, instance=budget)
         if form.is_valid() and formset.is_valid():
-            budget = form.save()
+            budget = stamp_actor(form.save(commit=False), request.user)
+            budget.save()
             formset = AnnualBudgetLineFormSet(request.POST, instance=budget)
             if formset.is_valid():
                 save_budget_formset(formset, budget)
@@ -1454,7 +1462,8 @@ def annual_budget_edit(request, pk):
         form = AnnualBudgetForm(request.POST, instance=budget)
         formset = AnnualBudgetLineFormSet(request.POST, instance=budget)
         if form.is_valid() and formset.is_valid():
-            budget = form.save()
+            budget = stamp_actor(form.save(commit=False), request.user)
+            budget.save()
             save_budget_formset(formset, budget)
             return redirect("ledger:annual_budget_detail", pk=budget.pk)
     else:
@@ -1614,6 +1623,7 @@ def asset_snapshot_create(request):
         if form.is_valid() and formset.is_valid():
             snapshot = form.save(commit=False)
             snapshot.is_draft = save_as_draft
+            stamp_actor(snapshot, request.user)
             snapshot.save()
             formset = AssetBalanceEntryFormSet(request.POST, instance=snapshot)
             if save_as_draft:
@@ -1657,6 +1667,7 @@ def asset_snapshot_edit(request, pk):
         if form.is_valid() and formset.is_valid():
             snapshot = form.save(commit=False)
             snapshot.is_draft = save_as_draft
+            stamp_actor(snapshot, request.user)
             snapshot.save()
             save_asset_snapshot_formset(formset, snapshot)
             messages.success(

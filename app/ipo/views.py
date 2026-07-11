@@ -13,6 +13,7 @@ from django.views.decorators.http import require_POST
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 
+from family_core.audit import stamp_actor
 from .forms import HkIpoAllotmentForm, HkIpoListingForm, HkIpoSaleForm, HkIpoSubscriptionTradeForm
 from .models import HkIpoListing, HkIpoSubscriptionTrade
 from .services import (
@@ -107,7 +108,7 @@ def ipo_sale_transactions(ipo_trade_ids):
     )
 
 
-def save_ipo_sale_transaction(ipo_trade, form, transaction=None):
+def save_ipo_sale_transaction(ipo_trade, form, transaction=None, user=None):
     sync_ipo_trade(ipo_trade.pk)
     buy_transaction = InvestmentTransaction.objects.filter(
         source=TransactionSourceChoices.IMPORT,
@@ -149,6 +150,8 @@ def save_ipo_sale_transaction(ipo_trade, form, transaction=None):
     transaction.currency = buy_transaction.currency
     transaction.remark = ipo_trade.remark
     transaction.extra_data = {"ipo_subscription_trade_id": ipo_trade.pk}
+    if user:
+        stamp_actor(transaction, user)
     transaction.save()
     rebuild_position(transaction.account, transaction.security)
     refresh_ipo_sale_summary(ipo_trade)
@@ -875,7 +878,8 @@ def subscription_trade_create(request):
     if request.method == "POST":
         form = HkIpoSubscriptionTradeForm(request.POST)
         if form.is_valid():
-            trade = form.save()
+            trade = stamp_actor(form.save(commit=False), request.user)
+            trade.save()
             return redirect(subscription_trade_list_url(trade))
     else:
         form = HkIpoSubscriptionTradeForm()
@@ -892,7 +896,8 @@ def subscription_trade_edit(request, pk):
     if request.method == "POST":
         form = HkIpoSubscriptionTradeForm(request.POST, instance=trade)
         if form.is_valid():
-            trade = form.save()
+            trade = stamp_actor(form.save(commit=False), request.user)
+            trade.save()
             return redirect(subscription_trade_list_url(trade))
     else:
         form = HkIpoSubscriptionTradeForm(instance=trade)
@@ -931,7 +936,8 @@ def subscription_trade_allotment(request, pk):
     if request.method == "POST":
         form = HkIpoAllotmentForm(request.POST, instance=trade)
         if form.is_valid():
-            trade = form.save()
+            trade = stamp_actor(form.save(commit=False), request.user)
+            trade.save()
             return redirect(subscription_trade_list_url(trade))
     else:
         form = HkIpoAllotmentForm(instance=trade)
@@ -964,7 +970,7 @@ def subscription_trade_sale(request, pk, transaction_id=None):
     if request.method == "POST":
         form = HkIpoSaleForm(request.POST, ipo_trade=trade, initial=initial)
         if form.is_valid():
-            save_ipo_sale_transaction(trade, form, transaction)
+            save_ipo_sale_transaction(trade, form, transaction, request.user)
             return redirect(subscription_trade_list_url(trade))
     else:
         form = HkIpoSaleForm(ipo_trade=trade, initial=initial)

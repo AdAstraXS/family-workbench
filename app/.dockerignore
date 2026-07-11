@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+db.sqlite3
+media/
+staticfiles/
+tmp/
+import_asset_snapshot_*.json

@@ -253,6 +253,12 @@ class AccountPrototypeTests(TestCase):
             username="prototype-tester",
             password="test-password",
         )
+        family = Family.objects.create(name="原型测试家庭")
+        FamilyMember.objects.create(
+            family=family,
+            user=user,
+            display_name="原型测试成员",
+        )
         self.client.force_login(user)
 
         overview = self.client.get(reverse("portfolio:account_prototype"))

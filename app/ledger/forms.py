@@ -18,6 +18,7 @@ from .models import (
     IncomeRecord,
 )
 from family_core.models import Family, FamilyMember
+from family_core.household import get_household_family
 
 
 class TwoDecimalNumberInput(forms.NumberInput):
@@ -52,7 +53,7 @@ class BankAccountForm(BaseModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop("request", None)
         super().__init__(*args, **kwargs)
-        default_family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
+        default_family = get_household_family()
         if default_family and not self.instance.pk:
             self.fields["family"].initial = default_family
             self.fields["member"].queryset = FamilyMember.objects.filter(family=default_family, is_active=True)
@@ -87,7 +88,7 @@ class CurrencyChoiceMixin:
 
 
 def get_default_family():
-    return Family.objects.filter(name="我的家庭").first() or Family.objects.first()
+    return get_household_family()
 
 
 def get_current_month_range():
@@ -405,7 +406,7 @@ class AssetBalanceSnapshotForm(BaseModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        default_family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
+        default_family = get_household_family()
         if default_family and not self.instance.pk:
             self.fields["family"].initial = default_family
             self.initial.setdefault("family", default_family.pk)

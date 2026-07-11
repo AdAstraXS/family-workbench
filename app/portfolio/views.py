@@ -15,6 +15,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
+from family_core.audit import stamp_actor
+from family_core.household import get_site_setting
 from family_core.models import AssetCategory, Currency, ExchangeRate, FamilyMember
 from ledger.models import BankAccount
 
@@ -291,7 +293,9 @@ def save_form(request, form_class, template_name, success_url_name, title, insta
     if request.method == "POST":
         form = form_class(request.POST, instance=instance)
         if form.is_valid():
-            form.save()
+            item = stamp_actor(form.save(commit=False), request.user)
+            item.save()
+            form.save_m2m()
             return redirect(success_url_name)
     else:
         form = form_class(instance=instance)
@@ -318,7 +322,7 @@ def overview(request):
         )
 
     family = login_member.family
-    base_currency = "CNY"
+    base_currency = get_site_setting().base_currency
     members = FamilyMember.objects.filter(
         family=family,
         is_active=True,
@@ -712,6 +716,7 @@ def cash_movement_create(request, account_id):
         if form.is_valid():
             movement = form.save(commit=False)
             movement.account = account
+            stamp_actor(movement, request.user)
             movement.save()
             return redirect(f"{account.get_absolute_url()}?tab=cashflows")
     else:
@@ -986,6 +991,7 @@ def save_transaction_form(request, title, instance=None):
         if form.is_valid():
             try:
                 with transaction.atomic():
+                    stamp_actor(form.instance, request.user)
                     item = form.save()
                     pairs = {old_pair, (item.account_id, item.security_id)}
                     for account_id, security_id in {

@@ -6,6 +6,8 @@ from portfolio.models import VisibilityChoices
 
 
 class BankAccount(TimestampedModel):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="bank_accounts")
     member = models.ForeignKey(FamilyMember, verbose_name="所属成员", on_delete=models.CASCADE, related_name="bank_accounts")
     account_name = models.CharField("账户名称", max_length=100)
@@ -95,6 +97,8 @@ class ExpenseCategory(models.Model):
 
 
 class IncomeRecord(TimestampedModel):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="income_records")
     member = models.ForeignKey(FamilyMember, verbose_name="所属成员", on_delete=models.CASCADE, related_name="income_records")
     bank_account = models.ForeignKey(BankAccount, verbose_name="入账账户", on_delete=models.SET_NULL, related_name="income_records", null=True, blank=True)
@@ -165,6 +169,8 @@ class ExpenseImportBatch(TimestampedModel):
 
 
 class ExpenseRecord(TimestampedModel):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="expense_records")
     member = models.ForeignKey(FamilyMember, verbose_name="所属成员", on_delete=models.CASCADE, related_name="expense_records")
     bank_account = models.ForeignKey(BankAccount, verbose_name="支出账户", on_delete=models.SET_NULL, related_name="expense_records", null=True, blank=True)
@@ -239,6 +245,8 @@ class CashflowMonthlySummary(TimestampedModel):
 
 
 class AnnualBudget(TimestampedModel):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="annual_budgets")
     year = models.PositiveIntegerField("预算年度")
     remark = models.TextField("备注", blank=True)
@@ -286,6 +294,8 @@ class AnnualBudgetLine(TimestampedModel):
 
 
 class AssetBalanceSnapshot(TimestampedModel):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="asset_balance_snapshots")
     snapshot_date = models.DateField("快照日期")
     is_draft = models.BooleanField("草稿", default=False)

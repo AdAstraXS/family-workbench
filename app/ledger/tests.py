@@ -77,6 +77,8 @@ class LedgerExpenseImportTests(TestCase):
             account_type_ref=self.account_types["券商"],
         )
         self.user = get_user_model().objects.create_user(username="tester", password="password")
+        self.me.user = self.user
+        self.me.save(update_fields=["user", "updated_at"])
 
     def workbook_upload(self, rows, filename="支出.xlsx", headers=EXPECTED_HEADERS):
         workbook = Workbook()
@@ -776,6 +778,8 @@ class AssetSnapshotImportTests(TestCase):
             username="trend-tester",
             password="password",
         )
+        self.me.user = user
+        self.me.save(update_fields=["user", "updated_at"])
         self.client.force_login(user)
 
         response = self.client.get(reverse("ledger:asset_snapshot_list"))
@@ -833,6 +837,8 @@ class AssetSnapshotWorkspaceTests(TestCase):
             username="snapshot-workspace-tester",
             password="password",
         )
+        self.member.user = self.user
+        self.member.save(update_fields=["user", "updated_at"])
         self.client.force_login(self.user)
 
     def test_decimal_inputs_render_with_two_decimal_places(self):
@@ -1066,6 +1072,8 @@ class LedgerOverviewChartTests(TestCase):
             username="overview-chart-tester",
             password="password",
         )
+        me.user = user
+        me.save(update_fields=["user", "updated_at"])
         self.client.force_login(user)
 
         response = self.client.get(reverse("ledger:overview"))
@@ -1114,6 +1122,8 @@ class AnnualBudgetReportTests(TestCase):
             username="budget-report-tester",
             password="password",
         )
+        self.member.user = self.user
+        self.member.save(update_fields=["user", "updated_at"])
         self.client.force_login(self.user)
 
     def test_legacy_budget_category_collects_current_descendant_records(self):
@@ -1255,6 +1265,11 @@ class CategoryManagementTests(TestCase):
         self.user = get_user_model().objects.create_user(
             username="category-tester",
             password="password",
+        )
+        FamilyMember.objects.create(
+            family=self.family,
+            user=self.user,
+            display_name="分类维护测试成员",
         )
 
     def test_expense_admin_form_creates_explicit_three_level_path(self):
@@ -1436,6 +1451,8 @@ class LedgerNavigationAndRedirectTests(TestCase):
             username="navigation-tester",
             password="password",
         )
+        self.member.user = self.user
+        self.member.save(update_fields=["user", "updated_at"])
         self.client.force_login(self.user)
 
     def test_ledger_page_has_consistent_context_navigation(self):

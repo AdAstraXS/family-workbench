@@ -6,6 +6,7 @@ from django.utils import timezone
 from datetime import datetime, time
 
 from family_core.models import Family
+from family_core.household import get_household_family
 
 from .models import (
     AnnualBudget,
@@ -97,7 +98,7 @@ class HierarchicalCategoryAdminForm(forms.ModelForm):
         if not family_id and self.instance.pk:
             family_id = self.instance.family_id
         if not family_id and not self.is_bound:
-            default_family = Family.objects.filter(name="我的家庭").first() or Family.objects.first()
+            default_family = get_household_family()
             if default_family:
                 family_id = default_family.pk
                 self.initial["family"] = default_family.pk

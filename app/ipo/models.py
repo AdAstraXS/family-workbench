@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, time, timedelta
 import calendar
+from django.conf import settings
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -454,6 +455,8 @@ class HkIpoListing(models.Model):
 
 
 class HkIpoSubscriptionTrade(models.Model):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     TRANCHE_ONE_LOT = "one_lot"
     TRANCHE_MID_A = "mid_a"
     TRANCHE_TAIL_A = "tail_a"

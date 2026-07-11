@@ -24,6 +24,27 @@ class Family(TimestampedModel):
         return self.name
 
 
+class SiteSetting(TimestampedModel):
+    household_name = models.CharField("工作台名称", max_length=100, default="家庭工作台")
+    base_currency = models.CharField("默认本位币", max_length=10, default="CNY")
+    timezone = models.CharField("时区", max_length=50, default="Asia/Shanghai")
+
+    class Meta:
+        verbose_name = "站点设置"
+        verbose_name_plural = "站点设置"
+
+    def delete(self, *args, **kwargs):
+        return None
+
+    @classmethod
+    def load(cls):
+        instance, _ = cls.objects.get_or_create(pk=1)
+        return instance
+
+    def __str__(self):
+        return self.household_name
+
+
 class FamilyMember(TimestampedModel):
     ROLE_ADMIN = "admin"
     ROLE_MEMBER = "member"
@@ -44,6 +65,7 @@ class FamilyMember(TimestampedModel):
         blank=True,
     )
     display_name = models.CharField("显示名称", max_length=100)
+    display_order = models.PositiveIntegerField("显示顺序", default=0)
     role = models.CharField("角色", max_length=20, choices=ROLE_CHOICES, default=ROLE_MEMBER)
     is_active = models.BooleanField("是否有效", default=True)
     remark = models.TextField("备注", blank=True)
@@ -52,6 +74,7 @@ class FamilyMember(TimestampedModel):
     class Meta:
         verbose_name = "家庭成员"
         verbose_name_plural = "家庭成员"
+        ordering = ["display_order", "id"]
         indexes = [
             models.Index(fields=["family", "role"]),
             models.Index(fields=["is_active"]),

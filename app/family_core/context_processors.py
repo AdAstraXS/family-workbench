@@ -1,5 +1,7 @@
 from django.urls import reverse
 
+from .models import SiteSetting
+
 
 def page_navigation(request):
     match = getattr(request, "resolver_match", None)
@@ -114,3 +116,11 @@ def page_navigation(request):
         return {"page_parent_url": parent_url}
 
     return {"page_parent_url": reverse("dashboard:home")}
+
+
+def site_identity(request):
+    setting = SiteSetting.objects.filter(pk=1).first()
+    return {
+        "site_household_name": setting.household_name if setting else "家庭工作台",
+        "site_base_currency": setting.base_currency if setting else "CNY",
+    }

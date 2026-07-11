@@ -773,6 +773,12 @@ class IpoUploadValidationTests(TestCase):
             username="upload-tester",
             password="password",
         )
+        family = Family.objects.create(name="上传测试家庭")
+        FamilyMember.objects.create(
+            family=family,
+            user=self.user,
+            display_name="上传测试成员",
+        )
         self.client.force_login(self.user)
 
     def test_image_recognition_rejects_unsupported_image_type(self):
@@ -966,6 +972,14 @@ class HkConnectExpectationTests(TestCase):
 class HkIpoExpectedMarginTests(TestCase):
     def setUp(self):
         _vbkr_margin_cache.update({"fetched_at": None, "data": {}})
+        self.family = Family.objects.create(name="孖展测试家庭")
+
+    def link_user(self, user):
+        FamilyMember.objects.create(
+            family=self.family,
+            user=user,
+            display_name=user.username,
+        )
 
     def test_margin_fetch_uses_doh_ipv4_fallback_when_normal_dns_route_fails(self):
         doh_payload = {
@@ -1009,6 +1023,7 @@ class HkIpoExpectedMarginTests(TestCase):
             username="listing-metric-tester",
             password="test-password",
         )
+        self.link_user(user)
         today = timezone.localdate()
         HkIpoListing.objects.create(
             stock_code="09996.HK",
@@ -1080,6 +1095,7 @@ class HkIpoExpectedMarginTests(TestCase):
             username="margin-endpoint-tester",
             password="test-password",
         )
+        self.link_user(user)
         self.client.force_login(user)
 
         with patch(
@@ -1096,6 +1112,7 @@ class HkIpoExpectedMarginTests(TestCase):
             username="listing-year-filter-tester",
             password="test-password",
         )
+        self.link_user(user)
         HkIpoListing.objects.create(
             stock_code="YEAR25.US",
             stock_name="二零二五新股",

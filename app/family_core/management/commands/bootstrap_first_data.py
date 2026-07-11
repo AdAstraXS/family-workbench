@@ -13,6 +13,7 @@ from family_core.models import (
     Currency,
     Family,
     FamilyMember,
+    SiteSetting,
 )
 from ledger.models import BankAccount, ExpenseCategory, ExpenseRecord, IncomeCategory, IncomeRecord
 from portfolio.models import InvestmentAccount, InvestmentPosition, InvestmentTransaction, Security
@@ -61,6 +62,14 @@ class Command(BaseCommand):
         family, _ = Family.objects.get_or_create(
             name=family_name,
             defaults={"base_currency": "CNY", "remark": "第一阶段 MVP 初始化家庭"},
+        )
+        SiteSetting.objects.update_or_create(
+            pk=1,
+            defaults={
+                "household_name": family.name,
+                "base_currency": family.base_currency,
+                "timezone": "Asia/Shanghai",
+            },
         )
         member, _ = FamilyMember.objects.get_or_create(
             family=family,

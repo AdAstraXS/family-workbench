@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AccountRegion, AccountType, AssetCategory, Currency, ExchangeRate, Family, FamilyMember
+from .models import AccountRegion, AccountType, AssetCategory, Currency, ExchangeRate, Family, FamilyMember, SiteSetting
 
 
 @admin.register(Family)
@@ -8,10 +8,27 @@ class FamilyAdmin(admin.ModelAdmin):
     list_display = ("name", "base_currency", "created_at", "updated_at")
     search_fields = ("name", "remark")
 
+    def has_add_permission(self, request):
+        return not Family.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(SiteSetting)
+class SiteSettingAdmin(admin.ModelAdmin):
+    list_display = ("household_name", "base_currency", "timezone", "updated_at")
+
+    def has_add_permission(self, request):
+        return not SiteSetting.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(FamilyMember)
 class FamilyMemberAdmin(admin.ModelAdmin):
-    list_display = ("display_name", "family", "role", "is_active", "created_at")
+    list_display = ("display_name", "display_order", "family", "role", "is_active", "created_at")
     list_filter = ("family", "role", "is_active")
     search_fields = ("display_name", "remark")
 

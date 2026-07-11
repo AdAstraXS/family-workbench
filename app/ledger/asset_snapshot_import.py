@@ -82,6 +82,8 @@ def parse_asset_snapshot_workbook(source):
         if WORKSHEET_NAME not in workbook.sheetnames:
             raise AssetSnapshotWorkbookError(f"找不到工作表“{WORKSHEET_NAME}”")
         worksheet = workbook[WORKSHEET_NAME]
+        if worksheet.max_row > 5_000 or worksheet.max_column > 500:
+            raise AssetSnapshotWorkbookError("资产快照文件不能超过 5000 行或 500 列")
         expected_headers = ("账户名称", "账户地区", "账户类型", "资产类别", "币种")
         actual_headers = tuple(worksheet.cell(4, column).value for column in range(1, 6))
         if actual_headers != expected_headers:
