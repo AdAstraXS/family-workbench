@@ -100,6 +100,7 @@ def decorate_ipo_rows(trades, *, holding=False):
                 or (trade.listing.final_price or Decimal("0")) * (trade.listing.lot_size or 0)
             )
             trade.display_remaining_upfront_fees = trade.remaining_upfront_fees
+            trade.display_holding_profit = -trade.remaining_upfront_fees
     return trades
 
 

@@ -26,7 +26,7 @@
       {% endif %}
       {% if not closed_mode and amount_column != "holding" %}<th>申购方式</th>{% endif %}
       <th>{% if amount_column == "holding" %}持有货值{% else %}费用合计{% endif %}</th>
-      <th>{% if amount_column == "holding" %}剩余前期费用{% elif closed_mode %}本次卖出净损益{% else %}盈利金额{% endif %}</th>
+      <th>盈利金额</th>
       <th>状态</th>
       <th>操作</th>
     </tr>
@@ -83,7 +83,7 @@
           {% endif %}
         </td>
         {% if amount_column == "holding" %}
-          <td class="number">{{ trade.display_remaining_upfront_fees|money2 }}</td>
+          <td class="number negative"><strong>{{ trade.display_holding_profit|money2 }}</strong></td>
         {% elif closed_mode %}
           <td class="number {% if trade.display_net_pnl > 0 %}positive{% elif trade.display_net_pnl < 0 %}negative{% endif %}">{{ trade.display_net_pnl|money2 }}</td>
         {% else %}
