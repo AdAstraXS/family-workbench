@@ -268,6 +268,10 @@ class TransactionFormTests(TestCase):
         )
         self.client.force_login(user)
 
+        page = self.client.get(reverse("portfolio:option_contract_create"))
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.context["page_parent_url"], reverse("portfolio:security_list"))
+
         response = self.client.post(
             reverse("portfolio:option_contract_create"),
             {

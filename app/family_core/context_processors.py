@@ -98,6 +98,8 @@ def page_navigation(request):
                 "portfolio:account_detail",
                 kwargs={"pk": kwargs["account_id"]},
             )
+        elif url_name == "option_contract_create":
+            parent_url = reverse("portfolio:security_list")
         elif url_name.endswith("_create") or url_name.endswith("_edit"):
             parent_url = reverse(
                 f"portfolio:{url_name.rsplit('_', 1)[0]}_list"
