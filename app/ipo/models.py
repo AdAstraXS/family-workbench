@@ -502,9 +502,6 @@ class HkIpoSubscriptionTrade(models.Model):
     applied_shares = models.PositiveIntegerField("申购股数", default=0)
     application_amount = models.DecimalField("申购金额", max_digits=24, decimal_places=4, default=0)
     application_method = models.CharField("申购方式", max_length=20, choices=METHOD_CHOICES, default=METHOD_MARGIN)
-    financing_amount = models.DecimalField("融资金额", max_digits=24, decimal_places=4, default=0)
-    financing_rate = models.DecimalField("融资利率", max_digits=8, decimal_places=4, default=Decimal("7"))
-    financing_days = models.PositiveIntegerField("融资天数", default=1)
     financing_interest = models.DecimalField("融资利息", max_digits=20, decimal_places=4, default=0)
     subscription_fee = models.DecimalField("手续费", max_digits=20, decimal_places=4, default=100)
     trade_status = models.CharField("新股状态", max_length=20, choices=STATUS_CHOICES, default=STATUS_APPLYING)
@@ -549,6 +546,38 @@ class HkIpoSubscriptionTrade(models.Model):
         )
 
     @property
+    def upfront_fees(self):
+        return sum(
+            (
+                self.subscription_fee or Decimal("0"),
+                self.allotment_fee or Decimal("0"),
+                self.financing_interest or Decimal("0"),
+            ),
+            Decimal("0"),
+        )
+
+    def upfront_fees_for_lots(self, lots):
+        allotted_lots = self.allotted_lots or 0
+        if not allotted_lots:
+            return Decimal("0")
+        return self.upfront_fees * Decimal(lots or 0) / Decimal(allotted_lots)
+
+    @property
+    def remaining_upfront_fees(self):
+        remaining_lots = max((self.allotted_lots or 0) - (self.sold_lots or 0), 0)
+        return self.upfront_fees_for_lots(remaining_lots)
+
+    @property
+    def break_even_price(self):
+        remaining_lots = max((self.allotted_lots or 0) - (self.sold_lots or 0), 0)
+        remaining_shares = remaining_lots * (self.listing.lot_size or 0)
+        if not remaining_shares:
+            return None
+        return (self.listing.final_price or Decimal("0")) + (
+            self.remaining_upfront_fees / Decimal(remaining_shares)
+        )
+
+    @property
     def holding_value(self):
         allotted_lots = self.allotted_lots or 0
         entry_fee = self.listing.entry_fee or (
@@ -566,14 +595,6 @@ class HkIpoSubscriptionTrade(models.Model):
 
         self.applied_shares = applied_lots * lot_size
         self.application_amount = Decimal(self.applied_shares) * final_price
-        self.financing_interest = (
-            (self.financing_amount or Decimal("0"))
-            * (self.financing_rate or Decimal("0"))
-            / Decimal("100")
-            / Decimal("365")
-            * Decimal(self.financing_days or 0)
-        )
-
         if allotted_lots is None:
             self.trade_status = self.STATUS_APPLYING
             self.allotted_value = Decimal("0")
@@ -596,9 +617,7 @@ class HkIpoSubscriptionTrade(models.Model):
             ((self.sell_price or Decimal("0")) - final_price)
             * Decimal(sold_lots)
             * Decimal(lot_size)
-            - (self.subscription_fee or Decimal("0"))
-            - (self.financing_interest or Decimal("0"))
-            - (self.allotment_fee or Decimal("0"))
+            - self.upfront_fees_for_lots(sold_lots)
             - (self.trading_fee or Decimal("0"))
         )
 

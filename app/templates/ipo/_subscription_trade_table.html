@@ -4,14 +4,19 @@
     <tr>
       <th>股票代码</th>
       <th>股票名称</th>
+      <th>每手股数</th>
       <th>家庭成员</th>
       <th>申购账户</th>
-      {% if not closed_mode %}
+      {% if not closed_mode and amount_column != "holding" %}
         <th>申购档位</th>
         <th>申购手数</th>
       {% endif %}
       <th>中签手数</th>
       {% if closed_mode %}<th>最终定价</th>{% endif %}
+      {% if amount_column == "holding" %}
+        <th>最终定价</th>
+        <th>盈亏平衡价格</th>
+      {% endif %}
       <th>卖出手数</th>
       {% if closed_mode %}<th>卖出金额</th>{% endif %}
       {% if amount_column == "holding" %}
@@ -19,9 +24,9 @@
       {% else %}
         <th>卖出日期</th>
       {% endif %}
-      {% if not closed_mode %}<th>申购方式</th>{% endif %}
+      {% if not closed_mode and amount_column != "holding" %}<th>申购方式</th>{% endif %}
       <th>{% if amount_column == "holding" %}持有货值{% else %}费用合计{% endif %}</th>
-      <th>盈利金额</th>
+      <th>{% if amount_column == "holding" %}剩余前期费用{% elif closed_mode %}本次卖出净损益{% else %}盈利金额{% endif %}</th>
       <th>状态</th>
       <th>操作</th>
     </tr>
@@ -32,15 +37,17 @@
         {% if closed_mode %}
           <td>{{ trade.ipo_trade.listing.stock_code }}</td>
           <td>{{ trade.ipo_trade.listing.stock_name|default:trade.ipo_trade.listing.company_name }}</td>
+          <td class="number">{{ trade.ipo_trade.listing.lot_size|lots }}</td>
           <td>{{ trade.ipo_trade.member }}</td>
           <td>{{ trade.ipo_trade.account.account_name|default:"-" }}</td>
         {% else %}
           <td>{{ trade.listing.stock_code }}</td>
           <td>{{ trade.listing.stock_name|default:trade.listing.company_name }}</td>
+          <td class="number">{{ trade.listing.lot_size|lots }}</td>
           <td>{{ trade.member }}</td>
           <td>{{ trade.account.account_name|default:"-" }}</td>
         {% endif %}
-        {% if not closed_mode %}
+        {% if not closed_mode and amount_column != "holding" %}
           <td>{{ trade.get_tranche_display }}</td>
           <td class="number">{{ trade.applied_lots|lots }}</td>
         {% endif %}
@@ -52,6 +59,10 @@
           <td>{{ trade.trade_date|date:"Y-m-d"|default:"-" }}</td>
         {% else %}
           <td class="number">{{ trade.allotted_lots|default:"-" }}</td>
+          {% if amount_column == "holding" %}
+            <td class="number">{{ trade.listing.final_price|money2 }}</td>
+            <td class="number">{{ trade.break_even_price|money2 }}</td>
+          {% endif %}
           <td class="number">{{ trade.sold_lots|lots }}</td>
           {% if amount_column == "holding" %}
             <td class="number">{{ trade.display_remaining_lots|default:"-" }}</td>
@@ -59,7 +70,7 @@
             <td>{{ trade.sell_date|date:"Y-m-d"|default:"-" }}</td>
           {% endif %}
         {% endif %}
-        {% if not closed_mode %}<td>{{ trade.get_application_method_display }}</td>{% endif %}
+        {% if not closed_mode and amount_column != "holding" %}<td>{{ trade.get_application_method_display }}</td>{% endif %}
         <td class="number">
           {% if amount_column == "holding" %}
             {% if trade.display_holding_value is not None %}
@@ -68,11 +79,13 @@
               {{ trade.holding_value|money2 }}
             {% endif %}
           {% else %}
-            {% if closed_mode %}{{ trade.fee|money2 }}{% else %}{{ trade.total_fees|money2 }}{% endif %}
+            {% if closed_mode %}{{ trade.display_total_fee|money2 }}{% else %}{{ trade.total_fees|money2 }}{% endif %}
           {% endif %}
         </td>
-        {% if closed_mode %}
-          <td class="number {% if trade.realized_pnl > 0 %}positive{% elif trade.realized_pnl < 0 %}negative{% endif %}">{{ trade.realized_pnl|money2 }}</td>
+        {% if amount_column == "holding" %}
+          <td class="number">{{ trade.display_remaining_upfront_fees|money2 }}</td>
+        {% elif closed_mode %}
+          <td class="number {% if trade.display_net_pnl > 0 %}positive{% elif trade.display_net_pnl < 0 %}negative{% endif %}">{{ trade.display_net_pnl|money2 }}</td>
         {% else %}
           <td class="number {% if trade.realized_profit > 0 %}positive{% elif trade.realized_profit < 0 %}negative{% endif %}">{{ trade.realized_profit|money2 }}</td>
         {% endif %}
@@ -108,7 +121,7 @@
                 <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_edit' trade.pk %}">编辑</a>
               {% elif trade.trade_status == "holding" %}
                 <a class="text-action action-sell" href="{% url 'ipo:subscription_trade_sale' trade.pk %}">卖出</a>
-                <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_allotment' trade.pk %}">编辑</a>
+                {% if not trade.sold_lots %}<a class="text-action action-edit" href="{% url 'ipo:subscription_trade_allotment' trade.pk %}">编辑</a>{% endif %}
               {% endif %}
             {% endif %}
           </span>
@@ -116,7 +129,7 @@
       </tr>
     {% empty %}
       <tr>
-        <td colspan="{% if closed_mode %}13{% else %}14{% endif %}">{{ empty_text|default:"暂无申购和交易记录。" }}</td>
+        <td colspan="{% if amount_column == 'fees' and not closed_mode %}15{% else %}13{% endif %}">{{ empty_text|default:"暂无申购和交易记录。" }}</td>
       </tr>
     {% endfor %}
   </tbody>

@@ -179,6 +179,18 @@ class HkIpoSubscriptionTradeForm(forms.ModelForm):
         self.fields["account"].queryset = account_queryset
         self.fields["account"].label_from_instance = lambda obj: f"{obj.member} - {obj.account_name}"
 
+        if self.instance.pk and (self.instance.sold_lots or 0) > 0:
+            for field_name in (
+                "listing",
+                "member",
+                "account",
+                "tranche",
+                "applied_lots",
+                "application_method",
+            ):
+                self.fields[field_name].disabled = True
+            self.fields["listing"].help_text = "已有卖出记录；如需修改账户、股票或申购结构，请先撤销卖出记录。"
+
     def clean_listing(self):
         value = self.cleaned_data["listing"].strip()
         normalized_code = value.upper().replace(" ", "")
@@ -223,9 +235,7 @@ class HkIpoSubscriptionTradeForm(forms.ModelForm):
             "tranche",
             "applied_lots",
             "application_method",
-            "financing_amount",
-            "financing_rate",
-            "financing_days",
+            "financing_interest",
             "subscription_fee",
             "remark",
         ]
@@ -240,6 +250,9 @@ class HkIpoAllotmentForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
+        if self.instance.pk and (self.instance.sold_lots or 0) > 0:
+            self.fields["allotted_lots"].disabled = True
+            self.fields["allotted_lots"].help_text = "已有卖出记录；如需修改中签手数，请先撤销卖出记录。"
 
 
 class HkIpoSaleForm(forms.Form):

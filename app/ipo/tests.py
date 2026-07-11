@@ -19,7 +19,7 @@ from family_core.models import AccountType, Family, FamilyMember
 from ledger.models import BankAccount
 from portfolio.models import InvestmentTransaction, TradeTypeChoices
 
-from .forms import HkIpoListingForm
+from .forms import HkIpoAllotmentForm, HkIpoListingForm, HkIpoSubscriptionTradeForm
 from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
 from .services import (
     IpoImageRecognitionError,
@@ -70,9 +70,7 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
             "application_date": date(2026, 6, 2),
             "applied_lots": 2,
             "subscription_fee": Decimal("100"),
-            "financing_amount": Decimal("10000"),
-            "financing_rate": Decimal("7.3"),
-            "financing_days": 5,
+            "financing_interest": Decimal("10"),
             "trading_fee": Decimal("10"),
         }
         defaults.update(kwargs)
@@ -86,7 +84,7 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
             sell_date=date(2026, 6, 9),
         )
 
-        expected_interest = Decimal("10000") * Decimal("7.3") / Decimal("100") / Decimal("365") * Decimal("5")
+        expected_interest = Decimal("10")
         self.assertEqual(trade.allotted_value, Decimal("2000"))
         self.assertEqual(trade.allotment_fee, Decimal("20.00"))
         self.assertEqual(trade.trading_fee, Decimal("10"))
@@ -108,6 +106,35 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
             + trade.trading_fee,
         )
         self.assertEqual(trade.holding_value, Decimal("2000"))
+        self.assertEqual(trade.remaining_upfront_fees, Decimal("65"))
+        self.assertEqual(trade.break_even_price, Decimal("10.65"))
+
+    def test_subscription_form_uses_manual_financing_interest(self):
+        form = HkIpoSubscriptionTradeForm()
+
+        self.assertIn("financing_interest", form.fields)
+        self.assertNotIn("financing_amount", form.fields)
+        self.assertNotIn("financing_rate", form.fields)
+        self.assertNotIn("financing_days", form.fields)
+
+    def test_structural_fields_are_locked_after_a_sale(self):
+        trade = self.make_trade(allotted_lots=2, sold_lots=1)
+
+        application_form = HkIpoSubscriptionTradeForm(instance=trade)
+        allotment_form = HkIpoAllotmentForm(instance=trade)
+
+        for field_name in (
+            "listing",
+            "member",
+            "account",
+            "tranche",
+            "applied_lots",
+            "application_method",
+        ):
+            self.assertTrue(application_form.fields[field_name].disabled)
+        self.assertFalse(application_form.fields["subscription_fee"].disabled)
+        self.assertFalse(application_form.fields["financing_interest"].disabled)
+        self.assertTrue(allotment_form.fields["allotted_lots"].disabled)
 
     def test_status_changes_from_applying_to_holding_to_closed(self):
         applying = self.make_trade(allotted_lots=None)
@@ -208,6 +235,29 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
             trade_type=TradeTypeChoices.SELL,
             ipo_subscription_trade=trade,
         )
+        self.assertEqual(sale.fee, Decimal("10"))
+
+        list_response = self.client.get(
+            reverse("ipo:subscription_trade_list"),
+            {"year": "2026"},
+        )
+        self.assertContains(
+            list_response,
+            reverse("ipo:subscription_trade_sale_cancel", args=[trade.pk, sale.pk]),
+        )
+
+        detail_response = self.client.get(
+            reverse("ipo:subscription_trade_detail", args=[trade.pk])
+        )
+        displayed_sale = detail_response.context["sale_transactions"][0]
+        self.assertEqual(displayed_sale.display_gross_pnl, Decimal("200"))
+        self.assertEqual(displayed_sale.display_upfront_fee, Decimal("65"))
+        self.assertEqual(displayed_sale.display_total_fee, Decimal("75"))
+        self.assertEqual(displayed_sale.display_net_pnl, Decimal("125"))
+        self.assertNotContains(
+            detail_response,
+            reverse("ipo:subscription_trade_allotment", args=[trade.pk]),
+        )
 
         response = self.client.post(
             reverse("ipo:subscription_trade_sale_cancel", args=[trade.pk, sale.pk]),
@@ -233,6 +283,8 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
         trade.trade_date = trade.sell_date
         trade.fee = trade.trading_fee
         trade.realized_pnl = trade.realized_profit
+        trade.display_total_fee = trade.total_fees
+        trade.display_net_pnl = trade.realized_profit
         trade.legacy_sale_row = True
 
         html = render_to_string(

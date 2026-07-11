@@ -96,7 +96,25 @@ def decorate_ipo_rows(trades, *, holding=False):
                 trade.listing.entry_fee
                 or (trade.listing.final_price or Decimal("0")) * (trade.listing.lot_size or 0)
             )
+            trade.display_remaining_upfront_fees = trade.remaining_upfront_fees
     return trades
+
+
+def decorate_ipo_sale(transaction, ipo_trade):
+    sold_lots = (
+        transaction.quantity / (ipo_trade.listing.lot_size or 1)
+        if transaction.quantity
+        else Decimal("0")
+    )
+    transaction.display_sold_lots = sold_lots
+    transaction.display_gross_pnl = (
+        (transaction.price - (ipo_trade.listing.final_price or Decimal("0")))
+        * transaction.quantity
+    )
+    transaction.display_upfront_fee = ipo_trade.upfront_fees_for_lots(sold_lots)
+    transaction.display_total_fee = transaction.display_upfront_fee + (transaction.fee or Decimal("0"))
+    transaction.display_net_pnl = transaction.display_gross_pnl - transaction.display_total_fee
+    return transaction
 
 
 def ipo_sale_transactions(ipo_trade_ids):
@@ -726,15 +744,11 @@ def subscription_trade_list(request):
     ipo_trade_map = {trade.pk: trade for trade in filtered_closed_trades}
     closed_rows = []
     for transaction in ipo_sale_transactions(ipo_trade_map):
-        ipo_trade = ipo_trade_map.get(transaction.extra_data.get("ipo_subscription_trade_id"))
+        ipo_trade = ipo_trade_map.get(transaction.ipo_subscription_trade_id)
         if not ipo_trade:
             continue
         transaction.ipo_trade = ipo_trade
-        transaction.display_sold_lots = (
-            transaction.quantity / (ipo_trade.listing.lot_size or 1)
-            if transaction.quantity
-            else 0
-        )
+        decorate_ipo_sale(transaction, ipo_trade)
         transaction.display_status_label = (
             "部分卖出"
             if ipo_trade.trade_status == HkIpoSubscriptionTrade.STATUS_HOLDING
@@ -759,6 +773,14 @@ def subscription_trade_list(request):
         trade.trade_date = trade.sell_date or trade.listing.allotment_result_date
         trade.fee = trade.trading_fee
         trade.realized_pnl = trade.realized_profit
+        trade.display_gross_pnl = (
+            ((trade.sell_price or Decimal("0")) - (trade.listing.final_price or Decimal("0")))
+            * Decimal(trade.sold_lots or 0)
+            * Decimal(trade.listing.lot_size or 0)
+        )
+        trade.display_upfront_fee = trade.upfront_fees_for_lots(trade.sold_lots)
+        trade.display_total_fee = trade.display_upfront_fee + (trade.trading_fee or Decimal("0"))
+        trade.display_net_pnl = trade.display_gross_pnl - trade.display_total_fee
         trade.legacy_sale_row = True
         trade.display_status_label = (
             "未中签"
@@ -897,15 +919,15 @@ def subscription_trade_detail(request, pk):
     sale_transactions = ipo_sale_transactions([trade.pk])
     trade.display_remaining_lots = max((trade.allotted_lots or 0) - (trade.sold_lots or 0), 0)
     for transaction in sale_transactions:
-        transaction.display_sold_lots = (
-            transaction.quantity / (trade.listing.lot_size or 1)
-            if transaction.quantity
-            else 0
-        )
+        decorate_ipo_sale(transaction, trade)
     return render(
         request,
         "ipo/subscription_trade_detail.html",
-        {"trade": trade, "sale_transactions": sale_transactions},
+        {
+            "trade": trade,
+            "sale_transactions": sale_transactions,
+            "has_sale_transactions": bool(sale_transactions) or (trade.sold_lots or 0) > 0,
+        },
     )
 
 

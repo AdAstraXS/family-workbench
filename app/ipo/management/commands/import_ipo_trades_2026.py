@@ -242,7 +242,6 @@ class Command(BaseCommand):
             application_date = listing.subscription_end_date or listing.listing_date
 
         applied_lots = self.parse_applied_lots(application, allotted_lots)
-        financing_amount = self.parse_financing_amount(application)
         application_method = (
             HkIpoSubscriptionTrade.METHOD_CASH
             if "现金" in application
@@ -263,9 +262,7 @@ class Command(BaseCommand):
             "tranche": self.parse_tranche(application),
             "applied_lots": applied_lots,
             "application_method": application_method,
-            "financing_amount": financing_amount,
-            "financing_rate": Decimal("0"),
-            "financing_days": 0,
+            "financing_interest": Decimal("0"),
             "subscription_fee": subscription_fee,
             "allotted_lots": allotted_lots,
             "sell_price": sell_price,
@@ -290,12 +287,6 @@ class Command(BaseCommand):
         if match:
             return max(int(match.group(1)), allotted_lots, 1)
         return max(allotted_lots, 1)
-
-    def parse_financing_amount(self, application):
-        match = re.search(r"(\d+(?:\.\d+)?)\s*万", application)
-        if not match:
-            return Decimal("0")
-        return (Decimal(match.group(1)) * Decimal("10000")).quantize(MONEY_STEP)
 
     def parse_tranche(self, application):
         if "乙4" in application or "大乙" in application:

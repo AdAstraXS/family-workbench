@@ -12,7 +12,7 @@
 <section class="quick-actions">
   <a class="button ghost" href="{% url 'ipo:subscription_trade_list' %}">返回申购和交易</a>
   <a class="button ghost" href="{% url 'ipo:subscription_trade_edit' trade.pk %}">编辑申购情况</a>
-  <a class="button ghost" href="{% url 'ipo:subscription_trade_allotment' trade.pk %}">编辑中签情况</a>
+  {% if not has_sale_transactions %}<a class="button ghost" href="{% url 'ipo:subscription_trade_allotment' trade.pk %}">编辑中签情况</a>{% endif %}
   {% if trade.trade_status == "holding" %}
     <a class="button" href="{% url 'ipo:subscription_trade_sale' trade.pk %}">录入卖出</a>
   {% endif %}
@@ -30,6 +30,8 @@
       <dt>申购档位</dt><dd>{{ trade.get_tranche_display }}</dd>
       <dt>申购手数</dt><dd>{{ trade.applied_lots|lots }}</dd>
       <dt>申购方式</dt><dd>{{ trade.get_application_method_display }}</dd>
+      <dt>手续费</dt><dd>{{ trade.subscription_fee|money2 }}</dd>
+      <dt>融资利息</dt><dd>{{ trade.financing_interest|money2 }}</dd>
     </dl>
   </div>
   <div class="panel">
@@ -38,6 +40,7 @@
       <dt>最终定价</dt><dd>{{ trade.listing.final_price|money2 }}</dd>
       <dt>每手股数</dt><dd>{{ trade.listing.lot_size|lots }}</dd>
       <dt>中签手数</dt><dd>{{ trade.allotted_lots|default:"-" }}</dd>
+      <dt>中签费</dt><dd>{{ trade.allotment_fee|money2 }}</dd>
       <dt>已卖出手数</dt><dd>{{ trade.sold_lots|lots }}</dd>
       <dt>剩余手数</dt><dd>{{ trade.display_remaining_lots|lots }}</dd>
       <dt>状态</dt><dd><span class="ipo-chip trade-{{ trade.trade_status }}">{{ trade.get_trade_status_display }}</span></dd>
@@ -56,8 +59,11 @@
           <th>卖出手数</th>
           <th>卖出价格</th>
           <th>成交金额</th>
+          <th>不计费用损益金额</th>
+          <th>前期费用</th>
           <th>交易费用</th>
-          <th>本次卖出损益</th>
+          <th>总费用</th>
+          <th>本次卖出净损益</th>
           <th>操作</th>
         </tr>
       </thead>
@@ -68,8 +74,11 @@
             <td class="number">{{ sale.display_sold_lots|lots }}</td>
             <td class="number">{{ sale.price|money2 }}</td>
             <td class="number">{{ sale.amount|money2 }}</td>
+            <td class="number">{{ sale.display_gross_pnl|money2 }}</td>
+            <td class="number">{{ sale.display_upfront_fee|money2 }}</td>
             <td class="number">{{ sale.fee|money2 }}</td>
-            <td class="number {% if sale.realized_pnl > 0 %}positive{% elif sale.realized_pnl < 0 %}negative{% endif %}">{{ sale.realized_pnl|money2 }}</td>
+            <td class="number">{{ sale.display_total_fee|money2 }}</td>
+            <td class="number {% if sale.display_net_pnl > 0 %}positive{% elif sale.display_net_pnl < 0 %}negative{% endif %}">{{ sale.display_net_pnl|money2 }}</td>
             <td>
               <span class="row-actions">
                 <a class="text-action action-edit" href="{% url 'ipo:subscription_trade_sale_edit' trade.pk sale.pk %}">编辑</a>
@@ -82,7 +91,7 @@
             </td>
           </tr>
         {% empty %}
-          <tr><td colspan="7">暂无卖出交易。</td></tr>
+          <tr><td colspan="10">暂无卖出交易。</td></tr>
         {% endfor %}
       </tbody>
     </table>
