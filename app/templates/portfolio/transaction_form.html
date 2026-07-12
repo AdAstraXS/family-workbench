@@ -45,7 +45,7 @@
       const selected = security.options[security.selectedIndex];
       const multiplier = Number(selected?.dataset.multiplier || 1);
       const value = Number(quantity.value || 0) * Number(price.value || 0) * multiplier;
-      amount.value = value ? value.toFixed(4) : "0";
+      amount.value = value ? value.toFixed(2) : "0.00";
     };
     const updatePositionEffect = () => {
       const selected = security.options[security.selectedIndex];

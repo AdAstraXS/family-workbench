@@ -254,6 +254,43 @@ class TransactionFormTests(TestCase):
         self.assertEqual(transaction.account.bank_account, bank_account)
         self.assertEqual(transaction.currency, "HKD")
 
+        response = self.client.post(
+            reverse("portfolio:transaction_create"),
+            {
+                "family": family.pk,
+                "member": member.pk,
+                "bank_account": bank_account.pk,
+                "security": security.pk,
+                "trade_date": "2026-07-06",
+                "trade_type_option": buy_option.pk,
+                "currency": "",
+                "quantity": "1.123456",
+                "price": "2.123456",
+                "amount": "2.38",
+                "fee": "0.10",
+                "tax": "0",
+                "trade_logic": "",
+                "information_source_option": "",
+                "strategy_option": "",
+                "strategy_other": "",
+                "emotion_option": "",
+                "exit_condition": "",
+                "remark": "精度测试",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        precise = InvestmentTransaction.objects.get(remark="精度测试")
+        self.assertEqual(
+            precise.amount,
+            (Decimal("1.123456") * Decimal("2.123456")).quantize(Decimal("0.01")),
+        )
+        edit_page = self.client.get(
+            reverse("portfolio:transaction_edit", args=[precise.pk])
+        )
+        self.assertIn('value="2.39"', str(edit_page.context["form"]["amount"]))
+        self.assertIn('value="2.123456"', str(edit_page.context["form"]["price"]))
+        self.assertIn('value="1.123456"', str(edit_page.context["form"]["quantity"]))
+
     def test_option_contract_form_keeps_option_distinct_from_underlying(self):
         user = get_user_model().objects.create_user(username="option-form-tester")
         family = Family.objects.create(name="期权家庭")

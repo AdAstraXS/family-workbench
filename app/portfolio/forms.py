@@ -1,7 +1,10 @@
+from decimal import Decimal, ROUND_HALF_UP
+
 from django import forms
 from django.db.models import Q
 
 from family_core.models import AssetCategory, Currency, Family, FamilyMember
+from family_core.form_widgets import apply_decimal_widgets
 from ledger.models import BankAccount
 
 from .account_sync import sync_investment_account
@@ -23,6 +26,11 @@ from .models import (
 
 class BaseModelForm(forms.ModelForm):
     date_fields = ()
+    money_fields = {
+        "amount", "fee", "tax", "cash_change", "sell_cost", "realized_pnl",
+        "market_value", "unrealized_pnl", "total_cash", "total_market_value",
+        "total_asset", "total_cost", "total_pnl",
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -33,6 +41,7 @@ class BaseModelForm(forms.ModelForm):
                     attrs={"class": "form-control", "type": "date"},
                     format="%Y-%m-%d",
                 )
+        apply_decimal_widgets(self, money_fields=self.money_fields)
 
 
 class InvestmentAccountForm(BaseModelForm):
@@ -115,6 +124,7 @@ class OptionContractForm(forms.Form):
         self.fields["currency"].choices = [
             (item.code, str(item)) for item in Currency.objects.filter(is_active=True)
         ]
+        apply_decimal_widgets(self)
 
     def clean_contract_symbol(self):
         symbol = self.cleaned_data["contract_symbol"].strip().upper()
@@ -218,6 +228,7 @@ class BondForm(forms.Form):
         self.fields["currency"].choices = [
             (item.code, str(item)) for item in Currency.objects.filter(is_active=True)
         ]
+        apply_decimal_widgets(self)
 
     def clean(self):
         cleaned = super().clean()
@@ -479,8 +490,18 @@ class InvestmentTransactionForm(BaseModelForm):
         else:
             cleaned_data["position_effect"] = ""
         if cleaned_data.get("quantity") and cleaned_data.get("price"):
-            multiplier = security.contract_multiplier if security else 1
-            cleaned_data["amount"] = cleaned_data["quantity"] * cleaned_data["price"] * multiplier
+            amount = (
+                security.market_value_for(
+                    cleaned_data["quantity"],
+                    cleaned_data["price"],
+                    include_accrued=False,
+                )
+                if security
+                else cleaned_data["quantity"] * cleaned_data["price"]
+            )
+            cleaned_data["amount"] = amount.quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
         strategy = cleaned_data.get("strategy_option")
         if strategy and strategy.code == "other" and not cleaned_data.get("strategy_other"):
             self.add_error("strategy_other", "选择“其他”时请填写具体交易策略。")

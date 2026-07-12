@@ -862,8 +862,8 @@ class AssetSnapshotWorkspaceTests(TestCase):
         )
         entry_form = AssetBalanceEntryForm(instance=entry)
 
-        self.assertIn('value="7.12"', str(snapshot_form["usd_to_base"]))
-        self.assertIn('value="0.91"', str(snapshot_form["hkd_to_base"]))
+        self.assertIn('value="7.12345678"', str(snapshot_form["usd_to_base"]))
+        self.assertIn('value="0.91234567"', str(snapshot_form["hkd_to_base"]))
         self.assertIn('value="123.46"', str(entry_form["original_amount"]))
 
     def test_save_draft_and_persist_manual_row_order(self):

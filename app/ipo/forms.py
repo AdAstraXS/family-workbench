@@ -1,6 +1,7 @@
 from django import forms
 
 from family_core.models import FamilyMember
+from family_core.form_widgets import apply_decimal_widgets
 from ledger.models import BankAccount
 
 from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
@@ -85,6 +86,7 @@ class HkIpoListingForm(forms.ModelForm):
                 )
             if field_name in self.textarea_fields:
                 field.widget.attrs.update({"rows": 3})
+        apply_decimal_widgets(self)
 
         self.fields["final_price"].help_text = "留空时保存会默认按招股价上限计算。"
         self.grouped_fields = [
@@ -164,6 +166,10 @@ class HkIpoSubscriptionTradeForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         for field_name, field in self.fields.items():
             field.widget.attrs.setdefault("class", "form-control")
+        apply_decimal_widgets(
+            self,
+            money_fields={"financing_interest", "subscription_fee"},
+        )
 
         if self.instance.pk:
             self.initial["listing"] = self.instance.stock_display if hasattr(self.instance, "stock_display") else (
@@ -250,6 +256,7 @@ class HkIpoAllotmentForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
+        apply_decimal_widgets(self)
         if self.instance.pk and (self.instance.sold_lots or 0) > 0:
             self.fields["allotted_lots"].disabled = True
             self.fields["allotted_lots"].help_text = "已有卖出记录；如需修改中签手数，请先撤销卖出记录。"
@@ -274,6 +281,7 @@ class HkIpoSaleForm(forms.Form):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
+        apply_decimal_widgets(self, money_fields={"trading_fee"})
 
     def clean_sold_lots(self):
         sold_lots = self.cleaned_data["sold_lots"]

@@ -1,6 +1,6 @@
 import calendar
 from datetime import datetime, time
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from django import forms
 from django.forms import inlineformset_factory
@@ -19,20 +19,15 @@ from .models import (
 )
 from family_core.models import Family, FamilyMember
 from family_core.household import get_household_family
-
-
-class TwoDecimalNumberInput(forms.NumberInput):
-    def format_value(self, value):
-        if value in (None, ""):
-            return ""
-        try:
-            return f"{Decimal(str(value)):.2f}"
-        except (InvalidOperation, TypeError, ValueError):
-            return value
+from family_core.form_widgets import apply_decimal_widgets
 
 
 class BaseModelForm(forms.ModelForm):
     date_fields = ()
+    money_fields = {
+        "amount", "balance", "annual_amount", "original_amount", "base_amount",
+        "total_amount", "total_income", "total_expense", "net_cashflow",
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -43,10 +38,7 @@ class BaseModelForm(forms.ModelForm):
                     attrs={"class": "form-control", "type": "date"},
                     format="%Y-%m-%d",
                 )
-            elif isinstance(field, forms.DecimalField):
-                attrs = dict(field.widget.attrs)
-                attrs.update({"class": "form-control", "step": "0.01"})
-                field.widget = TwoDecimalNumberInput(attrs=attrs)
+        apply_decimal_widgets(self, money_fields=self.money_fields)
 
 
 class BankAccountForm(BaseModelForm):
