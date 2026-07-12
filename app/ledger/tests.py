@@ -641,8 +641,12 @@ class AssetSnapshotImportTests(TestCase):
         self.broker_type = AccountType.objects.create(family=self.family, name="券商")
         self.domestic = AccountRegion.objects.create(family=self.family, name="境内")
         self.overseas = AccountRegion.objects.create(family=self.family, name="境外")
-        self.cash = AssetCategory.objects.create(family=self.family, name="现金")
-        self.fund = AssetCategory.objects.create(family=self.family, name="股指基金")
+        self.cash = AssetCategory.objects.create(
+            family=self.family, name="现金及现金等价物", code="cash"
+        )
+        self.fund = AssetCategory.objects.create(
+            family=self.family, name="基金类", code="fund"
+        )
         self.current_account = BankAccount.objects.create(
             family=self.family,
             member=self.me,

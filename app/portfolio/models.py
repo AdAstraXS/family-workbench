@@ -208,6 +208,28 @@ class Security(TimestampedModel):
     def __str__(self):
         return f"{self.symbol} {self.name}"
 
+    @classmethod
+    def default_asset_category(cls, family, asset_type):
+        code = {
+            cls.TYPE_STOCK: "equity",
+            cls.TYPE_ETF: "fund",
+            cls.TYPE_BOND: "fixed_income",
+            cls.TYPE_OPTION: "derivatives",
+            cls.TYPE_FUND: "fund",
+            cls.TYPE_OTHER: "alternatives",
+        }.get(asset_type)
+        if not code:
+            return None
+        return (
+            AssetCategory.objects.filter(
+                Q(family=family) | Q(family__isnull=True),
+                code=code,
+                is_active=True,
+            )
+            .order_by("-family_id", "display_order", "pk")
+            .first()
+        )
+
     @property
     def futu_url(self):
         suffix = self.exchange or self.market

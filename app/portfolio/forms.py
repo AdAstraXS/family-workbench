@@ -62,16 +62,33 @@ class SecurityForm(BaseModelForm):
         ]
 
     def __init__(self, *args, **kwargs):
+        self.family = kwargs.pop("family", None)
         super().__init__(*args, **kwargs)
+        self.fields["asset_type"].label = "金融工具类型"
+        self.fields["asset_category"].label = "资产配置类别"
         self.fields["currency"].widget = forms.Select(
             choices=[(item.code, str(item)) for item in Currency.objects.filter(is_active=True)]
         )
+        self.fields["asset_category"].queryset = AssetCategory.objects.filter(
+            Q(family=self.family) | Q(family=None), is_active=True
+        ).order_by("display_order", "name")
 
     def clean_asset_type(self):
         asset_type = self.cleaned_data["asset_type"]
         if asset_type == Security.TYPE_OPTION:
             raise forms.ValidationError("期权请使用“新增期权合约”页面录入，避免与正股合并。")
         return asset_type
+
+    def save(self, commit=True):
+        security = super().save(commit=False)
+        if not security.asset_category_id:
+            security.asset_category = Security.default_asset_category(
+                self.family, security.asset_type
+            )
+        if commit:
+            security.save()
+            self.save_m2m()
+        return security
 
 
 class OptionContractForm(forms.Form):
@@ -86,9 +103,6 @@ class OptionContractForm(forms.Form):
     multiplier = forms.IntegerField(label="合约乘数", min_value=1, initial=100)
     market = forms.CharField(label="市场", max_length=20, initial="US")
     currency = forms.ChoiceField(label="交易币种")
-    asset_category = forms.ModelChoiceField(
-        label="一级资产类别", queryset=AssetCategory.objects.none(), required=False
-    )
 
     def __init__(self, *args, family=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -101,9 +115,6 @@ class OptionContractForm(forms.Form):
         self.fields["currency"].choices = [
             (item.code, str(item)) for item in Currency.objects.filter(is_active=True)
         ]
-        self.fields["asset_category"].queryset = AssetCategory.objects.filter(
-            Q(family=family) | Q(family=None), is_active=True
-        ).order_by("display_order", "name")
 
     def clean_contract_symbol(self):
         symbol = self.cleaned_data["contract_symbol"].strip().upper()
@@ -123,7 +134,9 @@ class OptionContractForm(forms.Form):
     def save(self, member):
         underlying = self.cleaned_data["underlying"]
         security = Security.objects.create(
-            asset_category=self.cleaned_data.get("asset_category") or underlying.asset_category,
+            asset_category=Security.default_asset_category(
+                member.family, Security.TYPE_OPTION
+            ),
             symbol=self.cleaned_data["contract_symbol"],
             name=(
                 f"{underlying.name} {self.cleaned_data['expiration_date']} "
@@ -152,9 +165,6 @@ class OptionContractForm(forms.Form):
 
 
 class BondForm(forms.Form):
-    asset_category = forms.ModelChoiceField(
-        label="一级资产类别", queryset=AssetCategory.objects.none(), required=False
-    )
     symbol = forms.CharField(label="债券代码", max_length=30)
     name = forms.CharField(label="债券名称", max_length=200)
     market = forms.CharField(label="市场", max_length=20, initial="US")
@@ -185,7 +195,6 @@ class BondForm(forms.Form):
             bond = instance.bond_detail
             quote = getattr(instance, "market_snapshot", None)
             kwargs["initial"] = {
-                "asset_category": instance.asset_category,
                 "symbol": instance.symbol,
                 "name": instance.name,
                 "market": instance.market,
@@ -209,9 +218,6 @@ class BondForm(forms.Form):
         self.fields["currency"].choices = [
             (item.code, str(item)) for item in Currency.objects.filter(is_active=True)
         ]
-        self.fields["asset_category"].queryset = AssetCategory.objects.filter(
-            Q(family=family) | Q(family=None), is_active=True
-        ).order_by("display_order", "name")
 
     def clean(self):
         cleaned = super().clean()
@@ -226,7 +232,9 @@ class BondForm(forms.Form):
 
     def save(self, member):
         security = self.instance or Security()
-        security.asset_category = self.cleaned_data.get("asset_category")
+        security.asset_category = Security.default_asset_category(
+            member.family, Security.TYPE_BOND
+        )
         security.symbol = self.cleaned_data["symbol"].strip().upper()
         security.name = self.cleaned_data["name"].strip()
         security.market = self.cleaned_data["market"].strip().upper()

@@ -173,12 +173,33 @@ class AccountType(BaseLookup):
 
 
 class AssetCategory(BaseLookup):
+    code = models.SlugField("稳定代码", max_length=50, blank=True)
+
     class Meta(BaseLookup.Meta):
         verbose_name = "资产类别"
         verbose_name_plural = "资产类别"
         constraints = [
             models.UniqueConstraint(fields=["family", "name"], name="unique_asset_category_per_family"),
+            models.UniqueConstraint(fields=["family", "code"], name="unique_asset_category_code_per_family"),
         ]
+
+    def save(self, *args, **kwargs):
+        if not self.code:
+            known_codes = {
+                "现金及现金等价物": "cash",
+                "权益类": "equity",
+                "固定收益类": "fixed_income",
+                "基金类": "fund",
+                "衍生品": "derivatives",
+                "商品类": "commodities",
+                "另类投资": "alternatives",
+            }
+            self.code = (
+                known_codes.get(self.name)
+                or slugify(self.name)
+                or f"asset-category-{uuid.uuid4().hex[:12]}"
+            )
+        super().save(*args, **kwargs)
 
 
 class AccountRegion(BaseLookup):

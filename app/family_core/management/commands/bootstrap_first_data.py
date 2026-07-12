@@ -97,11 +97,20 @@ class Command(BaseCommand):
                 defaults={"display_order": order},
             )
 
-        for order, name in enumerate(["现金", "基金", "股票", "债券", "黄金", "低风险理财", "虚拟货币"], start=1):
+        categories = [
+            ("cash", "现金及现金等价物"),
+            ("equity", "权益类"),
+            ("fixed_income", "固定收益类"),
+            ("fund", "基金类"),
+            ("derivatives", "衍生品"),
+            ("commodities", "商品类"),
+            ("alternatives", "另类投资"),
+        ]
+        for order, (code, name) in enumerate(categories, start=1):
             AssetCategory.objects.get_or_create(
                 family=family,
-                name=name,
-                defaults={"display_order": order},
+                code=code,
+                defaults={"name": name, "display_order": order},
             )
 
         account_regions = {}

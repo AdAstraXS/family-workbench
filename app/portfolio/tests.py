@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 from family_core.models import (
     AccountRegion,
     AccountType,
+    AssetCategory,
     Currency,
     ExchangeRate,
     Family,
@@ -260,6 +261,9 @@ class TransactionFormTests(TestCase):
         Currency.objects.update_or_create(
             code="USD", defaults={"name": "美元", "symbol": "$", "is_active": True}
         )
+        derivative_category = AssetCategory.objects.create(
+            family=family, name="衍生品", code="derivatives"
+        )
         underlying = Security.objects.create(
             symbol="MSFT",
             name="微软",
@@ -293,6 +297,8 @@ class TransactionFormTests(TestCase):
         contract = OptionContract.objects.get()
         self.assertEqual(contract.security.symbol, "MSFT260717P00300000")
         self.assertEqual(contract.underlying, underlying)
+        self.assertEqual(contract.security.asset_category, derivative_category)
+        self.assertNotContains(page, "资产配置类别")
         self.assertTrue(
             WatchlistItem.objects.filter(family=family, security=contract.security).exists()
         )
@@ -756,6 +762,9 @@ class PortfolioOverviewTests(TestCase):
 
     def test_manual_bond_uses_clean_price_plus_accrued_interest(self):
         Currency.objects.get_or_create(code="CNY", defaults={"name": "人民币"})
+        fixed_income = AssetCategory.objects.create(
+            family=self.account.family, name="固定收益类", code="fixed_income"
+        )
         response = self.client.post(
             reverse("portfolio:bond_create"),
             {
@@ -792,11 +801,12 @@ class PortfolioOverviewTests(TestCase):
         overview = self.client.get(reverse("portfolio:overview"))
         position = next(
             item for item in overview.context["asset_groups"]
-            if item["name"] == "债券"
+            if item["name"] == "固定收益类"
         )
 
         self.assertEqual(position["amount"], Decimal("995"))
         self.assertEqual(bond.bond_detail.accrued_interest, Decimal("1.5"))
+        self.assertEqual(bond.asset_category, fixed_income)
 
     def test_account_page_converts_hkd_to_usd_through_cny_rates(self):
         response = self.client.get(reverse("portfolio:account_list"), {"currency": "USD"})

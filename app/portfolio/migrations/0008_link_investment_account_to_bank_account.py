@@ -23,7 +23,7 @@ def link_existing_accounts(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("ledger", "0001_initial"),
+        ("ledger", "0003_alter_assetbalanceentry_options_and_more"),
         ("portfolio", "0007_backfill_security_account_type"),
     ]
 

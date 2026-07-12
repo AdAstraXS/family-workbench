@@ -47,7 +47,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("family_core", "0002_accountregion_accounttype_assetcategory"),
-        ("ledger", "0001_initial"),
+        ("ledger", "0003_alter_assetbalanceentry_options_and_more"),
         ("portfolio", "0008_link_investment_account_to_bank_account"),
     ]
 

@@ -56,9 +56,9 @@ class AccountTypeAdmin(admin.ModelAdmin):
 
 @admin.register(AssetCategory)
 class AssetCategoryAdmin(admin.ModelAdmin):
-    list_display = ("name", "family", "display_order", "is_active")
+    list_display = ("name", "code", "family", "display_order", "is_active")
     list_filter = ("family", "is_active")
-    search_fields = ("name", "remark")
+    search_fields = ("name", "code", "remark")
 
 
 @admin.register(AccountRegion)

@@ -1066,6 +1066,10 @@ def watchlist_add(request):
     security.name = data["name"]
     security.exchange = data["exchange"]
     security.asset_type = data["asset_type"]
+    if not security.asset_category_id:
+        security.asset_category = Security.default_asset_category(
+            member.family, security.asset_type
+        )
     security.currency = data["currency"]
     security.lot_size = int(data.get("lot_size") or 0)
     security.listing_date = parse_date(data.get("listing_date") or "")
@@ -1112,13 +1116,36 @@ def watchlist_add(request):
 
 @login_required
 def security_create(request):
-    return save_form(request, SecurityForm, "portfolio/security_form.html", "portfolio:security_list", "新增证券标的")
+    return _security_form(request)
 
 
 @login_required
 def security_edit(request, pk):
     security = get_object_or_404(Security, pk=pk)
-    return save_form(request, SecurityForm, "portfolio/security_form.html", "portfolio:security_list", "编辑证券标的", security)
+    return _security_form(request, security)
+
+
+def _security_form(request, security=None):
+    member = FamilyMember.objects.filter(
+        user=request.user, is_active=True
+    ).select_related("family").first()
+    if not member:
+        messages.error(request, "当前登录用户尚未关联家庭成员。")
+        return redirect("portfolio:security_list")
+    form = SecurityForm(
+        request.POST or None,
+        instance=security,
+        family=member.family,
+    )
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, "证券标的已保存。")
+        return redirect("portfolio:security_list")
+    return render(
+        request,
+        "portfolio/security_form.html",
+        {"form": form, "title": "编辑证券标的" if security else "新增证券标的"},
+    )
 
 
 @login_required

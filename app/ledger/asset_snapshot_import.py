@@ -214,6 +214,29 @@ def _lookup_objects(family):
     account_types = {item.name: item for item in AccountType.objects.filter(family=family)}
     regions = {item.name: item for item in AccountRegion.objects.filter(family=family)}
     categories = {item.name: item for item in AssetCategory.objects.filter(family=family)}
+    categories_by_code = {
+        item.code: item
+        for item in AssetCategory.objects.filter(family=family, is_active=True)
+        if item.code
+    }
+    legacy_category_aliases = {
+        "现金": "cash",
+        "打新-现金": "cash",
+        "股票": "equity",
+        "债券": "fixed_income",
+        "美债": "fixed_income",
+        "低风险理财": "fixed_income",
+        "基金": "fund",
+        "指数基金": "fund",
+        "股指基金": "fund",
+        "期权": "derivatives",
+        "黄金": "commodities",
+        "虚拟货币": "alternatives",
+        "套利": "alternatives",
+    }
+    for old_name, code in legacy_category_aliases.items():
+        if code in categories_by_code:
+            categories.setdefault(old_name, categories_by_code[code])
     accounts = {
         (account.member.display_name, account.account_name): account
         for account in BankAccount.objects.filter(family=family).select_related("member")

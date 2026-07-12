@@ -37,7 +37,7 @@ def _stock_category(family):
     return (
         AssetCategory.objects.filter(
             Q(family=family) | Q(family__isnull=True),
-            name__icontains="股票",
+            code="equity",
             is_active=True,
         )
         .order_by("-family_id", "display_order", "pk")
