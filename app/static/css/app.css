@@ -1165,7 +1165,7 @@ button {
   padding: 10px 12px;
 }
 
-.asset-mini-card strong { font-size: 17px; }
+.asset-mini-card strong { font-size: 24px; }
 .asset-mini-1 { background: #fff7ed; }
 .asset-mini-2 { background: #eff6ff; }
 .asset-mini-3 { background: #f5f3ff; }
@@ -3011,7 +3011,7 @@ textarea {
 .currency-totals { display: flex; gap: 2rem; margin-bottom: .8rem; }
 .currency-totals span, .currency-totals strong { display: block; }
 .currency-position-list { padding: 12px 14px; border-left: 5px solid #64748b; background: #f8fafc; }
-.currency-position-row { display: grid; grid-template-columns: minmax(90px, 1fr) auto auto auto; gap: 8px; align-items: baseline; padding: 5px 0; color: #334155; }
+.currency-position-row { display: grid; grid-template-columns: minmax(72px, .72fr) auto auto auto; gap: 8px; align-items: baseline; padding: 5px 0; color: #334155; }
 .currency-position-row > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .currency-hk .currency-position-list { border-left-color: #ad4e00; background: #fff1e8; }
 .currency-us .currency-position-list { border-left-color: #0969a8; background: #e8f4ff; }
@@ -4006,9 +4006,15 @@ textarea {
 
 .currency-position-row .position-name {
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .currency-position-row > :not(.position-name) {
   text-align: right;
   font-weight: 400;
 }
+
+.account-pnl-card strong.positive { color: var(--profit-color); }
+.account-pnl-card strong.negative { color: var(--loss-color); }
