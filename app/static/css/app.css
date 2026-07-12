@@ -3011,7 +3011,7 @@ textarea {
 .currency-totals { display: flex; gap: 2rem; margin-bottom: .8rem; }
 .currency-totals span, .currency-totals strong { display: block; }
 .currency-position-list { padding: 12px 14px; border-left: 5px solid #64748b; background: #f8fafc; }
-.currency-position-row { display: grid; grid-template-columns: minmax(72px, .72fr) auto auto auto; gap: 8px; align-items: baseline; padding: 5px 0; color: #334155; }
+.currency-position-row { display: grid; grid-template-columns: 74px auto auto auto; gap: 8px; align-items: baseline; padding: 5px 0; color: #334155; }
 .currency-position-row > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .currency-hk .currency-position-list { border-left-color: #ad4e00; background: #fff1e8; }
 .currency-us .currency-position-list { border-left-color: #0969a8; background: #e8f4ff; }
@@ -4018,3 +4018,15 @@ textarea {
 
 .account-pnl-card strong.positive { color: var(--profit-color); }
 .account-pnl-card strong.negative { color: var(--loss-color); }
+
+.account-detail-metrics .metric strong .currency-amount,
+.account-detail-metrics .metric strong .currency-symbol,
+.account-detail-metrics .metric strong .currency-number {
+  display: inline;
+  color: inherit;
+}
+
+.account-detail-metrics .metric strong .currency-amount,
+.account-detail-metrics .metric strong .currency-number {
+  font-size: inherit;
+}
