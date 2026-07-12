@@ -563,7 +563,7 @@ def account_list(request):
         context["selected_currency"],
         request.GET.get("year", "all"),
     )
-    if snapshot_data:
+    if snapshot_data and selected_year != "all":
         snapshot, account_rows = snapshot_data
         context["account_rows"] = account_rows
         context["summary_rows"] = _summary_rows(account_rows)
@@ -630,6 +630,9 @@ def _currency_sections(account, positions, balances):
     return [
         {
             "currency": currency,
+            "market_code": {"HKD": "hk", "USD": "us", "CNY": "cn"}.get(
+                currency, "other"
+            ),
             "cash": balances[currency],
             "holding": sum((item.market_value_live for item in grouped[currency]), ZERO),
             "holding_pnl": sum((item.unrealized_live for item in grouped[currency]), ZERO),

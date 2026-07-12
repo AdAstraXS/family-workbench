@@ -31,10 +31,10 @@
   </div>
   {% if missing_exchange_rates %}<p class="form-error">部分原币缺少兑 {{ selected_currency }} 的汇率，资产卡暂不合并这些金额。</p>{% endif %}
   <div class="account-detail-metrics">
-    <div class="metric"><span>账户总资产</span><strong>{{ account_row.total_asset|currency0:selected_currency }}</strong></div>
-    {% for card in asset_cards %}<div class="metric"><span>{{ card.label }}</span><strong>{{ card.amount|currency0:selected_currency }}</strong><small>{{ card.ratio|floatformat:2 }}%</small></div>{% endfor %}
-    <div class="metric"><span>今日盈亏</span><strong class="{% if account_row.today_pnl > 0 %}positive{% elif account_row.today_pnl < 0 %}negative{% endif %}">{{ account_row.today_pnl|signed_currency0:selected_currency }}</strong></div>
-    <div class="metric"><span>持仓盈亏</span><strong class="{% if account_row.unrealized > 0 %}positive{% elif account_row.unrealized < 0 %}negative{% endif %}">{{ account_row.unrealized|signed_currency0:selected_currency }}</strong></div>
+    <div class="metric account-total-card"><span>账户总资产</span><strong>{{ account_row.total_asset|currency0:selected_currency }}</strong></div>
+    <div class="asset-mini-grid">{% for card in asset_cards %}<div class="metric asset-mini-card asset-mini-{{ forloop.counter }}"><span>{{ card.label }}</span><strong>{{ card.amount|currency0:selected_currency }}</strong><small>{{ card.ratio|floatformat:2 }}%</small></div>{% endfor %}</div>
+    <div class="metric account-pnl-card"><span>今日盈亏</span><strong class="{% if account_row.today_pnl > 0 %}positive{% elif account_row.today_pnl < 0 %}negative{% endif %}">{{ account_row.today_pnl|signed_currency0:selected_currency }}</strong></div>
+    <div class="metric account-pnl-card"><span>持仓盈亏</span><strong class="{% if account_row.unrealized > 0 %}positive{% elif account_row.unrealized < 0 %}negative{% endif %}">{{ account_row.unrealized|signed_currency0:selected_currency }}</strong></div>
   </div>
 </section>
 
@@ -108,7 +108,7 @@
     <dialog class="trade-detail-drawer" data-trade-dialog><div class="drawer-head"><div><span class="prototype-badge">交易详情</span><h2 data-detail-title></h2></div><button type="button" class="drawer-close" data-dialog-close aria-label="关闭">×</button></div><dl class="trade-detail-list"><div><dt>交易逻辑</dt><dd data-detail-logic></dd></div><div><dt>信息来源</dt><dd data-detail-source></dd></div><div><dt>退出条件</dt><dd data-detail-exit></dd></div><div><dt>备注</dt><dd data-detail-note></dd></div></dl></dialog>
   {% else %}
     <div class="section-head"><h2>账户概览</h2></div>
-    <div class="currency-overview-grid">{% for section in currency_sections %}<article class="currency-overview-card"><h3>{{ section.currency }}</h3><div class="currency-totals"><span>现金<strong>{{ section.cash|currency0:section.currency }}</strong></span><span>持仓<strong>{{ section.holding|currency0:section.currency }}</strong></span></div><table><thead><tr><th>当前持仓</th><th>持仓金额</th><th>持仓比例</th><th>持仓盈亏</th></tr></thead><tbody>{% for item in section.positions %}<tr><td>{{ item.security.name }}</td><td>{{ item.market_value_live|currency0:section.currency }}</td><td>{{ item.base_ratio|floatformat:2 }}%</td><td class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}">{{ item.unrealized_live|signed_currency0:section.currency }}</td></tr>{% empty %}<tr><td colspan="4">暂无持仓</td></tr>{% endfor %}</tbody></table></article>{% endfor %}</div>
+    <div class="currency-overview-grid">{% for section in currency_sections %}<article class="currency-overview-card currency-{{ section.market_code }}"><h3>{{ section.currency }}</h3><div class="currency-totals"><span>现金<strong>{{ section.cash|currency0:section.currency }}</strong></span><span>持仓<strong>{{ section.holding|currency0:section.currency }}</strong></span></div><div class="currency-position-list">{% for item in section.positions %}<div class="currency-position-row"><strong>{{ item.security.name }}</strong><span>{{ item.market_value_live|currency0:section.currency }}</span><span>{{ item.base_ratio|floatformat:2 }}%</span><span class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}">{{ item.unrealized_live|signed_currency0:section.currency }}</span></div>{% empty %}<span class="empty-currency-position">暂无持仓</span>{% endfor %}</div></article>{% endfor %}</div>
   {% endif %}
 </section>
 {% endblock %}

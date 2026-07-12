@@ -499,7 +499,7 @@ class AccountDashboardTests(TestCase):
 
         self.assertEqual(latest.context["year_options"], [2026, 2024])
         self.assertNotContains(latest, "2025 年")
-        self.assertEqual(latest.context["account_rows"][0]["cash"], Decimal("12000"))
+        self.assertEqual(latest.context["account_rows"][0]["cash"], Decimal("10000"))
         self.assertEqual(historical.context["account_rows"][0]["cash"], Decimal("8000"))
 
     def test_zero_positions_are_hidden_and_profit_tab_renders(self):

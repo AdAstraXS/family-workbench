@@ -1143,8 +1143,39 @@ button {
 
 .account-detail-metrics {
   display: grid;
-  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  grid-template-columns: 1.15fr 2fr 1fr 1fr;
   gap: 12px;
+  align-items: stretch;
+}
+
+.account-total-card,
+.account-pnl-card,
+.asset-mini-grid {
+  min-height: 132px;
+}
+
+.asset-mini-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.asset-mini-card {
+  min-height: 0;
+  padding: 10px 12px;
+}
+
+.asset-mini-card strong { font-size: 17px; }
+.asset-mini-1 { background: #fff7ed; }
+.asset-mini-2 { background: #eff6ff; }
+.asset-mini-3 { background: #f5f3ff; }
+.asset-mini-4 { background: #ecfdf5; }
+
+.account-total-card,
+.account-pnl-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .account-metric-panel {
@@ -1344,6 +1375,10 @@ button {
   .account-detail-metrics,
   .account-overview-grid {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .currency-overview-grid {
+    grid-template-columns: 1fr;
   }
 
   .prototype-filters {
@@ -2970,14 +3005,26 @@ textarea {
 .market-us { background: #e8f4ff; color: #0969a8; }
 .market-cn { background: #f7eaff; color: #722ed1; }
 .trade-tag.ipo { background: #ffebe6; color: #c2410c; }
-.currency-overview-grid { display: grid; gap: 1rem; }
-.currency-overview-card { border: 1px solid #e5e7eb; border-radius: .8rem; padding: 1rem; }
+.currency-overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.currency-overview-card { border: 1px solid #e5e7eb; border-radius: .8rem; padding: 1rem; overflow: hidden; }
 .currency-overview-card h3 { margin-top: 0; }
 .currency-totals { display: flex; gap: 2rem; margin-bottom: .8rem; }
 .currency-totals span, .currency-totals strong { display: block; }
+.currency-position-list { padding: 12px 14px; border-left: 5px solid #64748b; background: #f8fafc; }
+.currency-position-row { display: grid; grid-template-columns: minmax(90px, 1fr) auto auto auto; gap: 8px; align-items: baseline; padding: 5px 0; color: #334155; }
+.currency-position-row > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.currency-hk .currency-position-list { border-left-color: #ad4e00; background: #fff1e8; }
+.currency-us .currency-position-list { border-left-color: #0969a8; background: #e8f4ff; }
+.currency-cn .currency-position-list { border-left-color: #722ed1; background: #f7eaff; }
+.empty-currency-position { display: block; padding: 7px 0; color: #64748b; }
 .contract-breakdown { display: grid; gap: .35rem; margin-top: .5rem; font-size: .85rem; }
 .profit-filters { align-items: end; margin-bottom: 1rem; }
 .profit-filters label { display: grid; gap: .3rem; }
+
+@media (max-width: 900px) {
+  .currency-overview-grid { grid-template-columns: 1fr; }
+  .currency-position-row { grid-template-columns: minmax(90px, 1fr) repeat(3, auto); }
+}
 
 .ipo-trade-table .number {
   text-align: center;
