@@ -101,7 +101,7 @@
           <div class="portfolio-account-breakdown">
             {% for row in group.accounts %}
               <a href="{{ row.account.get_absolute_url }}">
-                <span>{{ row.account.member }} · {{ row.account.account_name }}</span>
+                <span>{{ row.label }}</span>
                 <span>{{ row.ratio|floatformat:2 }}%</span>
                 <strong>{{ row.amount|currency0:base_currency }}</strong>
               </a>

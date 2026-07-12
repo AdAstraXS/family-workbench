@@ -47,8 +47,14 @@ def convert_currency(amount, source, target, on_date=None):
 def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=False):
     accounts = list(accounts)
     positions = list(
-        InvestmentPosition.objects.filter(account__in=accounts)
-        .select_related("account__bank_account", "security", "security__market_snapshot", "security__option_contract")
+        InvestmentPosition.objects.filter(account__in=accounts).exclude(quantity=0)
+        .select_related(
+            "account__bank_account",
+            "security",
+            "security__market_snapshot",
+            "security__option_contract",
+            "security__bond_detail",
+        )
         .order_by("account_id", "security__symbol")
     )
     missing_rates = False
@@ -85,7 +91,9 @@ def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=Fal
         position.valuation_price = price
         position.valuation_fx_rate = rate
         multiplier = position.security.contract_multiplier
-        position.valuation_market_value_original = position.quantity * price * multiplier
+        position.valuation_market_value_original = position.security.market_value_for(
+            position.quantity, price
+        )
         position.valuation_cost_original = position.quantity * position.avg_cost * multiplier
         if rate is None:
             position.valuation_market_value = None

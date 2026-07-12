@@ -12,8 +12,10 @@ from .models import (
     InvestmentPosition,
     InvestmentTransaction,
     InvestmentOption,
+    BondDetail,
     OptionContract,
     Security,
+    SecurityMarketSnapshot,
     TradeTypeChoices,
     WatchlistItem,
 )
@@ -141,6 +143,115 @@ class OptionContractForm(forms.Form):
             strike_price=self.cleaned_data["strike_price"],
             expiration_date=self.cleaned_data["expiration_date"],
             multiplier=self.cleaned_data["multiplier"],
+        )
+        WatchlistItem.objects.update_or_create(
+            family=member.family,
+            security=security,
+            defaults={"member": member, "is_active": True},
+        )
+
+
+class BondForm(forms.Form):
+    asset_category = forms.ModelChoiceField(
+        label="一级资产类别", queryset=AssetCategory.objects.none(), required=False
+    )
+    symbol = forms.CharField(label="债券代码", max_length=30)
+    name = forms.CharField(label="债券名称", max_length=200)
+    market = forms.CharField(label="市场", max_length=20, initial="US")
+    currency = forms.ChoiceField(label="交易币种")
+    isin = forms.CharField(label="ISIN", max_length=20, required=False)
+    issuer = forms.CharField(label="发行人", max_length=200, required=False)
+    bond_type = forms.ChoiceField(label="债券类型", choices=BondDetail.BOND_TYPE_CHOICES)
+    face_value = forms.DecimalField(label="单张面值", max_digits=20, decimal_places=4, initial=100)
+    coupon_rate = forms.DecimalField(label="票面利率（%）", max_digits=10, decimal_places=6, initial=0)
+    coupon_frequency = forms.IntegerField(label="每年付息次数", min_value=1, initial=2)
+    maturity_date = forms.DateField(
+        label="到期日", required=False, widget=forms.DateInput(attrs={"type": "date"})
+    )
+    redemption_price = forms.DecimalField(label="到期兑付价格", max_digits=20, decimal_places=6, initial=100)
+    quote_basis = forms.ChoiceField(label="报价方式", choices=BondDetail.QUOTE_BASIS_CHOICES)
+    clean_price = forms.DecimalField(label="最新净价", max_digits=20, decimal_places=6)
+    accrued_interest = forms.DecimalField(
+        label="每报价单位应计利息", max_digits=20, decimal_places=6, initial=0
+    )
+    valuation_date = forms.DateField(
+        label="估值日期", required=False, widget=forms.DateInput(attrs={"type": "date"})
+    )
+
+    def __init__(self, *args, family=None, instance=None, **kwargs):
+        self.family = family
+        self.instance = instance
+        if instance and not args and "initial" not in kwargs:
+            bond = instance.bond_detail
+            quote = getattr(instance, "market_snapshot", None)
+            kwargs["initial"] = {
+                "asset_category": instance.asset_category,
+                "symbol": instance.symbol,
+                "name": instance.name,
+                "market": instance.market,
+                "currency": instance.currency,
+                "isin": bond.isin,
+                "issuer": bond.issuer,
+                "bond_type": bond.bond_type,
+                "face_value": bond.face_value,
+                "coupon_rate": bond.coupon_rate,
+                "coupon_frequency": bond.coupon_frequency,
+                "maturity_date": bond.maturity_date,
+                "redemption_price": bond.redemption_price,
+                "quote_basis": bond.quote_basis,
+                "clean_price": quote.last_price if quote else 0,
+                "accrued_interest": bond.accrued_interest,
+                "valuation_date": bond.valuation_date,
+            }
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+        self.fields["currency"].choices = [
+            (item.code, str(item)) for item in Currency.objects.filter(is_active=True)
+        ]
+        self.fields["asset_category"].queryset = AssetCategory.objects.filter(
+            Q(family=family) | Q(family=None), is_active=True
+        ).order_by("display_order", "name")
+
+    def clean(self):
+        cleaned = super().clean()
+        symbol = (cleaned.get("symbol") or "").strip().upper()
+        market = (cleaned.get("market") or "").strip().upper()
+        duplicate = Security.objects.filter(symbol=symbol, market=market)
+        if self.instance:
+            duplicate = duplicate.exclude(pk=self.instance.pk)
+        if symbol and market and duplicate.exists():
+            self.add_error("symbol", "该市场已存在相同代码。")
+        return cleaned
+
+    def save(self, member):
+        security = self.instance or Security()
+        security.asset_category = self.cleaned_data.get("asset_category")
+        security.symbol = self.cleaned_data["symbol"].strip().upper()
+        security.name = self.cleaned_data["name"].strip()
+        security.market = self.cleaned_data["market"].strip().upper()
+        security.asset_type = Security.TYPE_BOND
+        security.currency = self.cleaned_data["currency"]
+        security.data_source = "manual"
+        security.save()
+        BondDetail.objects.update_or_create(
+            security=security,
+            defaults={
+                field: self.cleaned_data[field]
+                for field in (
+                    "isin", "issuer", "bond_type", "face_value", "coupon_rate",
+                    "coupon_frequency", "maturity_date", "redemption_price",
+                    "quote_basis", "accrued_interest", "valuation_date",
+                )
+            },
+        )
+        SecurityMarketSnapshot.objects.update_or_create(
+            security=security,
+            defaults={
+                "last_price": self.cleaned_data["clean_price"],
+                "quote_time": str(self.cleaned_data.get("valuation_date") or ""),
+                "raw_data": {"manual_bond_valuation": True},
+            },
         )
         WatchlistItem.objects.update_or_create(
             family=member.family,

@@ -26,6 +26,7 @@ from .exchange_rate_service import ensure_daily_exchange_rates
 from .account_sync import sync_investment_account
 from .ipo_sync import sync_ipo_trade
 from .models import (
+    BondDetail,
     DailyExchangeRateFetch,
     InvestmentAccount,
     InvestmentCashMovement,
@@ -529,6 +530,46 @@ class AccountDashboardTests(TestCase):
         self.assertContains(profit, "个股盈亏")
         self.assertNotContains(profit, "统计年份")
 
+    def test_account_realized_pnl_includes_fully_closed_securities(self):
+        security = Security.objects.create(
+            symbol="CLOSED",
+            name="已清仓标的",
+            market="CN",
+            currency="CNY",
+        )
+        InvestmentPosition.objects.create(
+            account=self.account,
+            security=security,
+            quantity=0,
+            realized_pnl=Decimal("539.23"),
+            position_date=date(2026, 7, 5),
+        )
+        InvestmentTransaction.objects.create(
+            account=self.account,
+            security=security,
+            trade_date=date(2026, 7, 5),
+            trade_type=TradeTypeChoices.SELL,
+            quantity=1,
+            price=1,
+            amount=1,
+            currency="CNY",
+            realized_pnl=Decimal("539.23"),
+        )
+
+        dashboard = self.client.get(reverse("portfolio:account_list"))
+        profit = self.client.get(
+            reverse("portfolio:account_detail", args=[self.account.pk]),
+            {"tab": "individual-profit"},
+        )
+
+        self.assertEqual(dashboard.context["account_rows"][0]["realized"], Decimal("539.23"))
+        self.assertEqual(profit.context["individual_profit"]["rows"][0]["total_pnl"], Decimal("539.23"))
+        self.assertContains(
+            dashboard,
+            '<span class="currency-symbol">¥</span><span class="currency-number">+539</span>',
+            html=True,
+        )
+
     def test_detail_can_switch_to_diluted_cost_and_has_no_duplicate_actions(self):
         security = Security.objects.create(
             symbol="TEST",
@@ -708,9 +749,54 @@ class PortfolioOverviewTests(TestCase):
         self.assertEqual(response.context["total_market_value"], Decimal("6300"))
         self.assertEqual(response.context["total_cost"], Decimal("5400"))
         self.assertEqual(response.context["total_pnl"], Decimal("900"))
+        self.assertContains(response, "腾讯控股 - 成员甲 - 港股账户")
         self.assertEqual(response.context["total_asset"], Decimal("7200"))
         self.assertEqual(response.context["base_currency"], "CNY")
         self.assertEqual(PortfolioSnapshot.objects.count(), 0)
+
+    def test_manual_bond_uses_clean_price_plus_accrued_interest(self):
+        Currency.objects.get_or_create(code="CNY", defaults={"name": "人民币"})
+        response = self.client.post(
+            reverse("portfolio:bond_create"),
+            {
+                "asset_category": "",
+                "symbol": "UST2030",
+                "name": "美国国债 2030",
+                "market": "US",
+                "currency": "CNY",
+                "isin": "US0000000001",
+                "issuer": "美国财政部",
+                "bond_type": BondDetail.GOVERNMENT,
+                "face_value": "100",
+                "coupon_rate": "4.25",
+                "coupon_frequency": "2",
+                "maturity_date": "2030-06-30",
+                "redemption_price": "100",
+                "quote_basis": BondDetail.PER_100,
+                "clean_price": "98",
+                "accrued_interest": "1.5",
+                "valuation_date": "2026-07-12",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        bond = Security.objects.get(symbol="UST2030", market="US")
+        InvestmentPosition.objects.create(
+            account=self.account,
+            security=bond,
+            quantity=Decimal("1000"),
+            avg_cost=Decimal("97"),
+            current_price=Decimal("98"),
+            position_date=date(2026, 7, 12),
+        )
+
+        overview = self.client.get(reverse("portfolio:overview"))
+        position = next(
+            item for item in overview.context["asset_groups"]
+            if item["name"] == "债券"
+        )
+
+        self.assertEqual(position["amount"], Decimal("995"))
+        self.assertEqual(bond.bond_detail.accrued_interest, Decimal("1.5"))
 
     def test_account_page_converts_hkd_to_usd_through_cny_rates(self):
         response = self.client.get(reverse("portfolio:account_list"), {"currency": "USD"})

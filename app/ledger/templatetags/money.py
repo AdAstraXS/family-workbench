@@ -46,7 +46,7 @@ def cn_market_cap(value):
     )
 
 
-def _currency(value, code, places):
+def _currency(value, code, places, *, show_positive_sign=False):
     if value in (None, ""):
         return "-"
     try:
@@ -58,7 +58,7 @@ def _currency(value, code, places):
         '<span class="currency-amount"><span class="currency-symbol">{}</span>'
         '<span class="currency-number">{}</span></span>',
         symbol,
-        f"{amount:,.{places}f}",
+        f"{'+' if show_positive_sign and amount > 0 else ''}{amount:,.{places}f}",
     )
 
 
@@ -74,8 +74,7 @@ def currency2(value, code):
 
 @register.filter
 def signed_currency0(value, code):
-    rendered = _currency(value, code, 0)
-    return format_html("+{}", rendered) if value not in (None, "") and Decimal(value) > 0 else rendered
+    return _currency(value, code, 0, show_positive_sign=True)
 
 
 @register.filter

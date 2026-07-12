@@ -18,6 +18,7 @@
     <div class="row-actions">
       <a class="button ghost" href="{% url 'portfolio:security_create' %}">手工添加</a>
       <a class="button ghost" href="{% url 'portfolio:option_contract_create' %}">新增期权合约</a>
+      <a class="button ghost" href="{% url 'portfolio:bond_create' %}">新增债券</a>
     </div>
   </div>
   <form method="get">
@@ -113,7 +114,7 @@
           <td>{{ snapshot.low_52_week|money2 }} – {{ snapshot.high_52_week|money2 }}</td>
           <td class="table-actions">
             <a class="button external-link-button compact" href="{{ security.futu_url }}" target="_blank" rel="noopener noreferrer">查看</a>
-            <a href="{% url 'portfolio:security_edit' security.id %}">编辑</a>
+            {% if security.asset_type == 'bond' %}<a href="{% url 'portfolio:bond_edit' security.id %}">编辑</a>{% else %}<a href="{% url 'portfolio:security_edit' security.id %}">编辑</a>{% endif %}
           </td>
         </tr>
         {% endwith %}

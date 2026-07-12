@@ -21,6 +21,7 @@ from family_core.models import AssetCategory, Currency, FamilyMember
 from ledger.models import BankAccount
 
 from .forms import (
+    BondForm,
     InvestmentAccountForm,
     InvestmentCashMovementForm,
     InvestmentPositionForm,
@@ -181,6 +182,7 @@ def _latest_positions(accounts, year):
             "security__asset_category",
             "security__market_snapshot",
             "security__option_contract",
+            "security__bond_detail",
         )
         .order_by("account__bank_account__member__display_name", "account__bank_account__account_name", "security__symbol")
     )
@@ -216,6 +218,13 @@ def _account_dashboard_data(request, account=None):
             total=Sum("realized_pnl")
         )
     }
+    realized_by_account = defaultdict(list)
+    for row in transaction_filter.values("account_id", "currency").annotate(
+        total=Sum("realized_pnl")
+    ):
+        realized_by_account[row["account_id"]].append(
+            (row["currency"], row["total"] or ZERO)
+        )
     cash_by_account = defaultdict(list)
     for row in cash_filter.values("account_id", "currency").annotate(total=Sum("amount")):
         cash_by_account[row["account_id"]].append((row["currency"], row["total"] or ZERO))
@@ -231,7 +240,9 @@ def _account_dashboard_data(request, account=None):
             else item.avg_cost
         )
         multiplier = item.security.contract_multiplier
-        item.market_value_live = item.quantity * item.display_price * multiplier
+        item.market_value_live = item.security.market_value_for(
+            item.quantity, item.display_price
+        )
         item.unrealized_live = (
             item.market_value_live - item.quantity * item.display_cost * multiplier
         )
@@ -275,8 +286,8 @@ def _account_dashboard_data(request, account=None):
             for p in item_positions
         ]
         realized_values = [
-            _convert_currency(p.realized_for_year, p.original_currency, selected_currency)
-            for p in item_positions
+            _convert_currency(amount, currency, selected_currency)
+            for currency, amount in realized_by_account[item.pk]
         ]
         today_values = [
             _convert_currency(p.today_pnl, p.original_currency, selected_currency)
@@ -392,15 +403,15 @@ def overview(request):
     groups = {}
     missing_rates = False
 
-    def add_asset(category, account, amount):
+    def add_asset(category, account, amount, security=None):
         if amount is None:
             return
         group = groups.setdefault(
             category,
-            {"name": category, "amount": ZERO, "accounts": defaultdict(Decimal)},
+            {"name": category, "amount": ZERO, "details": defaultdict(Decimal)},
         )
         group["amount"] += amount
-        group["accounts"][account] += amount
+        group["details"][(account, security)] += amount
 
     account_map = {item.pk: item for item in accounts}
     total_cash = valuation["total_cash"]
@@ -412,8 +423,10 @@ def overview(request):
     total_cost = valuation["total_cost"]
     asset_type_names = {
         "stock": "股票",
+        "etf": "ETF",
         "fund": "基金",
         "bond": "债券",
+        "option": "期权",
         "crypto": "加密资产",
         "other": "其他资产",
     }
@@ -431,7 +444,7 @@ def overview(request):
                 item.security.asset_type,
             )
         )
-        add_asset(category, item.account, market_cny)
+        add_asset(category, item.account, market_cny, item.security)
 
     total_asset = valuation["total_asset"]
     total_pnl = valuation["total_pnl"]
@@ -492,14 +505,19 @@ def overview(request):
         amount = group["amount"]
         ratio = amount / total_asset * 100 if total_asset else ZERO
         account_rows = []
-        for account, account_amount in sorted(
-            group["accounts"].items(),
+        for (account, security), account_amount in sorted(
+            group["details"].items(),
             key=lambda item: item[1],
             reverse=True,
         ):
             account_rows.append(
                 {
                     "account": account,
+                    "label": (
+                        f"{security.name} - {account.member} - {account.account_name}"
+                        if security
+                        else f"{account.member} - {account.account_name}"
+                    ),
                     "amount": account_amount,
                     "ratio": (
                         account_amount / total_asset * 100
@@ -689,6 +707,9 @@ def _individual_profit_data(request, account, transactions):
     date_start = parse_date(request.GET.get("date_start", ""))
     date_end = parse_date(request.GET.get("date_end", ""))
     selected_stock = request.GET.get("stock", "")
+    display_currency = request.GET.get(
+        "currency", get_site_setting().base_currency
+    ).upper()
     day_maps = {}
     by_security = defaultdict(list)
     for item in transactions:
@@ -782,9 +803,18 @@ def _individual_profit_data(request, account, transactions):
         row["holding_days"] = (
             row["day_weight"] / row["closed_quantity"] if row["closed_quantity"] else ZERO
         )
+        row["display_total_pnl"] = _convert_currency(
+            row["total_pnl"], row["currency"], display_currency
+        )
+        row["display_income"] = _convert_currency(
+            row["income"], row["currency"], display_currency
+        )
         row["contracts"] = [
             {
                 **child,
+                "display_total_pnl": _convert_currency(
+                    child["total_pnl"], child["currency"], display_currency
+                ),
                 "holding_days": (
                     child["day_weight"] / child["closed_quantity"]
                     if child["closed_quantity"]
@@ -802,6 +832,7 @@ def _individual_profit_data(request, account, transactions):
         "selected_stock": selected_stock,
         "date_start": request.GET.get("date_start", ""),
         "date_end": request.GET.get("date_end", ""),
+        "display_currency": display_currency,
     }
 
 
@@ -1105,6 +1136,44 @@ def option_contract_create(request):
         messages.success(request, "期权合约已创建并加入自选标的。")
         return redirect("portfolio:security_list")
     return render(request, "form.html", {"form": form, "title": "新增期权合约"})
+
+
+def _bond_form(request, security=None):
+    member = FamilyMember.objects.filter(
+        user=request.user, is_active=True
+    ).select_related("family").first()
+    if not member:
+        messages.error(request, "当前登录用户尚未关联家庭成员。")
+        return redirect("portfolio:security_list")
+    form = BondForm(
+        request.POST or None,
+        family=member.family,
+        instance=security,
+    )
+    if request.method == "POST" and form.is_valid():
+        bond_security = form.save(member)
+        messages.success(request, f"债券 {bond_security.name} 已保存。")
+        return redirect("portfolio:security_list")
+    return render(
+        request,
+        "form.html",
+        {"form": form, "title": "编辑债券" if security else "新增债券"},
+    )
+
+
+@login_required
+def bond_create(request):
+    return _bond_form(request)
+
+
+@login_required
+def bond_edit(request, pk):
+    security = get_object_or_404(
+        Security.objects.select_related("bond_detail", "market_snapshot"),
+        pk=pk,
+        asset_type=Security.TYPE_BOND,
+    )
+    return _bond_form(request, security)
 
 
 @login_required

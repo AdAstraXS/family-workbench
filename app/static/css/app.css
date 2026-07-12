@@ -3973,6 +3973,10 @@ textarea {
   vertical-align: .08em;
 }
 
+.app-portfolio .currency-amount {
+  white-space: nowrap;
+}
+
 .app-portfolio table th {
   font-size: 14px;
 }

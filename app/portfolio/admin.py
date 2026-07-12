@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    BondDetail,
     DailyExchangeRateFetch,
     InvestmentAccount,
     InvestmentCashMovement,
@@ -47,6 +48,16 @@ class OptionContractAdmin(admin.ModelAdmin):
     list_display = ("security", "underlying", "option_type", "strike_price", "expiration_date", "multiplier")
     list_filter = ("option_type", "expiration_date")
     search_fields = ("security__symbol", "underlying__symbol", "underlying__name")
+
+
+@admin.register(BondDetail)
+class BondDetailAdmin(admin.ModelAdmin):
+    list_display = (
+        "security", "issuer", "bond_type", "coupon_rate", "maturity_date",
+        "quote_basis", "accrued_interest", "valuation_date",
+    )
+    list_filter = ("bond_type", "quote_basis", "maturity_date")
+    search_fields = ("security__symbol", "security__name", "isin", "issuer")
 
 
 @admin.register(WatchlistItem)

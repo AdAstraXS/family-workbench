@@ -48,7 +48,11 @@ def calculate_transactions(transactions):
             continue
         quantity = item.quantity or ZERO
         multiplier = item.security.contract_multiplier if item.security_id else Decimal("1")
-        amount = item.amount or quantity * item.price * multiplier
+        amount = item.amount or (
+            item.security.market_value_for(quantity, item.price, include_accrued=False)
+            if item.security_id
+            else quantity * item.price * multiplier
+        )
         fee_and_tax = (item.fee or ZERO) + (item.tax or ZERO)
 
         if item.security_id and item.security.asset_type == item.security.TYPE_OPTION:
@@ -139,7 +143,9 @@ def rebuild_position(account, security):
         InvestmentTransaction.objects.filter(
             account=account,
             security=security,
-        ).select_related("security__option_contract").order_by("trade_date", "created_at", "pk")
+        ).select_related(
+            "security__option_contract", "security__bond_detail"
+        ).order_by("trade_date", "created_at", "pk")
     )
     result, updates = calculate_transactions(transactions)
     for item, cash_change, sell_cost, realized_pnl, realized_return in updates:
@@ -188,7 +194,7 @@ def rebuild_position(account, security):
         latest_trade.price if latest_trade else ZERO
     )
     multiplier = security.contract_multiplier
-    market_value = result.quantity * current_price * multiplier
+    market_value = security.market_value_for(result.quantity, current_price)
     unrealized_pnl = market_value - result.remaining_cost
     position.quantity = result.quantity
     position.avg_cost = result.average_cost / multiplier

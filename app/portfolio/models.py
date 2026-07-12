@@ -217,7 +217,15 @@ class Security(TimestampedModel):
     @property
     def contract_multiplier(self):
         option = getattr(self, "option_contract", None)
-        return option.multiplier if option else Decimal("1")
+        if option:
+            return option.multiplier
+        bond = getattr(self, "bond_detail", None)
+        return Decimal("0.01") if bond and bond.quote_basis == BondDetail.PER_100 else Decimal("1")
+
+    def market_value_for(self, quantity, price, *, include_accrued=True):
+        bond = getattr(self, "bond_detail", None)
+        accrued = bond.accrued_interest if bond and include_accrued else Decimal("0")
+        return quantity * (price + accrued) * self.contract_multiplier
 
 
 class OptionContract(TimestampedModel):
@@ -254,6 +262,55 @@ class OptionContract(TimestampedModel):
 
     def __str__(self):
         return f"{self.underlying.symbol} {self.expiration_date} {self.get_option_type_display()} {self.strike_price}"
+
+
+class BondDetail(TimestampedModel):
+    GOVERNMENT = "government"
+    CORPORATE = "corporate"
+    CONVERTIBLE = "convertible"
+    OTHER = "other"
+    BOND_TYPE_CHOICES = [
+        (GOVERNMENT, "政府债券"),
+        (CORPORATE, "公司债券"),
+        (CONVERTIBLE, "可转换债券"),
+        (OTHER, "其他债券"),
+    ]
+    PER_100 = "per_100"
+    PER_UNIT = "per_unit"
+    QUOTE_BASIS_CHOICES = [
+        (PER_100, "每 100 面值报价"),
+        (PER_UNIT, "每单位报价"),
+    ]
+    security = models.OneToOneField(
+        Security,
+        verbose_name="债券标的",
+        on_delete=models.CASCADE,
+        related_name="bond_detail",
+    )
+    isin = models.CharField("ISIN", max_length=20, blank=True)
+    issuer = models.CharField("发行人", max_length=200, blank=True)
+    bond_type = models.CharField(
+        "债券类型", max_length=20, choices=BOND_TYPE_CHOICES, default=GOVERNMENT
+    )
+    face_value = models.DecimalField("单张面值", max_digits=20, decimal_places=4, default=100)
+    coupon_rate = models.DecimalField("票面利率（%）", max_digits=10, decimal_places=6, default=0)
+    coupon_frequency = models.PositiveSmallIntegerField("每年付息次数", default=2)
+    maturity_date = models.DateField("到期日", null=True, blank=True)
+    redemption_price = models.DecimalField("到期兑付价格", max_digits=20, decimal_places=6, default=100)
+    quote_basis = models.CharField(
+        "报价方式", max_length=20, choices=QUOTE_BASIS_CHOICES, default=PER_100
+    )
+    accrued_interest = models.DecimalField(
+        "每报价单位应计利息", max_digits=20, decimal_places=6, default=0
+    )
+    valuation_date = models.DateField("估值日期", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "债券详情"
+        verbose_name_plural = "债券详情"
+
+    def __str__(self):
+        return f"{self.security} {self.maturity_date or ''}".strip()
 
 
 class WatchlistItem(TimestampedModel):
