@@ -3964,3 +3964,51 @@ textarea {
     flex-direction: column;
   }
 }
+
+/* Portfolio-wide number and currency presentation. */
+.app-portfolio .currency-symbol {
+  margin-right: 1px;
+  font-size: 72%;
+  font-weight: 500;
+  vertical-align: .08em;
+}
+
+.app-portfolio table th {
+  font-size: 14px;
+}
+
+.app-portfolio table td:has(.number-value),
+.app-portfolio table td:has(.currency-amount) {
+  text-align: right;
+}
+
+.account-list-table :is(th, td):nth-child(n+3):nth-child(-n+9),
+.dashboard-holdings-table :is(th, td):nth-child(n+5):nth-child(-n+10),
+.account-positions-table :is(th, td):nth-child(n+4),
+.individual-profit-table :is(th, td):nth-child(n+4),
+.account-cashflow-table :is(th, td):nth-child(n+5),
+.account-transactions-table :is(th, td):nth-child(n+5):nth-child(-n+10),
+.portfolio-positions-table :is(th, td):nth-child(n+4):nth-child(-n+9),
+.portfolio-transactions-table :is(th, td):nth-child(n+5):nth-child(-n+8),
+.security-search-table :is(th, td):nth-child(n+4):nth-child(-n+10),
+.watchlist-compact-table :is(th, td):nth-child(n+4):nth-child(-n+12) {
+  text-align: right;
+}
+
+.summary-grid-head {
+  font-size: 14px;
+}
+
+.currency-position-row {
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.currency-position-row .position-name {
+  text-align: left;
+}
+
+.currency-position-row > :not(.position-name) {
+  text-align: right;
+  font-weight: 400;
+}

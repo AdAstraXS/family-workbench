@@ -1038,7 +1038,10 @@ class WatchlistPageTests(TestCase):
         self.assertContains(response, "07-04")
         self.assertContains(response, "2.35%")
         self.assertContains(response, "4.56 万亿")
-        self.assertContains(response, 'class="positive">500.20')
+        self.assertContains(
+            response,
+            'class="positive"><span class="number-value">500.20</span>',
+        )
         self.assertContains(response, "市盈率（静）")
         self.assertContains(response, "市盈率（TTM）")
         self.assertContains(response, "市净率")

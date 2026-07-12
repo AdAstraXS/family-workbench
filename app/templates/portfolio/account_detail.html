@@ -61,7 +61,7 @@
         </label>
       </form>
     </div>
-    <div class="account-table-wrap"><table class="account-prototype-table"><thead><tr><th>市场</th><th>标的</th><th>资产类别</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>持仓盈亏</th><th>累计已实现盈亏</th><th>仓位</th></tr></thead>
+    <div class="account-table-wrap"><table class="account-prototype-table account-positions-table"><thead><tr><th>市场</th><th>标的</th><th>资产类别</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>持仓盈亏</th><th>累计已实现盈亏</th><th>仓位</th></tr></thead>
       <tbody>{% for item in positions %}<tr>
         <td><span class="market-badge market-{{ item.security.market|lower }}">{{ item.security.market }}</span></td><td>{{ item.security.name }}</td><td>{{ item.security.asset_category|default:item.security.asset_type }}</td><td>{{ item.quantity|floatformat:"-4" }}</td>
         <td>{{ item.display_price|currency2:item.original_currency }}</td><td>{{ item.market_value_live|currency0:item.original_currency }}</td><td>{{ item.display_cost|currency2:item.original_currency }}</td>
@@ -79,13 +79,13 @@
       <label>股票<select name="stock"><option value="">全部标的</option>{% for value, label in individual_profit.stock_options %}<option value="{{ value }}"{% if value == individual_profit.selected_stock %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
       <button class="button compact" type="submit">查询</button>
     </form>
-    <div class="account-table-wrap"><table class="account-prototype-table"><thead><tr><th>市场</th><th>标的</th><th>资产类别</th><th>总盈亏</th><th>分红利息</th><th>交易次数</th><th>持仓天数</th></tr></thead><tbody>
+    <div class="account-table-wrap"><table class="account-prototype-table individual-profit-table"><thead><tr><th>市场</th><th>标的</th><th>资产类别</th><th>总盈亏</th><th>分红利息</th><th>交易次数</th><th>持仓天数</th></tr></thead><tbody>
       {% for row in individual_profit.rows %}<tr><td><span class="market-badge market-{{ row.market|lower }}">{{ row.market }}</span></td><td>{% if row.contracts %}<details><summary>{{ row.name }}</summary><div class="contract-breakdown">{% for child in row.contracts %}<span><b>{{ child.symbol }}</b>：{{ child.total_pnl|signed_currency0:child.currency }} / {{ child.trade_count }} 次 / {{ child.holding_days|floatformat:1 }} 天</span>{% endfor %}</div></details>{% else %}{{ row.name }}{% endif %}</td><td>{{ row.asset_type }}</td><td class="{% if row.total_pnl > 0 %}positive{% elif row.total_pnl < 0 %}negative{% endif %}">{{ row.total_pnl|signed_currency0:row.currency }}</td><td>{{ row.income|signed_currency0:row.currency }}</td><td>{{ row.trade_count }}</td><td>{{ row.holding_days|floatformat:1 }}</td></tr>
       {% empty %}<tr><td colspan="7">当前筛选范围内暂无已实现盈亏。</td></tr>{% endfor %}
     </tbody></table></div>
   {% elif active_tab == "cashflows" %}
     <div class="section-head"><h2>现金流水</h2></div>
-    <div class="account-table-wrap"><table><thead><tr><th>日期</th><th>标的</th><th>类型</th><th>对手账户</th><th>变动金额</th><th>变动后现金余额</th><th>变动后本位币余额</th></tr></thead>
+    <div class="account-table-wrap"><table class="account-cashflow-table"><thead><tr><th>日期</th><th>标的</th><th>类型</th><th>对手账户</th><th>变动金额</th><th>变动后现金余额</th><th>变动后本位币余额</th></tr></thead>
       <tbody>{% for item in cash_movements %}<tr>
         <td>{{ item.movement_date }}</td><td>{{ item.transaction.security|default:"-" }}</td><td>{{ item.get_movement_type_display }}</td>
         <td>{{ item.counterparty_account|default:"-" }}</td>
@@ -96,7 +96,7 @@
   {% elif active_tab == "transactions" %}
     <div class="section-head"><h2>交易记录</h2></div>
     <p class="table-hint">点击任意一行查看交易逻辑、信息来源、退出条件和备注。</p>
-    <div class="account-table-wrap"><table class="clickable-trade-table"><thead><tr><th>日期</th><th>标的</th><th>方向</th><th>开平仓</th><th>数量</th><th>价格</th><th>手续费等</th><th>成交金额</th><th>本次已实现损益</th><th>本次收益率</th><th>操作</th></tr></thead>
+    <div class="account-table-wrap"><table class="clickable-trade-table account-transactions-table"><thead><tr><th>日期</th><th>标的</th><th>方向</th><th>开平仓</th><th>数量</th><th>价格</th><th>手续费等</th><th>成交金额</th><th>本次已实现损益</th><th>本次收益率</th><th>操作</th></tr></thead>
       <tbody>{% for item in transactions %}<tr tabindex="0" role="button" data-trade-row data-title="{{ item.security }} · {{ item.get_trade_type_display }}" data-logic="{{ item.trade_logic|default:'-' }}" data-source="{{ item.information_source|default:'-' }}" data-exit="{{ item.exit_condition|default:'-' }}" data-note="{{ item.remark|default:'-' }}">
         <td>{{ item.trade_date }}</td><td>{{ item.security|default:"-" }}</td><td><span class="trade-tag {% if item.trade_type == 'buy' %}buy{% elif item.trade_type == 'ipo' %}ipo{% else %}sell{% endif %}">{{ item.get_trade_type_display }}</span></td><td>{{ item.get_position_effect_display|default:"-" }}</td><td>{{ item.quantity|floatformat:"-4" }}</td>
         <td>{{ item.price|currency2:item.currency }}</td><td>{{ item.total_fee|currency2:item.currency }}</td><td>{{ item.amount|currency2:item.currency }}</td>
@@ -108,7 +108,7 @@
     <dialog class="trade-detail-drawer" data-trade-dialog><div class="drawer-head"><div><span class="prototype-badge">交易详情</span><h2 data-detail-title></h2></div><button type="button" class="drawer-close" data-dialog-close aria-label="关闭">×</button></div><dl class="trade-detail-list"><div><dt>交易逻辑</dt><dd data-detail-logic></dd></div><div><dt>信息来源</dt><dd data-detail-source></dd></div><div><dt>退出条件</dt><dd data-detail-exit></dd></div><div><dt>备注</dt><dd data-detail-note></dd></div></dl></dialog>
   {% else %}
     <div class="section-head"><h2>账户概览</h2></div>
-    <div class="currency-overview-grid">{% for section in currency_sections %}<article class="currency-overview-card currency-{{ section.market_code }}"><h3>{{ section.currency }}</h3><div class="currency-totals"><span>现金<strong>{{ section.cash|currency0:section.currency }}</strong></span><span>持仓<strong>{{ section.holding|currency0:section.currency }}</strong></span></div><div class="currency-position-list">{% for item in section.positions %}<div class="currency-position-row"><strong>{{ item.security.name }}</strong><span>{{ item.market_value_live|currency0:section.currency }}</span><span>{{ item.base_ratio|floatformat:2 }}%</span><span class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}">{{ item.unrealized_live|signed_currency0:section.currency }}</span></div>{% empty %}<span class="empty-currency-position">暂无持仓</span>{% endfor %}</div></article>{% endfor %}</div>
+    <div class="currency-overview-grid">{% for section in currency_sections %}<article class="currency-overview-card currency-{{ section.market_code }}"><h3>{{ section.currency }}</h3><div class="currency-totals"><span>现金<strong>{{ section.cash|currency0:section.currency }}</strong></span><span>持仓<strong>{{ section.holding|currency0:section.currency }}</strong></span></div><div class="currency-position-list">{% for item in section.positions %}<div class="currency-position-row"><span class="position-name">{{ item.security.name }}</span><span>{{ item.market_value_live|thousands }}</span><span>{{ item.base_ratio|floatformat:2 }}%</span><span class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}">{{ item.unrealized_live|signed_number0 }}</span></div>{% empty %}<span class="empty-currency-position">暂无持仓</span>{% endfor %}</div></article>{% endfor %}</div>
   {% endif %}
 </section>
 {% endblock %}

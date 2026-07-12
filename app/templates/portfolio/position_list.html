@@ -9,7 +9,7 @@
     <h1>投资持仓</h1>
     <a class="button" href="{% url 'portfolio:position_create' %}">新增持仓</a>
   </div>
-  <table>
+  <table class="portfolio-positions-table">
     <thead><tr><th>日期</th><th>账户</th><th>标的</th><th>数量</th><th>移动平均成本</th><th>摊薄成本</th><th>现价</th><th>市值</th><th>已实现盈亏</th><th>操作</th></tr></thead>
     <tbody>
       {% for item in positions %}

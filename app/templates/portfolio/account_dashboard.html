@@ -61,7 +61,7 @@
     <div><h2>证券账户明细</h2><p>所有金额按选定币种统一折算。</p></div>
   </div>
   <div class="account-table-wrap account-table-scroll">
-    <table class="account-prototype-table">
+    <table class="account-prototype-table account-list-table">
       <thead><tr><th>成员</th><th>账户名称</th><th>现金余额</th><th>持仓市值</th><th>持仓占比</th><th>总资产</th><th>今日盈亏</th><th>累计浮动盈亏</th><th>累计已实现盈亏</th><th>操作</th></tr></thead>
       <tbody>
         {% for row in account_rows %}
@@ -86,7 +86,7 @@
 <section class="panel" id="holdings">
   <div class="section-head"><div><h2>持仓明细</h2><p>持仓按交易原币展示，盈亏同时显示家庭本位币。</p></div></div>
   <div class="account-table-wrap">
-    <table class="account-prototype-table holdings-prototype-table">
+    <table class="account-prototype-table holdings-prototype-table dashboard-holdings-table">
       <thead><tr><th>证券代码</th><th>证券名称</th><th>成员</th><th>券商账户</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>浮动盈亏</th><th>累计已实现盈亏</th></tr></thead>
       <tbody>
         {% for item in positions %}
