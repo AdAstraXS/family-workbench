@@ -93,6 +93,40 @@ def page_navigation(request):
     if app_name == "portfolio":
         if url_name == "overview":
             parent_url = reverse("dashboard:home")
+        elif url_name in {"transaction_create", "transaction_edit"}:
+            from portfolio.models import InvestmentAccount, InvestmentTransaction
+
+            account_id = request.GET.get("account", "")
+            if url_name == "transaction_edit":
+                account_id = (
+                    InvestmentTransaction.objects.filter(
+                        pk=kwargs["pk"],
+                        account__bank_account__family__members__user=request.user,
+                        account__bank_account__family__members__is_active=True,
+                    )
+                    .values_list("account_id", flat=True)
+                    .first()
+                )
+            elif str(account_id).isdigit():
+                account_id = (
+                    InvestmentAccount.objects.filter(
+                        pk=account_id,
+                        bank_account__family__members__user=request.user,
+                        bank_account__family__members__is_active=True,
+                    )
+                    .values_list("pk", flat=True)
+                    .first()
+                )
+            if str(account_id).isdigit():
+                parent_url = (
+                    reverse(
+                        "portfolio:account_detail",
+                        kwargs={"pk": account_id},
+                    )
+                    + "?tab=transactions"
+                )
+            else:
+                parent_url = reverse("portfolio:transaction_list")
         elif url_name == "cash_movement_create":
             parent_url = reverse(
                 "portfolio:account_detail",

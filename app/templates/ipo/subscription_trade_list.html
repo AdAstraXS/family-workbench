@@ -47,7 +47,7 @@
   <div class="metric"><span>中签比例</span><strong>{{ metrics.allotment_rate|floatformat:2 }}%</strong></div>
   <div class="metric"><span>尚持有股票数量</span><strong>{{ metrics.holding|default:0 }}</strong></div>
   <div class="metric"><span>已卖出股票数量</span><strong>{{ metrics.closed|default:0 }}</strong></div>
-  <div class="metric"><span>已实现盈利总额</span><strong>{{ metrics.realized_profit_total|money2 }}</strong></div>
+  <div class="metric"><span>已实现盈利总额</span><strong class="{% if metrics.realized_profit_total > 0 %}positive{% elif metrics.realized_profit_total < 0 %}negative{% endif %}">{{ metrics.realized_profit_total|money2 }}</strong></div>
 </section>
 
 <section class="ipo-profit-query-grid">

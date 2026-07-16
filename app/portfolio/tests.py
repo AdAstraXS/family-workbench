@@ -107,6 +107,73 @@ class DailyExchangeRateTests(TestCase):
 
 
 class IpoPortfolioSyncTests(TestCase):
+    def test_unallotted_cost_is_synced_and_replaced_when_allotted(self):
+        family = Family.objects.create(name="未中签费用家庭")
+        member = FamilyMember.objects.create(family=family, display_name="成员")
+        account_type = AccountType.objects.create(family=family, name="券商")
+        source_account = BankAccount.objects.create(
+            family=family,
+            member=member,
+            account_name="打新账户",
+            account_type_ref=account_type,
+            supports_ipo=True,
+        )
+        listing = HkIpoListing.objects.create(
+            stock_code="02600.HK",
+            stock_name="未中签测试",
+            company_name="未中签测试有限公司",
+            subscription_end_date=date(2026, 7, 1),
+            allotment_result_date=date(2026, 7, 3),
+            final_price=Decimal("20"),
+            lot_size=100,
+        )
+        ipo_trade = HkIpoSubscriptionTrade.objects.create(
+            listing=listing,
+            member=member,
+            account=source_account,
+            application_date=date(2026, 7, 1),
+            applied_lots=2,
+            allotted_lots=0,
+            subscription_fee=Decimal("100"),
+            financing_interest=Decimal("5"),
+        )
+        HkIpoSubscriptionTrade.objects.filter(pk=ipo_trade.pk).update(
+            allotment_fee=Decimal("99")
+        )
+        ipo_trade.refresh_from_db()
+
+        dry_run = StringIO()
+        call_command("backfill_unallotted_ipo_fees", stdout=dry_run)
+        self.assertFalse(InvestmentTransaction.objects.exists())
+        self.assertIn("待新增=1", dry_run.getvalue())
+
+        call_command("backfill_unallotted_ipo_fees", apply=True, stdout=StringIO())
+        adjustment = InvestmentTransaction.objects.get(
+            external_id=f"ipo:{ipo_trade.pk}:unallotted-fee"
+        )
+        self.assertEqual(adjustment.trade_type, TradeTypeChoices.OTHER_FEE_ADJUSTMENT)
+        self.assertEqual(adjustment.amount, Decimal("105"))
+        self.assertEqual(adjustment.cash_change, Decimal("-105"))
+        self.assertEqual(adjustment.realized_pnl, Decimal("-105"))
+        self.assertEqual(adjustment.cash_movement.amount, Decimal("-105"))
+        ipo_trade.refresh_from_db()
+        self.assertEqual(ipo_trade.realized_profit, Decimal("-105"))
+
+        ipo_trade.allotted_lots = 1
+        ipo_trade.save()
+        sync_ipo_trade(ipo_trade.pk)
+        self.assertFalse(
+            InvestmentTransaction.objects.filter(
+                external_id=f"ipo:{ipo_trade.pk}:unallotted-fee"
+            ).exists()
+        )
+        self.assertTrue(
+            InvestmentTransaction.objects.filter(
+                external_id=f"ipo:{ipo_trade.pk}:buy",
+                trade_type=TradeTypeChoices.IPO,
+            ).exists()
+        )
+
     def test_allotment_and_sale_create_idempotent_portfolio_transactions(self):
         family = Family.objects.create(name="IPO 同步家庭")
         member = FamilyMember.objects.create(family=family, display_name="成员")
@@ -253,6 +320,13 @@ class TransactionFormTests(TestCase):
         transaction = InvestmentTransaction.objects.get()
         self.assertEqual(transaction.account.bank_account, bank_account)
         self.assertEqual(transaction.currency, "HKD")
+        account_form_page = self.client.get(
+            reverse("portfolio:transaction_create"),
+            {"account": transaction.account_id},
+        )
+        expected_parent = transaction.account.get_absolute_url() + "?tab=transactions"
+        self.assertEqual(account_form_page.context["page_parent_url"], expected_parent)
+        self.assertContains(account_form_page, f'href="{expected_parent}"')
 
         response = self.client.post(
             reverse("portfolio:transaction_create"),
@@ -287,6 +361,7 @@ class TransactionFormTests(TestCase):
         edit_page = self.client.get(
             reverse("portfolio:transaction_edit", args=[precise.pk])
         )
+        self.assertEqual(edit_page.context["page_parent_url"], expected_parent)
         self.assertIn('value="2.39"', str(edit_page.context["form"]["amount"]))
         self.assertIn('value="2.123456"', str(edit_page.context["form"]["price"]))
         self.assertIn('value="1.123456"', str(edit_page.context["form"]["quantity"]))
@@ -483,7 +558,8 @@ class AccountDashboardTests(TestCase):
 
         self.assertContains(dashboard, "证券账户")
         self.assertContains(dashboard, "持仓明细")
-        self.assertContains(detail, "变动后本位币余额")
+        self.assertContains(detail, "变动后现金余额")
+        self.assertNotContains(detail, "变动后本位币余额")
 
     def test_accounts_sort_by_total_asset_descending(self):
         second = create_broker_investment_account(
@@ -612,6 +688,129 @@ class AccountDashboardTests(TestCase):
             '<span class="currency-symbol">¥</span><span class="currency-number">+539</span>',
             html=True,
         )
+
+    def test_option_profit_breakdown_renders_values_in_table_columns(self):
+        underlying = Security.objects.create(
+            symbol="TSLA", name="特斯拉", market="US", currency="CNY"
+        )
+        option = Security.objects.create(
+            symbol="TSLA 20260717 PUT 300.0",
+            name="特斯拉看跌期权",
+            market="US",
+            asset_type=Security.TYPE_OPTION,
+            currency="CNY",
+        )
+        OptionContract.objects.create(
+            security=option,
+            underlying=underlying,
+            option_type=OptionContract.PUT,
+            strike_price=300,
+            expiration_date=date(2026, 7, 17),
+        )
+        InvestmentTransaction.objects.create(
+            account=self.account,
+            security=option,
+            trade_date=date(2026, 7, 1),
+            trade_type=TradeTypeChoices.SELL,
+            position_effect=InvestmentTransaction.EFFECT_OPEN,
+            quantity=1,
+            price=5,
+            amount=500,
+            fee=1,
+            currency="CNY",
+        )
+        InvestmentTransaction.objects.create(
+            account=self.account,
+            security=option,
+            trade_date=date(2026, 7, 8),
+            trade_type=TradeTypeChoices.BUY,
+            position_effect=InvestmentTransaction.EFFECT_CLOSE,
+            quantity=1,
+            price=2,
+            amount=200,
+            fee=1,
+            currency="CNY",
+        )
+        rebuild_position(self.account, option)
+
+        response = self.client.get(
+            reverse("portfolio:account_detail", args=[self.account.pk]),
+            {"tab": "individual-profit", "currency": "CNY"},
+        )
+        child = response.context["individual_profit"]["rows"][0]["contracts"][0]
+
+        self.assertEqual(child["display_total_pnl"], Decimal("298"))
+        self.assertEqual(child["display_income"], Decimal("0"))
+        self.assertContains(response, 'class="option-contract-row"')
+        self.assertContains(response, "TSLA 20260717 PUT 300.0")
+
+    def test_profit_total_sorting_and_transaction_filters_use_display_currency(self):
+        ExchangeRate.objects.create(
+            base_currency="USD",
+            quote_currency="CNY",
+            rate=Decimal("7"),
+            rate_date=date(2026, 1, 1),
+        )
+        ExchangeRate.objects.create(
+            base_currency="HKD",
+            quote_currency="CNY",
+            rate=Decimal("0.9"),
+            rate_date=date(2026, 1, 1),
+        )
+        usd = Security.objects.create(
+            symbol="USD-PROFIT", name="美元盈利", market="US", currency="USD"
+        )
+        hkd = Security.objects.create(
+            symbol="HKD-PROFIT", name="港币盈利", market="HK", currency="HKD"
+        )
+        InvestmentTransaction.objects.create(
+            account=self.account,
+            security=usd,
+            trade_date=date(2026, 2, 1),
+            trade_type=TradeTypeChoices.SELL,
+            quantity=1,
+            price=1,
+            amount=1,
+            currency="USD",
+            realized_pnl=Decimal("200"),
+        )
+        InvestmentTransaction.objects.create(
+            account=self.account,
+            security=hkd,
+            trade_date=date(2026, 3, 1),
+            trade_type=TradeTypeChoices.SELL,
+            quantity=1,
+            price=1,
+            amount=1,
+            currency="HKD",
+            realized_pnl=Decimal("1000"),
+        )
+
+        profit = self.client.get(
+            reverse("portfolio:account_detail", args=[self.account.pk]),
+            {"tab": "individual-profit", "currency": "CNY"},
+        )
+        filtered = self.client.get(
+            reverse("portfolio:account_detail", args=[self.account.pk]),
+            {
+                "tab": "transactions",
+                "currency": "CNY",
+                "date_start": "2026-02-01",
+                "date_end": "2026-02-28",
+                "stock": f"security:{usd.pk}",
+            },
+        )
+
+        rows = profit.context["individual_profit"]["rows"]
+        self.assertEqual([row["name"] for row in rows], ["美元盈利", "港币盈利"])
+        self.assertEqual(
+            profit.context["individual_profit"]["display_total_pnl"],
+            sum((row["display_total_pnl"] for row in rows), Decimal("0")),
+        )
+        self.assertContains(profit, "合计")
+        self.assertEqual(len(filtered.context["transactions"]), 1)
+        self.assertEqual(filtered.context["transactions"][0].security, usd)
+        self.assertContains(filtered, "开始日期")
 
     def test_detail_can_switch_to_diluted_cost_and_has_no_duplicate_actions(self):
         security = Security.objects.create(
@@ -796,6 +995,13 @@ class PortfolioOverviewTests(TestCase):
         self.assertEqual(response.context["total_asset"], Decimal("7200"))
         self.assertEqual(response.context["base_currency"], "CNY")
         self.assertEqual(PortfolioSnapshot.objects.count(), 0)
+
+    def test_overview_never_mixes_financial_instrument_names_into_allocation_categories(self):
+        response = self.client.get(reverse("portfolio:overview"))
+
+        group_names = {item["name"] for item in response.context["asset_groups"]}
+        self.assertIn("权益类", group_names)
+        self.assertNotIn("股票", group_names)
 
     def test_manual_bond_uses_clean_price_plus_accrued_interest(self):
         Currency.objects.get_or_create(code="CNY", defaults={"name": "人民币"})

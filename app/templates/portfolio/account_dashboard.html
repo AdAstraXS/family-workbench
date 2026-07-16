@@ -10,6 +10,7 @@
     <p>统一查看家庭、成员和证券账户的现金、持仓与盈亏。</p>
   </div>
   <div class="account-header-controls">
+    <a class="button ghost" href="{% url 'portfolio:transaction_list' %}">全部交易明细</a>
     <div class="exchange-rate-strip">
       {% if rate_info.status == "success" %}
         <span>美元兑换人民币 {{ rate_info.usd_cny|floatformat:4 }}</span>

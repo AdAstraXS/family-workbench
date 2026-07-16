@@ -378,7 +378,7 @@ a:hover {
   gap: 12px;
 }
 
-.ipo-profit-query-head span,
+.ipo-profit-query-head > div > span,
 .ipo-profit-query label,
 .ipo-profit-query small {
   color: #6b7280;
@@ -463,7 +463,7 @@ a:hover {
   padding: 16px;
 }
 
-.metric span {
+.metric > span {
   display: block;
   color: #6b7280;
   font-size: 13px;
@@ -3017,7 +3017,25 @@ textarea {
 .currency-us .currency-position-list { border-left-color: #0969a8; background: #e8f4ff; }
 .currency-cn .currency-position-list { border-left-color: #722ed1; background: #f7eaff; }
 .empty-currency-position { display: block; padding: 7px 0; color: #64748b; }
-.contract-breakdown { display: grid; gap: .35rem; margin-top: .5rem; font-size: .85rem; }
+.individual-profit-table .profit-target,
+.individual-profit-table .profit-target summary { text-align: left; }
+.individual-profit-table :is(th, td):nth-child(1) { width: 7%; }
+.individual-profit-table :is(th, td):nth-child(2) { width: 31%; }
+.individual-profit-table :is(th, td):nth-child(3) { width: 10%; }
+.individual-profit-table :is(th, td):nth-child(4),
+.individual-profit-table :is(th, td):nth-child(5) { width: 14%; }
+.individual-profit-table :is(th, td):nth-child(6),
+.individual-profit-table :is(th, td):nth-child(7) { width: 12%; }
+.individual-profit-table .profit-target summary { cursor: pointer; }
+.individual-profit-table .option-contract-row { display: none; background: #f8fafc; }
+.individual-profit-table .profit-group:has(details[open]) .option-contract-row { display: table-row; }
+.individual-profit-table .contract-symbol {
+  padding-left: 2rem;
+  font-weight: 600;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  word-break: normal;
+}
 .profit-filters { align-items: end; margin-bottom: 1rem; }
 .profit-filters label { display: grid; gap: .3rem; }
 
@@ -3997,6 +4015,11 @@ textarea {
 .security-search-table :is(th, td):nth-child(n+4):nth-child(-n+10),
 .watchlist-compact-table :is(th, td):nth-child(n+4):nth-child(-n+12) {
   text-align: right;
+}
+
+.individual-profit-table .table-total-row td {
+  border-top: 2px solid var(--line);
+  font-weight: 700;
 }
 
 .summary-grid-head {

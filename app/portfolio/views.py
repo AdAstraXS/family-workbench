@@ -421,14 +421,14 @@ def overview(request):
 
     total_market_value = valuation["total_market_value"]
     total_cost = valuation["total_cost"]
-    asset_type_names = {
-        "stock": "股票",
-        "etf": "ETF",
-        "fund": "基金",
-        "bond": "债券",
-        "option": "期权",
-        "crypto": "加密资产",
-        "other": "其他资产",
+    default_category_names = {
+        "stock": "权益类",
+        "etf": "基金类",
+        "fund": "基金类",
+        "bond": "固定收益类",
+        "option": "衍生品",
+        "crypto": "另类投资",
+        "other": "另类投资",
     }
     for item in positions:
         market_cny = item.valuation_market_value
@@ -439,7 +439,7 @@ def overview(request):
         category = (
             item.security.asset_category.name
             if item.security.asset_category
-            else asset_type_names.get(
+            else default_category_names.get(
                 item.security.asset_type,
                 item.security.asset_type,
             )
@@ -815,6 +815,9 @@ def _individual_profit_data(request, account, transactions):
                 "display_total_pnl": _convert_currency(
                     child["total_pnl"], child["currency"], display_currency
                 ),
+                "display_income": _convert_currency(
+                    child["income"], child["currency"], display_currency
+                ),
                 "holding_days": (
                     child["day_weight"] / child["closed_quantity"]
                     if child["closed_quantity"]
@@ -825,7 +828,13 @@ def _individual_profit_data(request, account, transactions):
             if child["has_realized"]
         ]
         rows.append(row)
-    rows.sort(key=lambda row: row["total_pnl"], reverse=True)
+    rows.sort(
+        key=lambda row: row["display_total_pnl"] or ZERO,
+        reverse=True,
+    )
+    display_total_pnl = _sum_or_none(
+        row["display_total_pnl"] for row in rows
+    )
     return {
         "rows": rows,
         "stock_options": sorted(options.items(), key=lambda item: item[1]),
@@ -833,6 +842,7 @@ def _individual_profit_data(request, account, transactions):
         "date_start": request.GET.get("date_start", ""),
         "date_end": request.GET.get("date_end", ""),
         "display_currency": display_currency,
+        "display_total_pnl": display_total_pnl,
     }
 
 
@@ -855,12 +865,6 @@ def account_detail(request, pk):
     for movement in movements:
         balances[movement.currency] += movement.amount
         movement.balance_after = balances[movement.currency]
-        movement.base_balance_after = _convert_currency(
-            movement.balance_after,
-            movement.currency,
-            account.family.base_currency,
-            movement.movement_date,
-        )
         display_movements.append(movement)
     context["cash_movements"] = list(reversed(display_movements))
     symbols = {
@@ -889,7 +893,25 @@ def account_detail(request, pk):
         )
         .order_by("trade_date", "created_at", "pk")
     )
-    context["transactions"] = list(reversed(transactions))
+    individual_profit = _individual_profit_data(request, account, transactions)
+    transaction_date_start = parse_date(request.GET.get("date_start", ""))
+    transaction_date_end = parse_date(request.GET.get("date_end", ""))
+    transaction_stock = request.GET.get("stock", "")
+    filtered_transactions = []
+    for item in transactions:
+        option = getattr(item.security, "option_contract", None) if item.security else None
+        root = option.underlying if option else item.security
+        stock_key = (
+            f"option:{root.pk}" if option else f"security:{root.pk}"
+        ) if root else ""
+        if transaction_date_start and item.trade_date < transaction_date_start:
+            continue
+        if transaction_date_end and item.trade_date > transaction_date_end:
+            continue
+        if transaction_stock and stock_key != transaction_stock:
+            continue
+        filtered_transactions.append(item)
+    context["transactions"] = list(reversed(filtered_transactions))
     for item in context["transactions"]:
         item.total_fee = item.fee + item.tax
     account_row = context["account_rows"][0] if context["account_rows"] else None
@@ -913,9 +935,13 @@ def account_detail(request, pk):
     context["currency_sections"] = _currency_sections(
         account, context["positions"], balances
     )
-    context["individual_profit"] = _individual_profit_data(
-        request, account, transactions
-    )
+    context["individual_profit"] = individual_profit
+    context["transaction_filters"] = {
+        "date_start": request.GET.get("date_start", ""),
+        "date_end": request.GET.get("date_end", ""),
+        "selected_stock": transaction_stock,
+        "stock_options": individual_profit["stock_options"],
+    }
     return render(request, "portfolio/account_detail.html", context)
 
 

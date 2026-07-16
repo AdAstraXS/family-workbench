@@ -109,6 +109,7 @@ def refresh_ipo_sale_summary(ipo_trade):
     latest_sale = sales.order_by("-trade_date", "-pk").first()
     if ipo_trade.allotted_lots == 0:
         status = HkIpoSubscriptionTrade.STATUS_UNALLOTTED
+        realized_profit = -ipo_trade.unallotted_fees
     elif ipo_trade.allotted_lots and sold_lots >= ipo_trade.allotted_lots:
         status = HkIpoSubscriptionTrade.STATUS_CLOSED
     elif ipo_trade.allotted_lots is None:
@@ -215,11 +216,38 @@ def sync_ipo_trade(ipo_trade_id):
                 "extra_data": {},
             },
         )
+    elif allotted_lots == 0 and ipo_trade.unallotted_fees > 0:
+        external_id = f"{prefix}unallotted-fee"
+        desired_ids.append(external_id)
+        _upsert_transaction(
+            external_id,
+            {
+                "account": account,
+                "ipo_subscription_trade": ipo_trade,
+                "security": security,
+                "asset_category": security.asset_category,
+                "trade_date": listing.allotment_result_date or ipo_trade.application_date,
+                "trade_type": TradeTypeChoices.OTHER_FEE_ADJUSTMENT,
+                "trade_type_option": InvestmentOption.objects.filter(
+                    code=TradeTypeChoices.OTHER_FEE_ADJUSTMENT,
+                    **option_filter,
+                ).first(),
+                "status": TradeStatusChoices.COMPLETED,
+                "quantity": ZERO,
+                "price": ZERO,
+                "amount": ipo_trade.unallotted_fees,
+                "fee": ZERO,
+                "tax": ZERO,
+                "currency": security.currency,
+                "remark": "未中签前期费用",
+                "extra_data": {"unallotted_fee_adjustment": True},
+            },
+        )
 
     stale = InvestmentTransaction.objects.filter(
         source=TransactionSourceChoices.IPO,
         ipo_subscription_trade=ipo_trade,
-        trade_type=TradeTypeChoices.IPO,
+        external_id__in={f"{prefix}buy", f"{prefix}unallotted-fee"},
     )
     if desired_ids:
         stale = stale.exclude(external_id__in=desired_ids)

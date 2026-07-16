@@ -556,6 +556,12 @@ class HkIpoSubscriptionTrade(models.Model):
             Decimal("0"),
         )
 
+    @property
+    def unallotted_fees(self):
+        return (self.subscription_fee or Decimal("0")) + (
+            self.financing_interest or Decimal("0")
+        )
+
     def upfront_fees_for_lots(self, lots):
         allotted_lots = self.allotted_lots or 0
         if not allotted_lots:
@@ -614,7 +620,7 @@ class HkIpoSubscriptionTrade(models.Model):
                 )
 
         if allotted_lots == 0:
-            self.realized_profit = -self.upfront_fees
+            self.realized_profit = -self.unallotted_fees
         else:
             self.realized_profit = (
                 ((self.sell_price or Decimal("0")) - final_price)
