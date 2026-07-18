@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}投资账户月底差额对齐{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>投资账户月底差额对齐</h1>
+    <p>以家庭账本月底资产快照为准，预览后为每个投资账户生成一笔独立的余额调整流水。</p>
+  </div>
+  <a class="button ghost" href="{% url 'portfolio:overview' %}">返回投资组合</a>
+</section>
+
+<section class="panel">
+  <form method="get" class="portfolio-member-filter">
+    <label>家庭账本快照
+      <select name="date" onchange="this.form.submit()">
+        {% for snapshot in snapshots %}
+          <option value="{{ snapshot.snapshot_date|date:'Y-m-d' }}"{% if selected_snapshot.pk == snapshot.pk %} selected{% endif %}>
+            {{ snapshot.snapshot_date|date:"Y年n月j日" }}{% if snapshot.title %} · {{ snapshot.title }}{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+</section>
+
+{% if preview %}
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <h2>{{ selected_snapshot.snapshot_date|date:"Y年n月j日" }} 差额预览</h2>
+        <p>账本合计 {{ preview.total_ledger|currency2:selected_snapshot.base_currency }}；调整前试算 {{ preview.total_calculated|currency2:selected_snapshot.base_currency }}；拟调整 {{ preview.total_adjustment|signed_currency2:selected_snapshot.base_currency }}。</p>
+      </div>
+      {% if run and run.status == "applied" %}
+        <span class="pricing-status pricing-fresh">已对齐</span>
+      {% elif run %}
+        <span class="pricing-status pricing-stale">已撤销</span>
+      {% endif %}
+    </div>
+
+    {% if run and run.status == "applied" %}
+      <p class="muted">为便于审计和重复计算，下表“调整前试算”会剔除本批次已经生成的调整流水；“已对齐”表示调整后的正式快照已与账本一致。</p>
+    {% endif %}
+
+    {% if preview.blocking_rows %}
+      <p class="form-error">存在缺价、缺汇率或账户映射问题，必须处理后才能执行对齐。</p>
+    {% endif %}
+
+    <div class="account-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>成员</th>
+            <th>投资账户</th>
+            <th class="numeric">账本余额</th>
+            <th class="numeric">调整前试算</th>
+            <th class="numeric">本位币差额</th>
+            <th class="numeric">拟调整流水</th>
+            <th>状态/说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in preview.rows %}
+            <tr>
+              <td>{{ row.member_name }}</td>
+              <td>{{ row.account_name }}</td>
+              <td class="numeric">{{ row.ledger_base_amount|currency2:selected_snapshot.base_currency }}</td>
+              <td class="numeric">{% if row.calculated_base_amount is not None %}{{ row.calculated_base_amount|currency2:selected_snapshot.base_currency }}{% else %}-{% endif %}</td>
+              <td class="numeric {% if row.adjustment_base_amount > 0 %}positive{% elif row.adjustment_base_amount < 0 %}negative{% endif %}">
+                {% if row.adjustment_base_amount is not None %}{{ row.adjustment_base_amount|signed_currency2:selected_snapshot.base_currency }}{% else %}-{% endif %}
+              </td>
+              <td class="numeric">
+                {% if row.adjustment_original_amount is not None %}{{ row.adjustment_original_amount|floatformat:2 }} {{ row.currency }}{% else %}-{% endif %}
+              </td>
+              <td>{% if row.status == "blocked" %}<span class="form-error">{{ row.message }}</span>{% else %}{{ row.message|default:"可执行" }}{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="7" class="empty-state">该快照没有可对齐的投资账户。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="form-actions">
+      <form method="post" action="{% url 'portfolio:reconciliation_apply' %}" onsubmit="return confirm('确认按预览结果生成或更新月底差额调整流水，并重建当日快照吗？');">
+        {% csrf_token %}
+        <input type="hidden" name="snapshot_id" value="{{ selected_snapshot.pk }}">
+        <button type="submit"{% if not preview.can_apply %} disabled{% endif %}>确认差额对齐</button>
+      </form>
+      {% if run and run.status == "applied" %}
+        <form method="post" action="{% url 'portfolio:reconciliation_revert' %}" onsubmit="return confirm('确认删除本批次生成的调整流水，并重建当日快照吗？');">
+          {% csrf_token %}
+          <input type="hidden" name="run_id" value="{{ run.pk }}">
+          <button class="ghost" type="submit">撤销本次对齐</button>
+        </form>
+      {% endif %}
+    </div>
+  </section>
+{% else %}
+  <section class="panel"><div class="empty-state">暂无包含投资账户的非草稿家庭账本快照。</div></section>
+{% endif %}
+{% endblock %}

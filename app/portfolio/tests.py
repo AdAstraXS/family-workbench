@@ -1,13 +1,16 @@
 import json
 from io import StringIO
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.test import TestCase
+from django.core.management.base import CommandError
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
+from django.utils import timezone
 from unittest.mock import MagicMock, patch
 
 from family_core.models import (
@@ -21,28 +24,47 @@ from family_core.models import (
     SiteSetting,
 )
 from ipo.models import HkIpoListing, HkIpoSubscriptionTrade
-from ledger.models import BankAccount
+from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot, BankAccount
 
 from .exchange_rate_service import ensure_daily_exchange_rates
+from .futu_service import FutuQueryError
+from .market_data import record_security_price, refresh_market_data
 from .account_sync import sync_investment_account
 from .ipo_sync import sync_ipo_trade
 from .models import (
     BondDetail,
+    CashMovementTypeChoices,
     DailyExchangeRateFetch,
     InvestmentAccount,
     InvestmentCashMovement,
     InvestmentOption,
     InvestmentPosition,
     InvestmentTransaction,
+    MarketDataRunStatusChoices,
     OptionContract,
+    PortfolioReconciliationRun,
     PortfolioSnapshot,
     PortfolioSnapshotPositionLine,
+    PriceSourceChoices,
+    PricingStatusChoices,
     Security,
+    SecurityExchange,
+    SecurityMarket,
     SecurityMarketSnapshot,
+    SecurityPriceRecord,
+    SecurityQuoteConfig,
+    TransactionSourceChoices,
     TradeTypeChoices,
     WatchlistItem,
 )
 from .services import rebuild_position
+from .reconciliation import (
+    apply_reconciliation,
+    build_reconciliation_preview,
+    revert_reconciliation,
+)
+from .snapshot_service import create_portfolio_snapshots_for_date
+from .valuation import refresh_position_valuations
 
 
 def create_broker_investment_account(
@@ -107,6 +129,38 @@ class DailyExchangeRateTests(TestCase):
 
 
 class IpoPortfolioSyncTests(TestCase):
+    def test_unallotted_backfill_rejects_missing_listing_dates(self):
+        family = Family.objects.create(name="缺少日期家庭")
+        member = FamilyMember.objects.create(family=family, display_name="成员")
+        account_type = AccountType.objects.create(family=family, name="券商")
+        source_account = BankAccount.objects.create(
+            family=family,
+            member=member,
+            account_name="缺少日期账户",
+            account_type_ref=account_type,
+            supports_ipo=True,
+        )
+        listing = HkIpoListing.objects.create(
+            stock_code="02601.HK",
+            stock_name="缺少日期测试",
+            final_price=Decimal("20"),
+            lot_size=100,
+        )
+        HkIpoSubscriptionTrade.objects.create(
+            listing=listing,
+            member=member,
+            account=source_account,
+            application_date=date(2026, 7, 1),
+            applied_lots=2,
+            allotted_lots=0,
+            subscription_fee=Decimal("100"),
+        )
+
+        with self.assertRaisesMessage(CommandError, "请先到新股资料中补录这两个日期"):
+            call_command("backfill_unallotted_ipo_fees", stdout=StringIO())
+
+        self.assertFalse(InvestmentTransaction.objects.exists())
+
     def test_unallotted_cost_is_synced_and_replaced_when_allotted(self):
         family = Family.objects.create(name="未中签费用家庭")
         member = FamilyMember.objects.create(family=family, display_name="成员")
@@ -153,11 +207,23 @@ class IpoPortfolioSyncTests(TestCase):
         )
         self.assertEqual(adjustment.trade_type, TradeTypeChoices.OTHER_FEE_ADJUSTMENT)
         self.assertEqual(adjustment.amount, Decimal("105"))
+        self.assertEqual(adjustment.trade_date, date(2026, 7, 3))
         self.assertEqual(adjustment.cash_change, Decimal("-105"))
         self.assertEqual(adjustment.realized_pnl, Decimal("-105"))
         self.assertEqual(adjustment.cash_movement.amount, Decimal("-105"))
+        self.assertEqual(adjustment.cash_movement.movement_date, date(2026, 7, 3))
         ipo_trade.refresh_from_db()
         self.assertEqual(ipo_trade.realized_profit, Decimal("-105"))
+
+        listing.allotment_result_date = None
+        listing.subscription_end_date = date(2026, 7, 5)
+        listing.save(update_fields=["allotment_result_date", "subscription_end_date"])
+        sync_ipo_trade(ipo_trade.pk)
+        adjustment.refresh_from_db()
+        ipo_trade.refresh_from_db()
+        self.assertEqual(adjustment.trade_date, date(2026, 7, 7))
+        self.assertEqual(adjustment.cash_movement.movement_date, date(2026, 7, 7))
+        self.assertEqual(ipo_trade.sell_date, date(2026, 7, 7))
 
         ipo_trade.allotted_lots = 1
         ipo_trade.save()
@@ -526,6 +592,153 @@ class InvestmentCashMovementFormTests(TestCase):
         movement = InvestmentCashMovement.objects.get(account=account)
         self.assertEqual(movement.amount, Decimal("10000"))
         self.assertEqual(movement.counterparty_account, foreign_bank)
+
+
+class InvestmentCashMovementAdminBoundaryTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_superuser(
+            username="cash-admin-tester",
+            password="test-password",
+            email="cash-admin@example.com",
+        )
+        family = Family.objects.create(name="现金后台边界家庭")
+        member = FamilyMember.objects.create(
+            family=family,
+            display_name="现金后台管理员",
+        )
+        self.account = create_broker_investment_account(
+            family,
+            member,
+            "现金后台测试账户",
+        )
+        security = Security.objects.create(
+            symbol="CASH-ADMIN",
+            name="现金后台测试标的",
+            market="HK",
+            currency="HKD",
+        )
+        transaction_item = InvestmentTransaction.objects.create(
+            account=self.account,
+            security=security,
+            trade_date=date(2026, 7, 18),
+            trade_type=TradeTypeChoices.BUY,
+            quantity=Decimal("10"),
+            price=Decimal("10"),
+            amount=Decimal("100"),
+            fee=Decimal("1"),
+            currency="HKD",
+        )
+        rebuild_position(self.account, security)
+        self.linked = InvestmentCashMovement.objects.get(
+            transaction=transaction_item
+        )
+        self.independent = InvestmentCashMovement.objects.create(
+            account=self.account,
+            movement_date=date(2026, 7, 18),
+            movement_type=CashMovementTypeChoices.DEPOSIT,
+            currency="HKD",
+            amount=Decimal("1000"),
+        )
+        self.request = RequestFactory().get(
+            reverse("admin:portfolio_investmentcashmovement_changelist")
+        )
+        self.request.user = self.user
+        self.model_admin = admin.site._registry[InvestmentCashMovement]
+
+    def test_linked_movement_is_read_only_and_independent_movement_is_editable(self):
+        self.assertFalse(
+            self.model_admin.has_change_permission(self.request, self.linked)
+        )
+        self.assertFalse(
+            self.model_admin.has_delete_permission(self.request, self.linked)
+        )
+        self.assertTrue(
+            self.model_admin.has_change_permission(self.request, self.independent)
+        )
+        self.assertTrue(
+            self.model_admin.has_delete_permission(self.request, self.independent)
+        )
+        self.assertIn(
+            "amount",
+            self.model_admin.get_readonly_fields(self.request, self.linked),
+        )
+        self.assertNotIn(
+            "amount",
+            self.model_admin.get_readonly_fields(self.request, self.independent),
+        )
+
+    def test_admin_links_to_transaction_and_disables_bulk_delete(self):
+        link = str(self.model_admin.transaction_link(self.linked))
+
+        self.assertIn(
+            reverse(
+                "admin:portfolio_investmenttransaction_change",
+                args=[self.linked.transaction_id],
+            ),
+            link,
+        )
+        self.assertNotIn("delete_selected", self.model_admin.get_actions(self.request))
+
+    def test_admin_only_offers_independent_cash_movement_types(self):
+        field = self.model_admin.formfield_for_choice_field(
+            InvestmentCashMovement._meta.get_field("movement_type"),
+            self.request,
+        )
+        choices = {value for value, _ in field.choices}
+
+        self.assertIn(CashMovementTypeChoices.DEPOSIT, choices)
+        self.assertIn(CashMovementTypeChoices.EXCHANGE, choices)
+        self.assertNotIn(CashMovementTypeChoices.BUY, choices)
+        self.assertNotIn(CashMovementTypeChoices.SELL, choices)
+
+
+class InvestmentCashMovementAuditCommandTests(TestCase):
+    def test_audit_is_read_only_and_repair_rebuilds_transaction_movement(self):
+        family = Family.objects.create(name="现金流水审计家庭")
+        member = FamilyMember.objects.create(family=family, display_name="审计成员")
+        account = create_broker_investment_account(family, member, "审计账户")
+        security = Security.objects.create(
+            symbol="CASH-AUDIT",
+            name="现金流水审计标的",
+            market="HK",
+            currency="HKD",
+        )
+        transaction_item = InvestmentTransaction.objects.create(
+            account=account,
+            security=security,
+            trade_date=date(2026, 7, 18),
+            trade_type=TradeTypeChoices.BUY,
+            quantity=Decimal("10"),
+            price=Decimal("10"),
+            amount=Decimal("100"),
+            fee=Decimal("1"),
+            currency="HKD",
+        )
+        rebuild_position(account, security)
+        movement = InvestmentCashMovement.objects.get(transaction=transaction_item)
+        InvestmentCashMovement.objects.filter(pk=movement.pk).update(
+            amount=Decimal("999")
+        )
+
+        audit_output = StringIO()
+        call_command("audit_investment_cash_movements", stdout=audit_output)
+        movement.refresh_from_db()
+        self.assertIn("不一致=1", audit_output.getvalue())
+        self.assertEqual(movement.amount, Decimal("999"))
+
+        repair_output = StringIO()
+        call_command(
+            "audit_investment_cash_movements",
+            repair=True,
+            stdout=repair_output,
+        )
+        movement.refresh_from_db()
+        self.assertEqual(movement.amount, Decimal("-101"))
+        self.assertIn("修复完成", repair_output.getvalue())
+
+        final_output = StringIO()
+        call_command("audit_investment_cash_movements", stdout=final_output)
+        self.assertIn("缺失=0 不一致=0 多余=0", final_output.getvalue())
 
 
 class AccountDashboardTests(TestCase):
@@ -1087,13 +1300,34 @@ class PortfolioOverviewTests(TestCase):
         self.assertEqual(response.context["total_asset"], Decimal("500"))
         self.assertContains(response, "成员乙")
 
+    def test_overview_defaults_to_all_family_members(self):
+        second = FamilyMember.objects.create(
+            family=self.member.family,
+            display_name="成员乙",
+        )
+        create_broker_investment_account(
+            self.member.family,
+            second,
+            "成员乙账户",
+            currency="CNY",
+            cash_balance=Decimal("500"),
+        )
+
+        response = self.client.get(reverse("portfolio:overview"))
+
+        self.assertIsNone(response.context["selected_member"])
+        self.assertEqual(response.context["selected_member_value"], "all")
+        self.assertEqual(response.context["total_asset"], Decimal("7700"))
+        self.assertContains(response, "全部家庭成员")
+
     def test_overview_uses_existing_snapshots_for_trend(self):
         PortfolioSnapshot.objects.create(
             family=self.member.family,
-            member=self.member,
+            member=None,
             snapshot_date=date(2026, 7, 4),
             total_asset=Decimal("5000"),
             currency="CNY",
+            extra_data={"complete": True},
         )
 
         response = self.client.get(reverse("portfolio:overview"))
@@ -1101,6 +1335,62 @@ class PortfolioOverviewTests(TestCase):
         self.assertEqual(len(response.context["trend_snapshots"]), 1)
         self.assertEqual(response.context["change_amount"], Decimal("0"))
         self.assertTrue(response.context["trend_points"])
+
+    def test_overview_snapshot_views_use_period_end_and_daily_keeps_all_points(self):
+        snapshot_values = (
+            (date(2025, 12, 31), Decimal("100000")),
+            (date(2026, 1, 15), Decimal("150000")),
+            (date(2026, 1, 31), Decimal("200000")),
+            (date(2026, 2, 1), Decimal("300000")),
+        )
+        for snapshot_date, total_asset in snapshot_values:
+            PortfolioSnapshot.objects.create(
+                family=self.member.family,
+                member=None,
+                snapshot_date=snapshot_date,
+                total_asset=total_asset,
+                currency="CNY",
+                extra_data={"complete": True},
+            )
+
+        monthly = self.client.get(reverse("portfolio:overview"))
+        yearly = self.client.get(
+            reverse("portfolio:overview"), {"snapshot_view": "yearly"}
+        )
+        daily = self.client.get(
+            reverse("portfolio:overview"), {"snapshot_view": "daily"}
+        )
+
+        self.assertEqual(
+            [item.snapshot_date for item in monthly.context["trend_snapshots"]],
+            [date(2025, 12, 31), date(2026, 1, 31), date(2026, 2, 1)],
+        )
+        self.assertEqual(
+            [item.snapshot_date for item in yearly.context["trend_snapshots"]],
+            [date(2025, 12, 31), date(2026, 2, 1)],
+        )
+        self.assertEqual(len(daily.context["trend_snapshots"]), 4)
+        self.assertEqual(daily.context["chart_ticks"][0]["label"], "0.00")
+        self.assertEqual(daily.context["trend_rows"][-1]["amount_label"], "30.00万")
+
+    def test_daily_snapshot_chart_expands_instead_of_compressing_many_nodes(self):
+        for day in range(1, 13):
+            PortfolioSnapshot.objects.create(
+                family=self.member.family,
+                member=None,
+                snapshot_date=date(2026, 6, day),
+                total_asset=Decimal(day * 10000),
+                currency="CNY",
+                extra_data={"complete": True},
+            )
+
+        response = self.client.get(
+            reverse("portfolio:overview"), {"snapshot_view": "daily"}
+        )
+
+        self.assertEqual(len(response.context["trend_rows"]), 12)
+        self.assertGreater(response.context["chart_width"], 1000)
+        self.assertContains(response, "可左右滚动查看")
 
 
 class PortfolioSnapshotCommandTests(TestCase):
@@ -1147,7 +1437,7 @@ class PortfolioSnapshotCommandTests(TestCase):
         call_command("create_portfolio_snapshots")
         call_command("create_portfolio_snapshots")
 
-        self.assertEqual(PortfolioSnapshot.objects.count(), 2)
+        self.assertEqual(PortfolioSnapshot.objects.count(), 3)
         family_snapshot = PortfolioSnapshot.objects.get(member=None)
         self.assertEqual(family_snapshot.total_asset, Decimal("4500"))
         self.assertEqual(family_snapshot.position_lines.count(), 2)
@@ -1160,6 +1450,168 @@ class PortfolioSnapshotCommandTests(TestCase):
         )
         position.refresh_from_db()
         self.assertEqual(position.current_price, Decimal("400"))
+
+
+class HistoricalPortfolioSnapshotTests(TestCase):
+    def test_snapshot_rebuilds_position_as_of_date_instead_of_using_current_position(self):
+        family = Family.objects.create(name="历史快照家庭")
+        member = FamilyMember.objects.create(family=family, display_name="成员")
+        account = create_broker_investment_account(
+            family,
+            member,
+            "历史账户",
+            currency="CNY",
+            cash_balance=Decimal("1000"),
+        )
+        security = Security.objects.create(
+            symbol="HISTORY",
+            name="历史持仓测试",
+            market="CN",
+            asset_type=Security.TYPE_STOCK,
+            currency="CNY",
+        )
+        InvestmentTransaction.objects.create(
+            account=account,
+            security=security,
+            trade_date=date(2026, 6, 1),
+            trade_type=TradeTypeChoices.BUY,
+            quantity=Decimal("10"),
+            price=Decimal("10"),
+            amount=Decimal("100"),
+            currency="CNY",
+        )
+        InvestmentTransaction.objects.create(
+            account=account,
+            security=security,
+            trade_date=date(2026, 7, 1),
+            trade_type=TradeTypeChoices.SELL,
+            quantity=Decimal("5"),
+            price=Decimal("20"),
+            amount=Decimal("100"),
+            currency="CNY",
+        )
+        current_position = rebuild_position(account, security)
+        self.assertEqual(current_position.quantity, Decimal("5"))
+        SecurityPriceRecord.objects.create(
+            security=security,
+            price=Decimal("15"),
+            currency="CNY",
+            source=PriceSourceChoices.MANUAL,
+            price_as_of=timezone.make_aware(
+                datetime(2026, 6, 30, 16, 0)
+            ),
+        )
+
+        snapshots = create_portfolio_snapshots_for_date(
+            family,
+            [account],
+            date(2026, 6, 30),
+            "CNY",
+            require_complete=True,
+        )
+
+        family_snapshot = next(
+            item for item in snapshots if item.member_id is None
+        )
+        position_line = family_snapshot.position_lines.get(security=security)
+        self.assertEqual(position_line.quantity, Decimal("10"))
+        self.assertEqual(position_line.market_value, Decimal("150"))
+        self.assertEqual(family_snapshot.total_cash, Decimal("900"))
+        self.assertEqual(family_snapshot.total_asset, Decimal("1050"))
+
+
+class PortfolioReconciliationTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="reconciliation-admin",
+            password="test-password",
+            is_staff=True,
+        )
+        self.family = Family.objects.create(name="差额对齐家庭")
+        self.member = FamilyMember.objects.create(
+            family=self.family,
+            display_name="管理员",
+            role=FamilyMember.ROLE_ADMIN,
+            user=self.user,
+        )
+        self.account = create_broker_investment_account(
+            self.family,
+            self.member,
+            "对齐账户",
+            currency="CNY",
+            cash_balance=Decimal("1000"),
+        )
+        self.ledger_snapshot = AssetBalanceSnapshot.objects.create(
+            family=self.family,
+            snapshot_date=date(2026, 6, 30),
+            base_currency="CNY",
+            is_draft=False,
+        )
+        self.entry = AssetBalanceEntry.objects.create(
+            snapshot=self.ledger_snapshot,
+            member=self.member,
+            account=self.account.bank_account,
+            currency="CNY",
+            original_amount=Decimal("1200"),
+            base_amount=Decimal("1200"),
+        )
+
+    def test_apply_is_idempotent_updates_existing_adjustment_and_can_revert(self):
+        preview = build_reconciliation_preview(self.ledger_snapshot)
+        self.assertTrue(preview.can_apply)
+        self.assertEqual(preview.ready_rows[0].adjustment_base_amount, Decimal("200"))
+
+        first = apply_reconciliation(self.ledger_snapshot)
+        second = apply_reconciliation(self.ledger_snapshot)
+
+        self.assertEqual(first.pk, second.pk)
+        movements = InvestmentCashMovement.objects.filter(
+            source=TransactionSourceChoices.RECONCILIATION
+        )
+        self.assertEqual(movements.count(), 1)
+        self.assertEqual(movements.get().amount, Decimal("200"))
+        snapshot = PortfolioSnapshot.objects.get(
+            family=self.family,
+            member=None,
+            account=None,
+            snapshot_date=date(2026, 6, 30),
+            currency="CNY",
+        )
+        self.assertEqual(snapshot.total_asset, Decimal("1200"))
+
+        self.entry.original_amount = Decimal("1250")
+        self.entry.base_amount = Decimal("1250")
+        self.entry.save(update_fields=["original_amount", "base_amount"])
+        apply_reconciliation(self.ledger_snapshot)
+        self.assertEqual(movements.get().amount, Decimal("250"))
+
+        run = PortfolioReconciliationRun.objects.get(pk=first.pk)
+        revert_reconciliation(run)
+        self.assertFalse(
+            InvestmentCashMovement.objects.filter(
+                source=TransactionSourceChoices.RECONCILIATION
+            ).exists()
+        )
+        snapshot.refresh_from_db()
+        self.assertEqual(snapshot.total_asset, Decimal("1000"))
+
+    def test_adjustment_does_not_change_earlier_snapshot(self):
+        apply_reconciliation(self.ledger_snapshot)
+        earlier = create_portfolio_snapshots_for_date(
+            self.family,
+            [self.account],
+            date(2026, 5, 31),
+            "CNY",
+            require_complete=True,
+        )[0]
+        self.assertEqual(earlier.total_asset, Decimal("1000"))
+
+    def test_admin_can_render_reconciliation_preview_page(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("portfolio:reconciliation_preview"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "投资账户月底差额对齐")
+        self.assertContains(response, "200.00")
 
 
 class PositionAccountingTests(TestCase):
@@ -1424,3 +1876,294 @@ class WatchlistPageTests(TestCase):
             security.futu_url,
             "https://www.futunn.com/hk/stock/00700-HK",
         )
+
+
+class MarketDataFoundationTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="market-data-tester",
+            password="test-password",
+        )
+        self.family = Family.objects.create(name="行情测试家庭")
+        self.member = FamilyMember.objects.create(
+            family=self.family,
+            user=self.user,
+            display_name="行情测试成员",
+        )
+        self.account = create_broker_investment_account(
+            self.family,
+            self.member,
+            "行情测试账户",
+        )
+        self.security = Security.objects.create(
+            symbol="00700",
+            name="腾讯控股",
+            market="HK",
+            exchange="HK",
+            asset_type=Security.TYPE_STOCK,
+            currency="HKD",
+        )
+        self.position = InvestmentPosition.objects.create(
+            account=self.account,
+            security=self.security,
+            quantity=Decimal("10"),
+            avg_cost=Decimal("400"),
+            current_price=Decimal("400"),
+            position_date=date.today(),
+        )
+        self.client.force_login(self.user)
+
+    @patch("portfolio.market_data.get_futu_market_snapshots")
+    def test_batch_refresh_writes_history_latest_quote_and_position_value(self, fetch):
+        fetch.return_value = {
+            "HK.00700": {
+                "last_price": "500",
+                "quote_time": timezone.localtime().strftime("%Y-%m-%d %H:%M:%S"),
+                "change_rate": "2.5",
+                "raw_data": {"sec_status": "NORMAL"},
+            }
+        }
+
+        run = refresh_market_data(security_ids=[self.security.pk])
+
+        self.assertEqual(run.status, MarketDataRunStatusChoices.SUCCESS)
+        self.assertEqual(run.success_count, 1)
+        snapshot = SecurityMarketSnapshot.objects.get(security=self.security)
+        self.assertEqual(snapshot.last_price, Decimal("500"))
+        self.assertEqual(snapshot.price_source, PriceSourceChoices.FUTU)
+        self.assertEqual(SecurityPriceRecord.objects.count(), 1)
+        self.position.refresh_from_db()
+        self.assertEqual(self.position.current_price, Decimal("500"))
+        self.assertEqual(self.position.market_value, Decimal("5000"))
+        self.assertEqual(self.position.pricing_status, PricingStatusChoices.FRESH)
+
+    @patch("portfolio.market_data.get_futu_market_snapshots")
+    def test_failed_refresh_preserves_last_price_and_marks_error(self, fetch):
+        record_security_price(
+            self.security,
+            Decimal("480"),
+            source=PriceSourceChoices.FUTU,
+            price_as_of=timezone.now(),
+        )
+        fetch.side_effect = FutuQueryError("OpenD 暂不可用")
+
+        run = refresh_market_data(security_ids=[self.security.pk])
+
+        self.assertEqual(run.status, MarketDataRunStatusChoices.FAILED)
+        snapshot = SecurityMarketSnapshot.objects.get(security=self.security)
+        self.assertEqual(snapshot.last_price, Decimal("480"))
+        self.assertEqual(snapshot.pricing_status, PricingStatusChoices.ERROR)
+        self.position.refresh_from_db()
+        self.assertEqual(self.position.current_price, Decimal("480"))
+        self.assertEqual(self.position.pricing_status, PricingStatusChoices.ERROR)
+
+    def test_market_data_get_is_read_only_and_manual_price_updates_valuation(self):
+        response = self.client.get(reverse("portfolio:market_data_status"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "行情与估值")
+        self.assertFalse(SecurityQuoteConfig.objects.exists())
+
+        response = self.client.post(
+            reverse("portfolio:manual_security_price", args=[self.security.pk]),
+            {
+                "price": "510.25",
+                "price_as_of": timezone.localtime().strftime("%Y-%m-%dT%H:%M"),
+                "remark": "测试手工收盘价",
+            },
+        )
+
+        self.assertRedirects(response, reverse("portfolio:market_data_status"))
+        self.assertTrue(SecurityQuoteConfig.objects.filter(security=self.security).exists())
+        latest = SecurityPriceRecord.objects.get(security=self.security)
+        self.assertEqual(latest.source, PriceSourceChoices.MANUAL)
+        self.position.refresh_from_db()
+        self.assertEqual(self.position.current_price, Decimal("510.25"))
+        self.assertEqual(self.position.market_value, Decimal("5102.5"))
+        self.assertEqual(self.position.pricing_status, PricingStatusChoices.MANUAL)
+
+    def test_bond_uses_per_100_quote_and_expired_option_is_not_forced_to_zero(self):
+        bond = Security.objects.create(
+            symbol="UST-TEST",
+            name="测试美债",
+            market="US",
+            asset_type=Security.TYPE_BOND,
+            currency="USD",
+        )
+        BondDetail.objects.create(
+            security=bond,
+            quote_basis=BondDetail.PER_100,
+            accrued_interest=Decimal("2"),
+        )
+        bond_position = InvestmentPosition.objects.create(
+            account=self.account,
+            security=bond,
+            quantity=Decimal("1000"),
+            avg_cost=Decimal("95"),
+            current_price=Decimal("0"),
+            position_date=date.today(),
+        )
+        record_security_price(
+            bond,
+            Decimal("98"),
+            source=PriceSourceChoices.MANUAL,
+            price_as_of=timezone.now(),
+            price_type="manual",
+        )
+
+        underlying = Security.objects.create(
+            symbol="TSLA",
+            name="特斯拉",
+            market="US",
+            currency="USD",
+        )
+        option = Security.objects.create(
+            symbol="TSLA-EXPIRED-PUT",
+            name="到期看跌期权",
+            market="US",
+            asset_type=Security.TYPE_OPTION,
+            currency="USD",
+        )
+        OptionContract.objects.create(
+            security=option,
+            underlying=underlying,
+            option_type=OptionContract.PUT,
+            strike_price=Decimal("300"),
+            expiration_date=date.today() - timedelta(days=1),
+            multiplier=100,
+        )
+        option_position = InvestmentPosition.objects.create(
+            account=self.account,
+            security=option,
+            quantity=Decimal("1"),
+            avg_cost=Decimal("4"),
+            current_price=Decimal("5"),
+            position_date=date.today(),
+        )
+
+        refresh_position_valuations(security_ids=[bond.pk, option.pk])
+
+        bond_position.refresh_from_db()
+        self.assertEqual(bond_position.market_value, Decimal("1000"))
+        self.assertEqual(bond_position.unrealized_pnl, Decimal("50"))
+        option_position.refresh_from_db()
+        self.assertEqual(option_position.current_price, Decimal("5"))
+        self.assertEqual(option_position.market_value, Decimal("500"))
+        self.assertEqual(
+            option_position.pricing_status,
+            PricingStatusChoices.EXPIRED_UNRESOLVED,
+        )
+
+
+class SecurityMarketDictionaryTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="security-market-tester",
+            password="test-password",
+        )
+        self.family = Family.objects.create(name="市场字典测试家庭")
+        FamilyMember.objects.create(
+            family=self.family,
+            user=self.user,
+            display_name="市场字典成员",
+        )
+        AssetCategory.objects.create(
+            family=self.family,
+            name="权益类",
+            code="equity",
+        )
+        Currency.objects.update_or_create(
+            code="USD",
+            defaults={"name": "美元", "symbol": "$", "is_active": True},
+        )
+        Currency.objects.update_or_create(
+            code="HKD",
+            defaults={"name": "港币", "symbol": "HK$", "is_active": True},
+        )
+        self.client.force_login(self.user)
+
+    def test_seeded_b_share_dictionary_and_valid_security_creation(self):
+        b_market = SecurityMarket.objects.get(code="CN_B")
+        self.assertEqual(b_market.name, "B 股")
+        self.assertEqual(
+            set(
+                SecurityExchange.objects.filter(market=b_market).values_list(
+                    "code",
+                    "default_currency",
+                    "provider_prefix",
+                )
+            ),
+            {("SH", "USD", "SH"), ("SZ", "HKD", "SZ")},
+        )
+
+        response = self.client.post(
+            reverse("portfolio:security_create"),
+            {
+                "asset_category": "",
+                "symbol": "900901",
+                "name": "测试上海 B 股",
+                "market": "CN_B",
+                "exchange": "CN_B:SH",
+                "asset_type": Security.TYPE_STOCK,
+                "currency": "USD",
+                "industry": "",
+                "lot_size": "100",
+                "listing_date": "",
+                "is_active": "on",
+            },
+        )
+
+        self.assertRedirects(response, reverse("portfolio:security_list"))
+        security = Security.objects.get(symbol="900901", market="CN_B")
+        self.assertEqual(security.exchange, "SH")
+        self.assertEqual(security.currency, "USD")
+        config = SecurityQuoteConfig.objects.get(security=security)
+        self.assertEqual(config.provider, PriceSourceChoices.FUTU)
+        self.assertEqual(config.provider_symbol, "SH.900901")
+
+    def test_b_share_code_and_currency_are_validated(self):
+        response = self.client.post(
+            reverse("portfolio:security_create"),
+            {
+                "asset_category": "",
+                "symbol": "600000",
+                "name": "错误 B 股",
+                "market": "CN_B",
+                "exchange": "CN_B:SH",
+                "asset_type": Security.TYPE_STOCK,
+                "currency": "HKD",
+                "industry": "",
+                "lot_size": "100",
+                "listing_date": "",
+                "is_active": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "代码应以 900 开头")
+        self.assertContains(response, "应使用 USD 计价")
+        self.assertFalse(Security.objects.filter(name="错误 B 股").exists())
+
+    def test_admin_maintained_market_and_exchange_appear_in_form(self):
+        market = SecurityMarket.objects.create(
+            code="JP",
+            name="日本股市",
+            default_currency="JPY",
+            display_order=50,
+        )
+        SecurityExchange.objects.create(
+            market=market,
+            code="TSE",
+            name="东京证券交易所",
+            default_currency="JPY",
+            display_order=10,
+        )
+
+        response = self.client.get(reverse("portfolio:security_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'value="JP"')
+        self.assertContains(response, 'value="JP:TSE"')
+
+        market.code = "JP_CHANGED"
+        with self.assertRaisesMessage(ValidationError, "稳定代码创建后不可修改"):
+            market.save()

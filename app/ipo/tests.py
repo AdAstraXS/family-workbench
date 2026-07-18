@@ -19,7 +19,12 @@ from family_core.models import AccountType, Family, FamilyMember
 from ledger.models import BankAccount
 from portfolio.models import InvestmentTransaction, TradeTypeChoices
 
-from .forms import HkIpoAllotmentForm, HkIpoListingForm, HkIpoSubscriptionTradeForm
+from .forms import (
+    HkIpoAllotmentForm,
+    HkIpoListingForm,
+    HkIpoSaleForm,
+    HkIpoSubscriptionTradeForm,
+)
 from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
 from .services import (
     IpoImageRecognitionError,
@@ -35,7 +40,7 @@ from .services import (
     recognize_ipo_listing_from_image,
     refresh_listed_market_data,
 )
-from .views import subscription_trade_list_url
+from .views import save_ipo_sale_transaction, subscription_trade_list_url
 
 
 class HkIpoSubscriptionTradeCalculationTests(TestCase):
@@ -154,6 +159,31 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
         )
         self.assertEqual(trade.get_trade_status_display(), "未中签")
         self.assertEqual(trade.sell_date, self.listing.allotment_result_date)
+
+    def test_allotment_form_requires_listing_accounting_dates(self):
+        listing = HkIpoListing.objects.create(
+            stock_code="08888.HK",
+            stock_name="缺少日期的新股",
+            company_name="缺少日期的新股有限公司",
+            final_price=Decimal("10"),
+            lot_size=100,
+        )
+        trade = self.make_trade(listing=listing, allotted_lots=None)
+
+        form = HkIpoAllotmentForm({"allotted_lots": "0"}, instance=trade)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("招股截止日", form.non_field_errors()[0])
+        self.assertIn("公布结果日", form.non_field_errors()[0])
+        self.assertIn("新股资料", form.non_field_errors()[0])
+
+    def test_unallotted_uses_subscription_end_plus_two_when_result_date_missing(self):
+        self.listing.allotment_result_date = None
+        self.listing.save(update_fields=["allotment_result_date"])
+
+        trade = self.make_trade(allotted_lots=0, sold_lots=0)
+
+        self.assertEqual(trade.sell_date, self.listing.subscription_end_date + timedelta(days=2))
 
     def test_unallotted_closed_row_shows_all_upfront_fees_as_loss(self):
         user = get_user_model().objects.create_user(username="ipo-unallotted-fee-tester")
@@ -453,6 +483,93 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
         self.assertEqual(
             [trade.pk for trade in closed_trades],
             [newer.pk, historical_trade.pk, older.pk],
+        )
+
+    def test_cross_year_partial_sales_are_attributed_to_each_actual_sale_year(self):
+        user = get_user_model().objects.create_user(
+            username="ipo-cross-year-tester",
+            password="test-password",
+        )
+        self.member.user = user
+        self.member.save(update_fields=["user"])
+        listing = HkIpoListing.objects.create(
+            stock_code="06082.HK",
+            stock_name="Cross-year IPO",
+            company_name="Cross-year IPO Limited",
+            subscription_end_date=date(2025, 12, 29),
+            allotment_result_date=date(2025, 12, 30),
+            listing_date=date(2025, 12, 31),
+            final_price=Decimal("19.60"),
+            lot_size=200,
+        )
+        trade = HkIpoSubscriptionTrade.objects.create(
+            listing=listing,
+            member=self.member,
+            account=self.account,
+            application_date=date(2025, 12, 29),
+            applied_lots=3,
+            allotted_lots=3,
+            sold_lots=0,
+        )
+        first_form = HkIpoSaleForm(
+            {
+                "sell_price": "33",
+                "sell_date": "2025-12-31",
+                "sold_lots": "1",
+                "trading_fee": "0",
+            },
+            ipo_trade=trade,
+        )
+        self.assertTrue(first_form.is_valid(), first_form.errors)
+        first_sale = save_ipo_sale_transaction(trade, first_form)
+        trade.refresh_from_db()
+        second_form = HkIpoSaleForm(
+            {
+                "sell_price": "34.06",
+                "sell_date": "2026-01-02",
+                "sold_lots": "1",
+                "trading_fee": "0",
+            },
+            ipo_trade=trade,
+        )
+        self.assertTrue(second_form.is_valid(), second_form.errors)
+        second_sale = save_ipo_sale_transaction(trade, second_form)
+        trade.refresh_from_db()
+        first_sale.refresh_from_db()
+        second_sale.refresh_from_db()
+        self.assertEqual(trade.sell_date, date(2026, 1, 2))
+        self.client.force_login(user)
+
+        response_2025 = self.client.get(
+            reverse("ipo:subscription_trade_list"), {"year": "2025"}
+        )
+        rows_2025 = (
+            response_2025.context["closed_visible"]
+            + response_2025.context["closed_hidden"]
+        )
+        self.assertEqual([row.pk for row in rows_2025], [first_sale.pk])
+        self.assertEqual(
+            response_2025.context["metrics"]["realized_profit_total"],
+            first_sale.realized_pnl,
+        )
+
+        response_2026 = self.client.get(
+            reverse("ipo:subscription_trade_list"), {"year": "2026"}
+        )
+        rows_2026 = (
+            response_2026.context["closed_visible"]
+            + response_2026.context["closed_hidden"]
+        )
+        self.assertEqual([row.pk for row in rows_2026], [second_sale.pk])
+        self.assertEqual(
+            response_2026.context["metrics"]["realized_profit_total"],
+            second_sale.realized_pnl,
+        )
+        self.assertEqual(
+            self.client.get(reverse("ipo:index"), {"year": "2025"}).context[
+                "metrics"
+            ]["realized_profit_total"],
+            first_sale.realized_pnl,
         )
 
     def test_selected_year_persists_in_session(self):

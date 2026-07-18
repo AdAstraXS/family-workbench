@@ -78,6 +78,11 @@ def signed_currency0(value, code):
 
 
 @register.filter
+def signed_currency2(value, code):
+    return _currency(value, code, 2, show_positive_sign=True)
+
+
+@register.filter
 def signed_number0(value):
     if value in (None, ""):
         return "-"

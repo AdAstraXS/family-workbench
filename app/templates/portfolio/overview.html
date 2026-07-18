@@ -15,8 +15,12 @@
   <div class="quick-actions">
     <a class="button ghost" href="{% url 'portfolio:account_list' %}">证券账户和持仓</a>
     <a class="button ghost" href="{% url 'portfolio:security_list' %}">自选股</a>
+    {% if can_reconcile %}
+      <a class="button ghost" href="{% url 'portfolio:reconciliation_preview' %}">月底差额对齐</a>
+    {% endif %}
   </div>
   <form method="get" class="portfolio-member-filter">
+    <input type="hidden" name="snapshot_view" value="{{ trend_view }}">
     <label>成员
       <select name="member" onchange="this.form.submit()">
         <option value="all"{% if selected_member_value == "all" %} selected{% endif %}>全部成员</option>
@@ -42,27 +46,50 @@
         （{{ change_ratio|floatformat:2 }}%）
       </small>
     </div>
-    <span class="portfolio-snapshot-count">{{ trend_snapshots|length }} 个每日快照</span>
-  </div>
-  <div class="portfolio-trend-chart" aria-label="投资账户总资产走势">
-    <svg viewBox="0 0 1000 180" role="img" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="portfolioTrendFill" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stop-color="#22c55e" stop-opacity="0.18"/>
-          <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
-        </linearGradient>
-      </defs>
-      <line x1="0" y1="165" x2="1000" y2="165" class="portfolio-chart-axis"/>
-      {% if trend_points %}
-        <polygon points="0,165 {{ trend_points }} 1000,165" fill="url(#portfolioTrendFill)"/>
-        <polyline points="{{ trend_points }}" class="portfolio-trend-line"/>
-      {% endif %}
-    </svg>
-    <div class="portfolio-trend-dates">
-      <span>{{ trend_start|date:"Y年n月j日" }}</span>
-      <span>{{ trend_end|date:"Y年n月j日" }}</span>
+    <div class="portfolio-trend-controls">
+      <form method="get">
+        <input type="hidden" name="member" value="{{ selected_member_value }}">
+        <label>快照视图
+          <select name="snapshot_view" onchange="this.form.submit()">
+            {% for value, label in trend_view_options %}
+              <option value="{{ value }}"{% if trend_view == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+      </form>
+      <span class="portfolio-snapshot-count">{{ trend_snapshots|length }} 个资产快照</span>
     </div>
   </div>
+  <div class="portfolio-trend-chart-scroll">
+    <div class="portfolio-trend-chart" aria-label="投资账户总资产走势，单位人民币万元">
+      <svg viewBox="0 0 {{ chart_width }} {{ chart_height }}" role="img" style="width:{{ chart_width }}px;min-width:{{ chart_width }}px">
+        <defs>
+          <linearGradient id="portfolioTrendFill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#22c55e" stop-opacity="0.18"/>
+            <stop offset="100%" stop-color="#22c55e" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <text x="12" y="18" class="portfolio-chart-unit">人民币（万元）</text>
+        {% for tick in chart_ticks %}
+          <line x1="{{ chart_plot_left }}" y1="{{ tick.y }}" x2="{{ chart_plot_right }}" y2="{{ tick.y }}" class="portfolio-chart-grid"/>
+          <text x="66" y="{{ tick.y }}" class="portfolio-chart-y-label">{{ tick.label }}</text>
+        {% endfor %}
+        <line x1="{{ chart_plot_left }}" y1="{{ chart_plot_bottom }}" x2="{{ chart_plot_right }}" y2="{{ chart_plot_bottom }}" class="portfolio-chart-axis"/>
+        {% if trend_points %}
+          <polygon points="{{ trend_fill_points }}" fill="url(#portfolioTrendFill)"/>
+          <polyline points="{{ trend_points }}" class="portfolio-trend-line"/>
+          {% for row in trend_rows %}
+            <circle cx="{{ row.x }}" cy="{{ row.y }}" r="4.5" class="portfolio-trend-node"/>
+            <text x="{{ row.x }}" y="{{ row.label_y }}" class="portfolio-chart-value">{{ row.amount_label }}</text>
+            <text x="{{ row.x }}" y="249" class="portfolio-chart-date">{{ row.date_label }}</text>
+          {% endfor %}
+        {% endif %}
+      </svg>
+    </div>
+  </div>
+  {% if trend_view == "daily" and trend_snapshots|length > 10 %}
+    <p class="portfolio-trend-scroll-hint">已显示全部快照，可左右滚动查看；每个节点保持固定间距，避免数据和日期重叠。</p>
+  {% endif %}
 </section>
 
 <section class="panel portfolio-assets-card">

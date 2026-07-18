@@ -10,6 +10,8 @@ from django.utils import timezone
 from family_core.models import FamilyMember
 from ledger.models import BankAccount
 
+from .date_rules import ipo_accounting_date
+
 
 DEFAULT_LISTING_TYPE_CHOICES = [
     ("new_listing", "新上市"),
@@ -533,6 +535,11 @@ class HkIpoSubscriptionTrade(models.Model):
     def __str__(self):
         return f"{self.listing} {self.member} {self.get_tranche_display()}"
 
+    def clean(self):
+        super().clean()
+        if self.listing_id and self.allotted_lots is not None:
+            ipo_accounting_date(self.listing)
+
     @property
     def total_fees(self):
         return sum(
@@ -610,8 +617,10 @@ class HkIpoSubscriptionTrade(models.Model):
             self.allotment_fee = self.allotted_value * Decimal("0.01")
             if allotted_lots == 0:
                 self.trade_status = self.STATUS_UNALLOTTED
-                if not self.sell_date and self.listing.allotment_result_date:
-                    self.sell_date = self.listing.allotment_result_date
+                if self.listing.allotment_result_date or self.listing.subscription_end_date:
+                    self.sell_date = ipo_accounting_date(self.listing)
+                else:
+                    self.sell_date = None
             else:
                 self.trade_status = (
                     self.STATUS_CLOSED

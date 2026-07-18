@@ -11,6 +11,7 @@
     <p>{{ account.member }}{% if account.account_no_masked %} · {{ account.account_no_masked }}{% endif %}{% if account.account_region %} · {{ account.account_region }}{% endif %}</p>
   </div>
   <div class="table-actions">
+    <a class="button ghost" href="{% url 'portfolio:market_data_status' %}">行情与估值</a>
     <a class="button ghost" href="{% url 'portfolio:cash_movement_create' account.pk %}">入金 / 出金</a>
     <a class="button" href="{% url 'portfolio:transaction_create' %}?account={{ account.pk }}">新增交易</a>
   </div>
@@ -30,6 +31,7 @@
     </form>
   </div>
   {% if missing_exchange_rates %}<p class="form-error">部分原币缺少兑 {{ selected_currency }} 的汇率，资产卡暂不合并这些金额。</p>{% endif %}
+  {% if missing_prices %}<p class="form-error">部分持仓缺少可用价格，相关市值及账户总额暂不合并。请到“行情与估值”补录价格。</p>{% elif stale_prices %}<p class="market-data-warning">部分持仓使用过期价格、刷新失败价格或到期未处理的期权价格，请核对行情状态。</p>{% endif %}
   <div class="account-detail-metrics">
     <div class="metric account-total-card"><span>账户总资产</span><strong>{{ account_row.total_asset|currency0:selected_currency }}</strong></div>
     <div class="asset-mini-grid">{% for card in asset_cards %}<div class="metric asset-mini-card asset-mini-{{ forloop.counter }}"><span>{{ card.label }}</span><strong>{{ card.amount|currency0:selected_currency }}</strong><small>{{ card.ratio|floatformat:2 }}%</small></div>{% endfor %}</div>
@@ -61,14 +63,14 @@
         </label>
       </form>
     </div>
-    <div class="account-table-wrap"><table class="account-prototype-table account-positions-table"><thead><tr><th>市场</th><th>标的</th><th>资产类别</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>持仓盈亏</th><th>累计已实现盈亏</th><th>仓位</th></tr></thead>
+    <div class="account-table-wrap"><table class="account-prototype-table account-positions-table"><thead><tr><th>市场</th><th>标的</th><th>资产类别</th><th>数量</th><th>最新价</th><th>行情状态</th><th>市值</th><th>成本</th><th>持仓盈亏</th><th>累计已实现盈亏</th><th>仓位</th></tr></thead>
       <tbody>{% for item in positions %}<tr>
         <td><span class="market-badge market-{{ item.security.market|lower }}">{{ item.security.market }}</span></td><td>{{ item.security.name }}</td><td>{{ item.security.asset_category|default:item.security.asset_type }}</td><td>{{ item.quantity|floatformat:"-4" }}</td>
-        <td>{{ item.display_price|currency2:item.original_currency }}</td><td>{{ item.market_value_live|currency0:item.original_currency }}</td><td>{{ item.display_cost|currency2:item.original_currency }}</td>
+        <td>{{ item.display_price|currency2:item.original_currency }}</td><td><span class="pricing-status pricing-{{ item.pricing_status_display }}">{{ item.pricing_status_label }}</span><small class="price-meta">{{ item.price_source_label }}{% if item.price_as_of %} · {{ item.price_as_of|date:"m-d H:i" }}{% endif %}</small></td><td>{{ item.market_value_live|currency0:item.original_currency }}</td><td>{{ item.display_cost|currency2:item.original_currency }}</td>
         <td class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}"><span class="money-stack">{{ item.unrealized_live|signed_currency0:item.original_currency }}<small>本位币 {{ item.unrealized_base|signed_currency0:account.family.base_currency }}</small></span></td>
         <td class="{% if item.realized_for_year > 0 %}positive{% elif item.realized_for_year < 0 %}negative{% endif %}"><span class="money-stack">{{ item.realized_for_year|signed_currency0:item.original_currency }}<small>本位币 {{ item.realized_base|signed_currency0:account.family.base_currency }}</small></span></td>
         <td>{{ item.position_ratio|floatformat:2 }}%</td>
-      </tr>{% empty %}<tr><td colspan="10">暂无持仓。</td></tr>{% endfor %}</tbody>
+      </tr>{% empty %}<tr><td colspan="11">暂无持仓。</td></tr>{% endfor %}</tbody>
     </table></div>
   {% elif active_tab == "individual-profit" %}
     <div class="section-head"><h2>个股盈亏</h2></div>

@@ -16,6 +16,16 @@ from .models import (
 
 ZERO = Decimal("0")
 
+TRADE_CASH_MOVEMENT_TYPES = {
+    TradeTypeChoices.BUY: CashMovementTypeChoices.BUY,
+    TradeTypeChoices.IPO: CashMovementTypeChoices.BUY,
+    TradeTypeChoices.SELL: CashMovementTypeChoices.SELL,
+    TradeTypeChoices.DIVIDEND: CashMovementTypeChoices.DIVIDEND,
+    TradeTypeChoices.INTEREST: CashMovementTypeChoices.INTEREST,
+    TradeTypeChoices.OTHER_FEE_ADJUSTMENT: CashMovementTypeChoices.FEE,
+    TradeTypeChoices.OTHER: CashMovementTypeChoices.ADJUSTMENT,
+}
+
 
 @dataclass
 class PositionCalculation:
@@ -156,21 +166,12 @@ def rebuild_position(account, security):
             realized_return_ratio=realized_return,
         )
         if item.status in {TradeStatusChoices.PARTIAL, TradeStatusChoices.COMPLETED}:
-            movement_types = {
-                TradeTypeChoices.BUY: CashMovementTypeChoices.BUY,
-                TradeTypeChoices.IPO: CashMovementTypeChoices.BUY,
-                TradeTypeChoices.SELL: CashMovementTypeChoices.SELL,
-                TradeTypeChoices.DIVIDEND: CashMovementTypeChoices.DIVIDEND,
-                TradeTypeChoices.INTEREST: CashMovementTypeChoices.INTEREST,
-                TradeTypeChoices.OTHER_FEE_ADJUSTMENT: CashMovementTypeChoices.FEE,
-                TradeTypeChoices.OTHER: CashMovementTypeChoices.ADJUSTMENT,
-            }
             InvestmentCashMovement.objects.update_or_create(
                 transaction=item,
                 defaults={
                     "account": item.account,
                     "movement_date": item.trade_date,
-                    "movement_type": movement_types[item.trade_type],
+                    "movement_type": TRADE_CASH_MOVEMENT_TYPES[item.trade_type],
                     "currency": item.currency,
                     "amount": cash_change,
                     "source": item.source,
@@ -223,19 +224,13 @@ def rebuild_cash_only_transaction(item):
         realized_pnl=realized_pnl,
         realized_return_ratio=realized_return,
     )
-    movement_types = {
-        TradeTypeChoices.DIVIDEND: CashMovementTypeChoices.DIVIDEND,
-        TradeTypeChoices.INTEREST: CashMovementTypeChoices.INTEREST,
-        TradeTypeChoices.OTHER_FEE_ADJUSTMENT: CashMovementTypeChoices.FEE,
-        TradeTypeChoices.OTHER: CashMovementTypeChoices.ADJUSTMENT,
-    }
     if item.status in {TradeStatusChoices.PARTIAL, TradeStatusChoices.COMPLETED}:
         InvestmentCashMovement.objects.update_or_create(
             transaction=item,
             defaults={
                 "account": item.account,
                 "movement_date": item.trade_date,
-                "movement_type": movement_types[item.trade_type],
+                "movement_type": TRADE_CASH_MOVEMENT_TYPES[item.trade_type],
                 "currency": item.currency,
                 "amount": cash_change,
                 "source": item.source,

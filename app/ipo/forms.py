@@ -4,6 +4,7 @@ from family_core.models import FamilyMember
 from family_core.form_widgets import apply_decimal_widgets
 from ledger.models import BankAccount
 
+from .date_rules import ipo_accounting_date
 from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
 
 
@@ -293,3 +294,9 @@ class HkIpoSaleForm(forms.Form):
         if already_sold - current_lots + sold_lots > allotted_lots:
             raise forms.ValidationError("卖出手数不能大于剩余持有手数。")
         return sold_lots
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.ipo_trade:
+            ipo_accounting_date(self.ipo_trade.listing)
+        return cleaned_data

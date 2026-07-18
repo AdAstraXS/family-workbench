@@ -1,22 +1,121 @@
+from django import forms
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
+from django.urls import reverse
+from django.utils.html import format_html
+
+from .forms import (
+    clean_market_exchange,
+    security_exchange_choices,
+    security_market_choices,
+    validate_security_market_selection,
+)
 
 from .models import (
     BondDetail,
+    CashMovementTypeChoices,
     DailyExchangeRateFetch,
     InvestmentAccount,
     InvestmentCashMovement,
     InvestmentPosition,
     InvestmentTransaction,
     InvestmentOption,
+    MarketDataRefreshRun,
     OptionContract,
+    PortfolioAccountBalanceAnchor,
+    PortfolioReconciliationLine,
+    PortfolioReconciliationRun,
     PortfolioSnapshot,
     PortfolioSnapshotPositionLine,
     Security,
+    SecurityExchange,
+    SecurityMarket,
     SecurityMarketSnapshot,
+    SecurityPriceRecord,
+    SecurityQuoteConfig,
     SecurityNews,
+    TransactionSourceChoices,
     WatchlistItem,
 )
 from .services import rebuild_cash_only_transaction, rebuild_position
+
+
+class SecurityExchangeInline(admin.TabularInline):
+    model = SecurityExchange
+    extra = 0
+    can_delete = False
+    show_change_link = True
+    readonly_fields = ("code",)
+    fields = (
+        "code", "name", "default_currency", "provider_prefix",
+        "display_order", "is_active", "remark",
+    )
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(SecurityMarket)
+class SecurityMarketAdmin(admin.ModelAdmin):
+    list_display = (
+        "code", "name", "default_currency", "supports_futu",
+        "display_order", "is_active",
+    )
+    list_editable = ("display_order", "is_active")
+    list_filter = ("supports_futu", "is_active")
+    search_fields = ("code", "name", "remark")
+    inlines = (SecurityExchangeInline,)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_readonly_fields(self, request, obj=None):
+        return ("code",) if obj else ()
+
+
+@admin.register(SecurityExchange)
+class SecurityExchangeAdmin(admin.ModelAdmin):
+    list_display = (
+        "code", "name", "market", "default_currency", "provider_prefix",
+        "display_order", "is_active",
+    )
+    list_editable = ("display_order", "is_active")
+    list_filter = ("market", "is_active", "default_currency")
+    search_fields = ("code", "name", "market__code", "market__name", "remark")
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_readonly_fields(self, request, obj=None):
+        return ("market", "code") if obj else ()
+
+
+class SecurityAdminForm(forms.ModelForm):
+    class Meta:
+        model = Security
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        current_market = self.instance.market if self.instance and self.instance.pk else ""
+        current_exchange = self.instance.exchange if self.instance and self.instance.pk else ""
+        self.fields["market"] = forms.ChoiceField(
+            label="市场",
+            choices=security_market_choices(current_market),
+        )
+        self.fields["exchange"] = forms.ChoiceField(
+            label="交易所",
+            required=False,
+            choices=security_exchange_choices(current_market, current_exchange),
+        )
+        if current_exchange:
+            self.initial["exchange"] = f"{current_market}:{current_exchange}"
+
+    def clean(self):
+        cleaned = super().clean()
+        exchange = clean_market_exchange(self, cleaned)
+        validate_security_market_selection(self, cleaned, exchange)
+        return cleaned
 
 
 @admin.register(InvestmentAccount)
@@ -38,6 +137,7 @@ class InvestmentAccountAdmin(admin.ModelAdmin):
 
 @admin.register(Security)
 class SecurityAdmin(admin.ModelAdmin):
+    form = SecurityAdminForm
     list_display = ("symbol", "name", "market", "exchange", "asset_type", "currency", "lot_size", "data_source", "is_active")
     list_filter = ("market", "exchange", "asset_type", "currency", "data_source", "is_active")
     search_fields = ("symbol", "name", "industry")
@@ -69,14 +169,65 @@ class WatchlistItemAdmin(admin.ModelAdmin):
 
 @admin.register(SecurityMarketSnapshot)
 class SecurityMarketSnapshotAdmin(admin.ModelAdmin):
-    list_display = ("security", "last_price", "total_market_value", "pe_ttm_ratio", "pb_ratio", "quote_time", "fetched_at")
+    list_display = (
+        "security", "last_price", "price_source", "pricing_status",
+        "price_as_of", "total_market_value", "pe_ttm_ratio", "pb_ratio",
+        "fetched_at",
+    )
+    list_filter = ("price_source", "pricing_status", "is_delayed")
     search_fields = ("security__symbol", "security__name")
+
+
+@admin.register(SecurityQuoteConfig)
+class SecurityQuoteConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "security", "provider", "provider_symbol", "price_type",
+        "max_age_hours", "enabled", "priority",
+    )
+    list_filter = ("provider", "enabled")
+    search_fields = ("security__symbol", "security__name", "provider_symbol")
+
+
+@admin.register(SecurityPriceRecord)
+class SecurityPriceRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "security", "price", "currency", "source", "price_type",
+        "price_as_of", "fetched_at",
+    )
+    list_filter = ("source", "price_type", "currency")
+    search_fields = ("security__symbol", "security__name")
+    readonly_fields = ("fetched_at",)
+
+
+@admin.register(MarketDataRefreshRun)
+class MarketDataRefreshRunAdmin(admin.ModelAdmin):
+    list_display = (
+        "started_at", "finished_at", "status", "scope", "target_count",
+        "success_count", "stale_count", "missing_count", "error_count",
+    )
+    list_filter = ("status", "scope")
+    readonly_fields = (
+        "started_at", "finished_at", "status", "scope", "target_count",
+        "success_count", "stale_count", "missing_count", "error_count",
+        "details",
+    )
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(InvestmentPosition)
 class InvestmentPositionAdmin(admin.ModelAdmin):
-    list_display = ("account", "security", "quantity", "avg_cost", "diluted_cost", "current_price", "market_value", "position_date")
-    list_filter = ("account__bank_account__family", "account__bank_account__member", "security__market", "position_date")
+    list_display = (
+        "account", "security", "quantity", "avg_cost", "diluted_cost",
+        "current_price", "current_price_source", "pricing_status",
+        "current_price_as_of", "market_value", "position_date",
+    )
+    list_filter = (
+        "account__bank_account__family", "account__bank_account__member",
+        "security__market", "current_price_source", "pricing_status",
+        "position_date",
+    )
     search_fields = ("account__bank_account__account_name", "security__symbol", "security__name", "remark")
 
     def has_add_permission(self, request):
@@ -154,9 +305,193 @@ class DailyExchangeRateFetchAdmin(admin.ModelAdmin):
 
 @admin.register(InvestmentCashMovement)
 class InvestmentCashMovementAdmin(admin.ModelAdmin):
-    list_display = ("movement_date", "account", "movement_type", "currency", "amount", "counterparty_account", "transaction", "source")
-    list_filter = ("account__bank_account__family", "account__bank_account__member", "movement_type", "currency", "source", "movement_date")
+    INDEPENDENT_TYPES = {
+        CashMovementTypeChoices.DEPOSIT,
+        CashMovementTypeChoices.WITHDRAWAL,
+        CashMovementTypeChoices.EXCHANGE,
+        CashMovementTypeChoices.TRANSFER,
+        CashMovementTypeChoices.ADJUSTMENT,
+    }
+    LINKED_READONLY_FIELDS = (
+        "account",
+        "transaction",
+        "counterparty_account",
+        "movement_date",
+        "settlement_date",
+        "movement_type",
+        "currency",
+        "amount",
+        "source",
+        "external_id",
+        "remark",
+        "created_by",
+        "updated_by",
+    )
+    list_display = (
+        "movement_date",
+        "account",
+        "record_kind",
+        "movement_type",
+        "currency",
+        "amount",
+        "counterparty_account",
+        "transaction_link",
+        "source",
+    )
+    list_filter = (
+        "account__bank_account__family",
+        "account__bank_account__member",
+        ("transaction", admin.EmptyFieldListFilter),
+        "movement_type",
+        "currency",
+        "source",
+        "movement_date",
+    )
     search_fields = ("account__bank_account__account_name", "counterparty_account__account_name", "transaction__security__symbol", "external_id", "remark")
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related(
+            "transaction", "transaction__security"
+        )
+
+    def formfield_for_choice_field(self, db_field, request, **kwargs):
+        if db_field.name == "movement_type":
+            kwargs["choices"] = [
+                choice
+                for choice in CashMovementTypeChoices.choices
+                if choice[0] in self.INDEPENDENT_TYPES
+            ]
+        return super().formfield_for_choice_field(db_field, request, **kwargs)
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj and (
+            obj.transaction_id
+            or obj.source == TransactionSourceChoices.RECONCILIATION
+        ):
+            return self.LINKED_READONLY_FIELDS
+        return ("transaction", "source", "external_id")
+
+    def has_change_permission(self, request, obj=None):
+        if obj and (
+            obj.transaction_id
+            or obj.source == TransactionSourceChoices.RECONCILIATION
+        ):
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and (
+            obj.transaction_id
+            or obj.source == TransactionSourceChoices.RECONCILIATION
+        ):
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+    def delete_model(self, request, obj):
+        if obj.transaction_id:
+            raise PermissionDenied("交易派生现金流水不能直接删除，请修改或删除关联交易。")
+        if obj.source == TransactionSourceChoices.RECONCILIATION:
+            raise PermissionDenied("账本差额对齐流水只能通过差额对齐页面撤销。")
+        super().delete_model(request, obj)
+
+    @admin.display(description="记录性质")
+    def record_kind(self, obj):
+        return "交易派生" if obj.transaction_id else "独立现金"
+
+    @admin.display(description="关联交易")
+    def transaction_link(self, obj):
+        if not obj.transaction_id:
+            return "—"
+        url = reverse(
+            "admin:portfolio_investmenttransaction_change",
+            args=[obj.transaction_id],
+        )
+        label = obj.transaction.transaction_no or f"交易 #{obj.transaction_id}"
+        return format_html('<a href="{}">{}</a>', url, label)
+
+
+@admin.register(PortfolioAccountBalanceAnchor)
+class PortfolioAccountBalanceAnchorAdmin(admin.ModelAdmin):
+    list_display = (
+        "anchor_date",
+        "account",
+        "currency",
+        "original_amount",
+        "recorded_base_amount",
+        "reason",
+        "carry_forward",
+        "is_confirmed",
+    )
+    list_filter = (
+        "anchor_date",
+        "currency",
+        "reason",
+        "carry_forward",
+        "is_confirmed",
+    )
+    search_fields = (
+        "account__bank_account__account_name",
+        "account__bank_account__member__display_name",
+        "remark",
+    )
+    autocomplete_fields = ("account", "ledger_snapshot")
+
+
+class PortfolioReconciliationLineInline(admin.TabularInline):
+    model = PortfolioReconciliationLine
+    extra = 0
+    can_delete = False
+    readonly_fields = (
+        "account",
+        "currency",
+        "ledger_base_amount",
+        "calculated_base_amount",
+        "adjustment_base_amount",
+        "adjustment_original_amount",
+        "movement",
+    )
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PortfolioReconciliationRun)
+class PortfolioReconciliationRunAdmin(admin.ModelAdmin):
+    list_display = (
+        "ledger_snapshot",
+        "family",
+        "status",
+        "base_currency",
+        "applied_by",
+        "applied_at",
+        "reverted_at",
+    )
+    list_filter = ("status", "ledger_snapshot__snapshot_date", "family")
+    readonly_fields = (
+        "family",
+        "ledger_snapshot",
+        "base_currency",
+        "status",
+        "applied_by",
+        "applied_at",
+        "reverted_by",
+        "reverted_at",
+        "report",
+        "created_at",
+        "updated_at",
+    )
+    inlines = (PortfolioReconciliationLineInline,)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(PortfolioSnapshot)

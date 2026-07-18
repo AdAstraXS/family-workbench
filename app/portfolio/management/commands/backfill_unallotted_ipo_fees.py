@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from ipo.date_rules import MISSING_IPO_ACCOUNTING_DATE_MESSAGE, ipo_accounting_date
 from ipo.models import HkIpoSubscriptionTrade
 from portfolio.ipo_sync import _security_identity, sync_ipo_trade
 from portfolio.models import (
@@ -29,6 +30,19 @@ class Command(BaseCommand):
             .order_by("pk")
         )
         positive = [item for item in trades if item.unallotted_fees > ZERO]
+        missing_date = [
+            item
+            for item in positive
+            if not item.listing.allotment_result_date
+            and not item.listing.subscription_end_date
+        ]
+        if missing_date:
+            details = ", ".join(
+                f"{item.pk}({item.listing.stock_code})" for item in missing_date[:20]
+            )
+            raise CommandError(
+                f"{MISSING_IPO_ACCOUNTING_DATE_MESSAGE} 相关申购记录：{details}"
+            )
         missing_account = [item for item in positive if not item.account_id]
         if missing_account:
             ids = ", ".join(str(item.pk) for item in missing_account[:20])
@@ -64,7 +78,7 @@ class Command(BaseCommand):
             return
 
         with transaction.atomic():
-            for trade in trades:
+            for trade in positive:
                 sync_ipo_trade(trade.pk)
             invalid = []
             for trade in positive:
@@ -81,7 +95,7 @@ class Command(BaseCommand):
 
     @staticmethod
     def _is_current(item, trade):
-        expected_date = trade.listing.allotment_result_date or trade.application_date
+        expected_date = ipo_accounting_date(trade.listing)
         expected_currency = _security_identity(trade.listing.stock_code)[2]
         return (
             item.ipo_subscription_trade_id == trade.pk

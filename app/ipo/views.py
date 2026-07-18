@@ -1,11 +1,12 @@
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
-from django.db.models import F, Max, Q, Sum
+from django.db.models import F, Q
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -133,6 +134,77 @@ def ipo_sale_transactions(ipo_trade_ids):
     )
 
 
+@dataclass(frozen=True)
+class IpoProfitEvent:
+    ipo_trade: HkIpoSubscriptionTrade
+    event_date: date | None
+    profit: Decimal
+    transaction: InvestmentTransaction | None = None
+
+    @property
+    def listing(self):
+        return self.ipo_trade.listing
+
+    @property
+    def member(self):
+        return self.ipo_trade.member
+
+    @property
+    def account(self):
+        return self.ipo_trade.account
+
+
+def ipo_profit_events(queryset, *, year=None, date_start=None, date_end=None):
+    """Attribute realized profit to each actual sale date.
+
+    Synced sale transactions are the source of truth. Unallotted and legacy
+    records without sale transactions continue to use the IPO summary row.
+    """
+    trades = list(queryset.select_related("listing", "member", "account"))
+    if not trades:
+        return []
+    trade_map = {trade.pk: trade for trade in trades}
+    sales = ipo_sale_transactions(trade_map)
+    sale_trade_ids = {
+        transaction.ipo_subscription_trade_id for transaction in sales
+    }
+    events = []
+    for transaction in sales:
+        event_date = transaction.trade_date
+        if year is not None and (not event_date or event_date.year != year):
+            continue
+        if date_start and (not event_date or event_date < date_start):
+            continue
+        if date_end and (not event_date or event_date > date_end):
+            continue
+        events.append(
+            IpoProfitEvent(
+                ipo_trade=trade_map[transaction.ipo_subscription_trade_id],
+                event_date=event_date,
+                profit=transaction.realized_pnl or Decimal("0"),
+                transaction=transaction,
+            )
+        )
+    for trade in trades:
+        if trade.pk in sale_trade_ids:
+            continue
+        event_date = ipo_profit_date(trade)
+        if year is not None and (not event_date or event_date.year != year):
+            continue
+        if date_start and (not event_date or event_date < date_start):
+            continue
+        if date_end and (not event_date or event_date > date_end):
+            continue
+        events.append(
+            IpoProfitEvent(
+                ipo_trade=trade,
+                event_date=event_date,
+                profit=trade.realized_profit or Decimal("0"),
+            )
+        )
+    return events
+
+
 @transaction.atomic
 def save_ipo_sale_transaction(ipo_trade, form, transaction=None, user=None):
     sync_ipo_trade(ipo_trade.pk)
@@ -189,25 +261,25 @@ def save_ipo_sale_transaction(ipo_trade, form, transaction=None, user=None):
     return transaction
 
 
-def build_ipo_chart_data(trades, selected_year, current_year):
+def build_ipo_chart_data(events, selected_year, current_year):
     stock_totals = defaultdict(Decimal)
     account_totals = defaultdict(Decimal)
     trend_totals = defaultdict(Decimal)
 
-    for trade in trades:
-        profit = trade.realized_profit or Decimal("0")
+    for event in events:
+        profit = event.profit
         stock_label = (
-            f"{trade.listing.stock_name or trade.listing.company_name} "
-            f"({trade.listing.stock_code})"
+            f"{event.listing.stock_name or event.listing.company_name} "
+            f"({event.listing.stock_code})"
         )
         stock_totals[stock_label] += profit
         account_label = (
-            f"{trade.account.member} - {trade.account.account_name}"
-            if trade.account
+            f"{event.account.member} - {event.account.account_name}"
+            if event.account
             else "未关联账户"
         )
         account_totals[account_label] += profit
-        attribution_date = ipo_profit_date(trade)
+        attribution_date = event.event_date
         if attribution_date:
             trend_key = (
                 attribution_date.year
@@ -266,6 +338,14 @@ def index(request):
             value.year
             for value in trade_queryset.values_list("sell_date", flat=True)
             if value
+        }
+        | {
+            value.year
+            for value in InvestmentTransaction.objects.filter(
+                source=TransactionSourceChoices.IPO,
+                trade_type=TradeTypeChoices.SELL,
+                trade_date__isnull=False,
+            ).values_list("trade_date", flat=True)
         },
         reverse=True,
     )
@@ -283,6 +363,7 @@ def index(request):
     metric_listings = listings
     trade_metric_queryset = trade_queryset
     profit_queryset = ipo_profit_queryset(trade_queryset)
+    profit_year = None
     if selected_year != "all":
         year = int(selected_year)
         metric_listings = [
@@ -294,13 +375,7 @@ def index(request):
         trade_metric_queryset = trade_metric_queryset.filter(
             listing__subscription_end_date__year=year
         )
-        profit_queryset = profit_queryset.filter(
-            Q(sell_date__year=year)
-            | Q(
-                sell_date__isnull=True,
-                listing__subscription_end_date__year=year,
-            )
-        )
+        profit_year = year
 
     today_listings = [
         item
@@ -332,12 +407,12 @@ def index(request):
         .distinct()
         .count()
     )
-    realized_profit_total = (
-        profit_queryset.aggregate(total=Sum("realized_profit"))["total"]
-        or Decimal("0")
+    profit_events = ipo_profit_events(profit_queryset, year=profit_year)
+    realized_profit_total = sum(
+        (event.profit for event in profit_events), Decimal("0")
     )
     chart_data = build_ipo_chart_data(
-        list(profit_queryset),
+        profit_events,
         selected_year,
         current_year,
     )
@@ -554,8 +629,16 @@ def subscription_trade_list(request):
     sell_years = {
         value.year for value in trade_queryset.values_list("sell_date", flat=True) if value
     }
+    sale_transaction_years = {
+        value.year
+        for value in InvestmentTransaction.objects.filter(
+            source=TransactionSourceChoices.IPO,
+            trade_type=TradeTypeChoices.SELL,
+            trade_date__isnull=False,
+        ).values_list("trade_date", flat=True)
+    }
     available_years = sorted(
-        subscription_years | sell_years,
+        subscription_years | sell_years | sale_transaction_years,
         reverse=True,
     )
     selected_year = request.GET.get("year", "").strip()
@@ -583,27 +666,15 @@ def subscription_trade_list(request):
         Q(trade_status__in=HkIpoSubscriptionTrade.TERMINAL_STATUSES)
         | Q(sold_lots__gt=0)
     )
+    profit_year = None
     if selected_year != "all":
         year = int(selected_year)
+        profit_year = year
         metric_queryset = metric_queryset.filter(
             listing__subscription_end_date__year=year
         )
-        profit_queryset = profit_queryset.filter(
-            Q(sell_date__year=year)
-            | Q(
-                sell_date__isnull=True,
-                listing__subscription_end_date__year=year,
-            )
-        )
         active_queryset = active_queryset.filter(
             listing__subscription_end_date__year=year
-        )
-        closed_queryset = closed_queryset.filter(
-            Q(sell_date__year=year)
-            | Q(
-                sell_date__isnull=True,
-                listing__subscription_end_date__year=year,
-            )
         )
     if selected_status:
         active_queryset = active_queryset.filter(trade_status=selected_status)
@@ -626,14 +697,6 @@ def subscription_trade_list(request):
             "member__display_name",
         )
     )
-    closed_trades = list(
-        closed_queryset.order_by(
-            F("sell_date").desc(nulls_last=True),
-            "-updated_at",
-            "listing__stock_code",
-            "member__display_name",
-        )
-    )
     applying_trades = [
         trade
         for trade in active_trades
@@ -651,49 +714,51 @@ def subscription_trade_list(request):
         if application_record_count
         else Decimal("0")
     )
-    realized_profit_total = (
-        profit_queryset.aggregate(total=Sum("realized_profit"))["total"]
-        or Decimal("0")
+    profit_events = ipo_profit_events(profit_queryset, year=profit_year)
+    realized_profit_total = sum(
+        (event.profit for event in profit_events), Decimal("0")
     )
-    stock_option_filter = (
-        Q(subscription_trades__trade_status__in=HkIpoSubscriptionTrade.TERMINAL_STATUSES)
-        | Q(subscription_trades__sold_lots__gt=0)
+    stock_latest_dates = {}
+    for event in profit_events:
+        previous = stock_latest_dates.get(event.listing.pk)
+        if event.event_date and (previous is None or event.event_date > previous):
+            stock_latest_dates[event.listing.pk] = event.event_date
+    stock_options = list(
+        HkIpoListing.objects.filter(pk__in=stock_latest_dates).order_by(
+            "stock_name", "stock_code"
+        )
     )
-    if selected_year != "all":
-        stock_option_filter &= (
-            Q(subscription_trades__sell_date__year=year)
-            | Q(
-                subscription_trades__sell_date__isnull=True,
-                subscription_trades__listing__subscription_end_date__year=year,
-            )
-        )
-    stock_options = (
-        HkIpoListing.objects.filter(stock_option_filter)
-        .annotate(
-            latest_sell_date=Max(
-                "subscription_trades__sell_date",
-                filter=stock_option_filter,
-            )
-        )
-        .distinct()
-        .order_by(F("latest_sell_date").desc(nulls_last=True), "stock_name", "stock_code")
+    stock_options.sort(
+        key=lambda listing: stock_latest_dates.get(listing.pk, date.min),
+        reverse=True,
     )
     selected_stock_id = request.GET.get("stock", "").strip()
     stock_profit_total = None
     selected_stock = None
     if selected_stock_id.isdigit():
-        selected_stock = stock_options.filter(pk=int(selected_stock_id)).first()
+        selected_stock = next(
+            (
+                listing
+                for listing in stock_options
+                if listing.pk == int(selected_stock_id)
+            ),
+            None,
+        )
         if selected_stock:
-            stock_profit_total = (
-                profit_queryset.filter(listing=selected_stock)
-                .aggregate(total=Sum("realized_profit"))["total"]
-                or Decimal("0")
+            stock_profit_total = sum(
+                (
+                    event.profit
+                    for event in profit_events
+                    if event.listing.pk == selected_stock.pk
+                ),
+                Decimal("0"),
             )
 
-    account_options = (
-        BankAccount.objects.filter(
-            pk__in=profit_queryset.exclude(account__isnull=True).values("account_id")
-        )
+    profit_account_ids = {
+        event.account.pk for event in profit_events if event.account
+    }
+    account_options = list(
+        BankAccount.objects.filter(pk__in=profit_account_ids)
         .select_related("member")
         .order_by("member__display_name", "account_name")
     )
@@ -701,12 +766,22 @@ def subscription_trade_list(request):
     account_profit_total = None
     selected_account = None
     if selected_account_id.isdigit():
-        selected_account = account_options.filter(pk=int(selected_account_id)).first()
+        selected_account = next(
+            (
+                account
+                for account in account_options
+                if account.pk == int(selected_account_id)
+            ),
+            None,
+        )
         if selected_account:
-            account_profit_total = (
-                profit_queryset.filter(account=selected_account)
-                .aggregate(total=Sum("realized_profit"))["total"]
-                or Decimal("0")
+            account_profit_total = sum(
+                (
+                    event.profit
+                    for event in profit_events
+                    if event.account and event.account.pk == selected_account.pk
+                ),
+                Decimal("0"),
             )
 
     date_start = request.GET.get("date_start", "").strip()
@@ -716,43 +791,59 @@ def subscription_trade_list(request):
     period_profit_total = None
     period_query_error = ""
     if date_start or date_end:
-        period_trades = HkIpoSubscriptionTrade.objects.filter(sell_date__isnull=False)
         try:
             if date_start:
                 period_start_date = date.fromisoformat(date_start)
-                period_trades = period_trades.filter(sell_date__gte=period_start_date)
             if date_end:
                 period_end_date = date.fromisoformat(date_end)
-                period_trades = period_trades.filter(sell_date__lte=period_end_date)
             if period_start_date and period_end_date and period_start_date > period_end_date:
                 raise ValueError
-            period_profit_total = (
-                period_trades.aggregate(total=Sum("realized_profit"))["total"]
-                or Decimal("0")
+            period_profit_total = sum(
+                (
+                    event.profit
+                    for event in ipo_profit_events(
+                        ipo_profit_queryset(HkIpoSubscriptionTrade.objects.all()),
+                        date_start=period_start_date,
+                        date_end=period_end_date,
+                    )
+                ),
+                Decimal("0"),
             )
         except ValueError:
             period_query_error = "请选择有效的日期区间。"
             period_start_date = None
             period_end_date = None
-    filtered_closed_trades = closed_trades
+    closed_events = ipo_profit_events(closed_queryset, year=profit_year)
     if selected_stock:
-        filtered_closed_trades = [trade for trade in filtered_closed_trades if trade.listing_id == selected_stock.pk]
+        closed_events = [
+            event for event in closed_events if event.listing.pk == selected_stock.pk
+        ]
     if selected_account:
-        filtered_closed_trades = [
-            trade
-            for trade in filtered_closed_trades
-            if trade.account_id == selected_account.pk
+        closed_events = [
+            event
+            for event in closed_events
+            if event.account and event.account.pk == selected_account.pk
         ]
     if not period_query_error:
         if period_start_date:
-            filtered_closed_trades = [trade for trade in filtered_closed_trades if trade.sell_date and trade.sell_date >= period_start_date]
+            closed_events = [
+                event
+                for event in closed_events
+                if event.event_date and event.event_date >= period_start_date
+            ]
         if period_end_date:
-            filtered_closed_trades = [trade for trade in filtered_closed_trades if trade.sell_date and trade.sell_date <= period_end_date]
-    ipo_trade_map = {trade.pk: trade for trade in filtered_closed_trades}
+            closed_events = [
+                event
+                for event in closed_events
+                if event.event_date and event.event_date <= period_end_date
+            ]
     closed_rows = []
-    for transaction in ipo_sale_transactions(ipo_trade_map):
-        ipo_trade = ipo_trade_map.get(transaction.ipo_subscription_trade_id)
-        if not ipo_trade:
+    legacy_trades = []
+    for event in closed_events:
+        ipo_trade = event.ipo_trade
+        transaction = event.transaction
+        if not transaction:
+            legacy_trades.append(ipo_trade)
             continue
         transaction.ipo_trade = ipo_trade
         decorate_ipo_sale(transaction, ipo_trade)
@@ -767,12 +858,9 @@ def subscription_trade_list(request):
             else "closed"
         )
         closed_rows.append(transaction)
-    transaction_trade_ids = {
-        row.ipo_trade.pk for row in closed_rows if getattr(row, "ipo_trade", None)
-    }
-    for trade in filtered_closed_trades:
+    for trade in legacy_trades:
         is_unallotted = trade.trade_status == HkIpoSubscriptionTrade.STATUS_UNALLOTTED
-        if trade.pk in transaction_trade_ids or (not is_unallotted and not (trade.sold_lots or 0)):
+        if not is_unallotted and not (trade.sold_lots or 0):
             continue
         trade.ipo_trade = trade
         trade.display_sold_lots = trade.sold_lots

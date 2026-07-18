@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}行情与估值{% endblock %}
+
+{% block content %}
+<section class="headline">
+  <div>
+    <a class="prototype-back" href="{% url 'portfolio:account_list' %}">← 返回投资账户</a>
+    <h1>行情与估值</h1>
+    <p>股票和 ETF 可由 Futu 批量刷新；债券、非标准标的及无法获取行情的合约可手工录入价格。</p>
+  </div>
+  <form method="post" action="{% url 'portfolio:market_data_refresh' %}">
+    {% csrf_token %}
+    <input type="hidden" name="scope" value="{{ selected_scope }}">
+    <button type="submit">刷新当前范围自动行情</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="section-head"><div><h2>当前行情</h2><nav class="market-data-scopes"><a class="{% if selected_scope == 'holdings' %}active{% endif %}" href="?scope=holdings">当前持仓</a><a class="{% if selected_scope == 'watchlist' %}active{% endif %}" href="?scope=watchlist">持仓＋自选</a></nav></div><span>{{ rows|length }} 个标的</span></div>
+  <div class="account-table-wrap">
+    <table class="market-data-table">
+      <thead><tr><th>市场</th><th>标的</th><th>品种</th><th>持仓账户</th><th>来源配置</th><th>最新价格</th><th>价格时点</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td><span class="market-badge market-{{ row.security.market|lower }}">{{ row.security.market }}</span></td>
+          <td><strong>{{ row.security.name }}</strong><small class="price-meta">{{ row.security.symbol }}</small></td>
+          <td>{{ row.security.get_asset_type_display }}</td>
+          <td>{{ row.position_count }}</td>
+          <td>{{ row.config.get_provider_display }}<small class="price-meta">{{ row.config.provider_symbol|default:"手工估值" }}</small></td>
+          <td>{{ row.snapshot.last_price|currency2:row.security.currency }}</td>
+          <td>{% if row.snapshot.price_as_of %}{{ row.snapshot.price_as_of|date:"Y-m-d H:i" }}{% else %}-{% endif %}</td>
+          <td><span class="pricing-status pricing-{{ row.status }}">{{ row.status_label }}</span>{% if row.snapshot.last_error %}<small class="price-error" title="{{ row.snapshot.last_error }}">最近刷新有错误</small>{% endif %}</td>
+          <td><span class="row-actions">{% if row.config.provider == 'futu' and row.config.enabled %}<form method="post" action="{% url 'portfolio:market_data_refresh' %}">{% csrf_token %}<input type="hidden" name="security_id" value="{{ row.security.pk }}"><button class="text-action" type="submit">刷新</button></form>{% endif %}<a class="text-action" href="{% url 'portfolio:manual_security_price' row.security.pk %}">录入价格</a><a class="text-action" href="{% url 'portfolio:security_quote_config' row.security.pk %}">配置</a></span></td>
+        </tr>
+        {% empty %}<tr><td colspan="9">暂无持仓或自选标的。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-head"><h2>最近刷新记录</h2></div>
+  <div class="account-table-wrap"><table class="market-data-runs-table"><thead><tr><th>开始时间</th><th>范围</th><th>状态</th><th>目标</th><th>成功</th><th>过期</th><th>缺失</th><th>错误</th></tr></thead><tbody>
+    {% for run in recent_runs %}<tr><td>{{ run.started_at|date:"Y-m-d H:i:s" }}</td><td>{{ run.scope }}</td><td>{{ run.get_status_display }}</td><td>{{ run.target_count }}</td><td>{{ run.success_count }}</td><td>{{ run.stale_count }}</td><td>{{ run.missing_count }}</td><td>{{ run.error_count }}</td></tr>{% empty %}<tr><td colspan="8">尚无刷新记录。</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}

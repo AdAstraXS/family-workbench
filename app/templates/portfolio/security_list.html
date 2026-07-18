@@ -16,6 +16,7 @@
       <p>支持港股、美股和 A 股的代码或名称。</p>
     </div>
     <div class="row-actions">
+      <a class="button ghost" href="{% url 'portfolio:market_data_status' %}">行情与估值</a>
       <a class="button ghost" href="{% url 'portfolio:security_create' %}">手工添加</a>
       <a class="button ghost" href="{% url 'portfolio:option_contract_create' %}">新增期权合约</a>
       <a class="button ghost" href="{% url 'portfolio:bond_create' %}">新增债券</a>
@@ -27,6 +28,7 @@
         <option value="HK"{% if selected_market == "HK" %} selected{% endif %}>港股</option>
         <option value="US"{% if selected_market == "US" %} selected{% endif %}>美股</option>
         <option value="CN"{% if selected_market == "CN" %} selected{% endif %}>A 股</option>
+        <option value="CN_B"{% if selected_market == "CN_B" %} selected{% endif %}>B 股</option>
       </select>
     </label>
     <label>代码或名称

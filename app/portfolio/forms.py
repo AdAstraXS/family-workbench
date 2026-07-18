@@ -1,7 +1,9 @@
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django import forms
 from django.db.models import Q
+from django.utils import timezone
 
 from family_core.models import AssetCategory, Currency, Family, FamilyMember
 from family_core.form_widgets import apply_decimal_widgets
@@ -17,8 +19,11 @@ from .models import (
     InvestmentOption,
     BondDetail,
     OptionContract,
+    PriceSourceChoices,
     Security,
-    SecurityMarketSnapshot,
+    SecurityExchange,
+    SecurityMarket,
+    SecurityQuoteConfig,
     TradeTypeChoices,
     WatchlistItem,
 )
@@ -42,6 +47,92 @@ class BaseModelForm(forms.ModelForm):
                     format="%Y-%m-%d",
                 )
         apply_decimal_widgets(self, money_fields=self.money_fields)
+
+
+def security_market_choices(current_code="", *, excluded_codes=None):
+    excluded_codes = set(excluded_codes or ())
+    markets = SecurityMarket.objects.filter(
+        Q(is_active=True) | Q(code=current_code)
+    ).exclude(code__in=excluded_codes)
+    return [
+        (item.code, f"{item.name}（{item.code}）")
+        for item in markets.order_by("display_order", "code")
+    ]
+
+
+def security_exchange_choices(current_market="", current_exchange=""):
+    exchanges = (
+        SecurityExchange.objects.select_related("market")
+        .filter(
+            Q(is_active=True, market__is_active=True)
+            | Q(market__code=current_market, code=current_exchange)
+        )
+        .order_by("market__display_order", "display_order", "code")
+    )
+    groups = []
+    grouped = {}
+    for item in exchanges:
+        key = item.market_id
+        if key not in grouped:
+            grouped[key] = []
+            groups.append(
+                (
+                    f"{item.market.name}（{item.market.code}）",
+                    grouped[key],
+                )
+            )
+        label = f"{item.name}（{item.code}）"
+        if item.default_currency:
+            label += f" · {item.default_currency}"
+        grouped[key].append((f"{item.market.code}:{item.code}", label))
+    return [("", "未指定 / 场外交易")] + groups
+
+
+def clean_market_exchange(form, cleaned):
+    market = cleaned.get("market")
+    token = cleaned.get("exchange") or ""
+    if not token:
+        cleaned["exchange"] = ""
+        return None
+    try:
+        token_market, exchange_code = token.split(":", 1)
+    except ValueError:
+        form.add_error("exchange", "交易所选项无效，请重新选择。")
+        return None
+    if token_market != market:
+        form.add_error("exchange", "所选交易所不属于当前市场，请重新选择。")
+        return None
+    exchange = SecurityExchange.objects.filter(
+        market__code=market,
+        code=exchange_code,
+    ).first()
+    if not exchange:
+        form.add_error("exchange", "交易所字典中不存在该选项。")
+        return None
+    cleaned["exchange"] = exchange.code
+    return exchange
+
+
+def validate_security_market_selection(form, cleaned, exchange):
+    if cleaned.get("market") != "CN_B":
+        return
+    if cleaned.get("asset_type") != Security.TYPE_STOCK:
+        form.add_error("asset_type", "B 股市场仅用于股票标的。")
+    if not exchange:
+        form.add_error("exchange", "B 股必须选择上海或深圳交易所。")
+        return
+    symbol = (cleaned.get("symbol") or "").strip().upper()
+    expected_prefix = "900" if exchange.code == "SH" else "200"
+    if symbol and not symbol.startswith(expected_prefix):
+        form.add_error(
+            "symbol",
+            f"{exchange.name}代码应以 {expected_prefix} 开头。",
+        )
+    if cleaned.get("currency") != exchange.default_currency:
+        form.add_error(
+            "currency",
+            f"{exchange.name}应使用 {exchange.default_currency} 计价。",
+        )
 
 
 class InvestmentAccountForm(BaseModelForm):
@@ -73,6 +164,23 @@ class SecurityForm(BaseModelForm):
     def __init__(self, *args, **kwargs):
         self.family = kwargs.pop("family", None)
         super().__init__(*args, **kwargs)
+        current_market = self.instance.market if self.instance and self.instance.pk else ""
+        current_exchange = self.instance.exchange if self.instance and self.instance.pk else ""
+        self.fields["market"] = forms.ChoiceField(
+            label="市场",
+            choices=security_market_choices(current_market),
+            help_text="选项由后台“证券市场字典”维护。",
+        )
+        self.fields["exchange"] = forms.ChoiceField(
+            label="交易所",
+            required=False,
+            choices=security_exchange_choices(current_market, current_exchange),
+            help_text="选项由后台“证券交易所字典”维护；场外资产可以留空。",
+        )
+        self.fields["market"].widget.attrs["class"] = "form-control"
+        self.fields["exchange"].widget.attrs["class"] = "form-control"
+        if current_exchange:
+            self.initial["exchange"] = f"{current_market}:{current_exchange}"
         self.fields["asset_type"].label = "金融工具类型"
         self.fields["asset_category"].label = "资产配置类别"
         self.fields["currency"].widget = forms.Select(
@@ -87,6 +195,12 @@ class SecurityForm(BaseModelForm):
         if asset_type == Security.TYPE_OPTION:
             raise forms.ValidationError("期权请使用“新增期权合约”页面录入，避免与正股合并。")
         return asset_type
+
+    def clean(self):
+        cleaned = super().clean()
+        exchange = clean_market_exchange(self, cleaned)
+        validate_security_market_selection(self, cleaned, exchange)
+        return cleaned
 
     def save(self, commit=True):
         security = super().save(commit=False)
@@ -110,7 +224,7 @@ class OptionContractForm(forms.Form):
         widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
     )
     multiplier = forms.IntegerField(label="合约乘数", min_value=1, initial=100)
-    market = forms.CharField(label="市场", max_length=20, initial="US")
+    market = forms.ChoiceField(label="市场")
     currency = forms.ChoiceField(label="交易币种")
 
     def __init__(self, *args, family=None, **kwargs):
@@ -124,6 +238,8 @@ class OptionContractForm(forms.Form):
         self.fields["currency"].choices = [
             (item.code, str(item)) for item in Currency.objects.filter(is_active=True)
         ]
+        self.fields["market"].choices = security_market_choices()
+        self.fields["market"].initial = "US"
         apply_decimal_widgets(self)
 
     def clean_contract_symbol(self):
@@ -139,9 +255,13 @@ class OptionContractForm(forms.Form):
         currency = cleaned.get("currency")
         if underlying and currency and underlying.currency != currency:
             self.add_error("currency", "期权币种应与正股标的一致。")
+        if underlying and cleaned.get("market") != underlying.market:
+            self.add_error("market", "期权市场必须与正股标的一致。")
         return cleaned
 
     def save(self, member):
+        from .market_data import ensure_quote_config
+
         underlying = self.cleaned_data["underlying"]
         security = Security.objects.create(
             asset_category=Security.default_asset_category(
@@ -172,12 +292,88 @@ class OptionContractForm(forms.Form):
             security=security,
             defaults={"member": member, "is_active": True},
         )
+        ensure_quote_config(security)
+        return security
+
+
+class SecurityQuoteConfigForm(BaseModelForm):
+    class Meta:
+        model = SecurityQuoteConfig
+        fields = [
+            "provider",
+            "provider_symbol",
+            "price_type",
+            "max_age_hours",
+            "enabled",
+        ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["provider"].choices = [
+            (PriceSourceChoices.FUTU, PriceSourceChoices.FUTU.label),
+            (PriceSourceChoices.MANUAL, PriceSourceChoices.MANUAL.label),
+        ]
+
+    def clean(self):
+        cleaned = super().clean()
+        if (
+            cleaned.get("provider") == PriceSourceChoices.FUTU
+            and not (cleaned.get("provider_symbol") or "").strip()
+        ):
+            self.add_error("provider_symbol", "使用 Futu 行情时必须填写行情源代码。")
+        return cleaned
+
+
+class ManualSecurityPriceForm(forms.Form):
+    price = forms.DecimalField(
+        label="价格",
+        max_digits=20,
+        decimal_places=6,
+        min_value=Decimal("0"),
+    )
+    price_as_of = forms.DateTimeField(
+        label="价格时点",
+        widget=forms.DateTimeInput(
+            attrs={"type": "datetime-local", "class": "form-control"},
+            format="%Y-%m-%dT%H:%M",
+        ),
+    )
+    accrued_interest = forms.DecimalField(
+        label="每报价单位应计利息",
+        max_digits=20,
+        decimal_places=6,
+        required=False,
+        initial=0,
+    )
+    remark = forms.CharField(label="价格说明", required=False, max_length=500)
+
+    def __init__(self, *args, security=None, **kwargs):
+        self.security = security
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+        if not security or security.asset_type != Security.TYPE_BOND:
+            self.fields.pop("accrued_interest")
+        apply_decimal_widgets(self)
+
+    def clean_price(self):
+        price = self.cleaned_data["price"]
+        if price == 0 and self.security.asset_type != Security.TYPE_OPTION:
+            raise forms.ValidationError("除期权外，手工价格必须大于 0。")
+        return price
+
+    def clean_price_as_of(self):
+        price_as_of = self.cleaned_data["price_as_of"]
+        if price_as_of > timezone.now() + timedelta(minutes=5):
+            raise forms.ValidationError("价格时点不能晚于当前时间。")
+        return price_as_of
 
 
 class BondForm(forms.Form):
     symbol = forms.CharField(label="债券代码", max_length=30)
     name = forms.CharField(label="债券名称", max_length=200)
-    market = forms.CharField(label="市场", max_length=20, initial="US")
+    market = forms.ChoiceField(label="市场")
+    exchange = forms.ChoiceField(label="交易所", required=False)
     currency = forms.ChoiceField(label="交易币种")
     isin = forms.CharField(label="ISIN", max_length=20, required=False)
     issuer = forms.CharField(label="发行人", max_length=200, required=False)
@@ -208,6 +404,11 @@ class BondForm(forms.Form):
                 "symbol": instance.symbol,
                 "name": instance.name,
                 "market": instance.market,
+                "exchange": (
+                    f"{instance.market}:{instance.exchange}"
+                    if instance.exchange
+                    else ""
+                ),
                 "currency": instance.currency,
                 "isin": bond.isin,
                 "issuer": bond.issuer,
@@ -225,6 +426,17 @@ class BondForm(forms.Form):
         super().__init__(*args, **kwargs)
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
+        current_market = self.instance.market if self.instance else ""
+        current_exchange = self.instance.exchange if self.instance else ""
+        self.fields["market"].choices = security_market_choices(
+            current_market,
+            excluded_codes={"CN_B"},
+        )
+        self.fields["market"].initial = current_market or "US"
+        self.fields["exchange"].choices = security_exchange_choices(
+            current_market,
+            current_exchange,
+        )
         self.fields["currency"].choices = [
             (item.code, str(item)) for item in Currency.objects.filter(is_active=True)
         ]
@@ -232,6 +444,7 @@ class BondForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
+        clean_market_exchange(self, cleaned)
         symbol = (cleaned.get("symbol") or "").strip().upper()
         market = (cleaned.get("market") or "").strip().upper()
         duplicate = Security.objects.filter(symbol=symbol, market=market)
@@ -242,6 +455,12 @@ class BondForm(forms.Form):
         return cleaned
 
     def save(self, member):
+        from datetime import datetime, time
+
+        from django.utils import timezone
+
+        from .market_data import ensure_quote_config, record_security_price
+
         security = self.instance or Security()
         security.asset_category = Security.default_asset_category(
             member.family, Security.TYPE_BOND
@@ -249,6 +468,7 @@ class BondForm(forms.Form):
         security.symbol = self.cleaned_data["symbol"].strip().upper()
         security.name = self.cleaned_data["name"].strip()
         security.market = self.cleaned_data["market"].strip().upper()
+        security.exchange = self.cleaned_data.get("exchange", "").strip().upper()
         security.asset_type = Security.TYPE_BOND
         security.currency = self.cleaned_data["currency"]
         security.data_source = "manual"
@@ -264,12 +484,37 @@ class BondForm(forms.Form):
                 )
             },
         )
-        SecurityMarketSnapshot.objects.update_or_create(
-            security=security,
-            defaults={
-                "last_price": self.cleaned_data["clean_price"],
-                "quote_time": str(self.cleaned_data.get("valuation_date") or ""),
-                "raw_data": {"manual_bond_valuation": True},
+        config = ensure_quote_config(security)
+        config.provider = PriceSourceChoices.MANUAL
+        config.provider_symbol = ""
+        config.price_type = "manual"
+        config.max_age_hours = 720
+        config.save(
+            update_fields=[
+                "provider",
+                "provider_symbol",
+                "price_type",
+                "max_age_hours",
+                "updated_at",
+            ]
+        )
+        valuation_date = self.cleaned_data.get("valuation_date")
+        price_as_of = (
+            timezone.make_aware(datetime.combine(valuation_date, time(16, 0)))
+            if valuation_date
+            else timezone.now()
+        )
+        record_security_price(
+            security,
+            self.cleaned_data["clean_price"],
+            source=PriceSourceChoices.MANUAL,
+            price_as_of=price_as_of,
+            price_type="manual",
+            quote_data={
+                "raw_data": {
+                    "manual_bond_valuation": True,
+                    "accrued_interest": str(self.cleaned_data["accrued_interest"]),
+                }
             },
         )
         WatchlistItem.objects.update_or_create(

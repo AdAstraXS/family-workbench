@@ -1,10 +1,10 @@
-from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Q, Sum
 
 from family_core.models import AssetCategory
+from ipo.date_rules import ipo_accounting_date
 from ipo.models import HkIpoSubscriptionTrade
 
 from .account_sync import sync_investment_account
@@ -123,7 +123,7 @@ def refresh_ipo_sale_summary(ipo_trade):
             latest_sale.trade_date
             if latest_sale
             else (
-                ipo_trade.listing.allotment_result_date
+                ipo_accounting_date(ipo_trade.listing)
                 if ipo_trade.allotted_lots == 0
                 else None
             )
@@ -183,10 +183,7 @@ def sync_ipo_trade(ipo_trade_id):
     if allotted_lots > 0 and lot_size > 0 and final_price > 0:
         external_id = f"{prefix}buy"
         desired_ids.append(external_id)
-        trade_date = listing.allotment_result_date
-        if not trade_date and listing.subscription_end_date:
-            trade_date = listing.subscription_end_date + timedelta(days=2)
-        trade_date = trade_date or ipo_trade.application_date
+        trade_date = ipo_accounting_date(listing)
         quantity = Decimal(allotted_lots * lot_size)
         _upsert_transaction(
             external_id,
@@ -226,7 +223,7 @@ def sync_ipo_trade(ipo_trade_id):
                 "ipo_subscription_trade": ipo_trade,
                 "security": security,
                 "asset_category": security.asset_category,
-                "trade_date": listing.allotment_result_date or ipo_trade.application_date,
+                "trade_date": ipo_accounting_date(listing),
                 "trade_type": TradeTypeChoices.OTHER_FEE_ADJUSTMENT,
                 "trade_type_option": InvestmentOption.objects.filter(
                     code=TradeTypeChoices.OTHER_FEE_ADJUSTMENT,

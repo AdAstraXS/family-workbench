@@ -1,13 +1,13 @@
 from collections import defaultdict
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core import signing
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Count, Q, Sum
 from django.http import HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -18,7 +18,7 @@ from django.views.decorators.http import require_POST
 from family_core.audit import stamp_actor
 from family_core.household import get_site_setting
 from family_core.models import AssetCategory, Currency, FamilyMember
-from ledger.models import BankAccount
+from ledger.models import AssetBalanceSnapshot, BankAccount
 
 from .forms import (
     BondForm,
@@ -26,8 +26,10 @@ from .forms import (
     InvestmentCashMovementForm,
     InvestmentPositionForm,
     InvestmentTransactionForm,
+    ManualSecurityPriceForm,
     OptionContractForm,
     SecurityForm,
+    SecurityQuoteConfigForm,
 )
 from .futu_service import FutuQueryError, search_futu_securities
 from .exchange_rate_service import ensure_daily_exchange_rates
@@ -36,18 +38,47 @@ from .models import (
     InvestmentCashMovement,
     InvestmentPosition,
     InvestmentTransaction,
+    MarketDataRefreshRun,
+    PortfolioReconciliationRun,
     PortfolioSnapshot,
+    PriceSourceChoices,
+    PricingStatusChoices,
     Security,
-    SecurityMarketSnapshot,
     TradeTypeChoices,
     TransactionSourceChoices,
     WatchlistItem,
 )
+from .market_data import (
+    ensure_quote_config,
+    parse_futu_quote_time,
+    quote_config_for_security,
+    quote_status,
+    record_security_price,
+    refresh_market_data,
+)
+from .reconciliation import (
+    apply_reconciliation,
+    build_reconciliation_preview,
+    revert_reconciliation,
+)
 from .services import rebuild_cash_only_transaction, rebuild_position
-from .valuation import convert_currency as _convert_currency, value_portfolio
+from .valuation import (
+    convert_currency as _convert_currency,
+    refresh_position_valuations,
+    resolve_position_prices,
+    value_portfolio,
+)
 
 
 ZERO = Decimal("0")
+
+
+def _can_reconcile_portfolio(user, member):
+    return bool(
+        user.is_superuser
+        or user.is_staff
+        or (member and member.role == FamilyMember.ROLE_ADMIN)
+    )
 
 
 def _sum_or_none(values):
@@ -171,6 +202,48 @@ def _visible_accounts(request):
     return accounts.filter(bank_account__family=member.family) if member else accounts.none()
 
 
+def _visible_securities(request):
+    if request.user.is_superuser:
+        return Security.objects.filter(is_active=True)
+    member = FamilyMember.objects.filter(
+        user=request.user,
+        is_active=True,
+    ).first()
+    if not member:
+        return Security.objects.none()
+    return Security.objects.filter(
+        Q(positions__account__bank_account__family=member.family)
+        | Q(watchlist_items__family=member.family, watchlist_items__is_active=True),
+        is_active=True,
+    ).distinct()
+
+
+def _market_data_securities(request, *, include_watchlist=False):
+    accounts = _visible_accounts(request)
+    security_ids = set(
+        InvestmentPosition.objects.filter(account__in=accounts)
+        .exclude(quantity=0)
+        .values_list("security_id", flat=True)
+    )
+    if include_watchlist:
+        family_ids = set(
+            accounts.values_list("bank_account__family_id", flat=True)
+        )
+        member = FamilyMember.objects.filter(
+            user=request.user,
+            is_active=True,
+        ).first()
+        if member:
+            family_ids.add(member.family_id)
+        security_ids.update(
+            WatchlistItem.objects.filter(
+                family_id__in=family_ids,
+                is_active=True,
+            ).values_list("security_id", flat=True)
+        )
+    return _visible_securities(request).filter(pk__in=security_ids)
+
+
 def _latest_positions(accounts, year):
     return list(
         InvestmentPosition.objects.filter(account__in=accounts).exclude(quantity=0)
@@ -184,6 +257,7 @@ def _latest_positions(accounts, year):
             "security__option_contract",
             "security__bond_detail",
         )
+        .prefetch_related("security__quote_configs")
         .order_by("account__bank_account__member__display_name", "account__bank_account__account_name", "security__symbol")
     )
 
@@ -206,6 +280,7 @@ def _account_dashboard_data(request, account=None):
     if cost_method not in {"moving_average", "diluted"}:
         cost_method = "moving_average"
     positions = _latest_positions(accounts, year)
+    price_resolutions = resolve_position_prices(positions, date.today())
 
     transaction_filter = InvestmentTransaction.objects.filter(account__in=accounts)
     cash_filter = InvestmentCashMovement.objects.filter(account__in=accounts)
@@ -233,19 +308,35 @@ def _account_dashboard_data(request, account=None):
     positions_by_account = defaultdict(list)
     for item in positions:
         snapshot = getattr(item.security, "market_snapshot", None)
-        item.display_price = snapshot.last_price if snapshot and snapshot.last_price is not None else item.current_price
+        price_resolution = price_resolutions[item.pk]
+        item.display_price = price_resolution.price
+        item.price_source = price_resolution.source
+        item.price_as_of = price_resolution.price_as_of
+        item.pricing_status_display = price_resolution.status
+        item.price_source_label = (
+            PriceSourceChoices(price_resolution.source).label
+            if price_resolution.source
+            else "-"
+        )
+        item.pricing_status_label = PricingStatusChoices(
+            price_resolution.status
+        ).label
         item.display_cost = (
             item.diluted_cost
             if cost_method == "diluted"
             else item.avg_cost
         )
         multiplier = item.security.contract_multiplier
-        item.market_value_live = item.security.market_value_for(
-            item.quantity, item.display_price
-        )
-        item.unrealized_live = (
-            item.market_value_live - item.quantity * item.display_cost * multiplier
-        )
+        if item.display_price is None:
+            item.market_value_live = None
+            item.unrealized_live = None
+        else:
+            item.market_value_live = item.security.market_value_for(
+                item.quantity, item.display_price
+            )
+            item.unrealized_live = (
+                item.market_value_live - item.quantity * item.display_cost * multiplier
+            )
         item.realized_for_year = realized.get((item.account_id, item.security_id), ZERO)
         item.original_currency = item.security.currency
         base_currency = site_base_currency
@@ -263,8 +354,8 @@ def _account_dashboard_data(request, account=None):
             item.quantity
             * (item.display_price - item.display_price / (1 + change_rate / 100))
             * multiplier
-            if change_rate not in (None, -100)
-            else ZERO
+            if item.display_price is not None and change_rate not in (None, -100)
+            else (None if item.display_price is None else ZERO)
         )
         positions_by_account[item.account_id].append(item)
 
@@ -339,6 +430,19 @@ def _account_dashboard_data(request, account=None):
             for row in account_rows
             for field in ("cash", "market_value", "total_asset")
         ),
+        "stale_prices": any(
+            item.pricing_status_display
+            in {
+                PricingStatusChoices.STALE,
+                PricingStatusChoices.ERROR,
+                PricingStatusChoices.EXPIRED_UNRESOLVED,
+            }
+            for item in positions
+        ),
+        "missing_prices": any(
+            item.pricing_status_display == PricingStatusChoices.MISSING
+            for item in positions
+        ),
     }
 
 
@@ -381,10 +485,7 @@ def overview(request):
         is_active=True,
     ).order_by("display_name")
     requested_member = request.GET.get("member")
-    if requested_member is None:
-        selected_member = login_member
-        selected_member_value = str(login_member.pk)
-    elif requested_member == "all":
+    if requested_member in (None, "all"):
         selected_member = None
         selected_member_value = "all"
     else:
@@ -449,36 +550,117 @@ def overview(request):
     total_asset = valuation["total_asset"]
     total_pnl = valuation["total_pnl"]
 
-    trend_snapshots = list(
+    trend_view = request.GET.get("snapshot_view", "monthly")
+    trend_view_options = (
+        ("yearly", "按年末显示"),
+        ("monthly", "按月末显示"),
+        ("daily", "按天显示（全部快照）"),
+    )
+    valid_trend_views = {item[0] for item in trend_view_options}
+    if trend_view not in valid_trend_views:
+        trend_view = "monthly"
+    all_trend_snapshots = list(
         PortfolioSnapshot.objects.filter(
             family=family,
             member=selected_member,
             account=None,
             currency=base_currency,
+            extra_data__complete=True,
         )
-        .order_by("-snapshot_date", "-pk")[:60]
+        .order_by("snapshot_date", "pk")
     )
-    trend_snapshots.reverse()
+    if trend_view == "yearly":
+        selected_by_period = {}
+        for item in all_trend_snapshots:
+            selected_by_period[item.snapshot_date.year] = item
+        trend_snapshots = list(selected_by_period.values())
+    elif trend_view == "monthly":
+        selected_by_period = {}
+        for item in all_trend_snapshots:
+            selected_by_period[
+                (item.snapshot_date.year, item.snapshot_date.month)
+            ] = item
+        trend_snapshots = list(selected_by_period.values())
+    else:
+        trend_snapshots = all_trend_snapshots
+
     values = [item.total_asset for item in trend_snapshots]
-    chart_width, chart_height = Decimal("1000"), Decimal("180")
+    chart_height = Decimal("280")
+    plot_left = Decimal("76")
+    plot_right = Decimal("34")
+    plot_top = Decimal("34")
+    plot_bottom = Decimal("226")
+    chart_width = Decimal(max(1000, len(values) * 104 + 110))
+    plot_width = chart_width - plot_left - plot_right
+    plot_height = plot_bottom - plot_top
+    chart_ticks = []
+    trend_rows = []
+    trend_fill_points = ""
     if values:
-        minimum, maximum = min(values), max(values)
-        spread = maximum - minimum
-        if not spread:
-            spread = max(abs(maximum) * Decimal("0.05"), Decimal("1"))
-            minimum = maximum - spread / 2
-            maximum += spread / 2
-        point_count = max(len(values) - 1, 1)
-        points = []
-        for index, value in enumerate(values):
-            x = Decimal(index) / Decimal(point_count) * chart_width
-            y = Decimal("15") + (
-                (maximum - value) / spread * (chart_height - Decimal("30"))
+        maximum_wan = max(max(values), ZERO) / Decimal("10000")
+        if maximum_wan <= ZERO:
+            tick_step = Decimal("1")
+            axis_max_wan = Decimal("4")
+        else:
+            raw_step = maximum_wan / Decimal("4")
+            magnitude = Decimal("10") ** raw_step.adjusted()
+            normalized = raw_step / magnitude
+            nice_factor = (
+                Decimal("1")
+                if normalized <= Decimal("1")
+                else Decimal("2")
+                if normalized <= Decimal("2")
+                else Decimal("5")
+                if normalized <= Decimal("5")
+                else Decimal("10")
             )
-            points.append(f"{x:.2f},{y:.2f}")
-        if len(points) == 1:
-            points.append(f"{chart_width:.2f},{points[0].split(',')[1]}")
-        trend_points = " ".join(points)
+            tick_step = nice_factor * magnitude
+            axis_max_wan = (
+                maximum_wan / tick_step
+            ).to_integral_value(rounding=ROUND_CEILING) * tick_step
+        tick_count = int(axis_max_wan / tick_step)
+        for index in range(tick_count + 1):
+            tick_value = tick_step * index
+            y = plot_bottom - tick_value / axis_max_wan * plot_height
+            chart_ticks.append(
+                {"y": f"{y:.2f}", "label": f"{tick_value:,.2f}"}
+            )
+
+        point_denominator = max(len(values) - 1, 1)
+        for index, item in enumerate(trend_snapshots):
+            value_wan = item.total_asset / Decimal("10000")
+            x = (
+                plot_left + plot_width / Decimal("2")
+                if len(values) == 1
+                else plot_left
+                + Decimal(index) / Decimal(point_denominator) * plot_width
+            )
+            y = plot_bottom - max(value_wan, ZERO) / axis_max_wan * plot_height
+            if trend_view == "yearly":
+                date_label = f"{item.snapshot_date.year}年"
+            elif trend_view == "monthly":
+                date_label = (
+                    f"{item.snapshot_date.year}年{item.snapshot_date.month}月"
+                )
+            else:
+                date_label = item.snapshot_date.strftime("%Y-%m-%d")
+            trend_rows.append(
+                {
+                    "x": f"{x:.2f}",
+                    "y": f"{y:.2f}",
+                    "label_y": f"{max(y - Decimal('11'), Decimal('14')):.2f}",
+                    "amount_label": f"{value_wan:,.2f}万",
+                    "date_label": date_label,
+                }
+            )
+        trend_points = " ".join(
+            f"{item['x']},{item['y']}" for item in trend_rows
+        )
+        trend_fill_points = (
+            f"{trend_rows[0]['x']},{plot_bottom:.2f} "
+            f"{trend_points} "
+            f"{trend_rows[-1]['x']},{plot_bottom:.2f}"
+        )
     else:
         trend_points = ""
 
@@ -558,6 +740,17 @@ def overview(request):
             "asset_groups": asset_groups,
             "trend_snapshots": trend_snapshots,
             "trend_points": trend_points,
+            "trend_fill_points": trend_fill_points,
+            "trend_rows": trend_rows,
+            "trend_view": trend_view,
+            "trend_view_label": dict(trend_view_options)[trend_view],
+            "trend_view_options": trend_view_options,
+            "chart_width": int(chart_width),
+            "chart_height": int(chart_height),
+            "chart_ticks": chart_ticks,
+            "chart_plot_left": f"{plot_left:.2f}",
+            "chart_plot_right": f"{chart_width - plot_right:.2f}",
+            "chart_plot_bottom": f"{plot_bottom:.2f}",
             "trend_start": (
                 trend_snapshots[0].snapshot_date if trend_snapshots else today
             ),
@@ -567,7 +760,110 @@ def overview(request):
             "change_amount": change_amount,
             "change_ratio": change_ratio,
             "missing_rates": missing_rates,
+            "can_reconcile": _can_reconcile_portfolio(request.user, login_member),
         },
+    )
+
+
+@login_required
+def reconciliation_preview(request):
+    member = (
+        FamilyMember.objects.select_related("family")
+        .filter(user=request.user, is_active=True)
+        .first()
+    )
+    if not member or not _can_reconcile_portfolio(request.user, member):
+        raise PermissionDenied("只有家庭管理员可以执行投资账户差额对齐。")
+    snapshots = (
+        AssetBalanceSnapshot.objects.filter(
+            family=member.family,
+            is_draft=False,
+            entries__account__supports_investment=True,
+        )
+        .distinct()
+        .order_by("-snapshot_date", "-pk")
+    )
+    selected = None
+    requested_date = parse_date(request.GET.get("date", ""))
+    if requested_date:
+        selected = snapshots.filter(snapshot_date=requested_date).first()
+    selected = selected or snapshots.first()
+    preview = None
+    run = None
+    if selected:
+        preview = build_reconciliation_preview(selected)
+        run = PortfolioReconciliationRun.objects.filter(
+            ledger_snapshot=selected
+        ).first()
+    return render(
+        request,
+        "portfolio/reconciliation.html",
+        {
+            "snapshots": snapshots,
+            "selected_snapshot": selected,
+            "preview": preview,
+            "run": run,
+        },
+    )
+
+
+@login_required
+@require_POST
+def reconciliation_apply(request):
+    member = (
+        FamilyMember.objects.select_related("family")
+        .filter(user=request.user, is_active=True)
+        .first()
+    )
+    if not member or not _can_reconcile_portfolio(request.user, member):
+        raise PermissionDenied("只有家庭管理员可以执行投资账户差额对齐。")
+    snapshot = get_object_or_404(
+        AssetBalanceSnapshot,
+        pk=request.POST.get("snapshot_id"),
+        family=member.family,
+        is_draft=False,
+    )
+    try:
+        run = apply_reconciliation(snapshot, request.user)
+    except (ValidationError, ValueError) as exc:
+        detail = "；".join(getattr(exc, "messages", [str(exc)]))
+        messages.error(request, detail)
+    else:
+        messages.success(
+            request,
+            f"{snapshot.snapshot_date} 已完成 {run.lines.count()} 个投资账户的差额对齐并重建快照。",
+        )
+    return redirect(
+        f"{reverse('portfolio:reconciliation_preview')}?date={snapshot.snapshot_date}"
+    )
+
+
+@login_required
+@require_POST
+def reconciliation_revert(request):
+    member = (
+        FamilyMember.objects.select_related("family")
+        .filter(user=request.user, is_active=True)
+        .first()
+    )
+    if not member or not _can_reconcile_portfolio(request.user, member):
+        raise PermissionDenied("只有家庭管理员可以撤销投资账户差额对齐。")
+    run = get_object_or_404(
+        PortfolioReconciliationRun.objects.select_related("ledger_snapshot"),
+        pk=request.POST.get("run_id"),
+        family=member.family,
+    )
+    try:
+        revert_reconciliation(run, request.user)
+    except ValidationError as exc:
+        messages.error(request, "；".join(exc.messages))
+    else:
+        messages.success(
+            request,
+            f"{run.ledger_snapshot.snapshot_date} 的差额调整已撤销并重建快照。",
+        )
+    return redirect(
+        f"{reverse('portfolio:reconciliation_preview')}?date={run.ledger_snapshot.snapshot_date}"
     )
 
 
@@ -652,8 +948,14 @@ def _currency_sections(account, positions, balances):
                 currency, "other"
             ),
             "cash": balances[currency],
-            "holding": sum((item.market_value_live for item in grouped[currency]), ZERO),
-            "holding_pnl": sum((item.unrealized_live for item in grouped[currency]), ZERO),
+            "holding": sum(
+                (item.market_value_live or ZERO for item in grouped[currency]),
+                ZERO,
+            ),
+            "holding_pnl": sum(
+                (item.unrealized_live or ZERO for item in grouped[currency]),
+                ZERO,
+            ),
             "positions": grouped[currency],
         }
         for currency in currencies
@@ -1012,7 +1314,7 @@ def security_list(request):
     )
     query = request.GET.get("q", "").strip()
     market = request.GET.get("market", "HK").strip().upper()
-    if market not in {"HK", "US", "CN"}:
+    if market not in {"HK", "US", "CN", "CN_B"}:
         market = "HK"
     search_results = []
     query_error = ""
@@ -1064,6 +1366,186 @@ def _decimal_or_none(value):
 
 
 @login_required
+def market_data_status(request):
+    scope = request.GET.get("scope", "holdings")
+    if scope not in {"holdings", "watchlist"}:
+        scope = "holdings"
+    securities = list(
+        _market_data_securities(
+            request,
+            include_watchlist=scope == "watchlist",
+        )
+        .select_related(
+            "market_snapshot",
+            "option_contract",
+            "bond_detail",
+        )
+        .prefetch_related("quote_configs")
+        .order_by("market", "symbol")
+    )
+    visible_accounts = _visible_accounts(request)
+    position_counts = {
+        row["security_id"]: row["count"]
+        for row in InvestmentPosition.objects.filter(
+            account__in=visible_accounts,
+        )
+        .exclude(quantity=0)
+        .values("security_id")
+        .annotate(count=Count("pk"))
+    }
+    held_positions = list(
+        InvestmentPosition.objects.filter(
+            account__in=visible_accounts,
+            security_id__in=[security.pk for security in securities],
+        )
+        .exclude(quantity=0)
+        .select_related(
+            "security__market_snapshot",
+            "security__option_contract",
+            "security__bond_detail",
+        )
+    )
+    held_resolutions = resolve_position_prices(held_positions, date.today())
+    held_statuses = {
+        position.security_id: held_resolutions[position.pk].status
+        for position in held_positions
+    }
+    rows = []
+    for security in securities:
+        config = quote_config_for_security(security)
+        snapshot = getattr(security, "market_snapshot", None)
+        status = held_statuses.get(
+            security.pk,
+            quote_status(config, snapshot),
+        )
+        rows.append(
+            {
+                "security": security,
+                "config": config,
+                "snapshot": snapshot,
+                "position_count": position_counts.get(security.pk, 0),
+                "status": status,
+                "status_label": PricingStatusChoices(status).label,
+            }
+        )
+    return render(
+        request,
+        "portfolio/market_data_status.html",
+        {
+            "rows": rows,
+            "selected_scope": scope,
+            "recent_runs": MarketDataRefreshRun.objects.all()[:10],
+        },
+    )
+
+
+@login_required
+@require_POST
+def market_data_refresh(request):
+    security_id = request.POST.get("security_id", "").strip()
+    if security_id:
+        security = get_object_or_404(_visible_securities(request), pk=security_id)
+        run = refresh_market_data(security_ids=[security.pk])
+    else:
+        scope = request.POST.get("scope", "holdings")
+        visible_ids = list(
+            _market_data_securities(
+                request,
+                include_watchlist=scope == "watchlist",
+            ).values_list("pk", flat=True)
+        )
+        run = refresh_market_data(security_ids=visible_ids)
+    if run.error_count:
+        messages.warning(
+            request,
+            f"行情刷新完成：成功 {run.success_count}，错误 {run.error_count}，"
+            f"过期 {run.stale_count}，缺失 {run.missing_count}。",
+        )
+    else:
+        messages.success(
+            request,
+            f"行情刷新完成：成功更新 {run.success_count} 个自动行情标的。",
+        )
+    return redirect("portfolio:market_data_status")
+
+
+@login_required
+def manual_security_price(request, pk):
+    security = get_object_or_404(
+        _visible_securities(request).select_related("market_snapshot", "bond_detail"),
+        pk=pk,
+    )
+    snapshot = getattr(security, "market_snapshot", None)
+    bond = getattr(security, "bond_detail", None)
+    initial = {
+        "price": snapshot.last_price if snapshot else None,
+        "price_as_of": timezone.localtime(timezone.now()).replace(
+            second=0,
+            microsecond=0,
+        ),
+        "remark": "",
+    }
+    if bond:
+        initial["accrued_interest"] = bond.accrued_interest
+    form = ManualSecurityPriceForm(
+        request.POST or None,
+        security=security,
+        initial=initial,
+    )
+    if request.method == "POST" and form.is_valid():
+        ensure_quote_config(security)
+        if bond:
+            bond.accrued_interest = form.cleaned_data.get("accrued_interest") or ZERO
+            bond.valuation_date = timezone.localdate(form.cleaned_data["price_as_of"])
+            bond.save(update_fields=["accrued_interest", "valuation_date", "updated_at"])
+        record_security_price(
+            security,
+            form.cleaned_data["price"],
+            source=PriceSourceChoices.MANUAL,
+            price_as_of=form.cleaned_data["price_as_of"],
+            price_type="manual",
+            quote_data={
+                "raw_data": {
+                    "remark": form.cleaned_data.get("remark", ""),
+                    "entered_by_id": request.user.pk,
+                }
+            },
+        )
+        refresh_position_valuations(security_ids=[security.pk])
+        messages.success(request, f"{security.name} 的手工价格已保存并更新当前持仓估值。")
+        return redirect("portfolio:market_data_status")
+    return render(
+        request,
+        "form.html",
+        {
+            "form": form,
+            "title": f"录入手工价格 · {security.name}",
+            "page_parent_url": reverse("portfolio:market_data_status"),
+        },
+    )
+
+
+@login_required
+def security_quote_config(request, pk):
+    security = get_object_or_404(_visible_securities(request), pk=pk)
+    config = quote_config_for_security(security)
+    form = SecurityQuoteConfigForm(request.POST or None, instance=config)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, f"{security.name} 的行情来源配置已保存。")
+        return redirect("portfolio:market_data_status")
+    return render(
+        request,
+        "form.html",
+        {
+            "form": form,
+            "title": f"行情来源配置 · {security.name}",
+            "page_parent_url": reverse("portfolio:market_data_status"),
+        },
+    )
+
+
+@login_required
 @require_POST
 def watchlist_add(request):
     member = (
@@ -1104,30 +1586,36 @@ def watchlist_add(request):
     security.source_updated_at = timezone.now()
     security.extra_data = {
         **security.extra_data,
+        "futu_code": data.get("code") or "",
         "futu": data.get("raw_data") or {},
     }
     security.save()
 
-    SecurityMarketSnapshot.objects.update_or_create(
-        security=security,
-        defaults={
-            "quote_time": data.get("quote_time") or "",
-            "last_price": _decimal_or_none(data.get("last_price")),
-            "change_rate": _decimal_or_none(data.get("change_rate")),
-            "total_market_value": _decimal_or_none(data.get("total_market_value")),
-            "pe_ratio": _decimal_or_none(data.get("pe_ratio")),
-            "pe_ttm_ratio": _decimal_or_none(data.get("pe_ttm_ratio")),
-            "pb_ratio": _decimal_or_none(data.get("pb_ratio")),
-            "ps_ratio": _decimal_or_none(data.get("ps_ratio")),
-            "dividend_yield_ttm": _decimal_or_none(data.get("dividend_yield_ttm")),
-            "turnover_rate": _decimal_or_none(data.get("turnover_rate")),
-            "high_52_week": _decimal_or_none(data.get("high_52_week")),
-            "low_52_week": _decimal_or_none(data.get("low_52_week")),
-            "issued_shares": data.get("issued_shares"),
-            "outstanding_shares": data.get("outstanding_shares"),
-            "raw_data": data.get("raw_data") or {},
-        },
+    config = ensure_quote_config(security)
+    config.provider = PriceSourceChoices.FUTU
+    config.provider_symbol = data.get("code") or config.provider_symbol
+    config.price_type = "last"
+    config.max_age_hours = 96
+    config.save(
+        update_fields=[
+            "provider",
+            "provider_symbol",
+            "price_type",
+            "max_age_hours",
+            "updated_at",
+        ]
     )
+    if _decimal_or_none(data.get("last_price")) is not None:
+        record_security_price(
+            security,
+            data["last_price"],
+            source=PriceSourceChoices.FUTU,
+            price_as_of=parse_futu_quote_time(
+                data.get("quote_time"),
+                security.market,
+            ),
+            quote_data=data,
+        )
     item, created = WatchlistItem.objects.update_or_create(
         family=member.family,
         security=security,
@@ -1164,7 +1652,8 @@ def _security_form(request, security=None):
         family=member.family,
     )
     if request.method == "POST" and form.is_valid():
-        form.save()
+        saved_security = form.save()
+        ensure_quote_config(saved_security)
         messages.success(request, "证券标的已保存。")
         return redirect("portfolio:security_list")
     return render(

@@ -4,6 +4,30 @@
 <script>
   (() => {
     const type = document.getElementById("id_asset_type");
+    const market = document.getElementById("id_market");
+    const exchange = document.getElementById("id_exchange");
+    const exchangeOptions = exchange
+      ? Array.from(exchange.options).map((option) => ({
+          value: option.value,
+          label: option.textContent,
+          selected: option.selected,
+        }))
+      : [];
+    const filterExchanges = () => {
+      if (!market || !exchange) return;
+      const previous = exchange.value;
+      exchange.replaceChildren(
+        ...exchangeOptions
+          .filter((option) => !option.value || option.value.startsWith(`${market.value}:`))
+          .map((option) => new Option(
+            option.label,
+            option.value,
+            false,
+            option.value === previous || (!previous && option.selected),
+          )),
+      );
+      if (![...exchange.options].some((option) => option.selected)) exchange.value = "";
+    };
     const toggle = () => {
       const exchangeListed = ["stock", "etf"].includes(type.value);
       ["id_lot_size", "id_listing_date", "id_is_delisted"].forEach((id) => {
@@ -11,6 +35,8 @@
       });
     };
     type.addEventListener("change", toggle);
+    market?.addEventListener("change", filterExchanges);
+    filterExchanges();
     toggle();
   })();
 </script>

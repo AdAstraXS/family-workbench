@@ -572,24 +572,79 @@ td.negative {
   font-size: 12px;
 }
 
+.portfolio-trend-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.portfolio-trend-controls form,
+.portfolio-trend-controls label {
+  display: grid;
+  gap: 4px;
+}
+
+.portfolio-trend-controls label {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.portfolio-trend-controls select {
+  min-width: 156px;
+}
+
 .portfolio-trend-card {
   margin-bottom: 18px;
   overflow: hidden;
 }
 
-.portfolio-trend-chart {
+.portfolio-trend-chart-scroll {
   margin: 18px -18px -4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.portfolio-trend-chart {
+  width: max-content;
 }
 
 .portfolio-trend-chart svg {
   display: block;
-  width: 100%;
-  height: 220px;
+  height: 280px;
 }
 
 .portfolio-chart-axis {
+  stroke: #94a3b8;
+  stroke-width: 1.2;
+}
+
+.portfolio-chart-grid {
   stroke: #e2e8f0;
   stroke-width: 1;
+}
+
+.portfolio-chart-unit,
+.portfolio-chart-y-label,
+.portfolio-chart-date {
+  fill: #64748b;
+  font-size: 11px;
+}
+
+.portfolio-chart-y-label {
+  text-anchor: end;
+  dominant-baseline: middle;
+}
+
+.portfolio-chart-date,
+.portfolio-chart-value {
+  text-anchor: middle;
+}
+
+.portfolio-chart-value {
+  fill: #0f172a;
+  font-size: 11px;
+  font-weight: 750;
 }
 
 .portfolio-trend-line {
@@ -601,10 +656,15 @@ td.negative {
   vector-effect: non-scaling-stroke;
 }
 
-.portfolio-trend-dates {
-  display: flex;
-  justify-content: space-between;
-  padding: 0 18px 10px;
+.portfolio-trend-node {
+  fill: #ffffff;
+  stroke: #16a34a;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.portfolio-trend-scroll-hint {
+  margin: 8px 0 0;
   color: #64748b;
   font-size: 12px;
 }
@@ -1146,6 +1206,81 @@ button {
   grid-template-columns: 1.15fr 2fr 1fr 1fr;
   gap: 12px;
   align-items: stretch;
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pricing-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pricing-manual { background: #eef2ff; color: #4338ca; }
+.pricing-stale,
+.pricing-legacy { background: #fff7ed; color: #c2410c; }
+.pricing-error,
+.pricing-missing,
+.pricing-expired_unresolved { background: #fef2f2; color: #b91c1c; }
+
+.price-meta,
+.price-error {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.price-error { color: #b91c1c; }
+
+.market-data-warning {
+  margin: 8px 0 0;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.market-data-table :is(th, td):nth-child(4),
+.market-data-table :is(th, td):nth-child(6),
+.market-data-runs-table :is(th, td):nth-child(n+4) {
+  text-align: right;
+}
+
+.market-data-table .row-actions {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.market-data-scopes {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.market-data-scopes a {
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: #475569;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.market-data-scopes a.active {
+  background: #e8f4ff;
+  color: #0969a8;
+  font-weight: 700;
 }
 
 .account-total-card,
@@ -3004,6 +3139,7 @@ textarea {
 .market-hk { background: #fff1e8; color: #ad4e00; }
 .market-us { background: #e8f4ff; color: #0969a8; }
 .market-cn { background: #f7eaff; color: #722ed1; }
+.market-cn_b { background: #fff7d6; color: #8a5a00; }
 .trade-tag.ipo { background: #ffebe6; color: #c2410c; }
 .currency-overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
 .currency-overview-card { border: 1px solid #e5e7eb; border-radius: .8rem; padding: 1rem; overflow: hidden; }

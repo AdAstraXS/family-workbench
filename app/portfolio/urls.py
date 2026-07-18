@@ -7,6 +7,21 @@ app_name = "portfolio"
 
 urlpatterns = [
     path("", views.overview, name="overview"),
+    path(
+        "reconciliation/",
+        views.reconciliation_preview,
+        name="reconciliation_preview",
+    ),
+    path(
+        "reconciliation/apply/",
+        views.reconciliation_apply,
+        name="reconciliation_apply",
+    ),
+    path(
+        "reconciliation/revert/",
+        views.reconciliation_revert,
+        name="reconciliation_revert",
+    ),
     path("accounts/", views.account_list, name="account_list"),
     path("accounts/prototype/", views.account_prototype, name="account_prototype"),
     path(
@@ -29,6 +44,18 @@ urlpatterns = [
     path("securities/bonds/create/", views.bond_create, name="bond_create"),
     path("securities/bonds/<int:pk>/edit/", views.bond_edit, name="bond_edit"),
     path("securities/<int:pk>/edit/", views.security_edit, name="security_edit"),
+    path("market-data/", views.market_data_status, name="market_data_status"),
+    path("market-data/refresh/", views.market_data_refresh, name="market_data_refresh"),
+    path(
+        "market-data/<int:pk>/price/",
+        views.manual_security_price,
+        name="manual_security_price",
+    ),
+    path(
+        "market-data/<int:pk>/config/",
+        views.security_quote_config,
+        name="security_quote_config",
+    ),
     path("positions/", views.position_list, name="position_list"),
     path("positions/create/", views.position_create, name="position_create"),
     path("positions/<int:pk>/edit/", views.position_edit, name="position_edit"),

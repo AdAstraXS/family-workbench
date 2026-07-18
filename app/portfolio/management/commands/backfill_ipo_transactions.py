@@ -1,10 +1,10 @@
-from datetime import timedelta
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
+from ipo.date_rules import ipo_accounting_date
 from ipo.models import HkIpoSubscriptionTrade
 from portfolio.ipo_sync import _portfolio_account, _security
 from portfolio.models import (
@@ -63,11 +63,11 @@ class Command(BaseCommand):
             listing = ipo_trade.listing
             lot_size = listing.lot_size or 0
             final_price = listing.final_price or ZERO
-            buy_date = listing.allotment_result_date or (
-                listing.subscription_end_date + timedelta(days=2)
-                if listing.subscription_end_date
-                else ipo_trade.application_date
-            )
+            try:
+                buy_date = ipo_accounting_date(listing)
+            except ValidationError as exc:
+                errors.append(f"IPO #{ipo_trade.pk} {listing}: {exc.message}")
+                continue
             required = []
             if not ipo_trade.account_id:
                 required.append("申购账户")
@@ -75,8 +75,6 @@ class Command(BaseCommand):
                 required.append("每手股数")
             if not final_price:
                 required.append("最终定价")
-            if not buy_date:
-                required.append("中签日期")
             if need_sell and not ipo_trade.sell_date:
                 required.append("卖出日期")
             if need_sell and not ipo_trade.sell_price:

@@ -2,6 +2,7 @@ import uuid
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from django.urls import reverse
@@ -44,6 +45,30 @@ class TransactionSourceChoices(models.TextChoices):
     IMPORT = "import", "文件导入"
     FUTU = "futu", "Futu 同步"
     IPO = "ipo", "港股打新"
+    RECONCILIATION = "reconciliation", "账本差额对齐"
+
+
+class PriceSourceChoices(models.TextChoices):
+    FUTU = "futu", "Futu"
+    MANUAL = "manual", "手工录入"
+    LEGACY = "legacy", "历史缓存"
+
+
+class PricingStatusChoices(models.TextChoices):
+    FRESH = "fresh", "最新"
+    MANUAL = "manual", "手工价格"
+    STALE = "stale", "价格过期"
+    MISSING = "missing", "缺少价格"
+    ERROR = "error", "刷新失败"
+    LEGACY = "legacy", "历史价格"
+    EXPIRED_UNRESOLVED = "expired_unresolved", "到期未处理"
+
+
+class MarketDataRunStatusChoices(models.TextChoices):
+    RUNNING = "running", "执行中"
+    SUCCESS = "success", "成功"
+    PARTIAL = "partial", "部分成功"
+    FAILED = "failed", "失败"
 
 
 class InvestmentOption(TimestampedModel):
@@ -153,6 +178,91 @@ class InvestmentAccount(TimestampedModel):
 
     def get_absolute_url(self):
         return reverse("portfolio:account_detail", args=[self.pk])
+
+
+class SecurityMarket(TimestampedModel):
+    code = models.CharField("市场代码", max_length=20, unique=True)
+    name = models.CharField("市场名称", max_length=100)
+    default_currency = models.CharField("默认币种", max_length=10, blank=True)
+    supports_futu = models.BooleanField("支持 Futu 行情", default=False)
+    display_order = models.PositiveSmallIntegerField("显示顺序", default=0)
+    is_active = models.BooleanField("启用", default=True)
+    remark = models.CharField("说明", max_length=300, blank=True)
+
+    class Meta:
+        verbose_name = "证券市场字典"
+        verbose_name_plural = "证券市场字典"
+        ordering = ["display_order", "code"]
+
+    def __str__(self):
+        return f"{self.name}（{self.code}）"
+
+    def save(self, *args, **kwargs):
+        normalized_code = (self.code or "").strip().upper()
+        if self.pk:
+            previous_code = type(self).objects.filter(pk=self.pk).values_list(
+                "code",
+                flat=True,
+            ).first()
+            if previous_code and previous_code != normalized_code:
+                raise ValidationError("市场稳定代码创建后不可修改；请修改名称或停用旧记录。")
+        self.code = normalized_code
+        self.default_currency = (self.default_currency or "").strip().upper()
+        super().save(*args, **kwargs)
+
+
+class SecurityExchange(TimestampedModel):
+    market = models.ForeignKey(
+        SecurityMarket,
+        verbose_name="所属市场",
+        on_delete=models.PROTECT,
+        related_name="exchanges",
+    )
+    code = models.CharField("交易所代码", max_length=30)
+    name = models.CharField("交易所名称", max_length=100)
+    default_currency = models.CharField("默认币种", max_length=10, blank=True)
+    provider_prefix = models.CharField(
+        "行情源前缀",
+        max_length=20,
+        blank=True,
+        help_text="例如 Futu 使用 HK、US、SH、SZ；不自动取行情时可留空。",
+    )
+    display_order = models.PositiveSmallIntegerField("显示顺序", default=0)
+    is_active = models.BooleanField("启用", default=True)
+    remark = models.CharField("说明", max_length=300, blank=True)
+
+    class Meta:
+        verbose_name = "证券交易所字典"
+        verbose_name_plural = "证券交易所字典"
+        ordering = ["market__display_order", "display_order", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["market", "code"],
+                name="unique_security_exchange_market_code",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.market.name} - {self.name}（{self.code}）"
+
+    def save(self, *args, **kwargs):
+        normalized_code = (self.code or "").strip().upper()
+        if self.pk:
+            previous = type(self).objects.filter(pk=self.pk).values(
+                "market_id",
+                "code",
+            ).first()
+            if previous and (
+                previous["market_id"] != self.market_id
+                or previous["code"] != normalized_code
+            ):
+                raise ValidationError(
+                    "交易所所属市场和稳定代码创建后不可修改；请修改名称或停用旧记录。"
+                )
+        self.code = normalized_code
+        self.default_currency = (self.default_currency or "").strip().upper()
+        self.provider_prefix = (self.provider_prefix or "").strip().upper()
+        super().save(*args, **kwargs)
 
 
 class Security(TimestampedModel):
@@ -399,6 +509,30 @@ class SecurityMarketSnapshot(models.Model):
     issued_shares = models.BigIntegerField("总股本", null=True, blank=True)
     outstanding_shares = models.BigIntegerField("流通股本", null=True, blank=True)
     raw_data = models.JSONField("原始数据", default=dict, blank=True)
+    price_source = models.CharField(
+        "价格来源",
+        max_length=20,
+        choices=PriceSourceChoices.choices,
+        default=PriceSourceChoices.LEGACY,
+    )
+    price_as_of = models.DateTimeField("价格时点", null=True, blank=True)
+    pricing_status = models.CharField(
+        "价格状态",
+        max_length=30,
+        choices=PricingStatusChoices.choices,
+        default=PricingStatusChoices.LEGACY,
+    )
+    is_delayed = models.BooleanField("是否延迟行情", default=False)
+    last_attempt_at = models.DateTimeField("最近尝试时间", null=True, blank=True)
+    last_error = models.TextField("最近错误", blank=True)
+    refresh_run = models.ForeignKey(
+        "MarketDataRefreshRun",
+        verbose_name="刷新批次",
+        on_delete=models.SET_NULL,
+        related_name="latest_quotes",
+        null=True,
+        blank=True,
+    )
     fetched_at = models.DateTimeField("获取时间", auto_now=True)
 
     class Meta:
@@ -409,6 +543,110 @@ class SecurityMarketSnapshot(models.Model):
         return f"{self.security} {self.quote_time}"
 
 
+class SecurityQuoteConfig(TimestampedModel):
+    security = models.ForeignKey(
+        Security,
+        verbose_name="证券标的",
+        on_delete=models.CASCADE,
+        related_name="quote_configs",
+    )
+    provider = models.CharField(
+        "行情来源",
+        max_length=20,
+        choices=PriceSourceChoices.choices,
+        default=PriceSourceChoices.FUTU,
+    )
+    provider_symbol = models.CharField("行情源代码", max_length=100, blank=True)
+    price_type = models.CharField("价格类型", max_length=20, default="last")
+    enabled = models.BooleanField("启用", default=True)
+    priority = models.PositiveSmallIntegerField("优先级", default=10)
+    max_age_hours = models.PositiveIntegerField("最大有效小时数", default=96)
+
+    class Meta:
+        verbose_name = "证券行情配置"
+        verbose_name_plural = "证券行情配置"
+        ordering = ["priority", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["security", "provider"],
+                name="unique_security_quote_provider",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.security} - {self.get_provider_display()}"
+
+
+class MarketDataRefreshRun(models.Model):
+    started_at = models.DateTimeField("开始时间", auto_now_add=True)
+    finished_at = models.DateTimeField("完成时间", null=True, blank=True)
+    status = models.CharField(
+        "状态",
+        max_length=20,
+        choices=MarketDataRunStatusChoices.choices,
+        default=MarketDataRunStatusChoices.RUNNING,
+    )
+    scope = models.CharField("刷新范围", max_length=30, default="holdings")
+    target_count = models.PositiveIntegerField("目标数量", default=0)
+    success_count = models.PositiveIntegerField("成功数量", default=0)
+    stale_count = models.PositiveIntegerField("过期数量", default=0)
+    missing_count = models.PositiveIntegerField("缺失数量", default=0)
+    error_count = models.PositiveIntegerField("错误数量", default=0)
+    details = models.JSONField("执行详情", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "行情刷新批次"
+        verbose_name_plural = "行情刷新批次"
+        ordering = ["-started_at", "-pk"]
+
+    def __str__(self):
+        return f"{self.started_at} {self.get_status_display()}"
+
+
+class SecurityPriceRecord(models.Model):
+    security = models.ForeignKey(
+        Security,
+        verbose_name="证券标的",
+        on_delete=models.CASCADE,
+        related_name="price_records",
+    )
+    refresh_run = models.ForeignKey(
+        MarketDataRefreshRun,
+        verbose_name="刷新批次",
+        on_delete=models.SET_NULL,
+        related_name="price_records",
+        null=True,
+        blank=True,
+    )
+    price = models.DecimalField("价格", max_digits=20, decimal_places=6)
+    currency = models.CharField("币种", max_length=10)
+    source = models.CharField(
+        "价格来源",
+        max_length=20,
+        choices=PriceSourceChoices.choices,
+    )
+    price_type = models.CharField("价格类型", max_length=20, default="last")
+    price_as_of = models.DateTimeField("价格时点")
+    is_delayed = models.BooleanField("是否延迟行情", default=False)
+    raw_data = models.JSONField("原始数据", default=dict, blank=True)
+    fetched_at = models.DateTimeField("获取时间", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "证券历史价格"
+        verbose_name_plural = "证券历史价格"
+        ordering = ["-price_as_of", "-pk"]
+        indexes = [models.Index(fields=["security", "-price_as_of"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["security", "source", "price_type", "price_as_of"],
+                name="unique_security_price_observation",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.security} {self.price_as_of} {self.price}"
+
+
 class InvestmentPosition(TimestampedModel):
     account = models.ForeignKey(InvestmentAccount, verbose_name="投资账户", on_delete=models.CASCADE, related_name="positions")
     security = models.ForeignKey(Security, verbose_name="证券标的", on_delete=models.CASCADE, related_name="positions")
@@ -416,6 +654,19 @@ class InvestmentPosition(TimestampedModel):
     avg_cost = models.DecimalField("平均成本", max_digits=20, decimal_places=6, default=0)
     diluted_cost = models.DecimalField("摊薄成本", max_digits=20, decimal_places=6, default=0)
     current_price = models.DecimalField("当前价格", max_digits=20, decimal_places=6, default=0)
+    current_price_as_of = models.DateTimeField("当前价格时点", null=True, blank=True)
+    current_price_source = models.CharField(
+        "当前价格来源",
+        max_length=20,
+        choices=PriceSourceChoices.choices,
+        default=PriceSourceChoices.LEGACY,
+    )
+    pricing_status = models.CharField(
+        "价格状态",
+        max_length=30,
+        choices=PricingStatusChoices.choices,
+        default=PricingStatusChoices.LEGACY,
+    )
     market_value = models.DecimalField("当前市值", max_digits=20, decimal_places=4, default=0)
     unrealized_pnl = models.DecimalField("浮动盈亏", max_digits=20, decimal_places=4, default=0)
     realized_pnl = models.DecimalField("累计已实现盈亏", max_digits=20, decimal_places=4, default=0)
@@ -637,6 +888,169 @@ class InvestmentCashMovement(TimestampedModel):
 
     def __str__(self):
         return f"{self.movement_date} {self.account} {self.amount} {self.currency}"
+
+
+class PortfolioAccountBalanceAnchor(TimestampedModel):
+    REASON_HISTORICAL = "historical_balance"
+    REASON_RECONCILIATION = "ledger_reconciliation"
+    REASON_CHOICES = [
+        (REASON_HISTORICAL, "历史余额"),
+        (REASON_RECONCILIATION, "家庭账本核对"),
+    ]
+
+    account = models.ForeignKey(
+        InvestmentAccount,
+        verbose_name="投资账户",
+        on_delete=models.CASCADE,
+        related_name="balance_anchors",
+    )
+    ledger_snapshot = models.ForeignKey(
+        "ledger.AssetBalanceSnapshot",
+        verbose_name="家庭账本资产快照",
+        on_delete=models.PROTECT,
+        related_name="portfolio_balance_anchors",
+    )
+    anchor_date = models.DateField("锚点日期")
+    currency = models.CharField("原币", max_length=10)
+    original_amount = models.DecimalField(
+        "权威原币余额", max_digits=24, decimal_places=4
+    )
+    recorded_base_amount = models.DecimalField(
+        "账本本位币余额", max_digits=24, decimal_places=4
+    )
+    reason = models.CharField(
+        "原因", max_length=30, choices=REASON_CHOICES, default=REASON_HISTORICAL
+    )
+    carry_forward = models.BooleanField("沿用至下一锚点", default=False)
+    is_confirmed = models.BooleanField("已确认", default=True)
+    remark = models.TextField("说明", blank=True)
+
+    class Meta:
+        verbose_name = "投资账户余额锚点"
+        verbose_name_plural = "投资账户余额锚点"
+        ordering = ["-anchor_date", "account_id", "currency"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "anchor_date", "currency"],
+                name="unique_portfolio_account_balance_anchor",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["account", "anchor_date"]),
+            models.Index(fields=["anchor_date", "is_confirmed"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.anchor_date} {self.account} "
+            f"{self.original_amount} {self.currency}"
+        )
+
+
+class PortfolioReconciliationRun(TimestampedModel):
+    STATUS_APPLIED = "applied"
+    STATUS_REVERTED = "reverted"
+    STATUS_CHOICES = [
+        (STATUS_APPLIED, "已执行"),
+        (STATUS_REVERTED, "已撤销"),
+    ]
+
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="portfolio_reconciliation_runs",
+    )
+    ledger_snapshot = models.OneToOneField(
+        "ledger.AssetBalanceSnapshot",
+        verbose_name="家庭账本资产快照",
+        on_delete=models.PROTECT,
+        related_name="portfolio_reconciliation_run",
+    )
+    base_currency = models.CharField("本位币", max_length=10, default="CNY")
+    status = models.CharField(
+        "状态",
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_APPLIED,
+    )
+    applied_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="执行人",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="portfolio_reconciliations_applied",
+    )
+    applied_at = models.DateTimeField("执行时间", null=True, blank=True)
+    reverted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="撤销人",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="portfolio_reconciliations_reverted",
+    )
+    reverted_at = models.DateTimeField("撤销时间", null=True, blank=True)
+    report = models.JSONField("核对报告", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "投资账户差额对齐批次"
+        verbose_name_plural = "投资账户差额对齐批次"
+        ordering = ["-ledger_snapshot__snapshot_date", "-pk"]
+
+    def __str__(self):
+        return f"{self.ledger_snapshot.snapshot_date} {self.get_status_display()}"
+
+
+class PortfolioReconciliationLine(TimestampedModel):
+    run = models.ForeignKey(
+        PortfolioReconciliationRun,
+        verbose_name="对齐批次",
+        on_delete=models.CASCADE,
+        related_name="lines",
+    )
+    account = models.ForeignKey(
+        InvestmentAccount,
+        verbose_name="投资账户",
+        on_delete=models.PROTECT,
+        related_name="reconciliation_lines",
+    )
+    currency = models.CharField("调整币种", max_length=10)
+    ledger_base_amount = models.DecimalField(
+        "账本本位币余额", max_digits=24, decimal_places=4
+    )
+    calculated_base_amount = models.DecimalField(
+        "调整前试算余额", max_digits=24, decimal_places=4
+    )
+    adjustment_base_amount = models.DecimalField(
+        "本位币调整额", max_digits=24, decimal_places=4
+    )
+    adjustment_original_amount = models.DecimalField(
+        "原币调整额", max_digits=24, decimal_places=4
+    )
+    movement = models.OneToOneField(
+        InvestmentCashMovement,
+        verbose_name="调整现金流水",
+        on_delete=models.SET_NULL,
+        related_name="reconciliation_line",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "投资账户差额对齐明细"
+        verbose_name_plural = "投资账户差额对齐明细"
+        ordering = ["account_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["run", "account"],
+                name="unique_portfolio_reconciliation_account",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.run} {self.account} {self.adjustment_original_amount} {self.currency}"
 
 
 class PortfolioSnapshot(models.Model):
