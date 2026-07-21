@@ -4193,3 +4193,164 @@ textarea {
 .account-detail-metrics .metric strong .currency-number {
   font-size: inherit;
 }
+
+.investment-goal-headline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.investment-goal-empty {
+  display: grid;
+  justify-items: start;
+  gap: 14px;
+  padding: 28px;
+}
+
+.investment-goal-empty h2,
+.investment-goal-parameter-panel h2,
+.investment-goal-table-panel h2 {
+  margin: 0 0 6px;
+}
+
+.investment-goal-chart-panel {
+  overflow-x: auto;
+}
+
+.investment-goal-line.actual {
+  stroke-dasharray: 0;
+  stroke-width: 3.5;
+}
+
+.investment-goal-point.actual {
+  stroke-width: 3;
+}
+
+.investment-goal-parameter-panel,
+.investment-goal-table-panel {
+  margin-top: 18px;
+}
+
+.investment-goal-parameter-grid,
+.investment-goal-setting-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.investment-goal-parameter-grid article,
+.goal-setting-card {
+  padding: 18px;
+  border: 1px solid #dbe5f2;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #fff, #f8fbff);
+}
+
+.investment-goal-parameter-grid h3,
+.goal-setting-card h2 {
+  margin: 0 0 14px;
+  color: #172554;
+}
+
+.investment-goal-parameter-grid dl {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+}
+
+.investment-goal-parameter-grid dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.investment-goal-parameter-grid dt {
+  color: #64748b;
+}
+
+.investment-goal-parameter-grid dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.investment-goal-table-panel .snapshot-table-wrap {
+  max-height: 620px;
+  overflow: auto;
+}
+
+.investment-goal-table {
+  min-width: 1180px;
+}
+
+.investment-goal-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #eef4fb;
+  text-align: center;
+}
+
+.investment-goal-table thead tr:nth-child(2) th {
+  top: 40px;
+}
+
+.investment-goal-table .goal-family-cell {
+  background: #f8fbff;
+  font-weight: 700;
+}
+
+.goal-row-past td:first-child {
+  white-space: nowrap;
+}
+
+.goal-actual-cell small {
+  display: block;
+  margin-top: 3px;
+  color: #7c8798;
+  font-size: 10px;
+}
+
+.investment-goal-settings-panel,
+.investment-goal-override-panel {
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.goal-rule-note {
+  margin: 14px 0 18px;
+  padding: 12px 14px;
+  border-left: 4px solid #2563eb;
+  border-radius: 7px;
+  background: #eff6ff;
+  color: #334155;
+}
+
+.goal-setting-initial {
+  margin-bottom: 16px !important;
+}
+
+.goal-setting-card .form-row {
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.goal-setting-card .form-row small,
+.investment-goal-override-panel .form-row small {
+  color: #7c8798;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .investment-goal-headline,
+  .asset-trend-head {
+    flex-direction: column;
+  }
+
+  .asset-trend-switch {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}

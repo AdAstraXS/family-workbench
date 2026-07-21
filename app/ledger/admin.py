@@ -20,7 +20,12 @@ from .models import (
     ExpenseRecord,
     IncomeCategory,
     IncomeRecord,
+    InvestmentGoalActualOverride,
+    InvestmentGoalPlan,
+    InvestmentGoalPoint,
+    InvestmentGoalSetting,
 )
+from .investment_goals import recalculate_future_goal_points
 from portfolio.models import VisibilityChoices
 
 
@@ -544,3 +549,58 @@ class AssetBalanceEntryAdmin(admin.ModelAdmin):
             obj.display_order = (latest_order or 0) + 1
         prepare_asset_entry(obj, obj.snapshot)
         super().save_model(request, obj, form, change)
+
+
+class InvestmentGoalSettingInline(admin.TabularInline):
+    model = InvestmentGoalSetting
+    fields = ("member", "initial_amount", "semiannual_contribution", "semiannual_return_rate", "periods")
+    readonly_fields = ("member", "initial_amount")
+    extra = 0
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(InvestmentGoalPlan)
+class InvestmentGoalPlanAdmin(admin.ModelAdmin):
+    list_display = ("name", "family", "start_snapshot", "is_active", "updated_at")
+    list_filter = ("family", "is_active")
+    readonly_fields = ("family", "start_snapshot")
+    inlines = (InvestmentGoalSettingInline,)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def save_formset(self, request, form, formset, change):
+        super().save_formset(request, form, formset, change)
+        if formset.model is InvestmentGoalSetting:
+            recalculate_future_goal_points(form.instance)
+
+
+@admin.register(InvestmentGoalPoint)
+class InvestmentGoalPointAdmin(admin.ModelAdmin):
+    list_display = ("target_date", "member_name", "target_amount", "period_index", "is_frozen")
+    list_filter = ("is_frozen", "target_date", "setting__member")
+    readonly_fields = ("setting", "period_index", "target_date", "target_amount", "applied_contribution", "applied_return_rate", "is_frozen")
+
+    @admin.display(description="家庭成员")
+    def member_name(self, obj):
+        return obj.setting.member
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(InvestmentGoalActualOverride)
+class InvestmentGoalActualOverrideAdmin(admin.ModelAdmin):
+    list_display = ("target_date", "member", "amount", "plan", "updated_at")
+    list_filter = ("plan", "member", "target_date")

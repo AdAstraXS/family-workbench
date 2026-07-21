@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% load static %}
+{% load money %}
+
+{% block title %}投资目标{% endblock %}
+
+{% block content %}
+<section class="headline investment-goal-headline">
+  <div>
+    <h1>投资目标</h1>
+    {% if plan %}
+      <p>以 {{ plan.start_snapshot.snapshot_date|date:"Y年n月j日" }} 正式资产快照为期初，每半年计算一次；过去节点锁定，未来节点随参数更新。</p>
+    {% else %}
+      <p>建立家庭及各成员的半年资产目标，并与家庭账本资产快照对比。</p>
+    {% endif %}
+  </div>
+  {% if plan %}
+    <div class="inline-actions">
+      <a class="button ghost" href="{% url 'ledger:investment_goal_actual_override' %}">手工修正实际值</a>
+      <a class="button" href="{% url 'ledger:investment_goal_settings' %}">调整目标参数</a>
+    </div>
+  {% endif %}
+</section>
+
+{% if not plan %}
+  <section class="panel investment-goal-empty">
+    <h2>尚未初始化投资目标</h2>
+    {% if can_initialize %}
+      <p>系统将使用 2025-12-31 的正式资产快照作为期初，并按成员 ID 建立默认参数。</p>
+      <form method="post" action="{% url 'ledger:investment_goal_initialize' %}">
+        {% csrf_token %}
+        <button type="submit">初始化投资目标</button>
+      </form>
+    {% else %}
+      <p>缺少 2025-12-31 的正式资产快照，请先补齐资产快照。</p>
+      <a class="button" href="{% url 'ledger:asset_snapshot_list' %}">查看资产快照</a>
+    {% endif %}
+  </section>
+{% else %}
+  <section class="metrics investment-goal-metrics">
+    <div class="metric">
+      <span>最近对比节点</span>
+      <strong>{% if latest_row %}{{ latest_row.date|date:"Y-m-d" }}{% else %}-{% endif %}</strong>
+    </div>
+    <div class="metric"><span>家庭目标</span><strong>{{ latest_row.family_target|money2 }}</strong></div>
+    <div class="metric"><span>家庭实际</span><strong>{{ latest_row.family_actual|money2 }}</strong></div>
+    <div class="metric">
+      <span>实际与目标差额</span>
+      <strong class="{% if latest_row.family_gap > 0 %}positive{% elif latest_row.family_gap < 0 %}negative{% endif %}">{{ latest_row.family_gap|money2 }}</strong>
+    </div>
+    <div class="metric"><span>目标完成率</span><strong>{% if latest_row.family_achievement != None %}{{ latest_row.family_achievement|floatformat:2 }}%{% else %}-{% endif %}</strong></div>
+  </section>
+
+  <section class="panel asset-trend-panel investment-goal-chart-panel">
+    <div class="asset-trend-head">
+      <div>
+        <span class="asset-trend-eyebrow">TARGET VS ACTUAL</span>
+        <h1>目标与实际资产趋势</h1>
+        <p>收益率按半年口径直接计算；实际曲线只连接已有数据的节点，单位：万元</p>
+      </div>
+      <div class="asset-trend-switch" role="group" aria-label="成员筛选">
+        {% for scope in chart_data.scopes %}
+          <button type="button" class="{% if forloop.first %}active{% endif %}" data-goal-scope="{{ scope.id }}">{{ scope.label }}</button>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="asset-trend-chart-wrap">
+      <svg id="investment-goal-chart" class="asset-trend-chart" viewBox="0 0 1000 380" role="img" aria-label="投资目标与实际资产趋势图"></svg>
+      <div id="investment-goal-chart-empty" class="asset-trend-empty" hidden>暂无目标数据</div>
+    </div>
+    <div id="investment-goal-chart-legend" class="asset-trend-legend"></div>
+  </section>
+
+  <section class="panel investment-goal-parameter-panel">
+    <div class="section-head">
+      <div>
+        <h2>当前计算参数</h2>
+        <p>期初值取自资产快照；C、R、N 可调整。</p>
+      </div>
+      <a href="{% url 'ledger:investment_goal_settings' %}">编辑参数</a>
+    </div>
+    <div class="investment-goal-parameter-grid">
+      {% for setting in settings %}
+        <article>
+          <h3>{{ setting.member.display_name }}</h3>
+          <dl>
+            <div><dt>期初资产</dt><dd>{{ setting.initial_amount|money2 }}</dd></div>
+            <div><dt>每半年新增投入 C</dt><dd>{{ setting.semiannual_contribution|money2 }}</dd></div>
+            <div><dt>预期半年收益率 R</dt><dd>{{ setting.semiannual_return_rate|floatformat:2 }}%</dd></div>
+            <div><dt>期数 N</dt><dd>{{ setting.periods }} 期</dd></div>
+          </dl>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel investment-goal-table-panel">
+    <div class="section-head">
+      <div>
+        <h2>半年目标明细</h2>
+        <p>锁定表示该时点已经过去，修改参数时不会重新计算。</p>
+      </div>
+    </div>
+    <div class="snapshot-table-wrap">
+      <table class="investment-goal-table">
+        <thead>
+          <tr>
+            <th rowspan="2">目标日期</th>
+            {% for member in members %}<th colspan="3">{{ member.display_name }}</th>{% endfor %}
+            <th colspan="4">家庭合计</th>
+          </tr>
+          <tr>
+            {% for member in members %}<th>目标</th><th>实际</th><th>差额</th>{% endfor %}
+            <th>目标</th><th>实际</th><th>差额</th><th>完成率</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr class="{% if row.is_past %}goal-row-past{% endif %}">
+              <td>
+                {{ row.date|date:"Y-m-d" }}
+                {% if row.is_past %}<span class="record-badge">已锁定</span>{% endif %}
+              </td>
+              {% for cell in row.member_cells %}
+                <td class="number">{{ cell.target|money2 }}</td>
+                <td class="number goal-actual-cell">
+                  {{ cell.actual|money2 }}
+                  {% if cell.actual != None %}<small>{{ cell.source }}</small>{% endif %}
+                </td>
+                <td class="number {% if cell.gap > 0 %}positive{% elif cell.gap < 0 %}negative{% endif %}">{{ cell.gap|money2 }}</td>
+              {% endfor %}
+              <td class="number goal-family-cell">{{ row.family_target|money2 }}</td>
+              <td class="number goal-family-cell">{{ row.family_actual|money2 }}</td>
+              <td class="number goal-family-cell {% if row.family_gap > 0 %}positive{% elif row.family_gap < 0 %}negative{% endif %}">{{ row.family_gap|money2 }}</td>
+              <td class="number goal-family-cell">{% if row.family_achievement != None %}{{ row.family_achievement|floatformat:2 }}%{% else %}-{% endif %}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="20">暂无目标节点</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {{ chart_data|json_script:"investment-goal-chart-data" }}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% if plan %}<script src="{% static 'js/investment_goal_chart.js' %}?v=20260721-1"></script>{% endif %}
+{% endblock %}

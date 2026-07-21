@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}调整投资目标参数{% endblock %}
+
+{% block content %}
+<section class="panel investment-goal-settings-panel">
+  <div class="section-head">
+    <div>
+      <h1>调整投资目标参数</h1>
+      <p>保存后只重新计算今天之后的目标节点；已经过去的节点保持原值。</p>
+    </div>
+  </div>
+  <div class="goal-rule-note">
+    计算规则：本期目标 = 上期目标 ×（1 + R）+ C。R 是半年收益率，6 表示每半年 6%；N 是期初之后的半年期数。
+  </div>
+  <form method="post">
+    {% csrf_token %}
+    {{ formset.management_form }}
+    {% if formset.non_form_errors %}<div class="form-errors">{{ formset.non_form_errors }}</div>{% endif %}
+    <div class="investment-goal-setting-grid">
+      {% for item in setting_forms %}
+        <article class="goal-setting-card">
+          {{ item.form.id }}
+          <h2>{{ item.setting.member.display_name }}</h2>
+          <p class="goal-setting-initial">期初资产：{{ item.setting.initial_amount|money2 }}</p>
+          {% for field in item.form.visible_fields %}
+            <div class="form-row">
+              <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+              {% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+            </div>
+          {% endfor %}
+          {% for error in item.form.non_field_errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+        </article>
+      {% endfor %}
+    </div>
+    <div class="form-actions">
+      <button type="submit">保存并重算未来目标</button>
+      <a class="button ghost" href="{% url 'ledger:investment_goal_dashboard' %}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

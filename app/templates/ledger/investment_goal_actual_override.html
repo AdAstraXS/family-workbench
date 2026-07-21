@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}修正投资目标实际值{% endblock %}
+
+{% block content %}
+<section class="panel snapshot-form-panel investment-goal-override-panel">
+  <div class="section-head">
+    <div>
+      <h1>手工修正实际值</h1>
+      <p>手工值会覆盖同一成员、同一目标日期的资产快照金额；目标金额本身不会改变。</p>
+    </div>
+  </div>
+  <form method="post">
+    {% csrf_token %}
+    <div class="snapshot-meta-form">
+      {% for field in form.visible_fields %}
+        <div class="form-row">
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+          {% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+    {% for error in form.non_field_errors %}<div class="form-errors">{{ error }}</div>{% endfor %}
+    <div class="form-actions">
+      <button type="submit">保存实际值修正</button>
+      <a class="button ghost" href="{% url 'ledger:investment_goal_dashboard' %}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

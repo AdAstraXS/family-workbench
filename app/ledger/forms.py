@@ -16,6 +16,9 @@ from .models import (
     ExpenseRecord,
     IncomeCategory,
     IncomeRecord,
+    InvestmentGoalActualOverride,
+    InvestmentGoalPlan,
+    InvestmentGoalSetting,
 )
 from family_core.models import Family, FamilyMember
 from family_core.household import get_household_family
@@ -456,3 +459,77 @@ def make_asset_balance_entry_formset(extra=0):
 
 
 AssetBalanceEntryFormSet = make_asset_balance_entry_formset(extra=0)
+
+
+class InvestmentGoalSettingForm(BaseModelForm):
+    money_fields = BaseModelForm.money_fields | {"semiannual_contribution"}
+
+    class Meta:
+        model = InvestmentGoalSetting
+        fields = ["semiannual_contribution", "semiannual_return_rate", "periods"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["semiannual_contribution"].help_text = "每个半年期末投入的金额。"
+        self.fields["semiannual_return_rate"].help_text = "半年收益率，例如 6 表示每个半年周期按 6% 计息。"
+        self.fields["periods"].help_text = "从期初之后开始计算的半年期数，默认 24 期。"
+        self.fields["periods"].widget.attrs.update({"min": 1, "max": 120})
+
+    def clean(self):
+        cleaned_data = super().clean()
+        contribution = cleaned_data.get("semiannual_contribution")
+        return_rate = cleaned_data.get("semiannual_return_rate")
+        periods = cleaned_data.get("periods")
+        if contribution is not None and contribution < 0:
+            self.add_error("semiannual_contribution", "每半年新增投入不能为负数。")
+        if return_rate is not None and return_rate <= -100:
+            self.add_error("semiannual_return_rate", "半年收益率必须大于 -100%。")
+        if periods is not None and periods > 120:
+            self.add_error("periods", "期数不能超过 120 期。")
+        return cleaned_data
+
+
+InvestmentGoalSettingFormSet = inlineformset_factory(
+    InvestmentGoalPlan,
+    InvestmentGoalSetting,
+    form=InvestmentGoalSettingForm,
+    fields=["semiannual_contribution", "semiannual_return_rate", "periods"],
+    extra=0,
+    can_delete=False,
+)
+
+
+class InvestmentGoalActualOverrideForm(BaseModelForm):
+    date_fields = ("target_date",)
+    money_fields = BaseModelForm.money_fields | {"amount"}
+
+    def __init__(self, *args, plan=None, **kwargs):
+        self.plan = plan
+        super().__init__(*args, **kwargs)
+        if plan:
+            self.fields["member"].queryset = FamilyMember.objects.filter(
+                family=plan.family,
+                investment_goal_settings__plan=plan,
+            ).distinct().order_by("display_order", "id")
+        self.fields["target_date"].help_text = "必须是该成员目标曲线中的半年节点。"
+        self.fields["remark"].widget.attrs.update({"rows": 3})
+
+    class Meta:
+        model = InvestmentGoalActualOverride
+        fields = ["member", "target_date", "amount", "remark"]
+
+    def clean(self):
+        cleaned_data = super().clean()
+        member = cleaned_data.get("member")
+        target_date = cleaned_data.get("target_date")
+        if target_date and target_date > timezone.localdate():
+            self.add_error("target_date", "不能为未来日期填写实际值。")
+        if self.plan and member and target_date:
+            exists = InvestmentGoalSetting.objects.filter(
+                plan=self.plan,
+                member=member,
+                points__target_date=target_date,
+            ).exists()
+            if not exists:
+                self.add_error("target_date", "所选日期不是该成员的目标节点。")
+        return cleaned_data

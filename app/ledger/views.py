@@ -1,10 +1,12 @@
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
-from django.db.models import Q, Sum
+from django.db import transaction
+from django.db.models import Prefetch, Q, Sum
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 from datetime import date
 from decimal import Decimal
 import json
@@ -19,13 +21,21 @@ from .forms import (
     ExpenseImportForm,
     ExpenseRecordForm,
     IncomeRecordForm,
+    InvestmentGoalActualOverrideForm,
+    InvestmentGoalSettingFormSet,
     make_annual_budget_line_formset,
     make_asset_balance_entry_formset,
 )
 from .expense_import import ExpenseWorkbookError, import_expense_workbook
 from .expense_export import build_expense_workbook
 from .asset_snapshot_export import build_asset_snapshot_workbook
-from .models import AnnualBudget, AnnualBudgetLine, AssetBalanceSnapshot, BankAccount, ExpenseCategory, ExpenseImportBatch, ExpenseRecord, IncomeCategory, IncomeRecord
+from .investment_goals import (
+    InvestmentGoalInitializationError,
+    get_goal_actuals,
+    initialize_default_investment_goal_plan,
+    recalculate_future_goal_points,
+)
+from .models import AnnualBudget, AnnualBudgetLine, AssetBalanceSnapshot, BankAccount, ExpenseCategory, ExpenseImportBatch, ExpenseRecord, IncomeCategory, IncomeRecord, InvestmentGoalActualOverride, InvestmentGoalPlan, InvestmentGoalPoint, InvestmentGoalSetting
 from family_core.audit import stamp_actor
 from family_core.household import get_household_family
 from family_core.models import Family, FamilyMember
@@ -1386,6 +1396,256 @@ def overview(request):
 def investment_return_report(request):
     report = build_investment_return_report()
     return render(request, "ledger/investment_return_report.html", report)
+
+
+def build_investment_goal_dashboard(plan):
+    today = timezone.localdate()
+    settings = list(
+        InvestmentGoalSetting.objects.filter(plan=plan)
+        .select_related("member")
+        .prefetch_related(
+            Prefetch(
+                "points",
+                queryset=InvestmentGoalPoint.objects.order_by("target_date"),
+            )
+        )
+        .order_by("member__display_order", "member_id")
+    )
+    members = [setting.member for setting in settings]
+    points_by_member = {
+        setting.member_id: {point.target_date: point for point in setting.points.all()}
+        for setting in settings
+    }
+    target_dates = sorted(
+        {
+            point.target_date
+            for setting in settings
+            for point in setting.points.all()
+        }
+    )
+    actuals = get_goal_actuals(plan, target_dates, members)
+    rows = []
+    for target_date in target_dates:
+        member_cells = []
+        family_target = Decimal("0")
+        family_actual = Decimal("0")
+        family_actual_complete = True
+        has_target = False
+        source_names = set()
+        for setting in settings:
+            point = points_by_member[setting.member_id].get(target_date)
+            actual = actuals.get((target_date, setting.member_id))
+            target_amount = point.target_amount if point else None
+            actual_amount = actual["amount"] if actual else None
+            if target_amount is not None:
+                has_target = True
+                family_target += target_amount
+            if actual_amount is None:
+                family_actual_complete = False
+            else:
+                family_actual += actual_amount
+                source_names.add(actual["source"])
+            member_cells.append(
+                {
+                    "member": setting.member,
+                    "target": target_amount,
+                    "actual": actual_amount,
+                    "gap": actual_amount - target_amount if actual_amount is not None and target_amount is not None else None,
+                    "source": actual["source"] if actual else "暂无",
+                    "snapshot_id": actual["snapshot_id"] if actual else None,
+                    "is_frozen": point.is_frozen if point else False,
+                }
+            )
+        complete_actual = family_actual if family_actual_complete and members else None
+        rows.append(
+            {
+                "date": target_date,
+                "member_cells": member_cells,
+                "family_target": family_target if has_target else None,
+                "family_actual": complete_actual,
+                "family_gap": complete_actual - family_target if complete_actual is not None and has_target else None,
+                "family_achievement": (
+                    complete_actual / family_target * Decimal("100")
+                    if complete_actual is not None and family_target
+                    else None
+                ),
+                "actual_source": "、".join(sorted(source_names)) if family_actual_complete else "暂无完整实际值",
+                "is_past": target_date <= today,
+            }
+        )
+
+    latest_row = next(
+        (
+            row
+            for row in reversed(rows)
+            if row["date"] <= today and row["family_actual"] is not None
+        ),
+        None,
+    )
+
+    def values_for_member(member_id, value_name):
+        values = []
+        for row in rows:
+            cell = next(cell for cell in row["member_cells"] if cell["member"].id == member_id)
+            value = cell[value_name]
+            values.append(float((value / Decimal("10000")).quantize(Decimal("0.01"))) if value is not None else None)
+        return values
+
+    chart_scopes = [
+        {
+            "id": "family",
+            "label": "家庭合计",
+            "target": [
+                float((row["family_target"] / Decimal("10000")).quantize(Decimal("0.01")))
+                if row["family_target"] is not None
+                else None
+                for row in rows
+            ],
+            "actual": [
+                float((row["family_actual"] / Decimal("10000")).quantize(Decimal("0.01")))
+                if row["family_actual"] is not None
+                else None
+                for row in rows
+            ],
+        }
+    ]
+    chart_scopes.extend(
+        {
+            "id": str(member.id),
+            "label": member.display_name,
+            "target": values_for_member(member.id, "target"),
+            "actual": values_for_member(member.id, "actual"),
+        }
+        for member in members
+    )
+    return {
+        "settings": settings,
+        "members": members,
+        "rows": rows,
+        "latest_row": latest_row,
+        "chart_data": {
+            "unit": "万元",
+            "labels": [row["date"].strftime("%Y-%m-%d") for row in rows],
+            "scopes": chart_scopes,
+        },
+    }
+
+
+@login_required
+def investment_goal_dashboard(request):
+    family = get_household_family()
+    plan = (
+        InvestmentGoalPlan.objects.filter(family=family, is_active=True)
+        .select_related("family", "start_snapshot")
+        .first()
+        if family
+        else None
+    )
+    if not plan:
+        can_initialize = bool(
+            family
+            and AssetBalanceSnapshot.objects.filter(
+                family=family,
+                snapshot_date=date(2025, 12, 31),
+                is_draft=False,
+            ).exists()
+        )
+        return render(
+            request,
+            "ledger/investment_goal_dashboard.html",
+            {"plan": None, "can_initialize": can_initialize},
+        )
+    context = build_investment_goal_dashboard(plan)
+    context["plan"] = plan
+    return render(request, "ledger/investment_goal_dashboard.html", context)
+
+
+@login_required
+@require_POST
+def investment_goal_initialize(request):
+    family = get_household_family()
+    if not family:
+        messages.error(request, "尚未建立家庭资料，无法初始化投资目标。")
+        return redirect("ledger:investment_goal_dashboard")
+    try:
+        _, created = initialize_default_investment_goal_plan(
+            family,
+            actor=request.user,
+        )
+    except InvestmentGoalInitializationError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "投资目标已初始化。" if created else "投资目标已经存在。")
+    return redirect("ledger:investment_goal_dashboard")
+
+
+@login_required
+def investment_goal_settings(request):
+    family = get_household_family()
+    plan = get_object_or_404(
+        InvestmentGoalPlan.objects.select_related("start_snapshot"),
+        family=family,
+        is_active=True,
+    )
+    if request.method == "POST":
+        formset = InvestmentGoalSettingFormSet(request.POST, instance=plan)
+        if formset.is_valid():
+            with transaction.atomic():
+                formset.save()
+                plan = stamp_actor(plan, request.user)
+                plan.save()
+                recalculate_future_goal_points(plan)
+            messages.success(request, "参数已更新；过去节点保持不变，未来目标已重新计算。")
+            return redirect("ledger:investment_goal_dashboard")
+    else:
+        formset = InvestmentGoalSettingFormSet(instance=plan)
+    setting_forms = [
+        {"form": form, "setting": form.instance}
+        for form in formset.forms
+    ]
+    return render(
+        request,
+        "ledger/investment_goal_settings.html",
+        {"plan": plan, "formset": formset, "setting_forms": setting_forms},
+    )
+
+
+@login_required
+def investment_goal_actual_override(request):
+    family = get_household_family()
+    plan = get_object_or_404(InvestmentGoalPlan, family=family, is_active=True)
+    if request.method == "POST":
+        form = InvestmentGoalActualOverrideForm(request.POST, plan=plan)
+        if form.is_valid():
+            member = form.cleaned_data["member"]
+            target_date = form.cleaned_data["target_date"]
+            override, created = InvestmentGoalActualOverride.objects.get_or_create(
+                plan=plan,
+                member=member,
+                target_date=target_date,
+                defaults={"created_by": request.user},
+            )
+            override.amount = form.cleaned_data["amount"]
+            override.remark = form.cleaned_data["remark"]
+            override.updated_by = request.user
+            if created and not override.created_by_id:
+                override.created_by = request.user
+            override.save()
+            messages.success(request, "实际值修正已保存，并将优先于资产快照显示。")
+            return redirect("ledger:investment_goal_dashboard")
+    else:
+        form = InvestmentGoalActualOverrideForm(
+            plan=plan,
+            initial={
+                "member": request.GET.get("member", ""),
+                "target_date": request.GET.get("date", ""),
+            },
+        )
+    return render(
+        request,
+        "ledger/investment_goal_actual_override.html",
+        {"plan": plan, "form": form},
+    )
 
 
 @login_required

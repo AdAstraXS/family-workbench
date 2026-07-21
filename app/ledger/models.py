@@ -350,3 +350,100 @@ class AssetBalanceEntry(TimestampedModel):
     def __str__(self):
         account_name = self.account.account_name if self.account else self.account_name
         return f"{self.snapshot} {account_name} {self.asset_category} {self.member}"
+
+
+class InvestmentGoalPlan(TimestampedModel):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="investment_goal_plans")
+    name = models.CharField("方案名称", max_length=120, default="家庭投资目标")
+    start_snapshot = models.ForeignKey(
+        AssetBalanceSnapshot,
+        verbose_name="期初资产快照",
+        on_delete=models.PROTECT,
+        related_name="investment_goal_plans",
+    )
+    is_active = models.BooleanField("当前方案", default=True)
+    remark = models.TextField("备注", blank=True)
+
+    class Meta:
+        verbose_name = "投资目标方案"
+        verbose_name_plural = "投资目标方案"
+        ordering = ["-is_active", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["family", "name"], name="unique_investment_goal_plan_name"),
+        ]
+        indexes = [models.Index(fields=["family", "is_active"])]
+
+    def __str__(self):
+        return f"{self.family} - {self.name}"
+
+
+class InvestmentGoalSetting(TimestampedModel):
+    plan = models.ForeignKey(InvestmentGoalPlan, verbose_name="投资目标方案", on_delete=models.CASCADE, related_name="settings")
+    member = models.ForeignKey(FamilyMember, verbose_name="家庭成员", on_delete=models.PROTECT, related_name="investment_goal_settings")
+    initial_amount = models.DecimalField("期初资产", max_digits=24, decimal_places=4)
+    semiannual_contribution = models.DecimalField("每半年新增投入", max_digits=24, decimal_places=4, default=0)
+    semiannual_return_rate = models.DecimalField(
+        "预期半年收益率（%）",
+        max_digits=8,
+        decimal_places=4,
+        default=0,
+        help_text="直接按半年计息，例如 6 表示每半年 6%。",
+    )
+    periods = models.PositiveIntegerField("期数 N", default=24, help_text="期初之后的半年期数。")
+
+    class Meta:
+        verbose_name = "成员投资目标参数"
+        verbose_name_plural = "成员投资目标参数"
+        ordering = ["member__display_order", "member_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["plan", "member"], name="unique_investment_goal_setting_member"),
+        ]
+
+    def __str__(self):
+        return f"{self.plan} - {self.member}"
+
+
+class InvestmentGoalPoint(TimestampedModel):
+    setting = models.ForeignKey(InvestmentGoalSetting, verbose_name="成员目标参数", on_delete=models.CASCADE, related_name="points")
+    period_index = models.PositiveIntegerField("期次")
+    target_date = models.DateField("目标日期")
+    target_amount = models.DecimalField("目标金额", max_digits=24, decimal_places=4)
+    applied_contribution = models.DecimalField("本期新增投入", max_digits=24, decimal_places=4, default=0)
+    applied_return_rate = models.DecimalField("本期收益率（%）", max_digits=8, decimal_places=4, default=0)
+    is_frozen = models.BooleanField("已锁定", default=False)
+
+    class Meta:
+        verbose_name = "投资目标节点"
+        verbose_name_plural = "投资目标节点"
+        ordering = ["target_date", "setting__member__display_order", "setting__member_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["setting", "period_index"], name="unique_investment_goal_period"),
+            models.UniqueConstraint(fields=["setting", "target_date"], name="unique_investment_goal_date"),
+        ]
+        indexes = [models.Index(fields=["target_date", "is_frozen"])]
+
+    def __str__(self):
+        return f"{self.setting.member} {self.target_date} {self.target_amount}"
+
+
+class InvestmentGoalActualOverride(TimestampedModel):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    plan = models.ForeignKey(InvestmentGoalPlan, verbose_name="投资目标方案", on_delete=models.CASCADE, related_name="actual_overrides")
+    member = models.ForeignKey(FamilyMember, verbose_name="家庭成员", on_delete=models.PROTECT, related_name="investment_goal_actual_overrides")
+    target_date = models.DateField("目标日期")
+    amount = models.DecimalField("实际金额", max_digits=24, decimal_places=4)
+    remark = models.TextField("修正原因", blank=True)
+
+    class Meta:
+        verbose_name = "投资目标实际值修正"
+        verbose_name_plural = "投资目标实际值修正"
+        ordering = ["-target_date", "member__display_order", "member_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["plan", "member", "target_date"], name="unique_investment_goal_actual_override"),
+        ]
+
+    def __str__(self):
+        return f"{self.member} {self.target_date} {self.amount}"

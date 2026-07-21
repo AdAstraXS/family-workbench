@@ -20,6 +20,11 @@ from .asset_snapshot_import import (
 from .admin import ExpenseCategoryAdminForm, IncomeCategoryAdminForm
 from .expense_import import EXPECTED_HEADERS, ExpenseWorkbookError, import_expense_workbook
 from .forms import AssetBalanceEntryForm, AssetBalanceSnapshotForm, ExpenseRecordForm
+from .investment_goals import (
+    get_goal_actuals,
+    initialize_default_investment_goal_plan,
+    recalculate_future_goal_points,
+)
 from .models import (
     AnnualBudget,
     AnnualBudgetLine,
@@ -31,6 +36,9 @@ from .models import (
     ExpenseRecord,
     IncomeCategory,
     IncomeRecord,
+    InvestmentGoalActualOverride,
+    InvestmentGoalPlan,
+    InvestmentGoalPoint,
 )
 from .views import (
     build_asset_snapshot_matrix,
@@ -1529,3 +1537,163 @@ class LedgerNavigationAndRedirectTests(TestCase):
             reverse("ledger:expense_list"),
             fetch_redirect_response=False,
         )
+
+
+class InvestmentGoalTests(TestCase):
+    def setUp(self):
+        self.family = Family.objects.create(name="目标测试家庭")
+        self.me = FamilyMember.objects.create(
+            family=self.family,
+            display_name="我",
+            display_order=1,
+        )
+        self.secretary = FamilyMember.objects.create(
+            family=self.family,
+            display_name="孙秘书",
+            display_order=2,
+        )
+        self.user = get_user_model().objects.create_user(
+            username="goal-tester",
+            password="password",
+        )
+        self.me.user = self.user
+        self.me.save(update_fields=["user", "updated_at"])
+        self.start_snapshot = AssetBalanceSnapshot.objects.create(
+            family=self.family,
+            snapshot_date=date(2025, 12, 31),
+            is_draft=False,
+        )
+        AssetBalanceEntry.objects.create(
+            snapshot=self.start_snapshot,
+            member=self.me,
+            account_name="我的期初资产",
+            base_amount=Decimal("3091743.4243"),
+            original_amount=Decimal("3091743.4243"),
+        )
+        AssetBalanceEntry.objects.create(
+            snapshot=self.start_snapshot,
+            member=self.secretary,
+            account_name="秘书期初资产",
+            base_amount=Decimal("1731695.9185"),
+            original_amount=Decimal("1731695.9185"),
+        )
+
+    def initialize(self):
+        return initialize_default_investment_goal_plan(
+            self.family,
+            actor=self.user,
+            as_of=date(2026, 7, 21),
+        )[0]
+
+    def test_initialization_uses_snapshot_member_ids_and_half_year_rates(self):
+        plan = self.initialize()
+        settings = list(plan.settings.select_related("member").order_by("member__display_order"))
+
+        self.assertEqual(len(settings), 2)
+        self.assertEqual(settings[0].member_id, self.me.id)
+        self.assertEqual(settings[0].initial_amount, Decimal("3091743.4243"))
+        self.assertEqual(settings[0].semiannual_contribution, Decimal("50000"))
+        self.assertEqual(settings[0].semiannual_return_rate, Decimal("6"))
+        self.assertEqual(settings[1].member_id, self.secretary.id)
+        self.assertEqual(settings[1].initial_amount, Decimal("1731695.9185"))
+        self.assertEqual(settings[1].semiannual_contribution, Decimal("75000"))
+        self.assertEqual(settings[1].semiannual_return_rate, Decimal("3"))
+        self.assertEqual(settings[0].points.count(), 25)
+        self.assertEqual(settings[1].points.count(), 25)
+
+        first_future = settings[0].points.get(period_index=1)
+        self.assertEqual(first_future.target_date, date(2026, 6, 30))
+        self.assertEqual(first_future.target_amount, Decimal("3327248.0298"))
+        self.assertTrue(first_future.is_frozen)
+        self.assertEqual(
+            settings[0].points.get(period_index=24).target_date,
+            date(2037, 12, 31),
+        )
+
+    def test_parameter_changes_preserve_past_and_recalculate_future(self):
+        plan = self.initialize()
+        setting = plan.settings.get(member=self.me)
+        past_point = setting.points.get(target_date=date(2026, 6, 30))
+        future_before = setting.points.get(target_date=date(2026, 12, 31)).target_amount
+
+        setting.semiannual_contribution = Decimal("100000")
+        setting.semiannual_return_rate = Decimal("10")
+        setting.periods = 26
+        setting.save()
+        recalculate_future_goal_points(plan, as_of=date(2026, 7, 21))
+
+        past_point.refresh_from_db()
+        future_after = setting.points.get(target_date=date(2026, 12, 31))
+        self.assertEqual(past_point.target_amount, Decimal("3327248.0298"))
+        self.assertTrue(past_point.is_frozen)
+        self.assertNotEqual(future_before, future_after.target_amount)
+        self.assertEqual(future_after.target_amount, Decimal("3759972.8328"))
+        self.assertFalse(future_after.is_frozen)
+        self.assertEqual(setting.points.get(period_index=26).target_date, date(2038, 12, 31))
+
+    def test_actuals_use_exact_completed_snapshot_and_manual_override_wins(self):
+        plan = self.initialize()
+        actual_snapshot = AssetBalanceSnapshot.objects.create(
+            family=self.family,
+            snapshot_date=date(2026, 6, 30),
+            is_draft=False,
+        )
+        AssetBalanceEntry.objects.create(
+            snapshot=actual_snapshot,
+            member=self.me,
+            account_name="我的实际资产",
+            base_amount=Decimal("3608583"),
+            original_amount=Decimal("3608583"),
+        )
+        AssetBalanceEntry.objects.create(
+            snapshot=actual_snapshot,
+            member=self.secretary,
+            account_name="秘书实际资产",
+            base_amount=Decimal("1463632"),
+            original_amount=Decimal("1463632"),
+        )
+        InvestmentGoalActualOverride.objects.create(
+            plan=plan,
+            member=self.me,
+            target_date=date(2026, 6, 30),
+            amount=Decimal("3610000"),
+            remark="核对修正",
+        )
+
+        actuals = get_goal_actuals(
+            plan,
+            [date(2026, 6, 30)],
+            [self.me, self.secretary],
+        )
+
+        self.assertEqual(actuals[(date(2026, 6, 30), self.me.id)]["amount"], Decimal("3610000"))
+        self.assertEqual(actuals[(date(2026, 6, 30), self.me.id)]["source"], "手工修正")
+        self.assertEqual(actuals[(date(2026, 6, 30), self.secretary.id)]["amount"], Decimal("1463632"))
+        self.assertEqual(actuals[(date(2026, 6, 30), self.secretary.id)]["source"], "资产快照")
+
+    def test_dashboard_and_parameter_page_are_available(self):
+        plan = self.initialize()
+        self.client.force_login(self.user)
+
+        dashboard = self.client.get(reverse("ledger:investment_goal_dashboard"))
+        settings_page = self.client.get(reverse("ledger:investment_goal_settings"))
+
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertContains(dashboard, "目标与实际资产趋势")
+        self.assertContains(dashboard, "预期半年收益率 R")
+        self.assertContains(dashboard, "2037-12-31")
+        self.assertEqual(settings_page.status_code, 200)
+        self.assertContains(settings_page, "R 是半年收益率")
+        self.assertContains(settings_page, 'name="settings-0-semiannual_return_rate" value="6"')
+
+    def test_initialization_endpoint_creates_one_plan_only(self):
+        self.client.force_login(self.user)
+        url = reverse("ledger:investment_goal_initialize")
+
+        first = self.client.post(url)
+        second = self.client.post(url)
+
+        self.assertRedirects(first, reverse("ledger:investment_goal_dashboard"))
+        self.assertRedirects(second, reverse("ledger:investment_goal_dashboard"))
+        self.assertEqual(InvestmentGoalPlan.objects.count(), 1)
+        self.assertEqual(InvestmentGoalPoint.objects.count(), 50)

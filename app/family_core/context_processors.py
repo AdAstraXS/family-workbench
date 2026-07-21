@@ -44,6 +44,12 @@ def page_navigation(request):
             )
         elif url_name == "annual_budget_create":
             parent_url = reverse("ledger:annual_budget_list")
+        elif url_name in {
+            "investment_goal_settings",
+            "investment_goal_actual_override",
+            "investment_goal_initialize",
+        }:
+            parent_url = reverse("ledger:investment_goal_dashboard")
         elif url_name in {"bank_account_create", "bank_account_edit"}:
             parent_url = reverse("ledger:bank_account_list")
         elif url_name in {
