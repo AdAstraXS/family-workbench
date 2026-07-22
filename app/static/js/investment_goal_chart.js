@@ -23,6 +23,26 @@
     return Number(value).toFixed(2);
   }
 
+  function formatSignedValue(value) {
+    var number = Number(value);
+    return (number > 0 ? "+" : "") + number.toFixed(2);
+  }
+
+  function pointTooltip(scope, series, point, labels) {
+    var heading = scope.label + " · " + labels[point.index];
+    var valueLine = scope.label + " " + series.name + "：" + formatValue(point.value) + " 万元";
+    var targetValue = scope.target[point.index];
+    if (series.kind !== "actual" || targetValue === null) {
+      return heading + "\n" + valueLine;
+    }
+    return [
+      heading,
+      valueLine,
+      scope.label + " 目标：" + formatValue(targetValue) + " 万元",
+      "实际与目标差额：" + formatSignedValue(point.value - targetValue) + " 万元",
+    ].join("\n");
+  }
+
   function render(scopeId) {
     var scope = data.scopes.find(function (item) { return item.id === scopeId; }) || data.scopes[0];
     var labels = data.labels || [];
@@ -100,7 +120,7 @@
           style: "--point-delay:" + (280 + seriesIndex * 90 + pointIndex * 28) + "ms",
           tabindex: "0",
         });
-        circle.appendChild(svgElement("title", {}, scope.label + " · " + series.name + " · " + labels[point.index] + " · " + formatValue(point.value) + " 万元"));
+        circle.appendChild(svgElement("title", {}, pointTooltip(scope, series, point, labels)));
         chart.appendChild(circle);
         var shouldLabel = series.kind === "actual" || point.index % labelStep === 0 || point.index === labels.length - 1;
         if (shouldLabel) {
