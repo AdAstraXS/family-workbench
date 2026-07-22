@@ -751,7 +751,8 @@ class AccountDashboardTests(TestCase):
         member = FamilyMember.objects.create(
             family=family,
             user=self.user,
-            display_name="成员甲",
+            display_name="我",
+            display_order=1,
         )
         self.account = create_broker_investment_account(
             family,
@@ -789,6 +790,68 @@ class AccountDashboardTests(TestCase):
             response.context["account_rows"][0]["account"],
             second,
         )
+
+    def test_accounts_split_by_member_and_collapse_balances_below_1000_cny(self):
+        my_high = create_broker_investment_account(
+            self.account.family,
+            self.account.member,
+            "我的高资产账户",
+            currency="CNY",
+            cash_balance=Decimal("20000"),
+        )
+        my_low = create_broker_investment_account(
+            self.account.family,
+            self.account.member,
+            "我的低金额账户",
+            currency="CNY",
+            cash_balance=Decimal("999"),
+        )
+        secretary = FamilyMember.objects.create(
+            family=self.account.family,
+            display_name="孙秘书",
+            display_order=2,
+        )
+        secretary_high = create_broker_investment_account(
+            self.account.family,
+            secretary,
+            "秘书高资产账户",
+            currency="CNY",
+            cash_balance=Decimal("15000"),
+        )
+        secretary_low = create_broker_investment_account(
+            self.account.family,
+            secretary,
+            "秘书低金额账户",
+            currency="CNY",
+            cash_balance=Decimal("500"),
+        )
+
+        response = self.client.get(reverse("portfolio:account_list"))
+
+        groups = response.context["account_groups"]
+        self.assertEqual([group["title"] for group in groups], ["我的投资账户", "孙秘书的投资账户"])
+        self.assertEqual(
+            [row["account"] for row in groups[0]["visible_rows"]],
+            [my_high, self.account],
+        )
+        self.assertEqual(
+            [row["account"] for row in groups[0]["collapsed_rows"]],
+            [my_low],
+        )
+        self.assertEqual(
+            [row["account"] for row in groups[1]["visible_rows"]],
+            [secretary_high],
+        )
+        self.assertEqual(
+            [row["account"] for row in groups[1]["collapsed_rows"]],
+            [secretary_low],
+        )
+        self.assertContains(
+            response,
+            'class="account-prototype-table account-list-table member-account-table"',
+            count=2,
+        )
+        self.assertContains(response, 'class="low-value-account-rows" hidden', count=2)
 
     def test_balance_is_current_and_not_limited_to_selected_year(self):
         InvestmentCashMovement.objects.create(

@@ -1,0 +1,12 @@
+{% load money %}
+<tr>
+  <td><strong>{{ row.account.account_name }}</strong>{% if row.account.account_no_masked %}<small>{{ row.account.account_no_masked }}</small>{% endif %}</td>
+  <td>{{ row.cash|currency0:selected_currency }}</td>
+  <td>{{ row.market_value|currency0:selected_currency }}</td>
+  <td>{{ row.position_ratio|floatformat:2 }}%</td>
+  <td>{{ row.total_asset|currency0:selected_currency }}</td>
+  <td class="{% if row.today_pnl > 0 %}positive{% elif row.today_pnl < 0 %}negative{% endif %}">{{ row.today_pnl|signed_currency0:selected_currency }}</td>
+  <td class="{% if row.unrealized > 0 %}positive{% elif row.unrealized < 0 %}negative{% endif %}">{{ row.unrealized|signed_currency0:selected_currency }}</td>
+  <td class="{% if row.realized > 0 %}positive{% elif row.realized < 0 %}negative{% endif %}">{{ row.realized|signed_currency0:selected_currency }}</td>
+  <td><a class="button compact" href="{% url 'portfolio:account_detail' row.account.pk %}?currency={{ selected_currency }}">查看账户</a></td>
+</tr>

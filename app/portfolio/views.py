@@ -71,6 +71,7 @@ from .valuation import (
 
 
 ZERO = Decimal("0")
+LOW_VALUE_ACCOUNT_THRESHOLD_CNY = Decimal("1000")
 
 
 def _can_reconcile_portfolio(user, member):
@@ -149,6 +150,12 @@ def _snapshot_balance_data(accounts, family, selected_currency, requested_year):
             if row["cash"] is not None and row["market_value"] is not None
             else None
         )
+        row["total_asset_cny"] = _convert_currency(
+            row["total_asset"],
+            selected_currency,
+            "CNY",
+            snapshot.snapshot_date,
+        )
         row["position_ratio"] = (
             row["market_value"] / row["total_asset"] * 100
             if row["market_value"] is not None and row["total_asset"]
@@ -184,6 +191,54 @@ def _summary_rows(account_rows):
         }
         for label, rows in scopes
     ]
+
+
+def _account_member_groups(account_rows, family):
+    members = (
+        list(
+            FamilyMember.objects.filter(family=family, is_active=True).order_by(
+                "display_order", "id"
+            )
+        )
+        if family
+        else []
+    )
+    rows_by_member = defaultdict(list)
+    for row in account_rows:
+        rows_by_member[row["account"].member_id].append(row)
+
+    groups = []
+    for member in members:
+        rows = sorted(
+            rows_by_member.get(member.id, []),
+            key=lambda row: (
+                row["total_asset"] is not None,
+                row["total_asset"] or ZERO,
+            ),
+            reverse=True,
+        )
+        collapsed_rows = [
+            row
+            for row in rows
+            if row["total_asset_cny"] is not None
+            and row["total_asset_cny"] < LOW_VALUE_ACCOUNT_THRESHOLD_CNY
+        ]
+        collapsed_ids = {row["account"].id for row in collapsed_rows}
+        groups.append(
+            {
+                "member": member,
+                "title": (
+                    "我的投资账户"
+                    if member.display_name == "我"
+                    else f"{member.display_name}的投资账户"
+                ),
+                "visible_rows": [
+                    row for row in rows if row["account"].id not in collapsed_ids
+                ],
+                "collapsed_rows": collapsed_rows,
+            }
+        )
+    return groups
 
 
 def _visible_accounts(request):
@@ -397,6 +452,19 @@ def _account_dashboard_data(request, account=None):
             "realized": _sum_or_none(realized_values),
             "today_pnl": _sum_or_none(today_values),
         }
+        cash_cny = _sum_or_none(
+            _convert_currency(amount, currency, "CNY")
+            for currency, amount in cash_entries
+        )
+        market_cny = _sum_or_none(
+            _convert_currency(position.market_value_live, position.original_currency, "CNY")
+            for position in item_positions
+        )
+        row["total_asset_cny"] = (
+            cash_cny + market_cny
+            if cash_cny is not None and market_cny is not None
+            else None
+        )
         row["position_ratio"] = (
             row["market_value"] / row["total_asset"] * 100
             if row["market_value"] is not None and row["total_asset"]
@@ -885,6 +953,11 @@ def account_list(request):
     context["year_options"] = years
     context["selected_year"] = selected_year
     context["rate_info"] = rate_info
+    context["account_groups"] = _account_member_groups(
+        context["account_rows"],
+        context["family"],
+    )
+    context["low_value_account_threshold_cny"] = LOW_VALUE_ACCOUNT_THRESHOLD_CNY
     return render(
         request,
         "portfolio/account_dashboard.html",

@@ -1175,6 +1175,38 @@ button {
   margin-bottom: 18px;
 }
 
+.member-account-section + .member-account-section {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid #dbe5f2;
+}
+
+.member-account-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.member-account-heading h3 {
+  margin: 0;
+  color: #172554;
+  font-size: 18px;
+}
+
+.low-value-account-rows[hidden] {
+  display: none;
+}
+
+.low-value-account-rows tr {
+  background: #f8fafc;
+}
+
+.low-value-account-toggle {
+  flex: 0 0 auto;
+}
+
 .account-table-scroll {
   max-height: 356px;
   overflow-y: auto;
