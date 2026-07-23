@@ -1,6 +1,6 @@
 import json
 from io import StringIO
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.contrib import admin
@@ -34,12 +34,14 @@ from .ipo_sync import sync_ipo_trade
 from .models import (
     BondDetail,
     CashMovementTypeChoices,
+    DailyPortfolioValuationRun,
     DailyExchangeRateFetch,
     InvestmentAccount,
     InvestmentCashMovement,
     InvestmentOption,
     InvestmentPosition,
     InvestmentTransaction,
+    MarketDataRefreshRun,
     MarketDataRunStatusChoices,
     OptionContract,
     PortfolioReconciliationRun,
@@ -125,6 +127,36 @@ class DailyExchangeRateTests(TestCase):
                 rate_date=date(2026, 7, 3),
             ).count(),
             2,
+        )
+
+    @patch("portfolio.exchange_rate_service.urlopen")
+    def test_failed_fetch_can_retry_on_the_same_day(self, urlopen):
+        response = MagicMock()
+        response.read.return_value = json.dumps(
+            {
+                "data": {"lastDate": "2026-07-03 9:15"},
+                "records": [
+                    {"vrtEName": "USD/CNY", "price": "6.8047"},
+                    {"vrtEName": "HKD/CNY", "price": "0.86754"},
+                ],
+            }
+        ).encode()
+        urlopen.side_effect = [
+            OSError("temporary exchange-rate failure"),
+            response,
+        ]
+        response.__enter__.return_value = response
+
+        first = ensure_daily_exchange_rates()
+        second = ensure_daily_exchange_rates()
+
+        self.assertEqual(first["status"], "failed")
+        self.assertEqual(second["status"], "success")
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(DailyExchangeRateFetch.objects.count(), 1)
+        self.assertEqual(
+            DailyExchangeRateFetch.objects.get().error_message,
+            "",
         )
 
 
@@ -1513,6 +1545,311 @@ class PortfolioSnapshotCommandTests(TestCase):
         )
         position.refresh_from_db()
         self.assertEqual(position.current_price, Decimal("400"))
+
+
+class DailyPortfolioValuationCommandTests(TestCase):
+    def setUp(self):
+        self.valuation_date = timezone.localdate()
+        self.family = Family.objects.create(name="Daily Valuation Family")
+        self.member = FamilyMember.objects.create(
+            family=self.family,
+            display_name="Member",
+        )
+        SiteSetting.objects.update_or_create(
+            pk=1,
+            defaults={
+                "household_name": self.family.name,
+                "base_currency": "CNY",
+            },
+        )
+        self.account = create_broker_investment_account(
+            self.family,
+            self.member,
+            "Daily Account",
+            currency="CNY",
+            cash_balance=Decimal("1000"),
+        )
+        self.security = Security.objects.create(
+            symbol="DAILY",
+            name="Daily ETF",
+            market="CN",
+            asset_type=Security.TYPE_ETF,
+            currency="CNY",
+        )
+        InvestmentPosition.objects.create(
+            account=self.account,
+            security=self.security,
+            quantity=Decimal("10"),
+            avg_cost=Decimal("80"),
+            current_price=Decimal("90"),
+            position_date=self.valuation_date,
+        )
+        SecurityPriceRecord.objects.create(
+            security=self.security,
+            price=Decimal("100"),
+            currency="CNY",
+            source=PriceSourceChoices.MANUAL,
+            price_as_of=timezone.make_aware(
+                datetime.combine(self.valuation_date, time(16, 0))
+            ),
+        )
+
+    def _market_run(self, *, status=MarketDataRunStatusChoices.SUCCESS):
+        return MarketDataRefreshRun.objects.create(
+            finished_at=timezone.now(),
+            status=status,
+            target_count=1,
+            success_count=1,
+        )
+
+    def _exchange_rate_result(self, *, status="success"):
+        return {
+            "today": self.valuation_date,
+            "source_date": self.valuation_date if status == "success" else None,
+            "usd_cny": Decimal("7.1") if status == "success" else None,
+            "hkd_cny": Decimal("0.91") if status == "success" else None,
+            "status": status,
+            "error": "" if status == "success" else "rate provider unavailable",
+            "source_url": "https://example.test/rates",
+        }
+
+    def test_command_is_idempotent_for_same_day_snapshots(self):
+        market_run = self._market_run()
+        stdout = StringIO()
+        with (
+            patch(
+                "portfolio.daily_valuation.refresh_market_data",
+                return_value=market_run,
+            ),
+            patch(
+                "portfolio.daily_valuation.ensure_daily_exchange_rates",
+                return_value=self._exchange_rate_result(),
+            ),
+            patch("portfolio.daily_valuation.refresh_position_valuations"),
+        ):
+            call_command("run_daily_portfolio_valuation", stdout=stdout)
+            call_command("run_daily_portfolio_valuation", stdout=stdout)
+
+        self.assertEqual(PortfolioSnapshot.objects.count(), 3)
+        self.assertEqual(DailyPortfolioValuationRun.objects.count(), 2)
+        self.assertEqual(
+            PortfolioSnapshot.objects.get(
+                member=None,
+                account=None,
+            ).position_lines.count(),
+            2,
+        )
+        latest_run = DailyPortfolioValuationRun.objects.first()
+        self.assertEqual(latest_run.status, MarketDataRunStatusChoices.SUCCESS)
+        self.assertEqual(latest_run.snapshot_count, 3)
+        self.assertEqual(latest_run.quote_success_count, 1)
+        self.assertIn("状态=成功", stdout.getvalue())
+
+    def test_stale_manual_price_creates_partial_snapshot_and_is_recorded(self):
+        SecurityPriceRecord.objects.all().delete()
+        SecurityQuoteConfig.objects.create(
+            security=self.security,
+            provider=PriceSourceChoices.MANUAL,
+            price_type="manual",
+            max_age_hours=12,
+        )
+        SecurityPriceRecord.objects.create(
+            security=self.security,
+            price=Decimal("100"),
+            currency="CNY",
+            source=PriceSourceChoices.MANUAL,
+            price_as_of=timezone.make_aware(
+                datetime.combine(
+                    self.valuation_date - timedelta(days=1),
+                    time(16, 0),
+                )
+            ),
+        )
+        market_run = self._market_run()
+        with (
+            patch(
+                "portfolio.daily_valuation.refresh_market_data",
+                return_value=market_run,
+            ),
+            patch(
+                "portfolio.daily_valuation.ensure_daily_exchange_rates",
+                return_value=self._exchange_rate_result(),
+            ),
+            patch("portfolio.daily_valuation.refresh_position_valuations"),
+        ):
+            call_command(
+                "run_daily_portfolio_valuation",
+                stdout=StringIO(),
+            )
+
+        run = DailyPortfolioValuationRun.objects.get()
+        self.assertEqual(run.status, MarketDataRunStatusChoices.PARTIAL)
+        self.assertEqual(run.stale_price_count, 1)
+        self.assertEqual(
+            run.details["valuation"]["stale_prices"][0]["security"],
+            "CN:DAILY",
+        )
+        self.assertEqual(PortfolioSnapshot.objects.count(), 3)
+
+    def test_recent_previous_day_market_quote_is_not_marked_stale(self):
+        SecurityPriceRecord.objects.all().delete()
+        SecurityQuoteConfig.objects.create(
+            security=self.security,
+            provider=PriceSourceChoices.FUTU,
+            provider_symbol="SH.510300",
+            max_age_hours=96,
+        )
+        SecurityPriceRecord.objects.create(
+            security=self.security,
+            price=Decimal("100"),
+            currency="CNY",
+            source=PriceSourceChoices.FUTU,
+            price_as_of=timezone.make_aware(
+                datetime.combine(
+                    self.valuation_date - timedelta(days=1),
+                    time(16, 0),
+                )
+            ),
+        )
+        market_run = self._market_run()
+        with (
+            patch(
+                "portfolio.daily_valuation.refresh_market_data",
+                return_value=market_run,
+            ),
+            patch(
+                "portfolio.daily_valuation.ensure_daily_exchange_rates",
+                return_value=self._exchange_rate_result(),
+            ),
+            patch("portfolio.daily_valuation.refresh_position_valuations"),
+        ):
+            call_command(
+                "run_daily_portfolio_valuation",
+                stdout=StringIO(),
+            )
+
+        run = DailyPortfolioValuationRun.objects.get()
+        self.assertEqual(run.status, MarketDataRunStatusChoices.SUCCESS)
+        self.assertEqual(run.stale_price_count, 0)
+        self.assertEqual(
+            run.details["valuation"]["stale_prices"],
+            [],
+        )
+
+    def test_require_complete_records_failure_without_writing_snapshots(self):
+        SecurityPriceRecord.objects.all().delete()
+        market_run = self._market_run()
+        with (
+            patch(
+                "portfolio.daily_valuation.refresh_market_data",
+                return_value=market_run,
+            ),
+            patch(
+                "portfolio.daily_valuation.ensure_daily_exchange_rates",
+                return_value=self._exchange_rate_result(),
+            ),
+            patch("portfolio.daily_valuation.refresh_position_valuations"),
+            self.assertRaisesMessage(CommandError, "估值不完整"),
+        ):
+            call_command(
+                "run_daily_portfolio_valuation",
+                require_complete=True,
+                stdout=StringIO(),
+            )
+
+        run = DailyPortfolioValuationRun.objects.get()
+        self.assertEqual(run.status, MarketDataRunStatusChoices.FAILED)
+        self.assertEqual(run.missing_price_count, 1)
+        self.assertEqual(run.snapshot_count, 0)
+        self.assertEqual(PortfolioSnapshot.objects.count(), 0)
+        self.assertEqual(
+            run.details["valuation"]["missing_prices"][0]["security"],
+            "CN:DAILY",
+        )
+
+    def test_failed_exchange_rate_refresh_marks_run_partial(self):
+        market_run = self._market_run()
+        with (
+            patch(
+                "portfolio.daily_valuation.refresh_market_data",
+                return_value=market_run,
+            ),
+            patch(
+                "portfolio.daily_valuation.ensure_daily_exchange_rates",
+                return_value=self._exchange_rate_result(status="failed"),
+            ),
+            patch("portfolio.daily_valuation.refresh_position_valuations"),
+            self.assertRaisesMessage(CommandError, "快照已保留"),
+        ):
+            call_command(
+                "run_daily_portfolio_valuation",
+                fail_on_warning=True,
+                stdout=StringIO(),
+            )
+
+        run = DailyPortfolioValuationRun.objects.get()
+        self.assertEqual(run.status, MarketDataRunStatusChoices.PARTIAL)
+        self.assertEqual(run.exchange_rate_status, "failed")
+        self.assertEqual(run.error_count, 1)
+        self.assertEqual(
+            run.details["exchange_rates"]["error"],
+            "rate provider unavailable",
+        )
+
+    def test_missing_exchange_rate_is_recorded_in_partial_run(self):
+        InvestmentCashMovement.objects.create(
+            account=self.account,
+            movement_date=self.valuation_date,
+            movement_type=CashMovementTypeChoices.DEPOSIT,
+            currency="USD",
+            amount=Decimal("100"),
+        )
+        market_run = self._market_run()
+        with (
+            patch(
+                "portfolio.daily_valuation.refresh_market_data",
+                return_value=market_run,
+            ),
+            patch(
+                "portfolio.daily_valuation.ensure_daily_exchange_rates",
+                return_value=self._exchange_rate_result(),
+            ),
+            patch("portfolio.daily_valuation.refresh_position_valuations"),
+        ):
+            call_command(
+                "run_daily_portfolio_valuation",
+                stdout=StringIO(),
+            )
+
+        run = DailyPortfolioValuationRun.objects.get()
+        self.assertEqual(run.status, MarketDataRunStatusChoices.PARTIAL)
+        self.assertEqual(run.missing_exchange_rate_count, 1)
+        self.assertEqual(
+            run.details["valuation"]["missing_exchange_rates"][0]["currency"],
+            "USD",
+        )
+
+    def test_unexpected_failure_is_saved_before_command_exits(self):
+        with (
+            patch(
+                "portfolio.daily_valuation.refresh_market_data",
+                side_effect=RuntimeError("market service unavailable"),
+            ),
+            self.assertRaisesMessage(CommandError, "market service unavailable"),
+        ):
+            call_command(
+                "run_daily_portfolio_valuation",
+                stdout=StringIO(),
+            )
+
+        run = DailyPortfolioValuationRun.objects.get()
+        self.assertEqual(run.status, MarketDataRunStatusChoices.FAILED)
+        self.assertEqual(run.error_count, 1)
+        self.assertEqual(
+            run.details["exception"],
+            "market service unavailable",
+        )
+        self.assertIsNotNone(run.finished_at)
 
 
 class HistoricalPortfolioSnapshotTests(TestCase):

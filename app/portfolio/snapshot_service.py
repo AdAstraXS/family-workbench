@@ -11,6 +11,19 @@ from .models import PortfolioSnapshot, PortfolioSnapshotPositionLine
 ZERO = Decimal("0")
 
 
+class IncompletePortfolioSnapshotError(ValueError):
+    def __init__(self, snapshot_date, valuation):
+        self.snapshot_date = snapshot_date
+        self.valuation = valuation
+        missing = len(valuation["missing_prices"])
+        rates = len(valuation["missing_rates"])
+        errors = len(valuation["errors"])
+        super().__init__(
+            f"{snapshot_date} 估值不完整："
+            f"缺价 {missing}、缺汇率 {rates}、流水错误 {errors}。"
+        )
+
+
 @transaction.atomic
 def create_portfolio_snapshot(
     family,
@@ -126,12 +139,7 @@ def create_portfolio_snapshots_for_date(
         ledger_snapshot=ledger_snapshot,
     )
     if require_complete and not valuation["complete"]:
-        missing = len(valuation["missing_prices"])
-        rates = len(valuation["missing_rates"])
-        errors = len(valuation["errors"])
-        raise ValueError(
-            f"{snapshot_date} 估值不完整：缺价 {missing}、缺汇率 {rates}、流水错误 {errors}。"
-        )
+        raise IncompletePortfolioSnapshotError(snapshot_date, valuation)
 
     snapshots = []
     snapshots.append(

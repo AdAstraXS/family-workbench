@@ -14,6 +14,7 @@ from .forms import (
 from .models import (
     BondDetail,
     CashMovementTypeChoices,
+    DailyPortfolioValuationRun,
     DailyExchangeRateFetch,
     InvestmentAccount,
     InvestmentCashMovement,
@@ -209,6 +210,44 @@ class MarketDataRefreshRunAdmin(admin.ModelAdmin):
     readonly_fields = (
         "started_at", "finished_at", "status", "scope", "target_count",
         "success_count", "stale_count", "missing_count", "error_count",
+        "details",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(DailyPortfolioValuationRun)
+class DailyPortfolioValuationRunAdmin(admin.ModelAdmin):
+    list_display = (
+        "valuation_date",
+        "family",
+        "status",
+        "started_at",
+        "finished_at",
+        "snapshot_count",
+        "quote_success_count",
+        "stale_price_count",
+        "missing_price_count",
+        "missing_exchange_rate_count",
+        "error_count",
+    )
+    list_filter = ("status", "valuation_date", "exchange_rate_status")
+    readonly_fields = (
+        "family",
+        "valuation_date",
+        "started_at",
+        "finished_at",
+        "status",
+        "market_refresh",
+        "exchange_rate_status",
+        "exchange_rate_source_date",
+        "snapshot_count",
+        "quote_success_count",
+        "stale_price_count",
+        "missing_price_count",
+        "missing_exchange_rate_count",
+        "error_count",
         "details",
     )
 

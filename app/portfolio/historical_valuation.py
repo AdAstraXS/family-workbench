@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.utils import timezone
@@ -16,6 +16,7 @@ from .models import (
     PricingStatusChoices,
     SecurityPriceRecord,
 )
+from .market_data import quote_config_for_security
 from .services import calculate_transactions
 from .valuation import exchange_rate
 
@@ -256,13 +257,23 @@ def _apply_prices(positions, on_date):
             position.price_source = snapshot.price_source
             position.pricing_status = PricingStatusChoices.LEGACY
 
-        price_date = (
-            position.price_as_of.date()
-            if hasattr(position.price_as_of, "date")
-            else position.price_as_of
-        )
-        if position.price is not None and price_date and price_date < on_date:
-            position.pricing_status = PricingStatusChoices.STALE
+        if (
+            position.price is not None
+            and position.price_as_of
+            and position.price_source
+            in {PriceSourceChoices.FUTU, PriceSourceChoices.MANUAL}
+        ):
+            price_as_of = position.price_as_of
+            if not isinstance(price_as_of, datetime):
+                price_as_of = datetime.combine(price_as_of, time.max)
+            if timezone.is_naive(price_as_of):
+                price_as_of = timezone.make_aware(price_as_of)
+            reference_time = timezone.make_aware(
+                datetime.combine(on_date, time.max)
+            )
+            max_age_hours = quote_config_for_security(security).max_age_hours
+            if price_as_of < reference_time - timedelta(hours=max_age_hours):
+                position.pricing_status = PricingStatusChoices.STALE
         option = getattr(security, "option_contract", None)
         if option and option.expiration_date < on_date and position.quantity:
             position.pricing_status = PricingStatusChoices.EXPIRED_UNRESOLVED

@@ -39,12 +39,17 @@ def _result(log):
 
 def ensure_daily_exchange_rates():
     today = timezone.localdate()
-    log, should_fetch = DailyExchangeRateFetch.objects.get_or_create(
-        fetch_date=today,
-        defaults={"status": "fetching"},
-    )
-    if not should_fetch:
-        return _result(log)
+    with transaction.atomic():
+        log, created = DailyExchangeRateFetch.objects.select_for_update().get_or_create(
+            fetch_date=today,
+            defaults={"status": "fetching"},
+        )
+        if not created and log.status == "success":
+            return _result(log)
+        if not created:
+            log.status = "fetching"
+            log.error_message = ""
+            log.save(update_fields=["status", "error_message", "fetched_at"])
 
     try:
         request = Request(

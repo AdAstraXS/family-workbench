@@ -603,6 +603,60 @@ class MarketDataRefreshRun(models.Model):
         return f"{self.started_at} {self.get_status_display()}"
 
 
+class DailyPortfolioValuationRun(models.Model):
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="daily_portfolio_valuation_runs",
+    )
+    valuation_date = models.DateField("估值日期")
+    started_at = models.DateTimeField("开始时间", auto_now_add=True)
+    finished_at = models.DateTimeField("完成时间", null=True, blank=True)
+    status = models.CharField(
+        "状态",
+        max_length=20,
+        choices=MarketDataRunStatusChoices.choices,
+        default=MarketDataRunStatusChoices.RUNNING,
+    )
+    market_refresh = models.ForeignKey(
+        MarketDataRefreshRun,
+        verbose_name="行情刷新批次",
+        on_delete=models.SET_NULL,
+        related_name="daily_valuation_runs",
+        null=True,
+        blank=True,
+    )
+    exchange_rate_status = models.CharField("汇率刷新状态", max_length=20, blank=True)
+    exchange_rate_source_date = models.DateField(
+        "汇率来源日期",
+        null=True,
+        blank=True,
+    )
+    snapshot_count = models.PositiveIntegerField("快照数量", default=0)
+    quote_success_count = models.PositiveIntegerField("行情成功数量", default=0)
+    stale_price_count = models.PositiveIntegerField("过期价格数量", default=0)
+    missing_price_count = models.PositiveIntegerField("缺价数量", default=0)
+    missing_exchange_rate_count = models.PositiveIntegerField(
+        "缺汇率数量",
+        default=0,
+    )
+    error_count = models.PositiveIntegerField("错误数量", default=0)
+    details = models.JSONField("执行详情", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "每日投资组合估值运行"
+        verbose_name_plural = "每日投资组合估值运行"
+        ordering = ["-valuation_date", "-started_at", "-pk"]
+        indexes = [
+            models.Index(fields=["family", "valuation_date"]),
+            models.Index(fields=["status", "valuation_date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.family} {self.valuation_date} {self.get_status_display()}"
+
+
 class SecurityPriceRecord(models.Model):
     security = models.ForeignKey(
         Security,
