@@ -537,6 +537,119 @@ td.negative {
   font-size: 13px;
 }
 
+.portfolio-daily-valuation-form {
+  margin: 0;
+}
+
+.portfolio-daily-valuation-form button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.portfolio-valuation-run-card {
+  margin-bottom: 18px;
+  overflow: visible;
+  border-color: #dbe5f2;
+  background: linear-gradient(145deg, #ffffff, #f8fbff);
+}
+
+.portfolio-valuation-run-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.portfolio-valuation-run-head span,
+.portfolio-valuation-run-head small {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.portfolio-valuation-run-head h2 {
+  margin: 4px 0;
+  font-size: 18px;
+}
+
+.portfolio-run-status {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.portfolio-run-status.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.portfolio-run-status.partial {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.portfolio-run-status.failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.portfolio-run-status.running {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.portfolio-run-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin: 16px 0 0;
+}
+
+.portfolio-run-metrics div {
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.portfolio-run-metrics dt {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.portfolio-run-metrics dd {
+  margin: 3px 0 0;
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 750;
+}
+
+.portfolio-run-details {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.portfolio-run-details summary {
+  color: #1d4ed8;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.portfolio-run-details > div {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.portfolio-run-details p {
+  color: #475569;
+  overflow-wrap: anywhere;
+}
+
 .portfolio-card-head {
   display: flex;
   align-items: flex-start;
@@ -1685,6 +1798,12 @@ textarea {
   border-color: #fecaca;
   background: #fef2f2;
   color: #991b1b;
+}
+
+.app-message.warning {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #92400e;
 }
 
 .import-format {
@@ -3617,13 +3736,18 @@ textarea {
   }
 
   .portfolio-module-nav,
-  .portfolio-card-head {
+  .portfolio-card-head,
+  .portfolio-valuation-run-head {
     align-items: stretch;
     flex-direction: column;
   }
 
   .portfolio-member-filter label {
     min-width: 100%;
+  }
+
+  .portfolio-run-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .portfolio-asset-table {

@@ -18,6 +18,17 @@
     {% if can_reconcile %}
       <a class="button ghost" href="{% url 'portfolio:reconciliation_preview' %}">月底差额对齐</a>
     {% endif %}
+    {% if can_run_daily_valuation %}
+      <form
+        method="post"
+        action="{% url 'portfolio:daily_valuation_refresh' %}"
+        class="portfolio-daily-valuation-form"
+        onsubmit="if (!confirm('确认刷新全部投资账户的行情和汇率，并生成或更新今天的三级快照吗？')) return false; const button = this.querySelector('button'); button.disabled = true; button.textContent = '正在刷新…';"
+      >
+        {% csrf_token %}
+        <button class="button" type="submit">刷新行情并生成今日快照</button>
+      </form>
+    {% endif %}
   </div>
   <form method="get" class="portfolio-member-filter">
     <input type="hidden" name="snapshot_view" value="{{ trend_view }}">
@@ -31,6 +42,60 @@
     </label>
   </form>
 </section>
+
+{% if can_run_daily_valuation and latest_daily_valuation_run %}
+  {% with run=latest_daily_valuation_run %}
+    <section class="panel portfolio-valuation-run-card">
+      <div class="portfolio-valuation-run-head">
+        <div>
+          <span>最近一次每日估值</span>
+          <h2>{{ run.valuation_date|date:"Y-m-d" }} · 运行 #{{ run.pk }}</h2>
+          <small>
+            {{ run.started_at|date:"Y-m-d H:i:s" }}
+            {% if run.finished_at %}完成{% else %}开始{% endif %}
+          </small>
+        </div>
+        <span class="portfolio-run-status {{ run.status }}">{{ run.get_status_display }}</span>
+      </div>
+      <dl class="portfolio-run-metrics">
+        <div><dt>快照</dt><dd>{{ run.snapshot_count }}</dd></div>
+        <div><dt>行情成功</dt><dd>{{ run.quote_success_count }}</dd></div>
+        <div><dt>过期价格</dt><dd>{{ run.stale_price_count }}</dd></div>
+        <div><dt>缺价</dt><dd>{{ run.missing_price_count }}</dd></div>
+        <div><dt>缺汇率</dt><dd>{{ run.missing_exchange_rate_count }}</dd></div>
+        <div><dt>错误</dt><dd>{{ run.error_count }}</dd></div>
+      </dl>
+      {% if run.status != "success" %}
+        <details class="portfolio-run-details">
+          <summary>查看异常详情</summary>
+          <div>
+            {% if run.details.exception %}
+              <p class="negative">{{ run.details.exception }}</p>
+            {% endif %}
+            {% if run.details.exchange_rates.error %}
+              <p><strong>汇率：</strong>{{ run.details.exchange_rates.error }}</p>
+            {% endif %}
+            {% for error in run.details.market_refresh.details.errors %}
+              <p><strong>行情：</strong>{{ error }}</p>
+            {% endfor %}
+            {% for item in run.details.valuation.stale_prices %}
+              <p><strong>价格过期：</strong>{{ item.security }}{% if item.price_as_of %}（{{ item.price_as_of }}）{% endif %}</p>
+            {% endfor %}
+            {% for item in run.details.valuation.missing_prices %}
+              <p><strong>缺少价格：</strong>{{ item.security }}</p>
+            {% endfor %}
+            {% for item in run.details.valuation.missing_exchange_rates %}
+              <p><strong>缺少汇率：</strong>{{ item.currency }}</p>
+            {% endfor %}
+            {% for item in run.details.valuation.valuation_errors %}
+              <p><strong>流水错误：</strong>{{ item.message }}</p>
+            {% endfor %}
+          </div>
+        </details>
+      {% endif %}
+    </section>
+  {% endwith %}
+{% endif %}
 
 {% if missing_rates %}
   <p class="form-error">部分资产缺少兑换人民币的汇率，暂未计入下列图表。</p>

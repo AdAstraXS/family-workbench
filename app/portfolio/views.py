@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_CEILING
 
 from django.contrib import messages
@@ -20,6 +20,10 @@ from family_core.household import get_site_setting
 from family_core.models import AssetCategory, Currency, FamilyMember
 from ledger.models import AssetBalanceSnapshot, BankAccount
 
+from .daily_valuation import (
+    DailyPortfolioValuationError,
+    run_daily_portfolio_valuation as execute_daily_portfolio_valuation,
+)
 from .forms import (
     BondForm,
     InvestmentAccountForm,
@@ -34,11 +38,13 @@ from .forms import (
 from .futu_service import FutuQueryError, search_futu_securities
 from .exchange_rate_service import ensure_daily_exchange_rates
 from .models import (
+    DailyPortfolioValuationRun,
     InvestmentAccount,
     InvestmentCashMovement,
     InvestmentPosition,
     InvestmentTransaction,
     MarketDataRefreshRun,
+    MarketDataRunStatusChoices,
     PortfolioReconciliationRun,
     PortfolioSnapshot,
     PriceSourceChoices,
@@ -547,6 +553,17 @@ def overview(request):
         )
 
     family = login_member.family
+    can_run_daily_valuation = _can_reconcile_portfolio(
+        request.user,
+        login_member,
+    )
+    latest_daily_valuation_run = (
+        DailyPortfolioValuationRun.objects.filter(family=family)
+        .select_related("market_refresh")
+        .first()
+        if can_run_daily_valuation
+        else None
+    )
     base_currency = get_site_setting().base_currency
     members = FamilyMember.objects.filter(
         family=family,
@@ -829,8 +846,58 @@ def overview(request):
             "change_ratio": change_ratio,
             "missing_rates": missing_rates,
             "can_reconcile": _can_reconcile_portfolio(request.user, login_member),
+            "can_run_daily_valuation": can_run_daily_valuation,
+            "latest_daily_valuation_run": latest_daily_valuation_run,
         },
     )
+
+
+@login_required
+@require_POST
+def daily_valuation_refresh(request):
+    member = (
+        FamilyMember.objects.select_related("family")
+        .filter(user=request.user, is_active=True)
+        .first()
+    )
+    if not member or not _can_reconcile_portfolio(request.user, member):
+        raise PermissionDenied("只有家庭管理员可以刷新行情并生成每日快照。")
+
+    active_run = (
+        DailyPortfolioValuationRun.objects.filter(
+            family=member.family,
+            status=MarketDataRunStatusChoices.RUNNING,
+            started_at__gte=timezone.now() - timedelta(minutes=15),
+        )
+        .order_by("-started_at", "-pk")
+        .first()
+    )
+    if active_run:
+        messages.warning(
+            request,
+            f"每日估值 #{active_run.pk} 正在运行，请稍后刷新页面查看结果。",
+        )
+        return redirect(f"{reverse('portfolio:overview')}?snapshot_view=daily")
+
+    try:
+        run = execute_daily_portfolio_valuation(
+            valuation_date=timezone.localdate(),
+            family=member.family,
+        )
+    except DailyPortfolioValuationError as exc:
+        messages.error(request, f"今日投资组合估值失败：{exc}")
+    else:
+        message = (
+            f"今日估值已生成或更新 {run.snapshot_count} 个快照："
+            f"行情成功 {run.quote_success_count}、过期 {run.stale_price_count}、"
+            f"缺价 {run.missing_price_count}、缺汇率 "
+            f"{run.missing_exchange_rate_count}、错误 {run.error_count}。"
+        )
+        if run.status == MarketDataRunStatusChoices.SUCCESS:
+            messages.success(request, message)
+        else:
+            messages.warning(request, f"{message} 请检查下方最近运行详情。")
+    return redirect(f"{reverse('portfolio:overview')}?snapshot_view=daily")
 
 
 @login_required

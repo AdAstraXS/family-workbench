@@ -156,6 +156,10 @@ docker compose exec -T web python manage.py run_daily_portfolio_valuation
 Django 后台的“每日投资组合估值运行”中留下独立记录，包括行情批次、汇率
 来源日期、缺价、过期价格、缺汇率和错误明细。
 
+家庭管理员也可以在“投资组合”页面点击“刷新行情并生成今日快照”。页面会
+显示最近一次运行的状态、统计数字和异常详情；该按钮用于首次验证和异常重试，
+不能代替 NAS 定时任务。
+
 可用参数：
 
 ```text

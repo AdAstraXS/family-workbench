@@ -8,6 +8,11 @@ app_name = "portfolio"
 urlpatterns = [
     path("", views.overview, name="overview"),
     path(
+        "daily-valuation/refresh/",
+        views.daily_valuation_refresh,
+        name="daily_valuation_refresh",
+    ),
+    path(
         "reconciliation/",
         views.reconciliation_preview,
         name="reconciliation_preview",

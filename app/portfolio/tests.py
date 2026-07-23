@@ -26,6 +26,7 @@ from family_core.models import (
 from ipo.models import HkIpoListing, HkIpoSubscriptionTrade
 from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot, BankAccount
 
+from .daily_valuation import DailyPortfolioValuationError
 from .exchange_rate_service import ensure_daily_exchange_rates
 from .futu_service import FutuQueryError
 from .market_data import record_security_price, refresh_market_data
@@ -1303,6 +1304,134 @@ class PortfolioOverviewTests(TestCase):
         self.assertEqual(response.context["total_asset"], Decimal("7200"))
         self.assertEqual(response.context["base_currency"], "CNY")
         self.assertEqual(PortfolioSnapshot.objects.count(), 0)
+
+    def test_daily_valuation_button_is_visible_only_to_family_admin(self):
+        response = self.client.get(reverse("portfolio:overview"))
+        self.assertNotContains(response, "刷新行情并生成今日快照")
+
+        self.member.role = FamilyMember.ROLE_ADMIN
+        self.member.save(update_fields=["role"])
+        response = self.client.get(reverse("portfolio:overview"))
+
+        self.assertContains(response, "刷新行情并生成今日快照")
+        self.assertContains(
+            response,
+            reverse("portfolio:daily_valuation_refresh"),
+        )
+
+    def test_daily_valuation_refresh_requires_post_and_admin_permission(self):
+        url = reverse("portfolio:daily_valuation_refresh")
+
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.assertEqual(self.client.post(url).status_code, 403)
+
+    def test_admin_can_run_daily_valuation_and_see_latest_result(self):
+        self.member.role = FamilyMember.ROLE_ADMIN
+        self.member.save(update_fields=["role"])
+        run = DailyPortfolioValuationRun.objects.create(
+            family=self.member.family,
+            valuation_date=timezone.localdate(),
+            finished_at=timezone.now(),
+            status=MarketDataRunStatusChoices.SUCCESS,
+            snapshot_count=3,
+            quote_success_count=2,
+        )
+
+        with patch(
+            "portfolio.views.execute_daily_portfolio_valuation",
+            return_value=run,
+        ) as execute:
+            response = self.client.post(
+                reverse("portfolio:daily_valuation_refresh"),
+                follow=True,
+            )
+
+        execute.assert_called_once_with(
+            valuation_date=timezone.localdate(),
+            family=self.member.family,
+        )
+        self.assertRedirects(
+            response,
+            f"{reverse('portfolio:overview')}?snapshot_view=daily",
+        )
+        self.assertContains(response, "今日估值已生成或更新 3 个快照")
+        self.assertContains(response, "最近一次每日估值")
+        self.assertContains(response, "运行 #")
+        self.assertContains(response, "成功")
+
+    def test_partial_daily_valuation_shows_warning_details(self):
+        self.member.role = FamilyMember.ROLE_ADMIN
+        self.member.save(update_fields=["role"])
+        run = DailyPortfolioValuationRun.objects.create(
+            family=self.member.family,
+            valuation_date=timezone.localdate(),
+            finished_at=timezone.now(),
+            status=MarketDataRunStatusChoices.PARTIAL,
+            snapshot_count=3,
+            stale_price_count=1,
+            details={
+                "valuation": {
+                    "stale_prices": [
+                        {
+                            "security": "HK:00700",
+                            "price_as_of": "2026-07-22 16:00:00",
+                        }
+                    ]
+                }
+            },
+        )
+
+        with patch(
+            "portfolio.views.execute_daily_portfolio_valuation",
+            return_value=run,
+        ):
+            response = self.client.post(
+                reverse("portfolio:daily_valuation_refresh"),
+                follow=True,
+            )
+
+        self.assertContains(response, "请检查下方最近运行详情")
+        self.assertContains(response, "查看异常详情")
+        self.assertContains(response, "价格过期")
+        self.assertContains(response, "HK:00700")
+
+    def test_running_daily_valuation_blocks_duplicate_start(self):
+        self.member.role = FamilyMember.ROLE_ADMIN
+        self.member.save(update_fields=["role"])
+        active_run = DailyPortfolioValuationRun.objects.create(
+            family=self.member.family,
+            valuation_date=timezone.localdate(),
+            status=MarketDataRunStatusChoices.RUNNING,
+        )
+
+        with patch(
+            "portfolio.views.execute_daily_portfolio_valuation"
+        ) as execute:
+            response = self.client.post(
+                reverse("portfolio:daily_valuation_refresh"),
+                follow=True,
+            )
+
+        execute.assert_not_called()
+        self.assertContains(
+            response,
+            f"每日估值 #{active_run.pk} 正在运行",
+        )
+
+    def test_daily_valuation_failure_is_shown_as_page_message(self):
+        self.member.role = FamilyMember.ROLE_ADMIN
+        self.member.save(update_fields=["role"])
+
+        with patch(
+            "portfolio.views.execute_daily_portfolio_valuation",
+            side_effect=DailyPortfolioValuationError("行情服务不可用"),
+        ):
+            response = self.client.post(
+                reverse("portfolio:daily_valuation_refresh"),
+                follow=True,
+            )
+
+        self.assertContains(response, "今日投资组合估值失败：行情服务不可用")
 
     def test_overview_never_mixes_financial_instrument_names_into_allocation_categories(self):
         response = self.client.get(reverse("portfolio:overview"))
