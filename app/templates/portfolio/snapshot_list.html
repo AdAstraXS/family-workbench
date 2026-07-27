@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}投资组合快照审计{% endblock %}
+
+{% block content %}
+<section class="headline snapshot-audit-head">
+  <div>
+    <a class="prototype-back" href="{% url 'portfolio:overview' %}">← 返回投资组合</a>
+    <h1>投资组合快照审计</h1>
+    <p>{{ family }} · 查看每日家庭快照的完整性、账户范围和估值运行结果。</p>
+  </div>
+</section>
+
+<section class="panel">
+  <form method="get" class="snapshot-audit-filter">
+    <label>开始日期
+      <input type="date" name="date_from" value="{% if date_from %}{{ date_from|date:'Y-m-d' }}{% endif %}">
+    </label>
+    <label>结束日期
+      <input type="date" name="date_to" value="{% if date_to %}{{ date_to|date:'Y-m-d' }}{% endif %}">
+    </label>
+    <div class="snapshot-audit-filter-actions">
+      <button class="button compact" type="submit">查询</button>
+      <a class="button ghost compact" href="{% url 'portfolio:snapshot_list' %}">重置</a>
+    </div>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="section-head">
+    <div>
+      <h2>家庭级快照</h2>
+      <p>每个日期只列一条家庭汇总；点击日期查看成员、账户、现金与证券估值依据。</p>
+    </div>
+    <span>{{ page.paginator.count }} 个日期</span>
+  </div>
+  <div class="account-table-wrap">
+    <table class="snapshot-audit-list-table">
+      <thead>
+        <tr>
+          <th>快照日期</th>
+          <th>完整性</th>
+          <th>家庭总资产</th>
+          <th>成员快照</th>
+          <th>账户快照</th>
+          <th>资产明细</th>
+          <th>自动运行</th>
+          <th>异常摘要</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for snapshot in page.object_list %}
+          <tr>
+            <td><a href="{% url 'portfolio:snapshot_detail' snapshot.pk %}"><strong>{{ snapshot.snapshot_date|date:"Y-m-d" }}</strong></a></td>
+            <td><span class="snapshot-audit-status {{ snapshot.audit.status }}">{{ snapshot.audit.status_label }}</span></td>
+            <td>{{ snapshot.total_asset|currency2:snapshot.currency }}</td>
+            <td>{{ snapshot.member_snapshot_count }}</td>
+            <td>{{ snapshot.account_snapshot_count }}</td>
+            <td>{{ snapshot.position_line_count }}</td>
+            <td>
+              {% if snapshot.valuation_run %}
+                <span class="portfolio-run-status {{ snapshot.valuation_run.status }}">{{ snapshot.valuation_run.get_status_display }}</span>
+                <small class="price-meta">运行 #{{ snapshot.valuation_run.pk }} · {{ snapshot.valuation_run.started_at|date:"H:i" }}</small>
+              {% else %}
+                <span class="muted">历史/手工生成</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="snapshot-issue-counts">
+                缺价 {{ snapshot.audit.missing_prices|length }}
+                · 过期 {{ snapshot.audit.stale_prices|length }}
+                · 缺汇率 {{ snapshot.audit.missing_rates|length }}
+                · 错误 {{ snapshot.audit.valuation_errors|length }}
+              </span>
+            </td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="8">当前日期范围内没有家庭级投资组合快照。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if page.has_other_pages %}
+    <nav class="notes-pagination" aria-label="快照分页">
+      {% if page.has_previous %}
+        <a class="button ghost" href="?page={{ page.previous_page_number }}&date_from={% if date_from %}{{ date_from|date:'Y-m-d' }}{% endif %}&date_to={% if date_to %}{{ date_to|date:'Y-m-d' }}{% endif %}">上一页</a>
+      {% endif %}
+      <span>第 {{ page.number }} / {{ page.paginator.num_pages }} 页</span>
+      {% if page.has_next %}
+        <a class="button ghost" href="?page={{ page.next_page_number }}&date_from={% if date_from %}{{ date_from|date:'Y-m-d' }}{% endif %}&date_to={% if date_to %}{{ date_to|date:'Y-m-d' }}{% endif %}">下一页</a>
+      {% endif %}
+    </nav>
+  {% endif %}
+</section>
+{% endblock %}

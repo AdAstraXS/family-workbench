@@ -1440,6 +1440,94 @@ class PortfolioOverviewTests(TestCase):
         self.assertIn("权益类", group_names)
         self.assertNotIn("股票", group_names)
 
+    def test_family_member_can_audit_snapshot_list_and_detail(self):
+        snapshot_date = date(2026, 7, 24)
+        family_snapshot = PortfolioSnapshot.objects.create(
+            family=self.member.family,
+            snapshot_date=snapshot_date,
+            total_cash=Decimal("900"),
+            total_market_value=Decimal("6300"),
+            total_asset=Decimal("7200"),
+            total_cost=Decimal("5400"),
+            total_pnl=Decimal("900"),
+            currency="CNY",
+            extra_data={
+                "complete": True,
+                "missing_exchange_rates": [],
+                "stale_prices": [],
+                "missing_prices": [],
+                "valuation_errors": [],
+            },
+        )
+        PortfolioSnapshot.objects.create(
+            family=self.member.family,
+            member=self.member,
+            snapshot_date=snapshot_date,
+            total_asset=Decimal("7200"),
+            currency="CNY",
+            extra_data={"complete": True},
+        )
+        PortfolioSnapshot.objects.create(
+            family=self.member.family,
+            member=self.member,
+            account=self.account,
+            snapshot_date=snapshot_date,
+            total_asset=Decimal("7200"),
+            currency="CNY",
+            extra_data={"complete": True},
+        )
+        PortfolioSnapshotPositionLine.objects.create(
+            snapshot=family_snapshot,
+            account=self.account,
+            security=self.security,
+            asset_type=Security.TYPE_STOCK,
+            asset_name=self.security.name,
+            quantity=Decimal("20"),
+            price=Decimal("350"),
+            price_as_of=snapshot_date,
+            price_source=PriceSourceChoices.MANUAL,
+            pricing_status=PricingStatusChoices.MANUAL,
+            currency="HKD",
+            fx_rate=Decimal("0.9"),
+            fx_rate_as_of=date(2026, 7, 5),
+            market_value_original=Decimal("7000"),
+            market_value=Decimal("6300"),
+            cost_original=Decimal("6000"),
+            cost=Decimal("5400"),
+            unrealized_pnl=Decimal("900"),
+        )
+
+        response = self.client.get(reverse("portfolio:snapshot_list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "投资组合快照审计")
+        self.assertContains(response, "2026-07-24")
+        self.assertContains(response, "完整")
+
+        response = self.client.get(
+            reverse("portfolio:snapshot_detail", args=[family_snapshot.pk])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "现金与证券估值明细")
+        self.assertContains(response, "2026-07-05")
+        self.assertContains(response, "手工录入")
+        self.assertContains(response, "手工价格")
+
+    def test_snapshot_audit_never_exposes_another_family(self):
+        other_family = Family.objects.create(name="其他家庭")
+        other_snapshot = PortfolioSnapshot.objects.create(
+            family=other_family,
+            snapshot_date=date(2026, 7, 24),
+            total_asset=Decimal("999"),
+            currency="CNY",
+            extra_data={"complete": True},
+        )
+
+        response = self.client.get(
+            reverse("portfolio:snapshot_detail", args=[other_snapshot.pk])
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     def test_manual_bond_uses_clean_price_plus_accrued_interest(self):
         Currency.objects.get_or_create(code="CNY", defaults={"name": "人民币"})
         fixed_income = AssetCategory.objects.create(
@@ -1773,6 +1861,26 @@ class DailyPortfolioValuationCommandTests(TestCase):
         self.assertEqual(latest_run.snapshot_count, 3)
         self.assertEqual(latest_run.quote_success_count, 1)
         self.assertIn("状态=成功", stdout.getvalue())
+        family_snapshot = PortfolioSnapshot.objects.get(
+            member=None,
+            account=None,
+        )
+        position_line = family_snapshot.position_lines.get(
+            security=self.security,
+        )
+        self.assertEqual(position_line.price_as_of, self.valuation_date)
+        self.assertEqual(
+            position_line.price_source,
+            PriceSourceChoices.MANUAL,
+        )
+        self.assertEqual(
+            position_line.pricing_status,
+            PricingStatusChoices.MANUAL,
+        )
+        self.assertEqual(position_line.fx_rate_as_of, self.valuation_date)
+        cash_line = family_snapshot.position_lines.get(asset_type="cash")
+        self.assertEqual(cash_line.price_source, "cash")
+        self.assertEqual(cash_line.price_as_of, self.valuation_date)
 
     def test_stale_manual_price_creates_partial_snapshot_and_is_recorded(self):
         SecurityPriceRecord.objects.all().delete()
@@ -1895,6 +2003,50 @@ class DailyPortfolioValuationCommandTests(TestCase):
             run.details["valuation"]["missing_prices"][0]["security"],
             "CN:DAILY",
         )
+
+    def test_require_complete_rejects_stale_price_without_writing_snapshots(self):
+        SecurityPriceRecord.objects.all().delete()
+        SecurityQuoteConfig.objects.create(
+            security=self.security,
+            provider=PriceSourceChoices.MANUAL,
+            price_type="manual",
+            max_age_hours=12,
+        )
+        SecurityPriceRecord.objects.create(
+            security=self.security,
+            price=Decimal("100"),
+            currency="CNY",
+            source=PriceSourceChoices.MANUAL,
+            price_as_of=timezone.make_aware(
+                datetime.combine(
+                    self.valuation_date - timedelta(days=1),
+                    time(16, 0),
+                )
+            ),
+        )
+        market_run = self._market_run()
+        with (
+            patch(
+                "portfolio.daily_valuation.refresh_market_data",
+                return_value=market_run,
+            ),
+            patch(
+                "portfolio.daily_valuation.ensure_daily_exchange_rates",
+                return_value=self._exchange_rate_result(),
+            ),
+            patch("portfolio.daily_valuation.refresh_position_valuations"),
+            self.assertRaisesMessage(CommandError, "过期 1"),
+        ):
+            call_command(
+                "run_daily_portfolio_valuation",
+                require_complete=True,
+                stdout=StringIO(),
+            )
+
+        self.assertEqual(PortfolioSnapshot.objects.count(), 0)
+        run = DailyPortfolioValuationRun.objects.get()
+        self.assertEqual(run.status, MarketDataRunStatusChoices.FAILED)
+        self.assertEqual(run.stale_price_count, 1)
 
     def test_failed_exchange_rate_refresh_marks_run_partial(self):
         market_run = self._market_run()
@@ -2047,6 +2199,87 @@ class HistoricalPortfolioSnapshotTests(TestCase):
         self.assertEqual(position_line.market_value, Decimal("150"))
         self.assertEqual(family_snapshot.total_cash, Decimal("900"))
         self.assertEqual(family_snapshot.total_asset, Decimal("1050"))
+
+
+class PortfolioSnapshotBackfillPreviewTests(TestCase):
+    def setUp(self):
+        self.start_date = date(2026, 7, 1)
+        self.end_date = date(2026, 7, 2)
+        self.family = Family.objects.create(name="回补试算家庭")
+        self.member = FamilyMember.objects.create(
+            family=self.family,
+            display_name="成员",
+        )
+        SiteSetting.objects.update_or_create(
+            pk=1,
+            defaults={
+                "household_name": self.family.name,
+                "base_currency": "CNY",
+            },
+        )
+        self.account = create_broker_investment_account(
+            self.family,
+            self.member,
+            "试算账户",
+            currency="CNY",
+            cash_balance=Decimal("1000"),
+        )
+        self.security = Security.objects.create(
+            symbol="PREVIEW",
+            name="试算标的",
+            market="CN",
+            asset_type=Security.TYPE_ETF,
+            currency="CNY",
+        )
+        InvestmentPosition.objects.create(
+            account=self.account,
+            security=self.security,
+            quantity=Decimal("10"),
+            avg_cost=Decimal("8"),
+            position_date=self.start_date,
+        )
+        SecurityQuoteConfig.objects.create(
+            security=self.security,
+            provider=PriceSourceChoices.MANUAL,
+            price_type="manual",
+            max_age_hours=12,
+        )
+        SecurityPriceRecord.objects.create(
+            security=self.security,
+            price=Decimal("10"),
+            currency="CNY",
+            source=PriceSourceChoices.MANUAL,
+            price_as_of=timezone.make_aware(
+                datetime.combine(self.start_date, time(16, 0))
+            ),
+        )
+
+    def test_daily_status_accepts_date_range_and_never_writes_snapshots(self):
+        output = StringIO()
+
+        call_command(
+            "analyze_portfolio_snapshot_gaps",
+            start_date=self.start_date.isoformat(),
+            end_date=self.end_date.isoformat(),
+            daily_status=True,
+            stdout=output,
+        )
+
+        report = output.getvalue()
+        self.assertIn("2026-07-01\t完整", report)
+        self.assertIn("2026-07-02\t不完整", report)
+        self.assertIn("\t过期\t", report)
+        self.assertIn("未刷新行情、未写入价格、未生成快照", report)
+        self.assertEqual(PortfolioSnapshot.objects.count(), 0)
+
+    def test_date_range_requires_both_boundaries(self):
+        with self.assertRaisesMessage(CommandError, "必须同时使用"):
+            call_command(
+                "analyze_portfolio_snapshot_gaps",
+                start_date=self.start_date.isoformat(),
+                daily_status=True,
+                stdout=StringIO(),
+            )
 
 
 class PortfolioReconciliationTests(TestCase):

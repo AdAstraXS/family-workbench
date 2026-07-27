@@ -3,11 +3,16 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
+from django.utils.dateparse import parse_date
 
-from family_core.household import get_household_family
+from family_core.household import get_household_family, get_site_setting
 from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot
 from portfolio.market_data import futu_code_for_security
+from portfolio.historical_valuation import (
+    account_ids_as_of,
+    value_historical_portfolio,
+)
 from portfolio.models import (
     InvestmentAccount,
     InvestmentCashMovement,
@@ -40,6 +45,15 @@ def _target_dates(include_july):
         while current <= end:
             dates.append(current)
             current += timedelta(days=1)
+    return dates
+
+
+def _date_range(start_date, end_date):
+    dates = []
+    current = start_date
+    while current <= end_date:
+        dates.append(current)
+        current += timedelta(days=1)
     return dates
 
 
@@ -283,6 +297,19 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--include-july", action="store_true")
+        parser.add_argument(
+            "--start-date",
+            help="试算开始日期 YYYY-MM-DD；必须与 --end-date 同时使用。",
+        )
+        parser.add_argument(
+            "--end-date",
+            help="试算结束日期 YYYY-MM-DD；包含当天。",
+        )
+        parser.add_argument(
+            "--daily-status",
+            action="store_true",
+            help="只读输出逐日快照完整性，以及缺价、过期、缺汇率和流水错误清单。",
+        )
         parser.add_argument("--fetch-futu", action="store_true")
         parser.add_argument(
             "--matrix",
@@ -298,7 +325,29 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         family = get_household_family()
-        dates = _target_dates(options["include_july"])
+        if not family:
+            raise CommandError("尚未配置家庭。")
+        raw_start = options.get("start_date")
+        raw_end = options.get("end_date")
+        if bool(raw_start) != bool(raw_end):
+            raise CommandError("--start-date 与 --end-date 必须同时使用。")
+        if raw_start:
+            start_date = parse_date(raw_start)
+            end_date = parse_date(raw_end)
+            if not start_date:
+                raise CommandError(f"无效开始日期：{raw_start}")
+            if not end_date:
+                raise CommandError(f"无效结束日期：{raw_end}")
+            if start_date > end_date:
+                raise CommandError("开始日期不能晚于结束日期。")
+            dates = _date_range(start_date, end_date)
+        else:
+            dates = _target_dates(options["include_july"])
+
+        if options["daily_status"]:
+            self._write_daily_status(family, dates)
+            return
+
         ledger_snapshots = {
             item.snapshot_date: item
             for item in AssetBalanceSnapshot.objects.filter(
@@ -488,6 +537,129 @@ class Command(BaseCommand):
             self.stdout.write(f"无法自动估值的标的 {len(price_errors)} 个：")
             for code, message in sorted(price_errors.items()):
                 self.stdout.write(f"{code}\t{message}")
+
+    def _write_daily_status(self, family, dates):
+        currency = get_site_setting().base_currency
+        ledger_snapshots = {
+            item.snapshot_date: item
+            for item in AssetBalanceSnapshot.objects.filter(
+                family=family,
+                snapshot_date__in=dates,
+                is_draft=False,
+            ).order_by("snapshot_date", "-created_at", "-pk")
+        }
+        self.stdout.write(
+            "日期\t状态\t账户数\t持仓数\t缺价\t过期\t缺汇率\t流水错误"
+        )
+        detail_rows = set()
+        for on_date in dates:
+            accounts = list(
+                InvestmentAccount.objects.filter(
+                    pk__in=account_ids_as_of(family, on_date)
+                )
+                .select_related("bank_account__member")
+                .order_by(
+                    "bank_account__member__display_order",
+                    "bank_account__account_name",
+                    "pk",
+                )
+            )
+            valuation = value_historical_portfolio(
+                accounts,
+                currency,
+                on_date,
+                ledger_snapshot=ledger_snapshots.get(on_date),
+            )
+            missing_prices = valuation["missing_prices"]
+            stale_prices = valuation["stale_prices"]
+            missing_rates = valuation["missing_rates"]
+            errors = valuation["errors"]
+            missing_price_keys = {
+                (item["account_id"], item["security"])
+                for item in missing_prices
+            }
+            stale_price_keys = {
+                (item["account_id"], item["security"])
+                for item in stale_prices
+            }
+            missing_rate_keys = {
+                (item["account_id"], item["currency"])
+                for item in missing_rates
+            }
+            error_keys = {
+                (item["account_id"], item["message"])
+                for item in errors
+            }
+            complete = not any(
+                (missing_prices, stale_prices, missing_rates, errors)
+            )
+            self.stdout.write(
+                "\t".join(
+                    (
+                        on_date.isoformat(),
+                        "完整" if complete else "不完整",
+                        str(len(accounts)),
+                        str(len(valuation["positions"])),
+                        str(len(missing_price_keys)),
+                        str(len(stale_price_keys)),
+                        str(len(missing_rate_keys)),
+                        str(len(error_keys)),
+                    )
+                )
+            )
+            account_names = {
+                item.pk: (
+                    f"{item.member.display_name} / {item.account_name}"
+                )
+                for item in accounts
+            }
+            for item in missing_prices:
+                detail_rows.add(
+                    (
+                        on_date,
+                        "缺价",
+                        account_names.get(item["account_id"], str(item["account_id"])),
+                        item["security"],
+                    )
+                )
+            for item in stale_prices:
+                detail_rows.add(
+                    (
+                        on_date,
+                        "过期",
+                        account_names.get(item["account_id"], str(item["account_id"])),
+                        (
+                            f"{item['security']}@{item.get('price_as_of') or '-'}"
+                            f"({item.get('status') or '-'})"
+                        ),
+                    )
+                )
+            for item in missing_rates:
+                detail_rows.add(
+                    (
+                        on_date,
+                        "缺汇率",
+                        account_names.get(item["account_id"], str(item["account_id"])),
+                        item["currency"],
+                    )
+                )
+            for item in errors:
+                detail_rows.add(
+                    (
+                        on_date,
+                        "流水错误",
+                        account_names.get(item["account_id"], str(item["account_id"])),
+                        item["message"],
+                    )
+                )
+
+        self.stdout.write("")
+        self.stdout.write("日期\t问题\t账户\t标的/币种/说明")
+        for row in sorted(detail_rows):
+            self.stdout.write("\t".join(str(value) for value in row))
+        if not detail_rows:
+            self.stdout.write("无")
+        self.stdout.write("只读试算完成；未刷新行情、未写入价格、未生成快照。")
 
     def _write_matrix(self, rows, dates):
         by_account = defaultdict(dict)

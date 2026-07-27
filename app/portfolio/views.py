@@ -6,6 +6,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core import signing
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.http import HttpResponseRedirect, JsonResponse
@@ -16,7 +17,7 @@ from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
 from family_core.audit import stamp_actor
-from family_core.household import get_site_setting
+from family_core.household import get_household_family, get_site_setting
 from family_core.models import AssetCategory, Currency, FamilyMember
 from ledger.models import AssetBalanceSnapshot, BankAccount
 
@@ -86,6 +87,53 @@ def _can_reconcile_portfolio(user, member):
         or user.is_staff
         or (member and member.role == FamilyMember.ROLE_ADMIN)
     )
+
+
+def _request_family(request):
+    member = (
+        FamilyMember.objects.select_related("family")
+        .filter(user=request.user, is_active=True)
+        .first()
+    )
+    if member:
+        return member.family
+    if request.user.is_superuser:
+        family = get_household_family()
+        if family:
+            return family
+    raise PermissionDenied("当前用户未关联有效家庭。")
+
+
+def _snapshot_audit_summary(snapshot):
+    details = snapshot.extra_data or {}
+    missing_rates = details.get("missing_exchange_rates") or []
+    stale_prices = details.get("stale_prices") or []
+    missing_prices = details.get("missing_prices") or []
+    valuation_errors = details.get("valuation_errors") or []
+    complete = bool(details.get("complete")) and not any(
+        (missing_rates, stale_prices, missing_prices, valuation_errors)
+    )
+    if complete:
+        status = "complete"
+        status_label = "完整"
+    elif stale_prices and not missing_rates and not missing_prices and not valuation_errors:
+        status = "warning"
+        status_label = "价格需核对"
+    elif "complete" not in details:
+        status = "unknown"
+        status_label = "未记录完整性"
+    else:
+        status = "incomplete"
+        status_label = "不完整"
+    return {
+        "status": status,
+        "status_label": status_label,
+        "complete": complete,
+        "missing_rates": missing_rates,
+        "stale_prices": stale_prices,
+        "missing_prices": missing_prices,
+        "valuation_errors": valuation_errors,
+    }
 
 
 def _sum_or_none(values):
@@ -848,6 +896,194 @@ def overview(request):
             "can_reconcile": _can_reconcile_portfolio(request.user, login_member),
             "can_run_daily_valuation": can_run_daily_valuation,
             "latest_daily_valuation_run": latest_daily_valuation_run,
+        },
+    )
+
+
+@login_required
+def snapshot_list(request):
+    family = _request_family(request)
+    currency = get_site_setting().base_currency
+    snapshots = (
+        PortfolioSnapshot.objects.filter(
+            family=family,
+            member=None,
+            account=None,
+            currency=currency,
+        )
+        .annotate(position_line_count=Count("position_lines"))
+        .order_by("-snapshot_date", "-pk")
+    )
+    date_from = parse_date(request.GET.get("date_from", ""))
+    date_to = parse_date(request.GET.get("date_to", ""))
+    if date_from:
+        snapshots = snapshots.filter(snapshot_date__gte=date_from)
+    if date_to:
+        snapshots = snapshots.filter(snapshot_date__lte=date_to)
+
+    page = Paginator(snapshots, 31).get_page(request.GET.get("page"))
+    dates = [item.snapshot_date for item in page.object_list]
+    scope_counts = {
+        row["snapshot_date"]: row
+        for row in (
+            PortfolioSnapshot.objects.filter(
+                family=family,
+                snapshot_date__in=dates,
+                currency=currency,
+            )
+            .values("snapshot_date")
+            .annotate(
+                member_count=Count(
+                    "pk",
+                    filter=Q(member__isnull=False, account__isnull=True),
+                ),
+                account_count=Count(
+                    "pk",
+                    filter=Q(account__isnull=False),
+                ),
+            )
+        )
+    }
+    latest_runs = {}
+    for run in DailyPortfolioValuationRun.objects.filter(
+        family=family,
+        valuation_date__in=dates,
+    ).order_by("valuation_date", "-started_at", "-pk"):
+        latest_runs.setdefault(run.valuation_date, run)
+
+    for snapshot in page.object_list:
+        snapshot.audit = _snapshot_audit_summary(snapshot)
+        counts = scope_counts.get(snapshot.snapshot_date, {})
+        snapshot.member_snapshot_count = counts.get("member_count", 0)
+        snapshot.account_snapshot_count = counts.get("account_count", 0)
+        snapshot.valuation_run = latest_runs.get(snapshot.snapshot_date)
+
+    return render(
+        request,
+        "portfolio/snapshot_list.html",
+        {
+            "family": family,
+            "currency": currency,
+            "page": page,
+            "date_from": date_from,
+            "date_to": date_to,
+        },
+    )
+
+
+@login_required
+def snapshot_detail(request, pk):
+    family = _request_family(request)
+    snapshot = get_object_or_404(
+        PortfolioSnapshot.objects.filter(
+            family=family,
+            member=None,
+            account=None,
+        ),
+        pk=pk,
+    )
+    audit = _snapshot_audit_summary(snapshot)
+    member_snapshots = list(
+        PortfolioSnapshot.objects.filter(
+            family=family,
+            member__isnull=False,
+            account=None,
+            snapshot_date=snapshot.snapshot_date,
+            currency=snapshot.currency,
+        )
+        .select_related("member")
+        .order_by("member__display_order", "member_id")
+    )
+    account_snapshots = list(
+        PortfolioSnapshot.objects.filter(
+            family=family,
+            account__isnull=False,
+            snapshot_date=snapshot.snapshot_date,
+            currency=snapshot.currency,
+        )
+        .select_related("member", "account__bank_account")
+        .order_by(
+            "member__display_order",
+            "account__bank_account__account_name",
+            "account_id",
+        )
+    )
+    position_lines = list(
+        snapshot.position_lines.select_related(
+            "account__bank_account__member",
+            "security",
+        ).order_by(
+            "account__bank_account__member__display_order",
+            "account__bank_account__account_name",
+            "asset_type",
+            "asset_name",
+            "pk",
+        )
+    )
+    source_labels = {
+        PriceSourceChoices.FUTU: "Futu",
+        PriceSourceChoices.MANUAL: "手工录入",
+        PriceSourceChoices.LEGACY: "历史缓存",
+        "transaction": "成交价格",
+        "cash": "现金面值",
+    }
+    warning_statuses = {
+        PricingStatusChoices.STALE,
+        PricingStatusChoices.ERROR,
+        PricingStatusChoices.MISSING,
+        PricingStatusChoices.LEGACY,
+        PricingStatusChoices.EXPIRED_UNRESOLVED,
+    }
+    for line in position_lines:
+        line.price_source_label = source_labels.get(
+            line.price_source,
+            line.price_source or "未记录",
+        )
+        line.pricing_status_label = (
+            line.get_pricing_status_display()
+            if line.pricing_status
+            else "未记录"
+        )
+        line.has_pricing_warning = line.pricing_status in warning_statuses
+
+    account_names = {
+        item.account_id: item.account.account_name
+        for item in account_snapshots
+    }
+    for key in (
+        "missing_rates",
+        "stale_prices",
+        "missing_prices",
+        "valuation_errors",
+    ):
+        for item in audit[key]:
+            item["account_name"] = account_names.get(
+                item.get("account_id"),
+                (
+                    f"账户 #{item.get('account_id')}"
+                    if item.get("account_id")
+                    else "未记录账户"
+                ),
+            )
+
+    valuation_run = (
+        DailyPortfolioValuationRun.objects.filter(
+            family=family,
+            valuation_date=snapshot.snapshot_date,
+        )
+        .order_by("-started_at", "-pk")
+        .first()
+    )
+    return render(
+        request,
+        "portfolio/snapshot_detail.html",
+        {
+            "snapshot": snapshot,
+            "audit": audit,
+            "member_snapshots": member_snapshots,
+            "account_snapshots": account_snapshots,
+            "position_lines": position_lines,
+            "valuation_run": valuation_run,
         },
     )
 

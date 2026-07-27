@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}{{ snapshot.snapshot_date|date:"Y-m-d" }} 快照审计{% endblock %}
+
+{% block content %}
+<section class="headline snapshot-audit-head">
+  <div>
+    <a class="prototype-back" href="{% url 'portfolio:snapshot_list' %}">← 返回快照列表</a>
+    <h1>{{ snapshot.snapshot_date|date:"Y年n月j日" }}快照审计</h1>
+    <p>{{ snapshot.family }} · 本位币 {{ snapshot.currency }} · 创建于 {{ snapshot.created_at|date:"Y-m-d H:i:s" }}</p>
+  </div>
+  <span class="snapshot-audit-status {{ audit.status }}">{{ audit.status_label }}</span>
+</section>
+
+<section class="panel snapshot-audit-summary">
+  <div class="snapshot-audit-metrics">
+    <div><span>家庭总资产</span><strong>{{ snapshot.total_asset|currency2:snapshot.currency }}</strong></div>
+    <div><span>现金</span><strong>{{ snapshot.total_cash|currency2:snapshot.currency }}</strong></div>
+    <div><span>证券市值</span><strong>{{ snapshot.total_market_value|currency2:snapshot.currency }}</strong></div>
+    <div><span>持仓盈亏</span><strong class="{% if snapshot.total_pnl > 0 %}positive{% elif snapshot.total_pnl < 0 %}negative{% endif %}">{{ snapshot.total_pnl|signed_currency2:snapshot.currency }}</strong></div>
+    <div><span>估值运行</span><strong>{% if valuation_run %}#{{ valuation_run.pk }} {{ valuation_run.get_status_display }}{% else %}历史/手工{% endif %}</strong></div>
+  </div>
+</section>
+
+{% if audit.status != "complete" %}
+<section class="panel snapshot-audit-issues">
+  <div class="section-head"><h2>完整性与价格提示</h2></div>
+  {% for item in audit.missing_prices %}
+    <p class="negative"><strong>缺少价格：</strong>{{ item.account_name }} · {{ item.security }}</p>
+  {% endfor %}
+  {% for item in audit.stale_prices %}
+    <p class="market-data-warning"><strong>价格需核对：</strong>{{ item.account_name }} · {{ item.security }}{% if item.price_as_of %} · 价格日期 {{ item.price_as_of }}{% endif %} · {{ item.status }}</p>
+  {% endfor %}
+  {% for item in audit.missing_rates %}
+    <p class="negative"><strong>缺少汇率：</strong>{{ item.account_name }} · {{ item.currency }}</p>
+  {% endfor %}
+  {% for item in audit.valuation_errors %}
+    <p class="negative"><strong>流水错误：</strong>{{ item.account_name }} · {{ item.message }}</p>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="section-head"><h2>成员汇总</h2><span>{{ member_snapshots|length }} 位成员</span></div>
+  <div class="account-table-wrap">
+    <table>
+      <thead><tr><th>成员</th><th>现金</th><th>证券市值</th><th>总资产</th><th>持仓盈亏</th></tr></thead>
+      <tbody>
+        {% for item in member_snapshots %}
+          <tr><td>{{ item.member.display_name }}</td><td>{{ item.total_cash|currency2:item.currency }}</td><td>{{ item.total_market_value|currency2:item.currency }}</td><td>{{ item.total_asset|currency2:item.currency }}</td><td class="{% if item.total_pnl > 0 %}positive{% elif item.total_pnl < 0 %}negative{% endif %}">{{ item.total_pnl|signed_currency2:item.currency }}</td></tr>
+        {% empty %}<tr><td colspan="5">没有成员级快照。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-head"><h2>投资账户汇总</h2><span>{{ account_snapshots|length }} 个账户</span></div>
+  <div class="account-table-wrap">
+    <table>
+      <thead><tr><th>成员</th><th>投资账户</th><th>现金</th><th>证券市值</th><th>总资产</th><th>持仓盈亏</th></tr></thead>
+      <tbody>
+        {% for item in account_snapshots %}
+          <tr><td>{{ item.member.display_name }}</td><td>{{ item.account.account_name }}</td><td>{{ item.total_cash|currency2:item.currency }}</td><td>{{ item.total_market_value|currency2:item.currency }}</td><td>{{ item.total_asset|currency2:item.currency }}</td><td class="{% if item.total_pnl > 0 %}positive{% elif item.total_pnl < 0 %}negative{% endif %}">{{ item.total_pnl|signed_currency2:item.currency }}</td></tr>
+        {% empty %}<tr><td colspan="6">没有账户级快照。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-head">
+    <div><h2>现金与证券估值明细</h2><p>价格和汇率日期为空表示该字段在旧快照生成时尚未记录，不代表自动推断。</p></div>
+    <span>{{ position_lines|length }} 条</span>
+  </div>
+  <div class="account-table-wrap snapshot-audit-lines-wrap">
+    <table class="snapshot-audit-lines">
+      <thead>
+        <tr>
+          <th>成员</th><th>投资账户</th><th>资产</th><th>类型</th><th>数量</th>
+          <th>价格</th><th>价格日期</th><th>来源</th><th>状态</th>
+          <th>原币市值</th><th>汇率</th><th>汇率日期</th><th>人民币市值</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in position_lines %}
+          <tr class="{% if line.has_pricing_warning %}snapshot-line-warning{% endif %}">
+            <td>{{ line.account.member.display_name }}</td>
+            <td>{{ line.account.account_name }}</td>
+            <td><strong>{{ line.asset_name }}</strong>{% if line.security %}<small class="price-meta">{{ line.security.market }}:{{ line.security.symbol }}</small>{% endif %}</td>
+            <td>{% if line.asset_type == "cash" %}现金{% else %}{{ line.asset_type }}{% endif %}</td>
+            <td class="numeric">{{ line.quantity|floatformat:"-6" }}</td>
+            <td>{{ line.price|currency2:line.currency }}</td>
+            <td>{% if line.price_as_of %}{{ line.price_as_of|date:"Y-m-d" }}{% else %}<span class="muted">未记录</span>{% endif %}</td>
+            <td>{{ line.price_source_label }}</td>
+            <td><span class="pricing-status pricing-{{ line.pricing_status|default:'missing' }}">{{ line.pricing_status_label }}</span></td>
+            <td>{{ line.market_value_original|currency2:line.currency }}</td>
+            <td class="numeric">{{ line.fx_rate|floatformat:"-8" }}</td>
+            <td>{% if line.fx_rate_as_of %}{{ line.fx_rate_as_of|date:"Y-m-d" }}{% else %}<span class="muted">未记录</span>{% endif %}</td>
+            <td>{{ line.market_value|currency2:snapshot.currency }}</td>
+          </tr>
+        {% empty %}<tr><td colspan="13">该家庭快照没有资产明细。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

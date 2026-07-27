@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.utils import timezone
@@ -18,7 +18,7 @@ from .models import (
 )
 from .market_data import quote_config_for_security
 from .services import calculate_transactions
-from .valuation import exchange_rate
+from .valuation import exchange_rate, resolve_exchange_rate
 
 
 ZERO = Decimal("0")
@@ -59,22 +59,34 @@ class HistoricalPositionValue:
     price_source: str = ""
     pricing_status: str = PricingStatusChoices.MISSING
     fx_rate: Decimal | None = None
+    fx_rate_as_of: date | None = None
     market_value_original: Decimal | None = None
     market_value: Decimal | None = None
     cost: Decimal | None = None
 
 
-def snapshot_exchange_rate(source, target, on_date, ledger_snapshot=None):
+def snapshot_exchange_rate_details(source, target, on_date, ledger_snapshot=None):
     source = source.upper()
     target = target.upper()
     if source == target:
-        return Decimal("1")
+        return Decimal("1"), on_date
     if ledger_snapshot and target == ledger_snapshot.base_currency.upper():
         if source == "USD":
-            return ledger_snapshot.usd_to_base or None
+            return ledger_snapshot.usd_to_base or None, ledger_snapshot.snapshot_date
         if source == "HKD":
-            return ledger_snapshot.hkd_to_base or None
-    return exchange_rate(source, target, on_date)
+            return ledger_snapshot.hkd_to_base or None, ledger_snapshot.snapshot_date
+    resolution = resolve_exchange_rate(source, target, on_date)
+    return resolution.rate, resolution.rate_as_of
+
+
+def snapshot_exchange_rate(source, target, on_date, ledger_snapshot=None):
+    rate, _rate_as_of = snapshot_exchange_rate_details(
+        source,
+        target,
+        on_date,
+        ledger_snapshot,
+    )
+    return rate
 
 
 def _historical_states(accounts, on_date, exclude_movement_ids=None):
@@ -301,7 +313,7 @@ def value_historical_portfolio(
     missing_rates = []
     for state in states.values():
         for currency, amount in state["cash"].items():
-            rate = snapshot_exchange_rate(
+            rate, rate_as_of = snapshot_exchange_rate_details(
                 currency,
                 target_currency,
                 on_date,
@@ -320,6 +332,7 @@ def value_historical_portfolio(
                     "currency": currency,
                     "amount": amount,
                     "fx_rate": rate,
+                    "fx_rate_as_of": rate_as_of,
                     "converted": converted,
                 }
             )
@@ -339,13 +352,14 @@ def value_historical_portfolio(
                 }
             )
             continue
-        rate = snapshot_exchange_rate(
+        rate, rate_as_of = snapshot_exchange_rate_details(
             security.currency,
             target_currency,
             on_date,
             ledger_snapshot,
         )
         position.fx_rate = rate
+        position.fx_rate_as_of = rate_as_of
         position.market_value_original = security.market_value_for(
             position.quantity,
             position.price,
@@ -391,7 +405,12 @@ def value_historical_portfolio(
         "stale_prices": stale_prices,
         "missing_prices": missing_prices,
         "errors": errors,
-        "complete": not missing_rates and not missing_prices and not errors,
+        "complete": (
+            not missing_rates
+            and not stale_prices
+            and not missing_prices
+            and not errors
+        ),
     }
 
 
@@ -433,5 +452,10 @@ def slice_valuation(valuation, account_ids):
         "stale_prices": stale_prices,
         "missing_prices": missing_prices,
         "errors": errors,
-        "complete": not missing_rates and not missing_prices and not errors,
+        "complete": (
+            not missing_rates
+            and not stale_prices
+            and not missing_prices
+            and not errors
+        ),
     }

@@ -12,6 +12,12 @@ urlpatterns = [
         views.daily_valuation_refresh,
         name="daily_valuation_refresh",
     ),
+    path("snapshots/", views.snapshot_list, name="snapshot_list"),
+    path(
+        "snapshots/<int:pk>/",
+        views.snapshot_detail,
+        name="snapshot_detail",
+    ),
     path(
         "reconciliation/",
         views.reconciliation_preview,

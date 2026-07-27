@@ -541,7 +541,20 @@ class PortfolioSnapshotAdmin(admin.ModelAdmin):
 
 @admin.register(PortfolioSnapshotPositionLine)
 class PortfolioSnapshotPositionLineAdmin(admin.ModelAdmin):
-    list_display = ("snapshot", "account", "asset_type", "asset_name", "quantity", "price", "market_value")
+    list_display = (
+        "snapshot",
+        "account",
+        "asset_type",
+        "asset_name",
+        "quantity",
+        "price",
+        "price_as_of",
+        "price_source",
+        "pricing_status",
+        "fx_rate",
+        "fx_rate_as_of",
+        "market_value",
+    )
     list_filter = ("asset_type", "currency", "snapshot__snapshot_date")
     search_fields = ("asset_name", "security__symbol", "account__bank_account__account_name")
 

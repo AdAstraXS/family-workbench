@@ -1166,8 +1166,17 @@ class PortfolioSnapshotPositionLine(models.Model):
     asset_name = models.CharField("资产名称", max_length=200)
     quantity = models.DecimalField("数量", max_digits=24, decimal_places=6, default=0)
     price = models.DecimalField("快照价格", max_digits=20, decimal_places=6, default=0)
+    price_as_of = models.DateField("价格日期", null=True, blank=True)
+    price_source = models.CharField("价格来源", max_length=30, blank=True)
+    pricing_status = models.CharField(
+        "价格状态",
+        max_length=30,
+        choices=PricingStatusChoices.choices,
+        blank=True,
+    )
     currency = models.CharField("原币", max_length=10)
     fx_rate = models.DecimalField("折算汇率", max_digits=20, decimal_places=8, default=1)
+    fx_rate_as_of = models.DateField("汇率日期", null=True, blank=True)
     market_value_original = models.DecimalField("原币市值", max_digits=20, decimal_places=4, default=0)
     market_value = models.DecimalField("本位币市值", max_digits=20, decimal_places=4, default=0)
     cost_original = models.DecimalField("原币成本", max_digits=20, decimal_places=4, default=0)

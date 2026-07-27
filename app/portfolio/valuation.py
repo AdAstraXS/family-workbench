@@ -29,6 +29,12 @@ class PriceResolution:
     record: SecurityPriceRecord | None = None
 
 
+@dataclass
+class ExchangeRateResolution:
+    rate: Decimal | None
+    rate_as_of: date | None = None
+
+
 def _observation_status(config, source, price_as_of, reference_time):
     if not price_as_of:
         return PricingStatusChoices.MISSING
@@ -165,31 +171,41 @@ def refresh_position_valuations(*, security_ids=None, on_date=None):
     return positions
 
 
-def exchange_rate(source, target, on_date=None):
+def resolve_exchange_rate(source, target, on_date=None):
     source, target = source.upper(), target.upper()
+    rate_date = on_date or date.today()
     if source == target:
-        return Decimal("1")
-    rates = ExchangeRate.objects.filter(rate_date__lte=on_date or date.today())
+        return ExchangeRateResolution(Decimal("1"), rate_date)
+    rates = ExchangeRate.objects.filter(rate_date__lte=rate_date)
 
     def latest(base, quote):
-        item = (
+        return (
             rates.filter(base_currency=base, quote_currency=quote)
             .order_by("-rate_date")
             .first()
         )
-        return item.rate if item else None
 
     direct = latest(source, target)
     if direct is not None:
-        return direct
+        return ExchangeRateResolution(direct.rate, direct.rate_date)
     inverse = latest(target, source)
-    if inverse:
-        return Decimal("1") / inverse
+    if inverse and inverse.rate:
+        return ExchangeRateResolution(
+            Decimal("1") / inverse.rate,
+            inverse.rate_date,
+        )
     source_cny = latest(source, "CNY")
     target_cny = latest(target, "CNY")
     if source_cny and target_cny:
-        return source_cny / target_cny
-    return None
+        return ExchangeRateResolution(
+            source_cny.rate / target_cny.rate,
+            min(source_cny.rate_date, target_cny.rate_date),
+        )
+    return ExchangeRateResolution(None)
+
+
+def exchange_rate(source, target, on_date=None):
+    return resolve_exchange_rate(source, target, on_date).rate
 
 
 def convert_currency(amount, source, target, on_date=None):

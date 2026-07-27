@@ -15,6 +15,7 @@
   <div class="quick-actions">
     <a class="button ghost" href="{% url 'portfolio:account_list' %}">证券账户和持仓</a>
     <a class="button ghost" href="{% url 'portfolio:security_list' %}">自选股</a>
+    <a class="button ghost" href="{% url 'portfolio:snapshot_list' %}">快照审计</a>
     {% if can_reconcile %}
       <a class="button ghost" href="{% url 'portfolio:reconciliation_preview' %}">月底差额对齐</a>
     {% endif %}

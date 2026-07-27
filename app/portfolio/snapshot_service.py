@@ -1,6 +1,8 @@
+from datetime import datetime
 from decimal import Decimal
 
 from django.db import transaction
+from django.utils import timezone
 
 from ledger.models import AssetBalanceSnapshot
 
@@ -11,16 +13,25 @@ from .models import PortfolioSnapshot, PortfolioSnapshotPositionLine
 ZERO = Decimal("0")
 
 
+def _audit_date(value):
+    if isinstance(value, datetime):
+        if timezone.is_aware(value):
+            value = timezone.localtime(value)
+        return value.date()
+    return value
+
+
 class IncompletePortfolioSnapshotError(ValueError):
     def __init__(self, snapshot_date, valuation):
         self.snapshot_date = snapshot_date
         self.valuation = valuation
         missing = len(valuation["missing_prices"])
+        stale = len(valuation["stale_prices"])
         rates = len(valuation["missing_rates"])
         errors = len(valuation["errors"])
         super().__init__(
             f"{snapshot_date} 估值不完整："
-            f"缺价 {missing}、缺汇率 {rates}、流水错误 {errors}。"
+            f"缺价 {missing}、过期 {stale}、缺汇率 {rates}、流水错误 {errors}。"
         )
 
 
@@ -79,8 +90,12 @@ def create_portfolio_snapshot(
             asset_name=f"{row['currency']} 现金",
             quantity=row["amount"] or ZERO,
             price=Decimal("1"),
+            price_as_of=snapshot_date,
+            price_source="cash",
+            pricing_status="fresh",
             currency=row["currency"],
             fx_rate=row["fx_rate"],
+            fx_rate_as_of=row.get("fx_rate_as_of"),
             market_value_original=row["amount"] or ZERO,
             market_value=row["converted"],
             cost_original=row["amount"] or ZERO,
@@ -98,8 +113,12 @@ def create_portfolio_snapshot(
             asset_name=position.security.name,
             quantity=position.quantity,
             price=position.price,
+            price_as_of=_audit_date(position.price_as_of),
+            price_source=position.price_source,
+            pricing_status=position.pricing_status,
             currency=position.security.currency,
             fx_rate=position.fx_rate,
+            fx_rate_as_of=_audit_date(position.fx_rate_as_of),
             market_value_original=position.market_value_original,
             market_value=position.market_value,
             cost_original=position.cost_original,

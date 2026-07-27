@@ -99,6 +99,8 @@ def page_navigation(request):
     if app_name == "portfolio":
         if url_name == "overview":
             parent_url = reverse("dashboard:home")
+        elif url_name == "snapshot_detail":
+            parent_url = reverse("portfolio:snapshot_list")
         elif url_name in {"transaction_create", "transaction_edit"}:
             from portfolio.models import InvestmentAccount, InvestmentTransaction
 

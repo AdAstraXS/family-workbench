@@ -22,7 +22,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--require-complete",
             action="store_true",
-            help="存在缺价、缺汇率或流水错误时停止，不写入快照。",
+            help="存在缺价、过期价格、缺汇率或流水错误时停止，不写入快照。",
         )
 
     def handle(self, *args, **options):
