@@ -159,6 +159,24 @@ def page_navigation(request):
             parent_url = reverse("notes:index")
         return {"page_parent_url": parent_url}
 
+    if app_name == "knowledge":
+        if url_name == "index":
+            parent_url = reverse("dashboard:home")
+        elif url_name in {
+            "microsoft_start",
+            "microsoft_callback",
+            "notebooks_refresh",
+            "notebook_select",
+        }:
+            parent_url = reverse("knowledge:sources")
+        elif url_name in {"document_detail", "document_organize"}:
+            parent_url = reverse("knowledge:library")
+        elif url_name in {"job_detail", "job_cancel", "job_retry"}:
+            parent_url = reverse("knowledge:jobs")
+        else:
+            parent_url = reverse("knowledge:index")
+        return {"page_parent_url": parent_url}
+
     return {"page_parent_url": reverse("dashboard:home")}
 
 

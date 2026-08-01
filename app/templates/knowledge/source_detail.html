@@ -1,0 +1,93 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}{{ source.name }} · 来源详情{% endblock %}
+
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:sources' %}">来源与同步</a><span aria-hidden="true">›</span><span>{{ source.name|truncatechars:24 }}</span>{% endblock %}
+
+{% block hub_content %}
+<section class="headline knowledge-headline">
+  <div>
+    <span class="eyebrow">{{ source.get_kind_display }}</span>
+    <h1>{{ source.name }}</h1>
+    <p>原文自动同步；摘要、标签和分类建议仍需人工确认。</p>
+  </div>
+  <span class="status-pill status-{{ source.status }}">{{ source.get_status_display }}</span>
+</section>
+
+<section class="grid two">
+  <article class="panel">
+    <h2>来源状态</h2>
+    <dl class="knowledge-metadata">
+      <div><dt>所有者</dt><dd>{{ source.owner|default:"家庭内部来源" }}</dd></div>
+      <div><dt>可见范围</dt><dd>{{ source.get_visibility_display }}</dd></div>
+      <div><dt>文档数量</dt><dd>{{ document_count }}</dd></div>
+      <div><dt>最近同步</dt><dd>{{ source.last_sync_at|date:"Y-m-d H:i"|default:"尚未同步" }}</dd></div>
+      <div><dt>最近完整对账</dt><dd>{{ source.last_reconciled_at|date:"Y-m-d H:i"|default:"尚未对账" }}</dd></div>
+      <div><dt>云端 AI</dt><dd>{% if source.allow_cloud_ai %}已由所有者允许{% else %}未授权发送正文{% endif %}</dd></div>
+    </dl>
+    {% if source.last_error %}<div class="notice warning">{{ source.last_error }}</div>{% endif %}
+    {% if can_manage and source.kind == "onenote" %}
+      <div class="knowledge-source-actions">
+        <form method="post" action="{% url 'knowledge:source_sync' source.pk %}">
+          {% csrf_token %}
+          <label class="checkbox-label"><input type="checkbox" name="full_reconcile"><span>同时完整对账来源删除状态</span></label>
+          <button class="button primary" type="submit">创建同步任务</button>
+        </form>
+        <form method="post" action="{% url 'knowledge:source_generate_proposals' source.pk %}">
+          {% csrf_token %}
+          <button class="button" type="submit"{% if not source.allow_cloud_ai %} disabled{% endif %}>创建 AI 整理任务</button>
+        </form>
+      </div>
+    {% endif %}
+  </article>
+
+  <article class="panel">
+    <h2>来源设置</h2>
+    {% if can_change_settings %}
+      <form method="post" action="{% url 'knowledge:source_update' source.pk %}" class="stacked-form">
+        {% csrf_token %}
+        <label>
+          <span>新同步文档默认可见范围</span>
+          <select class="form-control" name="visibility">
+            <option value="family"{% if source.visibility == "family" %} selected{% endif %}>家庭可见</option>
+            <option value="private"{% if source.visibility == "private" %} selected{% endif %}>仅自己</option>
+          </select>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" name="allow_cloud_ai"{% if source.allow_cloud_ai %} checked{% endif %}>
+          <span>允许向已配置的云端 AI 发送该来源正文</span>
+        </label>
+        <small>修改默认可见范围只影响以后新同步的文档，不会静默批量改变已有内容。</small>
+        <button class="button" type="submit">保存来源设置</button>
+      </form>
+    {% else %}
+      <p>只有来源所有者可以修改可见范围和云端 AI 授权；家庭管理员只能查看健康状态和运行任务。</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <h2>最近任务</h2>
+    <a class="button" href="{% url 'knowledge:jobs' %}">查看全部</a>
+  </div>
+  <table>
+    <thead><tr><th>时间</th><th>任务</th><th>状态</th><th>新增</th><th>更新</th><th>跳过</th><th>失败</th></tr></thead>
+    <tbody>
+      {% for job in recent_jobs %}
+        <tr>
+          <td><a href="{% url 'knowledge:job_detail' job.pk %}">{{ job.created_at|date:"Y-m-d H:i" }}</a></td>
+          <td>{{ job.get_job_type_display }}</td>
+          <td>{{ job.get_status_display }}</td>
+          <td>{{ job.success_count }}</td>
+          <td>{{ job.updated_count }}</td>
+          <td>{{ job.skipped_count }}</td>
+          <td>{{ job.failed_count }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7">暂无任务。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

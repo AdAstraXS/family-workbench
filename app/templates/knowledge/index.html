@@ -1,0 +1,93 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}知识列表 · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>知识列表</span>{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-page-heading">
+  <div>
+    <span class="eyebrow">Library / Catalog</span>
+    <h1>知识列表</h1>
+    <p>{{ page_description }}</p>
+  </div>
+  <a class="button" href="{% url 'knowledge:topics' %}">按主题浏览</a>
+</section>
+
+<nav class="knowledge-kind-tabs" aria-label="知识类型">
+  <a href="?kind=all&amp;member={{ selected_member }}"{% if selected_kind == "all" %} class="active"{% endif %}>全部</a>
+  <a href="?kind=notes&amp;member={{ selected_member }}"{% if selected_kind == "notes" %} class="active"{% endif %}>个人笔记</a>
+  <a href="?kind=external&amp;member={{ selected_member }}"{% if selected_kind == "external" %} class="active"{% endif %}>外部文章</a>
+  <a href="{% url 'knowledge:people' %}">人物动态 <small>待接入</small></a>
+  <a href="{% url 'reading:index' %}">图书批注 <small>规划中</small></a>
+</nav>
+
+<section class="panel knowledge-search-panel">
+  <form method="get" class="knowledge-library-form">
+    <input type="hidden" name="kind" value="{{ selected_kind }}">
+    <div class="knowledge-library-primary-filter">
+      <label class="knowledge-search-main">
+        <span>搜索标题、正文、摘要、标签、作者和来源</span>
+        <input class="form-control" type="search" name="q" value="{{ query }}" placeholder="例如：英伟达估值、风险控制、利率周期">
+      </label>
+      <label>
+        <span>成员</span>
+        <select class="form-control" name="member">
+          {% for member in family_members %}
+            <option value="{{ member.pk }}"{% if selected_member == member.pk|stringformat:"s" %} selected{% endif %}>{{ member.display_name }}{% if member.pk == current_member.pk %}（当前账号）{% endif %}</option>
+          {% endfor %}
+          <option value="all"{% if selected_member == "all" %} selected{% endif %}>全部成员</option>
+        </select>
+      </label>
+      <button class="button primary" type="submit">查找</button>
+    </div>
+
+    <details class="knowledge-advanced-filter"{% if selected_source or selected_status or selected_tag or selected_author or date_from or date_to or scope != "all" %} open{% endif %}>
+      <summary>高级筛选 <span>来源、人物、标签、日期、状态与可见范围</span></summary>
+      <div class="knowledge-advanced-filter-grid">
+        <label>
+          <span>来源</span>
+          <select class="form-control" name="source">
+            <option value="">全部来源</option>
+            {% for source in source_choices %}<option value="{{ source.source_kind }}"{% if selected_source == source.source_kind %} selected{% endif %}>{{ source.source_name }}（{{ source.total }}）</option>{% endfor %}
+          </select>
+        </label>
+        <label><span>人物或作者</span><input class="form-control" type="text" name="person" value="{{ selected_author }}" placeholder="输入姓名"></label>
+        <label><span>标签</span><input class="form-control" type="text" name="tag" value="{{ selected_tag }}" placeholder="精确标签"></label>
+        <label><span>开始日期</span><input class="form-control" type="date" name="date_from" value="{{ date_from }}"></label>
+        <label><span>结束日期</span><input class="form-control" type="date" name="date_to" value="{{ date_to }}"></label>
+        <label>
+          <span>整理状态</span>
+          <select class="form-control" name="status">
+            <option value="">全部状态</option>
+            {% for value, label in curation_choices %}<option value="{{ value }}"{% if selected_status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>可见范围</span>
+          <select class="form-control" name="scope">
+            <option value="all"{% if scope == "all" %} selected{% endif %}>不限</option>
+            <option value="personal"{% if scope == "personal" %} selected{% endif %}>仅自己</option>
+            <option value="family"{% if scope == "family" %} selected{% endif %}>家庭共享</option>
+          </select>
+        </label>
+        <div class="knowledge-filter-actions">
+          <button class="button primary" type="submit">应用筛选</button>
+          <a class="button" href="{% url 'knowledge:library' %}">清空</a>
+        </div>
+      </div>
+    </details>
+  </form>
+</section>
+
+<aside class="knowledge-list-explainer">
+  <strong>这个页面的作用</strong>
+  <span>它是统一知识目录：首页负责提醒今天要做什么，动态收件箱负责处理新内容，人工确认页负责核对 AI 建议，人物页按人物组织时间线；这些视图最终都打开这里的同一知识条目和详情。</span>
+</aside>
+
+<section class="knowledge-result-list" aria-label="知识列表结果">
+  {% for entry in page_obj %}{% include "knowledge/_entry_card.html" %}
+  {% empty %}<div class="panel empty-state"><h2>当前范围没有匹配内容</h2><p>默认只显示当前登录成员的知识；可以切换成员为“全部成员”，或调整高级筛选。</p></div>{% endfor %}
+</section>
+
+{% include "knowledge/_pagination.html" %}
+{% endblock %}

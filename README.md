@@ -23,6 +23,11 @@ python -c "import secrets; print(secrets.token_urlsafe(64))"
 `https://ark.cn-beijing.volces.com/api/v3` 的
 `doubao-seed-2-0-lite-260215`，可在 Django 后台的“AI 服务商”中调整模型。
 
+家庭知识底座还需要单独配置 Microsoft 委托授权和令牌加密。完整步骤见
+[`docs/knowledge-v1-operations.md`](docs/knowledge-v1-operations.md)。其中
+`KNOWLEDGE_TOKEN_ENCRYPTION_KEY` 只能保存在部署环境；更换或丢失密钥会导致已有成员连接无法
+解密，不能把开发环境自动生成的临时密钥带到生产环境。
+
 2. 启动容器：
 
 ```bash
@@ -69,7 +74,8 @@ docker compose logs --tail=100 web
 
 ## 迁移现有数据
 
-现有 PostgreSQL 数据、上传文件和代码是三类独立内容。Git 只用于代码；真实账本数据和密钥不进入仓库。
+现有 PostgreSQL 数据、普通上传文件、知识原文文件和代码是四类独立内容。Git 只用于代码；
+真实账本、知识原文和密钥不进入仓库。
 
 在旧设备导出数据库：
 
@@ -77,7 +83,8 @@ docker compose logs --tail=100 web
 docker compose exec -T db pg_dump -U family_finance_user -d family_finance -Fc > family_finance.dump
 ```
 
-把 `family_finance.dump` 和项目根目录的 `media/` 通过受信任的局域网或加密方式复制到 NAS。NAS 上启动数据库后恢复：
+把 `family_finance.dump`、项目根目录的 `media/` 和 `knowledge_files/` 通过受信任的局域网
+或加密方式复制到 NAS。NAS 上启动数据库后恢复：
 
 ```bash
 docker compose exec -T db pg_restore -U family_finance_user -d family_finance --clean --if-exists < family_finance.dump
@@ -92,6 +99,7 @@ docker compose exec -T web python manage.py migrate
 
 - PostgreSQL 逻辑备份（`pg_dump -Fc`）。
 - `media/` 上传文件。
+- `knowledge_files/` 中的 OneNote 原文和受保护附件，并与数据库备份记录为同一个恢复点。
 - NAS 上的 `.env`（加密保存）。
 
 升级代码前先备份数据库，然后执行：

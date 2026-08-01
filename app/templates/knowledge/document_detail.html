@@ -1,0 +1,83 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}{{ document.title }} · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:library' %}">知识列表</a><span aria-hidden="true">›</span><span>{{ document.title|truncatechars:24 }}</span>{% endblock %}
+
+{% block hub_content %}
+<article class="knowledge-document-layout">
+  <section class="knowledge-document-reading">
+    <header class="knowledge-document-header">
+      <div class="knowledge-card-meta">
+        <span class="knowledge-content-label original">原文</span>
+        <span>{{ document.author|default:"作者未标注" }}</span>
+        <span>{{ document.content_modified_at|date:"Y-m-d"|default:"日期未知" }}</span>
+        <span>{{ document.source.name }}</span>
+      </div>
+      <h1>{{ document.title }}</h1>
+      <div class="knowledge-document-actions">
+        {% if document.source_url %}<a class="button" href="{{ document.source_url }}" rel="noopener noreferrer" target="_blank">打开原文链接</a>{% endif %}
+        {% if revision %}<a class="button" href="{% url 'knowledge:revision_raw_download' revision.pk %}">下载原始版本</a>{% endif %}
+        {% if can_organize %}<a class="button primary" href="{% url 'knowledge:document_organize' document.pk %}">人工整理</a>{% endif %}
+      </div>
+    </header>
+
+    {% if document.confirmed_summary %}
+      <aside class="knowledge-confirmed-summary">
+        <span class="knowledge-content-label confirmed">人工确认结果</span>
+        <strong>已确认摘要</strong>
+        <p>{{ document.confirmed_summary|linebreaksbr }}</p>
+        {% for proposal in proposals %}{% if proposal.proposal_type == "summary" and proposal.status == "accepted" and proposal.confirmed_by %}<small>由 {{ proposal.confirmed_by }} 于 {{ proposal.confirmed_at|date:"Y-m-d H:i" }} 确认</small>{% endif %}{% endfor %}
+      </aside>
+    {% endif %}
+
+    <div class="knowledge-original-label"><span>原始正文</span><strong>同步版本 v{{ revision.revision_number|default:"-" }} · AI 无权修改</strong></div>
+    <div class="knowledge-rich-content">
+      {% if revision %}{{ revision.normalized_html|safe }}{% else %}<p>正文尚未同步成功。</p>{% endif %}
+    </div>
+
+    <section class="knowledge-related-placeholder">
+      <header><span class="eyebrow">Connections</span><h2>相关知识</h2></header>
+      <p>相关内容和反向链接将在关系模型完成后按权限计算；当前不根据关键词伪造关联。</p>
+    </section>
+  </section>
+
+  <aside class="knowledge-detail-sidebar">
+    <section class="panel knowledge-property-panel">
+      <header><span class="eyebrow">Properties</span><h2>文档信息</h2></header>
+      <dl class="knowledge-property-list">
+        <div><dt>来源</dt><dd>{{ document.source.name }}</dd></div>
+        <div><dt>所属成员</dt><dd>{{ document.owner|default:"已转交家庭" }}</dd></div>
+        <div><dt>可见范围</dt><dd>{{ document.get_visibility_display }}</dd></div>
+        <div><dt>分类</dt><dd>{{ document.category|default:"未确认" }}</dd></div>
+        <div><dt>确认状态</dt><dd><span class="status-pill status-{{ document.curation_status }}">{{ document.get_curation_status_display }}</span></dd></div>
+        <div><dt>来源修改</dt><dd>{{ document.content_modified_at|date:"Y-m-d H:i"|default:"-" }}</dd></div>
+        <div><dt>同步版本</dt><dd>{% if revision %}v{{ revision.revision_number }} · {{ revision.created_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</dd></div>
+        <div><dt>相关人物</dt><dd>{{ document.author|default:"待识别" }}</dd></div>
+      </dl>
+      {% if document.sync_status == "source_deleted" %}<p class="notice warning">来源已删除或不可访问；NAS 已保存副本继续保留。</p>{% endif %}
+      {% if document.category or document.tags %}<div class="knowledge-tags">{% if document.category %}<span>{{ document.category }}</span>{% endif %}{% for tag in document.tags %}<a href="{% url 'knowledge:library' %}?tag={{ tag|urlencode }}">#{{ tag }}</a>{% endfor %}</div>{% endif %}
+    </section>
+
+    <section class="panel knowledge-ai-panel">
+      <header><span class="knowledge-content-label ai">AI 建议</span><h2>整理建议</h2><p>黄色状态表示尚未确认；每项建议绑定当前原文版本。</p></header>
+      {% for proposal in proposals %}
+        <article class="proposal-card status-{{ proposal.status }}">
+          <header><strong>{{ proposal.get_proposal_type_display }}</strong><span class="status-pill status-{{ proposal.status }}">{{ proposal.get_status_display }}</span></header>
+          <div class="proposal-value">{% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}</div>
+          <small>{{ proposal.model_name }} · {{ proposal.prompt_version }} · {{ proposal.created_at|date:"Y-m-d H:i" }}</small>
+          {% if proposal.status == "pending" and can_organize %}
+            <form method="post" action="{% url 'knowledge:proposal_review' proposal.pk %}" class="proposal-form">
+              {% csrf_token %}
+              <textarea class="form-control" name="value" rows="{% if proposal.proposal_type == 'summary' %}6{% else %}2{% endif %}">{% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}</textarea>
+              <div><button class="button primary" type="submit" name="action" value="accept">修改并确认</button><button class="button danger-outline" type="submit" name="action" value="reject">拒绝</button></div>
+            </form>
+          {% elif proposal.confirmed_by %}<small>由 {{ proposal.confirmed_by }} 于 {{ proposal.confirmed_at|date:"Y-m-d H:i" }} 处理</small>{% endif %}
+        </article>
+      {% empty %}<div class="empty-state compact"><p>当前版本还没有 AI 建议。可以直接人工整理，或由来源所有者创建 AI 任务。</p></div>{% endfor %}
+      {% if proposals %}<a class="button knowledge-review-entry" href="{% url 'knowledge:review' %}?document={{ document.pk }}">进入左右对照确认</a>{% endif %}
+    </section>
+
+    <section class="knowledge-detail-future"><strong>评论与反向链接 · 后续</strong><p>家庭评论、相关知识、反向链接和人物关系将在权限与关系模型完成后接入。</p></section>
+  </aside>
+</article>
+{% endblock %}

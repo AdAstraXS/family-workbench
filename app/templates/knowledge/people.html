@@ -1,0 +1,54 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}关注人物 · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>关注人物</span>{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-page-heading">
+  <div><span class="eyebrow">People & timeline</span><h1>关注人物</h1><p>人物主页与时间线的第一版骨架；当前只展示知识中已有的作者，不把作者自动认定为“已关注人物”。</p></div>
+  <span class="status-pill">人物连接器待接入</span>
+</section>
+
+<section class="knowledge-people-layout">
+  <aside class="knowledge-people-directory">
+    <header><span class="eyebrow">Directory</span><h2>知识中出现的作者</h2></header>
+    <nav aria-label="已有作者">
+      {% for item in authors %}
+        <a href="?person={{ item.author_name|urlencode }}"{% if selected_person == item.author_name %} class="active"{% endif %}><span>{{ item.author_name }}</span><strong>{{ item.total }}</strong></a>
+      {% empty %}<div class="knowledge-gentle-empty"><span>同步或导入含作者信息的资料后，这里会出现待治理的作者。</span></div>{% endfor %}
+    </nav>
+  </aside>
+
+  <article class="knowledge-person-profile">
+    {% if selected_person %}
+      <header class="knowledge-person-heading">
+        <div><span class="eyebrow">Author found in knowledge</span><h2>{{ selected_person }}</h2><p>尚未登记官方来源、机构身份和关注主题，因此不能把下列内容默认视为本人直接发言。</p></div>
+        <span class="status-pill warning">身份待核验</span>
+      </header>
+      <nav class="knowledge-person-filters" aria-label="人物动态类型">
+        <span class="active">全部</span><span>本人发帖 · 待接入</span><span>采访 · 待接入</span><span>演讲 · 待接入</span><span>机构动态 · 待接入</span><span>媒体报道 · 待接入</span>
+      </nav>
+      <div class="knowledge-person-timeline">
+        {% for entry in timeline %}
+          <article>
+            <time>{% if entry.content_time %}{{ entry.content_time|date:"Y-m-d" }}{% else %}日期未知{% endif %}</time>
+            <div><span class="status-pill">来源身份待核验</span><h3><a href="{{ entry.target_url }}">{{ entry.title }}</a></h3><p>{{ entry.hit_snippet|truncatechars:180 }}</p><small>{{ entry.source_name }} · 所属成员 {{ entry.owner.display_name }}</small></div>
+          </article>
+        {% empty %}<div class="knowledge-gentle-empty"><span>没有与该作者精确匹配的可见知识。</span></div>{% endfor %}
+      </div>
+    {% else %}
+      <div class="knowledge-person-empty">
+        <span class="knowledge-hub-brand-mark" aria-hidden="true">人</span>
+        <h2>选择作者查看已有内容</h2>
+        <p>正式“关注人物”将在人物身份、官方来源与来源等级模型完成后开放。马斯克、黄仁勋、奥特曼等不会以演示数据预先写入。</p>
+      </div>
+    {% endif %}
+  </article>
+</section>
+
+<section class="knowledge-source-identity-guide">
+  <header><span class="eyebrow">Source identity</span><h2>正式接入必须清楚区分</h2></header>
+  <div><span class="direct">本人直接发言</span><span class="institution">所属机构发布</span><span class="interview">采访或演讲原文</span><span class="media">媒体转述</span><span class="ai">AI 提炼观点</span></div>
+  <p>AI 提炼必须带来源引用和醒目标记，不能用引号或人物口吻冒充原话；抓取前还需确认官方或授权来源、版权、频率、去重和正文保存范围。</p>
+</section>
+{% endblock %}

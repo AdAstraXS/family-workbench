@@ -1,0 +1,27 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}交易复盘 · 家庭知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>交易复盘</span>{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-page-heading">
+  <div><span class="eyebrow">独立模块 · 规划中</span><h1>交易日志、纪律与复盘</h1><p>把交易事实与主观复盘分开：流水继续由 portfolio 负责，交易日志只引用事实并记录计划、纪律和偏差。</p></div>
+  <span class="status-pill">尚未开放业务功能</span>
+</section>
+
+<section class="trading-journal-flow">
+  <article><span>01</span><strong>交易前</strong><p>逻辑、信息来源、退出条件和风险预算。</p></article>
+  <article><span>02</span><strong>交易中</strong><p>执行变化、情绪和是否遵守纪律。</p></article>
+  <article><span>03</span><strong>交易后</strong><p>结果、偏差、可复制经验和待改进事项。</p></article>
+  <article><span>04</span><strong>长期复盘</strong><p>按策略、情绪和纪律版本回看历史案例。</p></article>
+</section>
+
+<section class="knowledge-roadmap-grid">
+  <article class="knowledge-roadmap-card"><span>事实引用</span><h2>交易案例</h2><ul><li>关联 portfolio 中真实交易和持仓</li><li>不复制成交金额、费用和盈亏</li><li>支持一次策略对应多笔交易</li><li>引用行情和研究资料版本</li></ul></article>
+  <article class="knowledge-roadmap-card"><span>纪律</span><h2>纪律版本</h2><ul><li>从现有 OneNote 纪律整理起步</li><li>保留生效日期和历史版本</li><li>案例记录当时适用的纪律版本</li><li>修订不反向改写历史判断</li></ul></article>
+  <article class="knowledge-roadmap-card"><span>复盘</span><h2>偏差与情绪</h2><ul><li>计划与实际执行对照</li><li>交易情绪和认知偏差</li><li>退出条件是否被遵守</li><li>区分运气、过程和结果</li></ul></article>
+  <article class="knowledge-roadmap-card"><span>知识沉淀</span><h2>进入知识底座</h2><ul><li>复盘结论可统一搜索</li><li>关联策略、人物和研究资料</li><li>AI 只建议，不自动裁定纪律</li><li>保留交易事实与复盘引用</li></ul></article>
+</section>
+
+<aside class="knowledge-planning-note"><strong>实现前注意</strong><p>交易逻辑、情绪、退出条件和备注仍是交易事实的上下文，不能从 portfolio 删除；trading_journal 负责纪律、案例组织和复盘，不得创建第二套交易流水。</p></aside>
+{% endblock %}

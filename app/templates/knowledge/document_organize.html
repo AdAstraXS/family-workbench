@@ -1,0 +1,29 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}人工整理 · {{ document.title }}{% endblock %}
+
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:document_detail' document.pk %}">{{ document.title|truncatechars:20 }}</a><span aria-hidden="true">›</span><span>人工整理</span>{% endblock %}
+
+{% block hub_content %}
+<section class="headline">
+  <h1>人工整理</h1>
+  <p>{{ document.title }}</p>
+</section>
+<section class="panel form-panel">
+  <form method="post" class="stacked-form">
+    {% csrf_token %}
+    {% for field in form %}
+      <label>
+        <span>{{ field.label }}</span>
+        {{ field }}
+        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+        {% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+      </label>
+    {% endfor %}
+    <div class="form-actions">
+      <button class="button primary" type="submit">保存正式整理结果</button>
+      <a class="button" href="{% url 'knowledge:document_detail' document.pk %}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

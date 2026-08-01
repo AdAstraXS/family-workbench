@@ -1,0 +1,46 @@
+<nav class="knowledge-hub-nav" aria-label="知识产品导航">
+  <section>
+    <h2>知识空间</h2>
+    <a href="{% url 'knowledge:index' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "index" %} class="active"{% endif %}>
+      <span aria-hidden="true">总</span><strong>总览</strong>
+    </a>
+    <a href="{% url 'knowledge:review' %}"{% if request.resolver_match.app_name == "knowledge" and "review" in request.resolver_match.url_name or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "proposal_bulk_preview" or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "proposal_bulk_apply" %} class="active"{% endif %}>
+      <span aria-hidden="true">审</span><strong>待人工确认</strong>
+    </a>
+    <a href="{% url 'knowledge:library' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "library" or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "document_detail" or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "document_organize" %} class="active"{% endif %}>
+      <span aria-hidden="true">知</span><strong>知识列表</strong>
+    </a>
+    <a href="{% url 'knowledge:inbox' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "inbox" %} class="active"{% endif %}>
+      <span aria-hidden="true">收</span><strong>动态收件箱</strong>
+    </a>
+    <a href="{% url 'knowledge:people' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "people" %} class="active"{% endif %}>
+      <span aria-hidden="true">人</span><strong>关注人物</strong><small>待接入</small>
+    </a>
+    <a href="{% url 'reading:index' %}"{% if request.resolver_match.app_name == "reading" %} class="active"{% endif %}>
+      <span aria-hidden="true">读</span><strong>在线书库</strong><small>规划中</small>
+    </a>
+    <a href="{% url 'knowledge:topics' %}"{% if request.resolver_match.url_name == "topics" %} class="active"{% endif %}>
+      <span aria-hidden="true">题</span><strong>主题与标签</strong>
+    </a>
+  </section>
+
+  <section>
+    <h2>专题模块</h2>
+    <a href="{% url 'trading_journal:index' %}"{% if request.resolver_match.app_name == "trading_journal" %} class="active"{% endif %}>
+      <span aria-hidden="true">复</span><strong>交易复盘</strong><small>规划中</small>
+    </a>
+  </section>
+
+  <section>
+    <h2>来源与管理</h2>
+    <a href="{% url 'knowledge:sources' %}"{% if request.resolver_match.app_name == "knowledge" and "source" in request.resolver_match.url_name or request.resolver_match.app_name == "knowledge" and "microsoft" in request.resolver_match.url_name or request.resolver_match.app_name == "knowledge" and "notebook" in request.resolver_match.url_name %} class="active"{% endif %}>
+      <span aria-hidden="true">源</span><strong>来源与同步</strong>
+    </a>
+    <a href="{% url 'knowledge:jobs' %}"{% if request.resolver_match.app_name == "knowledge" and "job" in request.resolver_match.url_name %} class="active"{% endif %}>
+      <span aria-hidden="true">任</span><strong>任务记录</strong>
+    </a>
+    <a href="{% url 'knowledge:architecture' %}"{% if request.resolver_match.url_name == "architecture" %} class="active"{% endif %}>
+      <span aria-hidden="true">界</span><strong>规划与边界</strong>
+    </a>
+  </section>
+</nav>

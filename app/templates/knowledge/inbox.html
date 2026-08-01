@@ -1,0 +1,37 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}动态收件箱 · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>动态收件箱</span>{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-page-heading">
+  <div><span class="eyebrow">Feed</span><h1>动态收件箱</h1><p>外部内容先在这里等待判断；只有确认值得长期保存后，才进入正式资料库。</p></div>
+  <a class="button" href="{% url 'knowledge:review' %}">处理 AI 建议</a>
+</section>
+
+<section class="knowledge-inbox-guide">
+  <div><strong>当前阶段</strong><span>OneNote 同步资料</span></div><i>→</i>
+  <div><strong>整理辅助</strong><span>摘要、去重、分类建议</span></div><i>→</i>
+  <div><strong>由你决定</strong><span>保留、忽略、稍后处理</span></div><i>→</i>
+  <div><strong>长期沉淀</strong><span>个人或家庭资料库</span></div>
+</section>
+
+<nav class="knowledge-status-filter" aria-label="收件箱状态筛选">
+  <a href="{% url 'knowledge:inbox' %}"{% if not selected_status %} class="active"{% endif %}>全部</a>
+  {% for item in curation_filters %}
+    <a href="?status={{ item.value }}"{% if selected_status == item.value %} class="active"{% endif %}>{{ item.label }} <span>{{ item.total }}</span></a>
+  {% endfor %}
+</nav>
+
+<section class="knowledge-result-list" aria-label="待整理资料">
+  {% for entry in page_obj %}{% include "knowledge/_entry_card.html" %}
+  {% empty %}<div class="panel empty-state"><h2>当前收件箱为空</h2><p>人物动态、网页订阅等自动来源将在后续连接器完成后进入这里，而不是直接进入正式知识库。</p></div>{% endfor %}
+</section>
+
+{% include "knowledge/_pagination.html" %}
+
+<aside class="knowledge-planning-note">
+  <strong>后续工作提醒</strong>
+  <p>人物动态接入前必须逐一确认官方或授权来源、版权、调用频率和全文保存范围；需要完成去重、来源等级和“保留/忽略/稍后处理”操作，不能抓到什么就直接入库。</p>
+</aside>
+{% endblock %}

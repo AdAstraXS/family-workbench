@@ -1,0 +1,31 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}批量确认预览 · 知识中心{% endblock %}
+
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:review' %}">待人工确认</a><span aria-hidden="true">›</span><span>批量预览</span>{% endblock %}
+
+{% block hub_content %}
+<section class="headline">
+  <h1>批量确认预览</h1>
+  <p>以下 {{ proposals|length }} 项将按 AI 原建议直接接受。需要修改的项目请返回原文逐项处理。</p>
+</section>
+<section class="panel">
+  <div class="proposal-list">
+    {% for proposal in proposals %}
+      <div class="proposal-list-row preview">
+        <span><strong>{{ proposal.document.title }}</strong><small>{{ proposal.get_proposal_type_display }} · v{{ proposal.revision.revision_number }}</small></span>
+        <span class="proposal-value">
+          {% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}
+        </span>
+      </div>
+    {% endfor %}
+  </div>
+  <form method="post" action="{% url 'knowledge:proposal_bulk_apply' %}" class="form-actions">
+    {% csrf_token %}
+    <input type="hidden" name="proposal_ids" value="{{ proposal_ids }}">
+    <input type="hidden" name="confirm" value="yes">
+    <button class="button primary" type="submit">确认接受这 {{ proposals|length }} 项</button>
+    <a class="button" href="{% url 'knowledge:review' %}">返回修改选择</a>
+  </form>
+</section>
+{% endblock %}

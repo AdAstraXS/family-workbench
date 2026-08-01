@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="knowledge-hub-shell">
+  <aside class="knowledge-hub-sidebar">
+    <a class="knowledge-hub-brand" href="{% url 'knowledge:index' %}">
+      <span class="knowledge-hub-brand-mark" aria-hidden="true">知</span>
+      <span><strong>家庭知识中心</strong><small>收集 · 阅读 · 整理 · 回顾</small></span>
+    </a>
+    {% include "knowledge_hub/sidebar.html" %}
+    <div class="knowledge-hub-principle">
+      <strong>知识保存原则</strong>
+      <span>原文长期保存在 NAS；AI 只提供建议，正式结果由家庭成员确认。</span>
+    </div>
+  </aside>
+
+  <section class="knowledge-hub-main">
+    <nav class="knowledge-breadcrumb" aria-label="面包屑">
+      <a href="{% url 'dashboard:home' %}">工作台</a>
+      <span aria-hidden="true">›</span>
+      <a href="{% url 'knowledge:index' %}">知识中心</a>
+      {% block hub_breadcrumb %}{% endblock %}
+    </nav>
+    {% block hub_content %}{% endblock %}
+  </section>
+</div>
+{% endblock %}

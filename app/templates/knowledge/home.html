@@ -1,0 +1,85 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}知识中心{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-home-hero">
+  <div>
+    <span class="eyebrow">家庭知识底座</span>
+    <h1>今天需要做什么？</h1>
+    <p>先处理新增和待确认，再继续阅读或回顾知识；运维入口放在次级区域。</p>
+  </div>
+  <div class="knowledge-home-commandbar">
+    <form method="get" action="{% url 'knowledge:library' %}" class="knowledge-global-search" role="search">
+      <label class="sr-only" for="knowledge-home-search">搜索家庭知识</label>
+      <input id="knowledge-home-search" type="search" name="q" placeholder="搜索家庭知识……">
+      <button type="submit">搜索</button>
+    </form>
+    <div class="knowledge-home-import-actions" aria-label="资料导入入口">
+      <span class="button disabled" aria-disabled="true" title="文件上传将在批量导入连接器完成后开放">上传资料</span>
+      <span class="button disabled" aria-disabled="true" title="Markdown 与 HTML 导入将在下一阶段开放">导入</span>
+    </div>
+  </div>
+</section>
+
+<section class="knowledge-home-shortcuts" aria-label="知识空间快捷入口">
+  <a href="{% url 'knowledge:library' %}"><span>我的知识</span><strong>{{ stats.total }}</strong><small>默认只看当前账号</small></a>
+  <a href="{% url 'knowledge:library' %}?date_from={% now 'Y-m-d' %}"><span>今日新增</span><strong>{{ stats.today_new }}</strong><small>今天首次进入索引</small></a>
+  <a href="{% url 'knowledge:review' %}"><span>AI 待确认</span><strong>{{ stats.pending_review }}</strong><small>逐条对照原文</small></a>
+  <a href="{% url 'knowledge:sources' %}"><span>同步异常</span><strong>{{ stats.source_errors }}</strong><small>账号失效与来源错误</small></a>
+</section>
+
+<section class="knowledge-home-grid">
+  <article class="knowledge-home-section knowledge-home-section-wide">
+    <header><div><span class="eyebrow">Today</span><h2>今日新增</h2></div><a href="{% url 'knowledge:inbox' %}">查看动态收件箱</a></header>
+    <div class="knowledge-flow-strip" aria-label="知识整理流程">
+      <span><strong>1</strong>自动进入</span><i aria-hidden="true">→</i>
+      <span><strong>2</strong>AI 建议</span><i aria-hidden="true">→</i>
+      <span><strong>3</strong>人工判断</span><i aria-hidden="true">→</i>
+      <span><strong>4</strong>进入知识列表</span>
+    </div>
+    <div class="knowledge-compact-list">
+      {% for entry in today_entries %}{% include "knowledge/_compact_entry.html" %}
+      {% empty %}<div class="knowledge-gentle-empty"><strong>今天还没有新内容</strong><span>新同步的外部内容会先进入动态收件箱，不会未经筛选直接成为正式知识。</span></div>{% endfor %}
+    </div>
+  </article>
+
+  <article class="knowledge-home-section">
+    <header><div><span class="eyebrow">Reading</span><h2>继续阅读</h2></div><a href="{% url 'reading:index' %}">打开在线书库</a></header>
+    <div class="knowledge-gentle-empty"><strong>尚未产生阅读进度</strong><span>reading 模块落地后，这里显示最近阅读的图书、章节和真实进度；不使用演示书籍伪造数据。</span></div>
+  </article>
+
+  <article class="knowledge-home-section">
+    <header><div><span class="eyebrow">长期保存</span><h2>最近确认</h2></div><a href="{% url 'knowledge:library' %}">知识列表</a></header>
+    <div class="knowledge-compact-list">
+      {% for entry in recent_confirmed %}{% include "knowledge/_compact_entry.html" %}
+      {% empty %}<div class="knowledge-gentle-empty"><span>人工确认后的摘要、分类和标签会与原文一起长期保留。</span></div>{% endfor %}
+    </div>
+  </article>
+
+  <article class="knowledge-home-section">
+    <header><div><span class="eyebrow">People</span><h2>关注人物的重要更新</h2></div><a href="{% url 'knowledge:people' %}">人物动态</a></header>
+    <div class="knowledge-gentle-empty"><strong>尚未接入关注人物来源</strong><span>接入前需核验本人、机构、采访和媒体转述来源，AI 摘要不会冒充原话。</span></div>
+  </article>
+
+  <article class="knowledge-home-section">
+    <header><div><span class="eyebrow">Recent</span><h2>最近更新</h2></div><a href="{% url 'knowledge:library' %}">知识列表</a></header>
+    <div class="knowledge-compact-list">
+      {% for entry in recent_entries %}{% include "knowledge/_compact_entry.html" %}
+      {% empty %}<div class="knowledge-gentle-empty"><span>绑定 OneNote 或继续使用随手记后，最近内容会显示在这里。</span></div>{% endfor %}
+    </div>
+  </article>
+</section>
+
+{% if source_issues %}
+<section class="knowledge-home-alert" aria-label="来源异常">
+  <div><strong>有 {{ stats.source_errors }} 个来源需要处理</strong><span>来源异常不会删除 NAS 中已经保存的原文。</span></div>
+  <a class="button" href="{% url 'knowledge:sources' %}">查看来源状态</a>
+</section>
+{% endif %}
+
+<section class="knowledge-future-ribbon">
+  <div><span class="eyebrow">逐步开放</span><strong>在线阅读与交易复盘保持独立模块</strong><p>书籍、批注和评论由阅读模块负责；交易案例、纪律版本和复盘由交易日志模块负责。两者只把可检索知识投影到知识底座。</p></div>
+  <a href="{% url 'knowledge:architecture' %}">查看完整边界与后续工作</a>
+</section>
+{% endblock %}
