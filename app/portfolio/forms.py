@@ -25,6 +25,7 @@ from .models import (
     SecurityMarket,
     SecurityQuoteConfig,
     TradeTypeChoices,
+    WatchlistGroup,
     WatchlistItem,
 )
 
@@ -214,9 +215,117 @@ class SecurityForm(BaseModelForm):
         return security
 
 
+def build_option_contract_symbol(underlying, expiration_date, option_type, strike_price):
+    root = "".join(
+        character
+        for character in underlying.symbol.strip().upper()
+        if character.isalnum()
+    )
+    strike_code = int(
+        (Decimal(str(strike_price)) * Decimal("1000")).quantize(Decimal("1"))
+    )
+    option_code = "C" if option_type == OptionContract.CALL else "P"
+    return f"{root}{expiration_date:%y%m%d}{option_code}{strike_code:08d}"
+
+
+def save_option_contract(
+    *,
+    member,
+    underlying,
+    option_type,
+    strike_price,
+    expiration_date,
+    multiplier,
+    contract_symbol="",
+    security=None,
+):
+    from .market_data import ensure_quote_config
+
+    contract_symbol = (contract_symbol or build_option_contract_symbol(
+        underlying,
+        expiration_date,
+        option_type,
+        strike_price,
+    )).strip().upper()
+    if security is None:
+        existing = (
+            OptionContract.objects.select_related("security")
+            .filter(
+                underlying=underlying,
+                option_type=option_type,
+                strike_price=strike_price,
+                expiration_date=expiration_date,
+            )
+            .first()
+        )
+        if existing:
+            security = existing.security
+    duplicate_symbol = Security.objects.filter(
+        symbol=contract_symbol,
+        market=underlying.market,
+    )
+    if security:
+        duplicate_symbol = duplicate_symbol.exclude(pk=security.pk)
+    if duplicate_symbol.exists():
+        raise forms.ValidationError("该市场已存在相同的期权合约代码。")
+
+    security = security or Security()
+    security.asset_category = Security.default_asset_category(
+        member.family, Security.TYPE_OPTION
+    )
+    security.symbol = contract_symbol
+    security.name = (
+        f"{underlying.name} {expiration_date} "
+        f"{dict(OptionContract.OPTION_TYPE_CHOICES)[option_type]} {strike_price}"
+    )
+    security.market = underlying.market
+    security.exchange = underlying.exchange
+    security.asset_type = Security.TYPE_OPTION
+    security.currency = underlying.currency
+    security.data_source = "manual"
+    security.save()
+    OptionContract.objects.update_or_create(
+        security=security,
+        defaults={
+            "underlying": underlying,
+            "option_type": option_type,
+            "strike_price": strike_price,
+            "expiration_date": expiration_date,
+            "multiplier": multiplier,
+        },
+    )
+    WatchlistItem.objects.update_or_create(
+        family=member.family,
+        security=security,
+        defaults={"member": member, "is_active": True},
+    )
+    config = ensure_quote_config(security)
+    config.provider = PriceSourceChoices.MANUAL
+    config.provider_symbol = ""
+    config.price_type = "manual"
+    config.max_age_hours = 168
+    config.enabled = True
+    config.save(
+        update_fields=[
+            "provider",
+            "provider_symbol",
+            "price_type",
+            "max_age_hours",
+            "enabled",
+            "updated_at",
+        ]
+    )
+    return security
+
+
 class OptionContractForm(forms.Form):
     underlying = forms.ModelChoiceField(label="正股标的", queryset=Security.objects.none())
-    contract_symbol = forms.CharField(label="完整合约代码", max_length=30)
+    contract_symbol = forms.CharField(
+        label="完整合约代码",
+        max_length=30,
+        required=False,
+        help_text="可以留空，系统会按正股、到期日、期权类型和行权价自动生成。",
+    )
     option_type = forms.ChoiceField(label="期权类型", choices=OptionContract.OPTION_TYPE_CHOICES)
     strike_price = forms.DecimalField(label="行权价", max_digits=20, decimal_places=6)
     expiration_date = forms.DateField(
@@ -227,7 +336,20 @@ class OptionContractForm(forms.Form):
     market = forms.ChoiceField(label="市场")
     currency = forms.ChoiceField(label="交易币种")
 
-    def __init__(self, *args, family=None, **kwargs):
+    def __init__(self, *args, family=None, instance=None, **kwargs):
+        self.instance = instance
+        if instance and not args and "initial" not in kwargs:
+            contract = instance.option_contract
+            kwargs["initial"] = {
+                "underlying": contract.underlying,
+                "contract_symbol": instance.symbol,
+                "option_type": contract.option_type,
+                "strike_price": contract.strike_price,
+                "expiration_date": contract.expiration_date,
+                "multiplier": contract.multiplier,
+                "market": instance.market,
+                "currency": instance.currency,
+            }
         super().__init__(*args, **kwargs)
         self.family = family
         for field in self.fields.values():
@@ -244,8 +366,13 @@ class OptionContractForm(forms.Form):
 
     def clean_contract_symbol(self):
         symbol = self.cleaned_data["contract_symbol"].strip().upper()
+        if not symbol:
+            return symbol
         market = (self.data.get("market") or "US").strip().upper()
-        if Security.objects.filter(symbol=symbol, market=market).exists():
+        duplicate = Security.objects.filter(symbol=symbol, market=market)
+        if self.instance:
+            duplicate = duplicate.exclude(pk=self.instance.pk)
+        if duplicate.exists():
             raise forms.ValidationError("该市场已存在相同代码；期权必须使用完整且唯一的合约代码。")
         return symbol
 
@@ -257,43 +384,91 @@ class OptionContractForm(forms.Form):
             self.add_error("currency", "期权币种应与正股标的一致。")
         if underlying and cleaned.get("market") != underlying.market:
             self.add_error("market", "期权市场必须与正股标的一致。")
+        if underlying and all(
+            cleaned.get(field) is not None
+            for field in ("option_type", "strike_price", "expiration_date")
+        ):
+            duplicate = OptionContract.objects.filter(
+                underlying=underlying,
+                option_type=cleaned["option_type"],
+                strike_price=cleaned["strike_price"],
+                expiration_date=cleaned["expiration_date"],
+            )
+            if self.instance:
+                duplicate = duplicate.exclude(security=self.instance)
+            if duplicate.exists():
+                self.add_error(None, "相同条款的期权合约已经存在。")
         return cleaned
 
     def save(self, member):
-        from .market_data import ensure_quote_config
-
-        underlying = self.cleaned_data["underlying"]
-        security = Security.objects.create(
-            asset_category=Security.default_asset_category(
-                member.family, Security.TYPE_OPTION
-            ),
-            symbol=self.cleaned_data["contract_symbol"],
-            name=(
-                f"{underlying.name} {self.cleaned_data['expiration_date']} "
-                f"{dict(OptionContract.OPTION_TYPE_CHOICES)[self.cleaned_data['option_type']]} "
-                f"{self.cleaned_data['strike_price']}"
-            ),
-            market=self.cleaned_data["market"].strip().upper(),
-            exchange=underlying.exchange,
-            asset_type=Security.TYPE_OPTION,
-            currency=self.cleaned_data["currency"],
-            data_source="manual",
-        )
-        OptionContract.objects.create(
-            security=security,
-            underlying=underlying,
+        return save_option_contract(
+            member=member,
+            underlying=self.cleaned_data["underlying"],
             option_type=self.cleaned_data["option_type"],
             strike_price=self.cleaned_data["strike_price"],
             expiration_date=self.cleaned_data["expiration_date"],
             multiplier=self.cleaned_data["multiplier"],
+            contract_symbol=self.cleaned_data["contract_symbol"],
+            security=self.instance,
         )
-        WatchlistItem.objects.update_or_create(
-            family=member.family,
-            security=security,
-            defaults={"member": member, "is_active": True},
-        )
-        ensure_quote_config(security)
-        return security
+
+
+class WatchlistGroupForm(forms.ModelForm):
+    class Meta:
+        model = WatchlistGroup
+        fields = ["name"]
+
+
+class OptionPositionActionForm(forms.Form):
+    action_date = forms.DateField(
+        label="处理日期",
+        widget=forms.DateInput(
+            attrs={"type": "date", "class": "form-control"},
+            format="%Y-%m-%d",
+        ),
+    )
+    quantity = forms.DecimalField(
+        label="合约张数",
+        max_digits=24,
+        decimal_places=6,
+        min_value=Decimal("0.000001"),
+    )
+    fee = forms.DecimalField(
+        label="相关费用",
+        max_digits=20,
+        decimal_places=4,
+        min_value=Decimal("0"),
+        initial=0,
+    )
+    remark = forms.CharField(label="备注", required=False, max_length=500)
+
+    def __init__(self, *args, position=None, action="expire", **kwargs):
+        self.position = position
+        self.action = action
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+        apply_decimal_widgets(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        if not self.position:
+            return cleaned
+        quantity = cleaned.get("quantity")
+        if quantity and quantity > abs(self.position.quantity):
+            self.add_error("quantity", "处理张数不能超过当前持仓张数。")
+        action_date = cleaned.get("action_date")
+        contract = self.position.security.option_contract
+        if action_date and action_date > timezone.localdate():
+            self.add_error("action_date", "处理日期不能晚于今天。")
+        if self.action == "expire" and action_date and action_date < contract.expiration_date:
+            self.add_error("action_date", "到期作废日期不能早于合约到期日。")
+        if self.action == "exercise":
+            if self.position.quantity <= 0:
+                raise forms.ValidationError("空头期权不能行权，请按实际指派结果录入交易。")
+            if action_date and action_date > contract.expiration_date:
+                self.add_error("action_date", "行权日期不能晚于合约到期日。")
+        return cleaned
 
 
 class SecurityQuoteConfigForm(BaseModelForm):
@@ -553,6 +728,44 @@ class InvestmentTransactionForm(BaseModelForm):
         label="证券账户",
         queryset=BankAccount.objects.none(),
     )
+    create_option_contract = forms.BooleanField(
+        label="同时新建期权合约",
+        required=False,
+        help_text="新合约无需先离开交易页面单独建立。",
+    )
+    option_underlying = forms.ModelChoiceField(
+        label="期权正股",
+        queryset=Security.objects.none(),
+        required=False,
+    )
+    option_contract_symbol = forms.CharField(
+        label="期权合约代码",
+        required=False,
+        max_length=30,
+        help_text="可以留空，由系统自动生成标准代码。",
+    )
+    option_type = forms.ChoiceField(
+        label="期权类型",
+        choices=[("", "---------")] + list(OptionContract.OPTION_TYPE_CHOICES),
+        required=False,
+    )
+    option_strike_price = forms.DecimalField(
+        label="行权价",
+        max_digits=20,
+        decimal_places=6,
+        required=False,
+    )
+    option_expiration_date = forms.DateField(
+        label="到期日",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date", "class": "form-control"}),
+    )
+    option_multiplier = forms.IntegerField(
+        label="合约乘数",
+        min_value=1,
+        initial=100,
+        required=False,
+    )
     date_fields = ("trade_date",)
 
     class Meta:
@@ -587,6 +800,13 @@ class InvestmentTransactionForm(BaseModelForm):
                 "bank_account",
                 "asset_category",
                 "security",
+                "create_option_contract",
+                "option_underlying",
+                "option_contract_symbol",
+                "option_type",
+                "option_strike_price",
+                "option_expiration_date",
+                "option_multiplier",
                 "trade_date",
                 "trade_type_option",
                 "position_effect",
@@ -606,6 +826,7 @@ class InvestmentTransactionForm(BaseModelForm):
             ]
         )
         self.fields["security"].label = "交易标的"
+        self.fields["security"].help_text = "已有标的直接选择；新期权请勾选下方选项。"
         self.fields["trade_type_option"].label = "交易类型"
         self.fields["position_effect"].label = "开平仓（期权）"
         self.fields["position_effect"].required = False
@@ -690,6 +911,10 @@ class InvestmentTransactionForm(BaseModelForm):
                 Q(pk=self.instance.security_id) | Q(pk__in=security_queryset)
             )
         self.fields["security"].queryset = security_queryset
+        self.fields["option_underlying"].queryset = Security.objects.filter(
+            Q(watchlist_items__family_id=family_id, watchlist_items__is_active=True)
+            | Q(positions__account__bank_account__family_id=family_id)
+        ).exclude(asset_type=Security.TYPE_OPTION).distinct().order_by("market", "symbol")
         self.fields["trade_type_option"].queryset = InvestmentOption.objects.filter(
             category=InvestmentOption.CATEGORY_TRANSACTION_TYPE,
             is_active=True,
@@ -714,11 +939,31 @@ class InvestmentTransactionForm(BaseModelForm):
         family = cleaned_data.get("family")
         member = cleaned_data.get("member")
         trade_type_option = cleaned_data.get("trade_type_option")
+        creating_option = cleaned_data.get("create_option_contract")
+        if creating_option:
+            required_option_fields = {
+                "option_underlying": "请选择期权对应的正股。",
+                "option_type": "请选择期权类型。",
+                "option_strike_price": "请输入行权价。",
+                "option_expiration_date": "请输入到期日。",
+                "option_multiplier": "请输入合约乘数。",
+            }
+            for field_name, message in required_option_fields.items():
+                if cleaned_data.get(field_name) in (None, ""):
+                    self.add_error(field_name, message)
+            underlying = cleaned_data.get("option_underlying")
+            if underlying:
+                cleaned_data["currency"] = underlying.currency
+                cleaned_data["asset_category"] = Security.default_asset_category(
+                    family, Security.TYPE_OPTION
+                )
+            cleaned_data["security"] = None
         if (
             trade_type_option
             and trade_type_option.code
             in {TradeTypeChoices.BUY, TradeTypeChoices.IPO, TradeTypeChoices.SELL}
             and not security
+            and not creating_option
         ):
             self.add_error("security", "买入、打新和卖出交易必须选择交易标的。")
         if bank_account and family and bank_account.family_id != family.pk:
@@ -729,21 +974,29 @@ class InvestmentTransactionForm(BaseModelForm):
             cleaned_data["currency"] = security.currency
         if security and not cleaned_data.get("asset_category"):
             cleaned_data["asset_category"] = security.asset_category
-        if security and security.asset_type == Security.TYPE_OPTION:
+        if creating_option or (security and security.asset_type == Security.TYPE_OPTION):
             if not cleaned_data.get("position_effect"):
                 self.add_error("position_effect", "期权交易必须选择开仓或平仓。")
         else:
             cleaned_data["position_effect"] = ""
         if cleaned_data.get("quantity") and cleaned_data.get("price"):
-            amount = (
-                security.market_value_for(
-                    cleaned_data["quantity"],
-                    cleaned_data["price"],
-                    include_accrued=False,
+            if creating_option:
+                multiplier = Decimal(str(cleaned_data.get("option_multiplier") or 100))
+                amount = (
+                    cleaned_data["quantity"]
+                    * cleaned_data["price"]
+                    * multiplier
                 )
-                if security
-                else cleaned_data["quantity"] * cleaned_data["price"]
-            )
+            else:
+                amount = (
+                    security.market_value_for(
+                        cleaned_data["quantity"],
+                        cleaned_data["price"],
+                        include_accrued=False,
+                    )
+                    if security
+                    else cleaned_data["quantity"] * cleaned_data["price"]
+                )
             cleaned_data["amount"] = amount.quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
@@ -754,6 +1007,16 @@ class InvestmentTransactionForm(BaseModelForm):
 
     def save(self, commit=True):
         instance = super().save(commit=False)
+        if self.cleaned_data.get("create_option_contract"):
+            instance.security = save_option_contract(
+                member=self.cleaned_data["member"],
+                underlying=self.cleaned_data["option_underlying"],
+                option_type=self.cleaned_data["option_type"],
+                strike_price=self.cleaned_data["option_strike_price"],
+                expiration_date=self.cleaned_data["option_expiration_date"],
+                multiplier=self.cleaned_data.get("option_multiplier") or 100,
+                contract_symbol=self.cleaned_data.get("option_contract_symbol", ""),
+            )
         bank_account = self.cleaned_data["bank_account"]
         currency = self.cleaned_data.get("currency") or (
             instance.security.currency if instance.security else ""

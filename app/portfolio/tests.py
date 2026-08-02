@@ -58,16 +58,17 @@ from .models import (
     SecurityQuoteConfig,
     TransactionSourceChoices,
     TradeTypeChoices,
+    WatchlistGroup,
     WatchlistItem,
 )
-from .services import rebuild_position
+from .services import rebuild_position, settle_option_position
 from .reconciliation import (
     apply_reconciliation,
     build_reconciliation_preview,
     revert_reconciliation,
 )
 from .snapshot_service import create_portfolio_snapshots_for_date
-from .valuation import refresh_position_valuations
+from .valuation import refresh_position_valuations, resolve_position_prices
 
 
 def create_broker_investment_account(
@@ -514,6 +515,102 @@ class TransactionFormTests(TestCase):
             WatchlistItem.objects.filter(family=family, security=contract.security).exists()
         )
 
+    def test_transaction_form_can_create_option_contract_and_seed_recent_price(self):
+        user = get_user_model().objects.create_user(username="inline-option-tester")
+        family = Family.objects.create(name="期权交易家庭")
+        member = FamilyMember.objects.create(
+            family=family,
+            user=user,
+            display_name="成员",
+        )
+        account_type = AccountType.objects.create(family=family, name="券商")
+        bank_account = BankAccount.objects.create(
+            family=family,
+            member=member,
+            account_type_ref=account_type,
+            account_name="美股账户",
+            supports_investment=True,
+        )
+        Currency.objects.update_or_create(
+            code="USD",
+            defaults={"name": "美元", "symbol": "$", "is_active": True},
+        )
+        AssetCategory.objects.create(
+            family=family,
+            name="衍生品",
+            code="derivatives",
+        )
+        underlying = Security.objects.create(
+            symbol="MSFT",
+            name="微软",
+            market="US",
+            exchange="NASDAQ",
+            currency="USD",
+        )
+        WatchlistItem.objects.create(
+            family=family,
+            member=member,
+            security=underlying,
+        )
+        buy_option = InvestmentOption.objects.get(
+            category=InvestmentOption.CATEGORY_TRANSACTION_TYPE,
+            code=TradeTypeChoices.BUY,
+        )
+        trade_date = timezone.localdate()
+        expiration_date = trade_date + timedelta(days=7)
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("portfolio:transaction_create"),
+            {
+                "family": family.pk,
+                "member": member.pk,
+                "bank_account": bank_account.pk,
+                "asset_category": "",
+                "security": "",
+                "create_option_contract": "on",
+                "option_underlying": underlying.pk,
+                "option_contract_symbol": "",
+                "option_type": OptionContract.PUT,
+                "option_strike_price": "370",
+                "option_expiration_date": expiration_date.isoformat(),
+                "option_multiplier": "100",
+                "trade_date": trade_date.isoformat(),
+                "trade_type_option": buy_option.pk,
+                "position_effect": InvestmentTransaction.EFFECT_OPEN,
+                "currency": "",
+                "quantity": "1",
+                "price": "2.50",
+                "amount": "250",
+                "fee": "1",
+                "tax": "0",
+                "trade_logic": "",
+                "information_source_option": "",
+                "strategy_option": "",
+                "strategy_other": "",
+                "emotion_option": "",
+                "exit_condition": "",
+                "remark": "微软看跌期权",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        contract = OptionContract.objects.select_related("security").get()
+        transaction = InvestmentTransaction.objects.get()
+        position = InvestmentPosition.objects.get()
+        self.assertEqual(contract.underlying, underlying)
+        self.assertEqual(contract.strike_price, Decimal("370"))
+        self.assertEqual(transaction.security, contract.security)
+        self.assertEqual(transaction.amount, Decimal("250.00"))
+        self.assertEqual(contract.security.symbol, f"MSFT{expiration_date:%y%m%d}P00370000")
+        self.assertEqual(
+            SecurityQuoteConfig.objects.get(security=contract.security).max_age_hours,
+            168,
+        )
+        resolution = resolve_position_prices([position], trade_date)[position.pk]
+        self.assertEqual(resolution.price, Decimal("2.50"))
+        self.assertEqual(resolution.status, PricingStatusChoices.MANUAL)
+
 
 class AccountPrototypeTests(TestCase):
     def test_prototype_and_detail_pages_are_reviewable(self):
@@ -807,6 +904,99 @@ class AccountDashboardTests(TestCase):
         self.assertContains(dashboard, "持仓明细")
         self.assertContains(detail, "变动后现金余额")
         self.assertNotContains(detail, "变动后本位币余额")
+
+    def test_holding_rows_offer_price_and_sell_shortcuts_with_prefilled_trade(self):
+        security = Security.objects.create(
+            symbol="AAPL",
+            name="苹果",
+            market="US",
+            currency="USD",
+        )
+        transaction = InvestmentTransaction.objects.create(
+            account=self.account,
+            security=security,
+            trade_date=timezone.localdate(),
+            trade_type=TradeTypeChoices.BUY,
+            quantity=Decimal("3"),
+            price=Decimal("200"),
+            amount=Decimal("600"),
+            currency="USD",
+        )
+        position = rebuild_position(self.account, security)
+        record_security_price(
+            security,
+            Decimal("210"),
+            source=PriceSourceChoices.MANUAL,
+            price_as_of=timezone.now(),
+        )
+
+        dashboard = self.client.get(reverse("portfolio:account_list"))
+        shortcut = self.client.get(
+            reverse("portfolio:transaction_create"),
+            {
+                "account": self.account.pk,
+                "security": security.pk,
+                "action": "sell",
+            },
+        )
+
+        self.assertContains(dashboard, "更新价格")
+        self.assertContains(dashboard, "卖出")
+        self.assertEqual(shortcut.context["form"].initial["security"], security)
+        self.assertEqual(shortcut.context["form"].initial["quantity"], Decimal("3"))
+        self.assertEqual(shortcut.context["form"].initial["price"], Decimal("210"))
+        self.assertEqual(
+            shortcut.context["form"].initial["trade_type_option"].code,
+            TradeTypeChoices.SELL,
+        )
+
+    def test_expired_option_action_form_defaults_to_expiry_date_and_full_quantity(self):
+        underlying = Security.objects.create(
+            symbol="MSFT",
+            name="微软",
+            market="US",
+            currency="USD",
+        )
+        option = Security.objects.create(
+            symbol="MSFT260731P00370000",
+            name="微软到期看跌期权",
+            market="US",
+            asset_type=Security.TYPE_OPTION,
+            currency="USD",
+        )
+        expiration_date = date(2026, 7, 31)
+        OptionContract.objects.create(
+            security=option,
+            underlying=underlying,
+            option_type=OptionContract.PUT,
+            strike_price=Decimal("370"),
+            expiration_date=expiration_date,
+            multiplier=100,
+        )
+        InvestmentTransaction.objects.create(
+            account=self.account,
+            security=option,
+            trade_date=date(2026, 7, 25),
+            trade_type=TradeTypeChoices.BUY,
+            position_effect=InvestmentTransaction.EFFECT_OPEN,
+            quantity=Decimal("2"),
+            price=Decimal("3"),
+            amount=Decimal("600"),
+            currency="USD",
+        )
+        position = rebuild_position(self.account, option)
+
+        response = self.client.get(
+            reverse(
+                "portfolio:option_position_action",
+                args=[position.pk, "expire"],
+            )
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('value="2026-07-31"', str(response.context["form"]["action_date"]))
+        self.assertIn('value="2"', str(response.context["form"]["quantity"]))
+        self.assertContains(response, "系统将以 0 价格平仓该期权")
 
     def test_accounts_sort_by_total_asset_descending(self):
         second = create_broker_investment_account(
@@ -1647,6 +1837,38 @@ class PortfolioOverviewTests(TestCase):
         self.assertEqual(len(response.context["trend_snapshots"]), 1)
         self.assertEqual(response.context["change_amount"], Decimal("0"))
         self.assertTrue(response.context["trend_points"])
+
+    def test_overview_marks_partial_daily_snapshot_instead_of_hiding_latest_point(self):
+        PortfolioSnapshot.objects.create(
+            family=self.member.family,
+            member=None,
+            snapshot_date=date(2026, 7, 31),
+            total_asset=Decimal("7000"),
+            currency="CNY",
+            extra_data={"complete": True},
+        )
+        PortfolioSnapshot.objects.create(
+            family=self.member.family,
+            member=None,
+            snapshot_date=date(2026, 8, 1),
+            total_asset=Decimal("7100"),
+            currency="CNY",
+            extra_data={
+                "complete": False,
+                "stale_prices": [{"security": "US:MSFT"}],
+            },
+        )
+
+        response = self.client.get(
+            reverse("portfolio:overview"),
+            {"snapshot_view": "daily"},
+        )
+
+        self.assertEqual(len(response.context["trend_snapshots"]), 2)
+        self.assertEqual(response.context["partial_trend_snapshot_count"], 1)
+        self.assertFalse(response.context["trend_rows"][-1]["is_complete"])
+        self.assertContains(response, "部分数据")
+        self.assertContains(response, "2026-08-01*")
 
     def test_overview_snapshot_views_use_period_end_and_daily_keeps_all_points(self):
         snapshot_values = (
@@ -2506,6 +2728,100 @@ class PositionAccountingTests(TestCase):
         self.assertEqual(close_short.cash_change, Decimal("-201"))
         self.assertEqual(close_short.realized_pnl, Decimal("298"))
 
+    def test_expired_option_action_closes_position_at_zero(self):
+        option = Security.objects.create(
+            symbol="OPT-EXPIRE",
+            name="到期看涨期权",
+            market="HK",
+            asset_type=Security.TYPE_OPTION,
+            currency="HKD",
+        )
+        OptionContract.objects.create(
+            security=option,
+            underlying=self.security,
+            option_type=OptionContract.CALL,
+            strike_price=Decimal("100"),
+            expiration_date=date(2026, 7, 31),
+            multiplier=100,
+        )
+        InvestmentTransaction.objects.create(
+            account=self.account,
+            security=option,
+            trade_date=date(2026, 7, 25),
+            trade_type=TradeTypeChoices.BUY,
+            position_effect=InvestmentTransaction.EFFECT_OPEN,
+            quantity=Decimal("1"),
+            price=Decimal("2"),
+            amount=Decimal("200"),
+            currency="HKD",
+        )
+        position = rebuild_position(self.account, option)
+
+        close_transaction, underlying_transaction = settle_option_position(
+            position,
+            action="expire",
+            action_date=date(2026, 7, 31),
+            quantity=Decimal("1"),
+            fee=Decimal("1"),
+        )
+
+        position.refresh_from_db()
+        self.assertEqual(position.quantity, Decimal("0"))
+        self.assertEqual(close_transaction.price, Decimal("0"))
+        self.assertEqual(close_transaction.position_effect, InvestmentTransaction.EFFECT_CLOSE)
+        self.assertIsNone(underlying_transaction)
+
+    def test_exercise_long_call_closes_option_and_buys_underlying(self):
+        option = Security.objects.create(
+            symbol="OPT-EXERCISE",
+            name="行权看涨期权",
+            market="HK",
+            asset_type=Security.TYPE_OPTION,
+            currency="HKD",
+        )
+        OptionContract.objects.create(
+            security=option,
+            underlying=self.security,
+            option_type=OptionContract.CALL,
+            strike_price=Decimal("80"),
+            expiration_date=date(2026, 7, 31),
+            multiplier=100,
+        )
+        InvestmentTransaction.objects.create(
+            account=self.account,
+            security=option,
+            trade_date=date(2026, 7, 25),
+            trade_type=TradeTypeChoices.BUY,
+            position_effect=InvestmentTransaction.EFFECT_OPEN,
+            quantity=Decimal("1"),
+            price=Decimal("3"),
+            amount=Decimal("300"),
+            currency="HKD",
+        )
+        position = rebuild_position(self.account, option)
+
+        close_transaction, underlying_transaction = settle_option_position(
+            position,
+            action="exercise",
+            action_date=date(2026, 7, 31),
+            quantity=Decimal("1"),
+            fee=Decimal("5"),
+        )
+
+        position.refresh_from_db()
+        underlying_position = InvestmentPosition.objects.get(
+            account=self.account,
+            security=self.security,
+        )
+        self.assertEqual(position.quantity, Decimal("0"))
+        self.assertEqual(underlying_position.quantity, Decimal("100"))
+        self.assertEqual(underlying_transaction.trade_type, TradeTypeChoices.BUY)
+        self.assertEqual(underlying_transaction.price, Decimal("80"))
+        self.assertEqual(
+            close_transaction.extra_data["underlying_transaction_id"],
+            underlying_transaction.pk,
+        )
+
     def test_transaction_numbers_are_unique_without_max_plus_one(self):
         first = self.add_trade(date(2026, 1, 1), TradeTypeChoices.BUY, "1", "100")
         second = self.add_trade(date(2026, 1, 1), TradeTypeChoices.BUY, "1", "100")
@@ -2599,7 +2915,6 @@ class WatchlistPageTests(TestCase):
         self.assertContains(response, "市盈率（TTM）")
         self.assertContains(response, "市净率")
         self.assertContains(response, "市销率")
-        self.assertNotContains(response, "<th>市场</th>", html=True)
         self.assertNotContains(response, "<th>币种</th>", html=True)
         self.assertNotContains(response, "<th>上市日期</th>", html=True)
         self.assertNotContains(response, "<th>每手</th>", html=True)
@@ -2638,6 +2953,84 @@ class WatchlistPageTests(TestCase):
             security.futu_url,
             "https://www.futunn.com/hk/stock/00700-HK",
         )
+
+    def test_watchlist_supports_groups_and_safe_remove(self):
+        security = Security.objects.create(
+            symbol="MSFT",
+            name="微软",
+            market="US",
+            currency="USD",
+            data_source="manual",
+        )
+        item = WatchlistItem.objects.create(
+            family=self.family,
+            member=self.member,
+            security=security,
+        )
+
+        response = self.client.post(
+            reverse("portfolio:watchlist_group_manage"),
+            {"name": "美股科技"},
+        )
+        self.assertRedirects(response, reverse("portfolio:security_list"))
+        group = WatchlistGroup.objects.get(family=self.family)
+
+        response = self.client.post(
+            reverse("portfolio:watchlist_item_update", args=[item.pk]),
+            {"group": group.pk},
+        )
+        self.assertRedirects(response, reverse("portfolio:security_list"))
+        item.refresh_from_db()
+        self.assertEqual(item.group, group)
+        filtered = self.client.get(
+            reverse("portfolio:security_list"),
+            {"group": group.pk},
+        )
+        self.assertContains(filtered, "微软")
+
+        response = self.client.post(
+            reverse("portfolio:watchlist_item_update", args=[item.pk]),
+            {"action": "remove"},
+        )
+        self.assertRedirects(response, reverse("portfolio:security_list"))
+        item.refresh_from_db()
+        self.assertFalse(item.is_active)
+        self.assertTrue(Security.objects.filter(pk=security.pk).exists())
+
+    def test_futu_security_has_no_edit_link_but_manual_security_keeps_it(self):
+        futu_security = Security.objects.create(
+            symbol="00700",
+            name="腾讯控股",
+            market="HK",
+            currency="HKD",
+            data_source="futu",
+        )
+        manual_security = Security.objects.create(
+            symbol="MANUAL",
+            name="手工标的",
+            market="US",
+            currency="USD",
+            data_source="manual",
+        )
+        for security in (futu_security, manual_security):
+            WatchlistItem.objects.create(
+                family=self.family,
+                member=self.member,
+                security=security,
+            )
+
+        response = self.client.get(reverse("portfolio:security_list"))
+
+        self.assertContains(response, "Futu 同步")
+        self.assertNotContains(
+            response,
+            reverse("portfolio:security_edit", args=[futu_security.pk]),
+        )
+        self.assertContains(
+            response,
+            reverse("portfolio:security_edit", args=[manual_security.pk]),
+        )
+        self.assertContains(response, "删除自选")
 
 
 class MarketDataFoundationTests(TestCase):

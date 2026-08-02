@@ -886,9 +886,26 @@ td.negative {
   vector-effect: non-scaling-stroke;
 }
 
+.portfolio-trend-node.partial {
+  fill: #fff7ed;
+  stroke: #f59e0b;
+  stroke-dasharray: 3 2;
+}
+
+.portfolio-chart-date.partial {
+  fill: #b45309;
+  font-weight: 700;
+}
+
 .portfolio-trend-scroll-hint {
   margin: 8px 0 0;
   color: #64748b;
+  font-size: 12px;
+}
+
+.portfolio-trend-partial-note {
+  margin: 8px 0 0;
+  color: #b45309;
   font-size: 12px;
 }
 
@@ -1020,6 +1037,70 @@ td.negative {
   overflow-x: hidden;
 }
 
+.watchlist-group-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+  overflow-x: auto;
+}
+
+.watchlist-group-tabs a {
+  padding: 7px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  color: #475569;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.watchlist-group-tabs a.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.watchlist-group-manager {
+  position: relative;
+}
+
+.watchlist-group-manager > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.watchlist-group-manager-panel {
+  position: absolute;
+  z-index: 10;
+  right: 0;
+  width: min(460px, 82vw);
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 16px 36px rgb(15 23 42 / 14%);
+}
+
+.watchlist-group-manager-panel form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.watchlist-group-manager-panel input {
+  min-width: 0;
+  flex: 1;
+}
+
+.watchlist-summary {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+
 .watchlist-compact-table {
   table-layout: fixed;
 }
@@ -1038,6 +1119,39 @@ td.negative {
 
 .watchlist-compact-table .watchlist-name {
   word-break: break-word;
+}
+
+.watchlist-compact-table .watchlist-name strong,
+.watchlist-compact-table .watchlist-name small,
+.watchlist-valuation small {
+  display: block;
+}
+
+.watchlist-compact-table .watchlist-name small,
+.watchlist-valuation small {
+  margin-top: 3px;
+  color: #64748b;
+}
+
+.watchlist-group-form select {
+  width: 100%;
+  min-width: 96px;
+  padding: 6px;
+}
+
+.source-chip {
+  color: #64748b;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.holding-actions {
+  min-width: 112px;
+  flex-wrap: wrap;
+}
+
+.muted-form-row {
+  opacity: 0.55;
 }
 
 .watchlist-compact-table .button.compact {

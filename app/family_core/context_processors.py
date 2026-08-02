@@ -140,7 +140,12 @@ def page_navigation(request):
                 "portfolio:account_detail",
                 kwargs={"pk": kwargs["account_id"]},
             )
-        elif url_name in {"option_contract_create", "bond_create", "bond_edit"}:
+        elif url_name in {
+            "option_contract_create",
+            "option_contract_edit",
+            "bond_create",
+            "bond_edit",
+        }:
             parent_url = reverse("portfolio:security_list")
         elif url_name.endswith("_create") or url_name.endswith("_edit"):
             parent_url = reverse(

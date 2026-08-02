@@ -89,41 +89,81 @@
 
 <section class="panel watchlist-existing">
   <div class="section-head">
-    <h2>已有自选股</h2>
-    <span>{{ watchlist_items|length }} 只</span>
+    <div>
+      <h2>我的自选</h2>
+      <p>按分类查看重点标的；Futu 标的资料由行情源维护，手工标的可编辑。</p>
+    </div>
+    <details class="watchlist-group-manager">
+      <summary class="button ghost compact">管理分类</summary>
+      <div class="watchlist-group-manager-panel">
+        <form method="post" action="{% url 'portfolio:watchlist_group_manage' %}">
+          {% csrf_token %}
+          <input name="name" maxlength="50" placeholder="新分类名称，例如：美股科技">
+          <button class="button compact" type="submit">新建</button>
+        </form>
+        {% for group in watchlist_groups %}
+          <form method="post" action="{% url 'portfolio:watchlist_group_manage' %}">
+            {% csrf_token %}
+            <input type="hidden" name="group_id" value="{{ group.pk }}">
+            <input name="name" value="{{ group.name }}" maxlength="50">
+            <button class="button compact ghost" name="action" value="save" type="submit">改名</button>
+            <button class="text-action danger" name="action" value="delete" type="submit" onclick="return confirm('删除分类后，其中标的会转为未分类，是否继续？');">删除分类</button>
+          </form>
+        {% empty %}<p class="muted">尚未建立自选分类。</p>{% endfor %}
+      </div>
+    </details>
   </div>
-  <table class="watchlist-compact-table">
+  <nav class="watchlist-group-tabs">
+    <a class="{% if selected_group == 'all' %}active{% endif %}" href="?group=all">全部</a>
+    {% for group in watchlist_groups %}<a class="{% if selected_group == group.pk|stringformat:'s' %}active{% endif %}" href="?group={{ group.pk }}">{{ group.name }}</a>{% endfor %}
+    <a class="{% if selected_group == 'ungrouped' %}active{% endif %}" href="?group=ungrouped">未分类</a>
+  </nav>
+  <div class="watchlist-summary"><span>{{ watchlist_items|length }} 只标的</span><span>行情、估值与快捷操作</span></div>
+  <div class="account-table-wrap"><table class="watchlist-compact-table">
     <thead>
-      <tr><th>代码</th><th>名称</th><th>行情时间</th><th>最新价</th><th>当日涨跌幅</th><th>总市值</th><th>市盈率（静）</th><th>市盈率（TTM）</th><th>市净率</th><th>市销率</th><th>股息率（TTM）</th><th>52 周区间</th><th>操作</th></tr>
+      <tr><th>标的</th><th>市场</th><th>最新价</th><th>当日涨跌</th><th>行情时间</th><th>总市值</th><th>估值</th><th>52 周区间</th><th>分类</th><th>操作</th></tr>
     </thead>
     <tbody>
       {% for item in watchlist_items %}
         {% with security=item.security snapshot=item.security.market_snapshot %}
         <tr>
-          <td>{{ security.symbol }}</td>
-          <td class="watchlist-name">{{ security.name }}</td>
-          <td>{{ snapshot.quote_time|slice:"5:10"|default:"-" }}</td>
+          <td class="watchlist-name"><strong>{{ security.name }}</strong><small>{{ security.symbol }} · {{ security.get_asset_type_display }}</small></td>
+          <td><span class="market-badge market-{{ security.market|lower }}">{{ security.market }}</span></td>
           <td class="{% if snapshot.change_rate > 0 %}positive{% elif snapshot.change_rate < 0 %}negative{% endif %}">{{ snapshot.last_price|money2 }}</td>
           <td class="{% if snapshot.change_rate > 0 %}positive{% elif snapshot.change_rate < 0 %}negative{% endif %}">
             {% if snapshot.change_rate is not None %}{{ snapshot.change_rate|floatformat:2 }}%{% else %}-{% endif %}
           </td>
+          <td>{{ snapshot.quote_time|slice:"5:16"|default:"-" }}</td>
           <td>{{ snapshot.total_market_value|cn_market_cap }}</td>
-          <td>{{ snapshot.pe_ratio|floatformat:2|default:"-" }}</td>
-          <td>{{ snapshot.pe_ttm_ratio|floatformat:2|default:"-" }}</td>
-          <td>{{ snapshot.pb_ratio|floatformat:2|default:"-" }}</td>
-          <td>{{ snapshot.ps_ratio|floatformat:2|default:"-" }}</td>
-          <td>{{ snapshot.dividend_yield_ttm|floatformat:2|default:"-" }}</td>
+          <td><span class="watchlist-valuation"><small>PE {{ snapshot.pe_ttm_ratio|floatformat:2|default:"-" }}</small><small>PB {{ snapshot.pb_ratio|floatformat:2|default:"-" }}</small></span></td>
           <td>{{ snapshot.low_52_week|money2 }} – {{ snapshot.high_52_week|money2 }}</td>
+          <td>
+            <form class="watchlist-group-form" method="post" action="{% url 'portfolio:watchlist_item_update' item.pk %}">
+              {% csrf_token %}
+              <select name="group" onchange="this.form.submit()">
+                <option value="">未分类</option>
+                {% for group in watchlist_groups %}<option value="{{ group.pk }}"{% if item.group_id == group.pk %} selected{% endif %}>{{ group.name }}</option>{% endfor %}
+              </select>
+            </form>
+          </td>
           <td class="table-actions">
-            <a class="button external-link-button compact" href="{{ security.futu_url }}" target="_blank" rel="noopener noreferrer">查看</a>
-            {% if security.asset_type == 'bond' %}<a href="{% url 'portfolio:bond_edit' security.id %}">编辑</a>{% else %}<a href="{% url 'portfolio:security_edit' security.id %}">编辑</a>{% endif %}
+            {% if security.data_source == 'futu' %}
+              <a class="text-action" href="{{ security.futu_url }}" target="_blank" rel="noopener noreferrer">行情详情</a>
+              <span class="source-chip">Futu 同步</span>
+            {% else %}
+              <a class="text-action" href="{% url 'portfolio:manual_security_price' security.pk %}">更新价格</a>
+              {% if security.asset_type == 'bond' %}<a class="text-action" href="{% url 'portfolio:bond_edit' security.id %}">编辑</a>{% elif security.asset_type == 'option' %}<a class="text-action" href="{% url 'portfolio:option_contract_edit' security.id %}">编辑</a>{% else %}<a class="text-action" href="{% url 'portfolio:security_edit' security.id %}">编辑</a>{% endif %}
+            {% endif %}
+            <form method="post" action="{% url 'portfolio:watchlist_item_update' item.pk %}" onsubmit="return confirm('确认从自选股移除 {{ security.name|escapejs }} 吗？历史交易和持仓不会删除。');">
+              {% csrf_token %}<button class="text-action danger" name="action" value="remove" type="submit">删除自选</button>
+            </form>
           </td>
         </tr>
         {% endwith %}
       {% empty %}
-        <tr><td colspan="13">暂无自选股，请先在上方查询并添加。</td></tr>
+        <tr><td colspan="10">当前分类暂无标的，请在上方查询添加或切换其他分类。</td></tr>
       {% endfor %}
     </tbody>
-  </table>
+  </table></div>
 </section>
 {% endblock %}

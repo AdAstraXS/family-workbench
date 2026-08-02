@@ -8,6 +8,17 @@
     const account = document.getElementById("id_bank_account");
     const category = document.getElementById("id_asset_category");
     const security = document.getElementById("id_security");
+    const createOption = document.getElementById("id_create_option_contract");
+    const optionUnderlying = document.getElementById("id_option_underlying");
+    const optionMultiplier = document.getElementById("id_option_multiplier");
+    const optionFields = [
+      "id_option_underlying",
+      "id_option_contract_symbol",
+      "id_option_type",
+      "id_option_strike_price",
+      "id_option_expiration_date",
+      "id_option_multiplier",
+    ].map((id) => document.getElementById(id));
     const currency = document.getElementById("id_currency");
     const quantity = document.getElementById("id_quantity");
     const price = document.getElementById("id_price");
@@ -33,6 +44,7 @@
       replaceOptions(account, data.accounts, "---------");
       replaceOptions(category, data.categories, "---------");
       replaceOptions(security, data.securities, "---------");
+      replaceOptions(optionUnderlying, data.underlyings || [], "---------");
       data.securities.forEach((row) => {
         const option = [...security.options].find((item) => item.value === String(row.id));
         if (option) option.dataset.currency = row.currency;
@@ -43,13 +55,23 @@
 
     const updateAmount = () => {
       const selected = security.options[security.selectedIndex];
-      const multiplier = Number(selected?.dataset.multiplier || 1);
+      const multiplier = createOption.checked
+        ? Number(optionMultiplier.value || 100)
+        : Number(selected?.dataset.multiplier || 1);
       const value = Number(quantity.value || 0) * Number(price.value || 0) * multiplier;
       amount.value = value ? value.toFixed(2) : "0.00";
     };
     const updatePositionEffect = () => {
       const selected = security.options[security.selectedIndex];
-      positionEffect.closest(".form-row").hidden = selected?.dataset.assetType !== "option";
+      positionEffect.closest(".form-row").hidden = !createOption.checked && selected?.dataset.assetType !== "option";
+    };
+    const updateOptionFields = () => {
+      optionFields.forEach((field) => {
+        field.closest(".form-row").hidden = !createOption.checked;
+      });
+      security.closest(".form-row").classList.toggle("muted-form-row", createOption.checked);
+      updatePositionEffect();
+      updateAmount();
     };
     const updateStrategyOther = () => {
       const selected = strategy.options[strategy.selectedIndex];
@@ -63,12 +85,16 @@
       updatePositionEffect();
       updateAmount();
     });
+    createOption.addEventListener("change", updateOptionFields);
+    optionMultiplier.addEventListener("input", updateAmount);
     quantity.addEventListener("input", updateAmount);
     price.addEventListener("input", updateAmount);
     strategy.addEventListener("change", updateStrategyOther);
     updateAmount();
     updateStrategyOther();
+    updateOptionFields();
     refresh(false).then(() => {
+      updateOptionFields();
       updatePositionEffect();
       updateAmount();
     });

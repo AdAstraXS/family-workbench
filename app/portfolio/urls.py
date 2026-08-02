@@ -50,8 +50,23 @@ urlpatterns = [
     path("accounts/<int:pk>/edit/", views.account_edit, name="account_edit"),
     path("securities/", views.security_list, name="security_list"),
     path("securities/watchlist/add/", views.watchlist_add, name="watchlist_add"),
+    path(
+        "securities/watchlist/<int:pk>/update/",
+        views.watchlist_item_update,
+        name="watchlist_item_update",
+    ),
+    path(
+        "securities/watchlist/groups/manage/",
+        views.watchlist_group_manage,
+        name="watchlist_group_manage",
+    ),
     path("securities/create/", views.security_create, name="security_create"),
     path("securities/options/create/", views.option_contract_create, name="option_contract_create"),
+    path(
+        "securities/options/<int:pk>/edit/",
+        views.option_contract_edit,
+        name="option_contract_edit",
+    ),
     path("securities/bonds/create/", views.bond_create, name="bond_create"),
     path("securities/bonds/<int:pk>/edit/", views.bond_edit, name="bond_edit"),
     path("securities/<int:pk>/edit/", views.security_edit, name="security_edit"),
@@ -70,6 +85,11 @@ urlpatterns = [
     path("positions/", views.position_list, name="position_list"),
     path("positions/create/", views.position_create, name="position_create"),
     path("positions/<int:pk>/edit/", views.position_edit, name="position_edit"),
+    path(
+        "positions/<int:pk>/option/<str:action>/",
+        views.option_position_action,
+        name="option_position_action",
+    ),
     path("transactions/", views.transaction_list, name="transaction_list"),
     path(
         "transactions/form-options/",

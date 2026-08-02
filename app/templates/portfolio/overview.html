@@ -145,9 +145,11 @@
           <polygon points="{{ trend_fill_points }}" fill="url(#portfolioTrendFill)"/>
           <polyline points="{{ trend_points }}" class="portfolio-trend-line"/>
           {% for row in trend_rows %}
-            <circle cx="{{ row.x }}" cy="{{ row.y }}" r="4.5" class="portfolio-trend-node"/>
+            <circle cx="{{ row.x }}" cy="{{ row.y }}" r="4.5" class="portfolio-trend-node{% if not row.is_complete %} partial{% endif %}">
+              <title>{{ row.date_label }} · {{ row.amount_label }}{% if not row.is_complete %} · 部分数据{% endif %}</title>
+            </circle>
             <text x="{{ row.x }}" y="{{ row.label_y }}" class="portfolio-chart-value">{{ row.amount_label }}</text>
-            <text x="{{ row.x }}" y="249" class="portfolio-chart-date">{{ row.date_label }}</text>
+            <text x="{{ row.x }}" y="249" class="portfolio-chart-date{% if not row.is_complete %} partial{% endif %}">{{ row.date_label }}{% if not row.is_complete %}*{% endif %}</text>
           {% endfor %}
         {% endif %}
       </svg>
@@ -155,6 +157,9 @@
   </div>
   {% if trend_view == "daily" and trend_snapshots|length > 10 %}
     <p class="portfolio-trend-scroll-hint">已显示全部快照，可左右滚动查看；每个节点保持固定间距，避免数据和日期重叠。</p>
+  {% endif %}
+  {% if partial_trend_snapshot_count %}
+    <p class="portfolio-trend-partial-note">* 含 {{ partial_trend_snapshot_count }} 个“部分数据”快照；节点已显示，但不视为完整审计快照。</p>
   {% endif %}
 </section>
 

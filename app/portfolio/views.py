@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_CEILING
 
 from django.contrib import messages
@@ -33,8 +33,10 @@ from .forms import (
     InvestmentTransactionForm,
     ManualSecurityPriceForm,
     OptionContractForm,
+    OptionPositionActionForm,
     SecurityForm,
     SecurityQuoteConfigForm,
+    WatchlistGroupForm,
 )
 from .futu_service import FutuQueryError, search_futu_securities
 from .exchange_rate_service import ensure_daily_exchange_rates
@@ -42,6 +44,7 @@ from .models import (
     DailyPortfolioValuationRun,
     InvestmentAccount,
     InvestmentCashMovement,
+    InvestmentOption,
     InvestmentPosition,
     InvestmentTransaction,
     MarketDataRefreshRun,
@@ -53,6 +56,7 @@ from .models import (
     Security,
     TradeTypeChoices,
     TransactionSourceChoices,
+    WatchlistGroup,
     WatchlistItem,
 )
 from .market_data import (
@@ -68,7 +72,11 @@ from .reconciliation import (
     build_reconciliation_preview,
     revert_reconciliation,
 )
-from .services import rebuild_cash_only_transaction, rebuild_position
+from .services import (
+    rebuild_cash_only_transaction,
+    rebuild_position,
+    settle_option_position,
+)
 from .valuation import (
     convert_currency as _convert_currency,
     refresh_position_valuations,
@@ -430,6 +438,13 @@ def _account_dashboard_data(request, account=None):
         item.pricing_status_label = PricingStatusChoices(
             price_resolution.status
         ).label
+        option_contract = getattr(item.security, "option_contract", None)
+        item.is_option = option_contract is not None
+        item.option_expired = bool(
+            option_contract
+            and option_contract.expiration_date <= timezone.localdate()
+        )
+        item.is_long_option = bool(option_contract and item.quantity > 0)
         item.display_cost = (
             item.diluted_cost
             if cost_method == "diluted"
@@ -698,7 +713,6 @@ def overview(request):
             member=selected_member,
             account=None,
             currency=base_currency,
-            extra_data__complete=True,
         )
         .order_by("snapshot_date", "pk")
     )
@@ -784,6 +798,7 @@ def overview(request):
                     "label_y": f"{max(y - Decimal('11'), Decimal('14')):.2f}",
                     "amount_label": f"{value_wan:,.2f}万",
                     "date_label": date_label,
+                    "is_complete": bool((item.extra_data or {}).get("complete")),
                 }
             )
         trend_points = " ".join(
@@ -872,6 +887,11 @@ def overview(request):
             "total_pnl": total_pnl,
             "asset_groups": asset_groups,
             "trend_snapshots": trend_snapshots,
+            "partial_trend_snapshot_count": sum(
+                1
+                for item in trend_snapshots
+                if not (item.extra_data or {}).get("complete")
+            ),
             "trend_points": trend_points,
             "trend_fill_points": trend_fill_points,
             "trend_rows": trend_rows,
@@ -1707,16 +1727,30 @@ def security_list(request):
                     compress=True,
                 )
 
+    watchlist_groups = (
+        WatchlistGroup.objects.filter(family=member.family)
+        if member
+        else WatchlistGroup.objects.none()
+    )
+    selected_group = request.GET.get("group", "all")
     watchlist_items = (
         WatchlistItem.objects.select_related(
             "security",
             "security__market_snapshot",
             "member",
+            "group",
         )
         .filter(family=member.family, is_active=True)
         if member
         else WatchlistItem.objects.none()
     )
+    if selected_group == "ungrouped":
+        watchlist_items = watchlist_items.filter(group__isnull=True)
+    elif selected_group.isdigit():
+        if watchlist_groups.filter(pk=selected_group).exists():
+            watchlist_items = watchlist_items.filter(group_id=selected_group)
+        else:
+            selected_group = "all"
     watched_ids = set(watchlist_items.values_list("security_id", flat=True))
     watched_keys = set(
         Security.objects.filter(pk__in=watched_ids).values_list("market", "symbol")
@@ -1733,6 +1767,9 @@ def security_list(request):
             "selected_market": market,
             "query_error": query_error,
             "has_member": member is not None,
+            "watchlist_groups": watchlist_groups,
+            "selected_group": selected_group,
+            "group_form": WatchlistGroupForm(),
         },
     )
 
@@ -2005,6 +2042,74 @@ def watchlist_add(request):
 
 
 @login_required
+@require_POST
+def watchlist_item_update(request, pk):
+    member = get_object_or_404(
+        FamilyMember.objects.select_related("family"),
+        user=request.user,
+        is_active=True,
+    )
+    item = get_object_or_404(
+        WatchlistItem.objects.select_related("security"),
+        pk=pk,
+        family=member.family,
+        is_active=True,
+    )
+    action = request.POST.get("action", "group")
+    if action == "remove":
+        item.is_active = False
+        item.save(update_fields=["is_active", "updated_at"])
+        messages.success(request, f"{item.security} 已从自选股移除，历史交易和持仓不受影响。")
+    else:
+        group_id = request.POST.get("group", "")
+        group = None
+        if group_id:
+            group = get_object_or_404(
+                WatchlistGroup,
+                pk=group_id,
+                family=member.family,
+            )
+        item.group = group
+        item.save(update_fields=["group", "updated_at"])
+        messages.success(request, f"{item.security} 的自选分类已更新。")
+    return redirect("portfolio:security_list")
+
+
+@login_required
+@require_POST
+def watchlist_group_manage(request):
+    member = get_object_or_404(
+        FamilyMember.objects.select_related("family"),
+        user=request.user,
+        is_active=True,
+    )
+    group_id = request.POST.get("group_id", "")
+    action = request.POST.get("action", "save")
+    group = None
+    if group_id:
+        group = get_object_or_404(
+            WatchlistGroup,
+            pk=group_id,
+            family=member.family,
+        )
+    if action == "delete" and group:
+        group.items.update(group=None)
+        group_name = group.name
+        group.delete()
+        messages.success(request, f"分类“{group_name}”已删除，其中标的转为未分类。")
+        return redirect("portfolio:security_list")
+    form = WatchlistGroupForm(request.POST, instance=group)
+    if form.is_valid():
+        saved_group = form.save(commit=False)
+        saved_group.family = member.family
+        saved_group.save()
+        messages.success(request, f"分类“{saved_group.name}”已保存。")
+    else:
+        messages.error(request, "分类名称无效或已经存在。")
+    return redirect("portfolio:security_list")
+
+
+@login_required
 def security_create(request):
     return _security_form(request)
 
@@ -2054,6 +2159,36 @@ def option_contract_create(request):
         messages.success(request, "期权合约已创建并加入自选标的。")
         return redirect("portfolio:security_list")
     return render(request, "form.html", {"form": form, "title": "新增期权合约"})
+
+
+@login_required
+def option_contract_edit(request, pk):
+    member = FamilyMember.objects.filter(
+        user=request.user, is_active=True
+    ).select_related("family").first()
+    if not member:
+        messages.error(request, "当前登录用户尚未关联家庭成员。")
+        return redirect("portfolio:security_list")
+    security = get_object_or_404(
+        _visible_securities(request).select_related("option_contract"),
+        pk=pk,
+        asset_type=Security.TYPE_OPTION,
+        data_source="manual",
+    )
+    form = OptionContractForm(
+        request.POST or None,
+        family=member.family,
+        instance=security,
+    )
+    if request.method == "POST" and form.is_valid():
+        form.save(member)
+        messages.success(request, "期权合约已更新。")
+        return redirect("portfolio:security_list")
+    return render(
+        request,
+        "form.html",
+        {"form": form, "title": "编辑期权合约"},
+    )
 
 
 def _bond_form(request, security=None):
@@ -2109,6 +2244,77 @@ def position_create(request):
 def position_edit(request, pk):
     messages.info(request, "持仓已改为由交易流水自动计算，请修改对应交易记录。")
     return redirect("portfolio:account_list")
+
+
+@login_required
+def option_position_action(request, pk, action):
+    if action not in {"expire", "exercise"}:
+        raise PermissionDenied("不支持的期权操作。")
+    position = get_object_or_404(
+        InvestmentPosition.objects.filter(account__in=_visible_accounts(request))
+        .exclude(quantity=0)
+        .select_related(
+            "account__bank_account",
+            "security__option_contract__underlying",
+        ),
+        pk=pk,
+        security__asset_type=Security.TYPE_OPTION,
+    )
+    contract = position.security.option_contract
+    initial_date = (
+        contract.expiration_date
+        if contract.expiration_date <= timezone.localdate()
+        else timezone.localdate()
+    )
+    form = OptionPositionActionForm(
+        request.POST or None,
+        position=position,
+        action=action,
+        initial={
+            "action_date": initial_date,
+            "quantity": abs(position.quantity),
+            "fee": 0,
+        },
+    )
+    if request.method == "POST" and form.is_valid():
+        try:
+            settle_option_position(
+                position,
+                action=action,
+                action_date=form.cleaned_data["action_date"],
+                quantity=form.cleaned_data["quantity"],
+                fee=form.cleaned_data.get("fee") or ZERO,
+                remark=form.cleaned_data.get("remark", ""),
+                user=request.user,
+            )
+        except ValidationError as exc:
+            form.add_error(None, exc)
+        else:
+            messages.success(
+                request,
+                "期权到期作废已记录。" if action == "expire" else "期权行权及正股交易已记录。",
+            )
+            return redirect(f"{position.account.get_absolute_url()}?tab=positions")
+    return render(
+        request,
+        "form.html",
+        {
+            "form": form,
+            "title": (
+                f"到期作废 · {position.security.name}"
+                if action == "expire"
+                else f"行权 · {position.security.name}"
+            ),
+            "form_intro": (
+                "系统将以 0 价格平仓该期权。"
+                if action == "expire"
+                else "系统将关闭期权持仓，并按行权价自动生成对应正股买入或卖出交易。"
+            ),
+            "page_parent_url": (
+                f"{position.account.get_absolute_url()}?tab=positions"
+            ),
+        },
+    )
 
 
 @login_required
@@ -2171,6 +2377,7 @@ def transaction_form_options(request):
                 "accounts": [],
                 "categories": [],
                 "securities": [],
+                "underlyings": [],
             }
         )
     members = FamilyMember.objects.filter(
@@ -2192,6 +2399,7 @@ def transaction_form_options(request):
         watchlist_items__family_id=family_id,
         watchlist_items__is_active=True,
     ).distinct().order_by("market", "symbol")
+    underlyings = securities.exclude(asset_type=Security.TYPE_OPTION)
     return JsonResponse(
         {
             "members": [{"id": item.pk, "name": item.display_name} for item in members],
@@ -2212,6 +2420,14 @@ def transaction_form_options(request):
                     "multiplier": str(item.contract_multiplier),
                 }
                 for item in securities
+            ],
+            "underlyings": [
+                {
+                    "id": item.pk,
+                    "name": f"{item.symbol} {item.name}",
+                    "currency": item.currency,
+                }
+                for item in underlyings
             ],
         }
     )
@@ -2234,6 +2450,30 @@ def save_transaction_form(request, title, instance=None):
                 with transaction.atomic():
                     stamp_actor(form.instance, request.user)
                     item = form.save()
+                    if (
+                        item.security_id
+                        and item.security.asset_type == Security.TYPE_OPTION
+                        and item.price >= ZERO
+                        and item.trade_date <= timezone.localdate()
+                    ):
+                        transaction_price_as_of = timezone.make_aware(
+                            datetime.combine(item.trade_date, time(16, 0))
+                        )
+                        if transaction_price_as_of > timezone.now():
+                            transaction_price_as_of = timezone.now()
+                        record_security_price(
+                            item.security,
+                            item.price,
+                            source=PriceSourceChoices.MANUAL,
+                            price_as_of=transaction_price_as_of,
+                            price_type="transaction",
+                            quote_data={
+                                "raw_data": {
+                                    "transaction_id": item.pk,
+                                    "transaction_price": True,
+                                }
+                            },
+                        )
                     pairs = {old_pair, (item.account_id, item.security_id)}
                     for account_id, security_id in {
                         pair for pair in pairs if pair and pair[1]
@@ -2249,6 +2489,7 @@ def save_transaction_form(request, title, instance=None):
                 return redirect(f"{item.account.get_absolute_url()}?tab=transactions")
     else:
         initial = {}
+        selected_position = None
         if request.GET.get("account", "").isdigit():
             selected_account = _visible_accounts(request).filter(
                 pk=request.GET["account"]
@@ -2262,6 +2503,56 @@ def save_transaction_form(request, title, instance=None):
                         "bank_account": selected_account.bank_account,
                     }
                 )
+                if request.GET.get("security", "").isdigit():
+                    selected_position = (
+                        InvestmentPosition.objects.filter(
+                            account=selected_account,
+                            security_id=request.GET["security"],
+                        )
+                        .exclude(quantity=0)
+                        .select_related(
+                            "security__asset_category",
+                            "security__option_contract",
+                            "security__market_snapshot",
+                        )
+                        .prefetch_related("security__quote_configs")
+                        .first()
+                    )
+        if selected_position:
+            resolution = resolve_position_prices(
+                [selected_position], timezone.localdate()
+            )[selected_position.pk]
+            action = request.GET.get("action", "sell")
+            trade_code = TradeTypeChoices.SELL
+            position_effect = ""
+            if selected_position.security.asset_type == Security.TYPE_OPTION:
+                trade_code = (
+                    TradeTypeChoices.SELL
+                    if selected_position.quantity > 0
+                    else TradeTypeChoices.BUY
+                )
+                position_effect = InvestmentTransaction.EFFECT_CLOSE
+            initial.update(
+                {
+                    "security": selected_position.security,
+                    "asset_category": selected_position.security.asset_category,
+                    "trade_date": timezone.localdate(),
+                    "trade_type_option": InvestmentOption.objects.filter(
+                        category=InvestmentOption.CATEGORY_TRANSACTION_TYPE,
+                        code=trade_code,
+                        is_active=True,
+                    ).first(),
+                    "position_effect": position_effect,
+                    "currency": selected_position.security.currency,
+                    "quantity": abs(selected_position.quantity),
+                    "price": resolution.price,
+                }
+            )
+            title = (
+                f"平仓 · {selected_position.security.name}"
+                if selected_position.security.asset_type == Security.TYPE_OPTION
+                else f"卖出 · {selected_position.security.name}"
+            )
         form = InvestmentTransactionForm(
             instance=instance,
             initial=initial,

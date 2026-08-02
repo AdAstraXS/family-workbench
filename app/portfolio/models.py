@@ -445,6 +445,31 @@ class BondDetail(TimestampedModel):
         return f"{self.security} {self.maturity_date or ''}".strip()
 
 
+class WatchlistGroup(TimestampedModel):
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="watchlist_groups",
+    )
+    name = models.CharField("分类名称", max_length=50)
+    display_order = models.PositiveSmallIntegerField("显示顺序", default=0)
+
+    class Meta:
+        verbose_name = "自选股分类"
+        verbose_name_plural = "自选股分类"
+        ordering = ["display_order", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["family", "name"],
+                name="unique_family_watchlist_group_name",
+            )
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class WatchlistItem(TimestampedModel):
     family = models.ForeignKey(
         Family,
@@ -465,6 +490,14 @@ class WatchlistItem(TimestampedModel):
         verbose_name="证券标的",
         on_delete=models.CASCADE,
         related_name="watchlist_items",
+    )
+    group = models.ForeignKey(
+        WatchlistGroup,
+        verbose_name="自选分类",
+        on_delete=models.SET_NULL,
+        related_name="items",
+        null=True,
+        blank=True,
     )
     is_active = models.BooleanField("是否关注", default=True)
     remark = models.TextField("关注备注", blank=True)
