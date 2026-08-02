@@ -1,6 +1,6 @@
 # 家庭知识底座第一版配置与运行手册
 
-> 更新日期：2026-07-30
+> 更新日期：2026-08-02
 >
 > 适用范围：家庭知识底座第一版的本地验证、Microsoft 配置、任务运行和生产部署前检查
 >
@@ -149,11 +149,18 @@ docker compose exec -T web python manage.py queue_knowledge_syncs
 docker compose exec -T web python manage.py queue_knowledge_syncs --full-reconcile
 ```
 
-试点人工验收通过后，可在 DSM Task Scheduler 建议配置：
+生产环境当前已在 DSM Task Scheduler 配置：
 
-- 每日固定时间运行 `queue_knowledge_syncs`；
-- 每 10 分钟运行 `process_knowledge_jobs --limit 5`；
-- 每周运行一次 `queue_knowledge_syncs --full-reconcile`。
+- 任务名称：`family-workbench-knowledge-jobs`（任务 ID 6）；
+- 运行身份：`root`；
+- 时间：每天 00:00 至 23:55，每 5 分钟一次；
+- 命令：在 Web 容器中运行 `process_knowledge_jobs --limit 5`，并追加写入
+  `logs/knowledge-jobs.log`。
+
+这个任务只是异步执行器：网页“同步”按钮负责创建任务，执行器负责在下一次轮询时处理；它
+不会自动创建 OneNote 同步任务。因此没有用户操作时，轮询只做一次数据库空队列检查，不会
+访问 Microsoft Graph。当前没有启用每日自动创建同步任务或每周完整对账；如后续需要自动
+同步，再单独启用 `queue_knowledge_syncs` 或 `--full-reconcile`。
 
 同一来源同一任务类型存在排队或运行任务时不会重复创建。任务失败、部分成功或来源不可访问时，
 处理命令返回非零状态并保留数据库审计记录。
@@ -171,20 +178,21 @@ docker compose exec -T web python manage.py queue_knowledge_syncs --full-reconci
 搜索投影可以删除后重建，不作为唯一备份。恢复演练至少核对文档数、版本数、附件数、来源数、
 搜索权限以及抽样原文和附件哈希。
 
-## 9. 当前生产部署门槛
+## 9. 当前生产状态与后续门槛
 
-本版本新增 `cryptography`、`msal` 和 `nh3` 依赖。在 NAS Python/Docker 镜像源和依赖安装能力
-重新验证前，不得沿用旧镜像部署，也不得把“源码挂载成功”当成新依赖已经安装。
+第一版所需的 `cryptography`、`msal` 和 `nh3` 依赖已完成 NAS 镜像构建和验证。生产环境已配置
+独立的知识文件持久目录、Microsoft 应用 Secret 和令牌加密密钥，并完成一名成员、一个笔记本
+的真实内容试点。当前运行提交为 `1b2bd784b2ff1fc6a8455eb09229c201eaebe36a`。
 
-正式部署还必须：
+后续发布仍必须：
 
 1. 按 NAS 部署技能创建并验证生产数据库备份；
-2. 联合备份或建立空的 `knowledge_files/` 持久目录；
-3. 配置 Microsoft 回调域名、Client Secret 和独立令牌加密密钥；
-4. 运行迁移和原有模块回归测试；
-5. 先由一位成员验证一个笔记本，再创建正式 DSM 定时任务。
+2. 保留生产 `.env`、数据库卷和 `knowledge_files/`，不得用本地数据覆盖；
+3. 依赖清单变化时重新验证镜像构建，不得只替换挂载源码；
+4. 运行迁移检查、Django 系统检查和原有模块回归测试；
+5. 部署后核对任务日志、知识原文、金融关键表基线和实际运行 commit。
 
-## 10. 本地验证记录
+## 10. 验证记录
 
 2026-07-30 已完成以下本地验证：
 
@@ -195,6 +203,30 @@ docker compose exec -T web python manage.py queue_knowledge_syncs --full-reconci
 - 知识中心、搜索、来源管理和待确认页面完成浏览器验证；
 - 375 px 宽度下完成移动端布局检查，浏览器控制台无错误。
 
-尚未验证的项目包括真实 Microsoft OAuth、真实 OneNote 内容与大体量搜索、真实云端 AI
-建议质量、NAS 镜像构建、生产备份恢复和 DSM 定时任务。这些项目必须在用户提供试点与生产
-配置、且 NAS 依赖构建门槛解决后逐项验收，不能用本地模拟结果代替。
+截至 2026-07-30，本地环境尚不能验证真实 Microsoft OAuth、OneNote 内容、NAS 镜像与 DSM
+任务；以下生产试点记录用于补充这些验证，不能把此前的模拟结果当作生产结论。
+
+2026-08-02 已完成以下生产试点：
+
+- 用户本人完成真实 Microsoft OAuth 绑定，选定一个包含 6 页的 OneNote 笔记本；云端 AI
+  保持关闭；
+- 首轮同步暴露 OneNote 图片偶尔返回 `application/octet-stream` 的兼容问题，修复后任务 #2
+  成功完成（更新 1、跳过 5）；
+- 修复 OneNote HTML 正文转换后重建 6 个文档，确认正文可以展示；
+- 发现 Graph 页面列表的 `lastModifiedDateTime` 可能未随正文及时变化，因此从提交
+  `1b2bd784b2ff1fc6a8455eb09229c201eaebe36a` 起，页面 HTML 哈希是增量判断的权威依据，
+  列表修改时间只作为描述性元数据；
+- 用户修改“金刚经-王路”后创建任务 #5，DSM 执行器自动处理成功：新增 0、更新 1、跳过 5、
+  失败 0；未再修改内容后创建任务 #6，自动处理结果为新增 0、更新 0、跳过 6、失败 0；
+- 未变化页面会读取一次 HTML 以规避时间戳滞后，但不会下载正文图片、创建知识版本或附件；
+- 修复版本全项目 210 项自动测试通过，`makemigrations --check --dry-run` 无遗漏迁移，生产
+  `manage.py check` 无问题；
+- 部署前数据库备份为
+  `backups/family-workbench-pre-onenote-content-hash-1b2bd78.dump`，SHA-256 为
+  `3187dbc3a9531e3228370b0cecb4b2286f47406879ca7b90d7bab114c70a156d`；部署前源码恢复包为
+  `backups/source-predeploy-a67f34b0f0d7257dd68fcf6b931be29425459d4f-20260802-214151.tar.gz`，
+  SHA-256 为 `6df6cca566ab78b8e6d2b3afeaeadefda60a18343484c9a3374c2bb284adf87e`；
+- 部署前后生产 `.env` 校验值和金融关键表基线一致，未使用本地数据库覆盖生产数据。
+
+仍待验收：复杂附件与大体量搜索、第二名成员的账户和可见性隔离、授权过期后的重新绑定、
+数据库与 `knowledge_files/` 联合恢复，以及用户明确同意后的云端 AI 建议质量。
