@@ -18,6 +18,7 @@ from notes.models import InvestmentNote, InvestmentNoteType
 from .content import (
     UnsafeKnowledgeResourceError,
     normalize_onenote_html,
+    validate_resource_mime,
     validate_resource_signature,
 )
 from .ai import KnowledgeAiError, generate_proposals
@@ -95,6 +96,22 @@ class KnowledgeSecurityUnitTests(SimpleTestCase):
             b"\x89PNG\r\n\x1a\npayload",
             "image/png",
         )
+
+    def test_octet_stream_image_requires_a_supported_file_signature(self):
+        self.assertEqual(
+            validate_resource_mime(
+                "application/octet-stream",
+                True,
+                b"\x89PNG\r\n\x1a\npayload",
+            ),
+            "image/png",
+        )
+        with self.assertRaises(UnsafeKnowledgeResourceError):
+            validate_resource_mime(
+                "application/octet-stream",
+                True,
+                b"not-an-image",
+            )
 
 
 @override_settings(
@@ -625,7 +642,7 @@ class KnowledgeBaseTests(TestCase):
             def resource(self, url):
                 return GraphResponse(
                     body=b"\x89PNG\r\n\x1a\n" + b"image-data",
-                    content_type="image/png",
+                    content_type="application/octet-stream",
                     content_disposition="",
                 )
 
@@ -651,6 +668,10 @@ class KnowledgeBaseTests(TestCase):
         page_one = source.documents.get(external_id="page-1")
         self.assertEqual(page_one.revisions.count(), 1)
         self.assertEqual(page_one.current_revision.assets.count(), 1)
+        self.assertEqual(
+            page_one.current_revision.assets.get().mime_type,
+            "image/png",
+        )
         self.assertNotIn("script", page_one.current_revision.normalized_html)
         self.assertNotIn("alert", page_one.current_revision.normalized_html)
         self.assertIn("https://example.com/article", page_one.current_revision.normalized_html)

@@ -117,6 +117,7 @@ def _download_page_resources(client, raw_html):
         mime_type = validate_resource_mime(
             response.content_type or reference.declared_mime,
             reference.is_image,
+            response.body,
         )
         validate_resource_signature(response.body, mime_type)
         total_bytes += len(response.body)

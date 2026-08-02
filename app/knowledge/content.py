@@ -172,10 +172,28 @@ def is_allowed_microsoft_resource_url(value):
     )
 
 
-def validate_resource_mime(mime_type, is_image):
+def detect_safe_image_mime(body):
+    if body.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if body.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if body.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if body.startswith(b"RIFF") and body[8:12] == b"WEBP":
+        return "image/webp"
+    return ""
+
+
+def validate_resource_mime(mime_type, is_image, body=b""):
     normalized = (mime_type or "application/octet-stream").split(";", 1)[0].lower()
     if normalized in DANGEROUS_MIME_TYPES:
         raise UnsafeKnowledgeResourceError(f"不允许保存危险文件类型：{normalized}")
+    if is_image and normalized == "application/octet-stream":
+        normalized = detect_safe_image_mime(body)
+        if not normalized:
+            raise UnsafeKnowledgeResourceError(
+                "正文图片缺少可信类型，且文件内容无法识别为受支持的图片。"
+            )
     if is_image and normalized not in SAFE_IMAGE_MIME_TYPES:
         raise UnsafeKnowledgeResourceError(f"不支持的正文图片类型：{normalized}")
     return normalized
