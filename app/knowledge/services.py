@@ -336,15 +336,9 @@ def _sync_page(client, source, section, page):
     document.source_deleted_at = None
     document.save()
 
-    if (
-        not created
-        and document.current_revision_id
-        and document.current_revision.converter_version
-        == ONENOTE_CONVERTER_VERSION
-        and not metadata_changed
-    ):
-        return document, KnowledgeJobItem.STATUS_SKIPPED
-
+    # OneNote collection metadata can lag behind the page content visible in
+    # OneNote Online. Treat lastModifiedDateTime as descriptive metadata only;
+    # the downloaded HTML hash is the authoritative change detector.
     raw_bytes = client.page_content(external_id)
     raw_hash = content_hash(raw_bytes)
     if (
@@ -354,7 +348,8 @@ def _sync_page(client, source, section, page):
         if document.current_revision.converter_version != ONENOTE_CONVERTER_VERSION:
             rebuild_document_normalized_content(document)
             return document, KnowledgeJobItem.STATUS_UPDATED
-        index_document(document)
+        if metadata_changed:
+            index_document(document)
         return document, KnowledgeJobItem.STATUS_SKIPPED
     resources = _download_page_resources(
         client,

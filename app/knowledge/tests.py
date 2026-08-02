@@ -613,6 +613,8 @@ class KnowledgeBaseTests(TestCase):
             def __init__(self):
                 self.modified = "2026-07-30T01:00:00Z"
                 self.page_ids = ["page-1", "page-2"]
+                self.page_content_calls = []
+                self.resource_calls = []
                 self.html = {
                     "page-1": (
                         "<html><body><script>alert(1)</script>"
@@ -655,9 +657,11 @@ class KnowledgeBaseTests(TestCase):
                 ]
 
             def page_content(self, page_id):
+                self.page_content_calls.append(page_id)
                 return self.html[page_id].encode("utf-8")
 
             def resource(self, url):
+                self.resource_calls.append(url)
                 return GraphResponse(
                     body=b"\x89PNG\r\n\x1a\n" + b"image-data",
                     content_type="application/octet-stream",
@@ -725,14 +729,33 @@ class KnowledgeBaseTests(TestCase):
         self.assertEqual(second.skipped_count, 2)
         page_one.refresh_from_db()
         self.assertEqual(page_one.revisions.count(), 1)
+        self.assertEqual(len(fake.page_content_calls), 6)
+        self.assertEqual(len(fake.resource_calls), 1)
 
-        fake.modified = "2026-07-30T03:00:00Z"
         fake.html["page-1"] = fake.html["page-1"].replace("第一版", "第二版")
         changed = run_sync()
         self.assertEqual(changed.updated_count, 1)
+        self.assertEqual(changed.skipped_count, 1)
         page_one.refresh_from_db()
         self.assertEqual(page_one.revisions.count(), 2)
         self.assertIn("第二版", page_one.current_revision.plain_text)
+        self.assertEqual(len(fake.resource_calls), 2)
+        self.assertEqual(
+            page_one.content_modified_at.isoformat(),
+            "2026-07-30T01:00:00+00:00",
+        )
+
+        fake.modified = "2026-07-30T03:00:00Z"
+        metadata_only = run_sync()
+        self.assertEqual(metadata_only.updated_count, 0)
+        self.assertEqual(metadata_only.skipped_count, 2)
+        page_one.refresh_from_db()
+        self.assertEqual(page_one.revisions.count(), 2)
+        self.assertEqual(len(fake.resource_calls), 2)
+        self.assertEqual(
+            page_one.content_modified_at.isoformat(),
+            "2026-07-30T03:00:00+00:00",
+        )
 
         fake.page_ids = ["page-1"]
         reconciled = run_sync(full_reconcile=True)
