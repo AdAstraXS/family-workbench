@@ -11,6 +11,7 @@ from django.utils.dateparse import parse_datetime
 
 from .ai import KnowledgeAiError, generate_proposals
 from .content import (
+    ONENOTE_CONVERTER_VERSION,
     UnsafeKnowledgeResourceError,
     content_hash,
     extract_resource_references,
@@ -135,6 +136,52 @@ def _download_page_resources(client, raw_html):
     return downloaded
 
 
+def _stored_resource_urls(revision, raw_html):
+    assets = {asset.external_id: asset for asset in revision.assets.all()}
+    resource_urls = {}
+    for reference in extract_resource_references(raw_html):
+        asset = assets.get(resource_external_id(reference.url))
+        if asset is None:
+            continue
+        protected_url = reverse("knowledge:asset_download", kwargs={"pk": asset.pk})
+        resource_urls[reference.url] = protected_url
+        for alias in reference.aliases:
+            resource_urls[alias] = protected_url
+    return resource_urls
+
+
+def rebuild_document_normalized_content(document, *, save=True):
+    revision = document.current_revision
+    if revision is None:
+        raise ValueError("知识文档没有可重建的当前原始版本。")
+    with revision.raw_file.open("rb") as raw_file:
+        raw_bytes = raw_file.read()
+    raw_html = raw_bytes.decode("utf-8", errors="replace")
+    resource_urls = _stored_resource_urls(revision, raw_html)
+    safe_html, plain_text = normalize_onenote_html(raw_html, resource_urls)
+    changed = any(
+        [
+            revision.normalized_html != safe_html,
+            revision.plain_text != plain_text,
+            revision.converter_version != ONENOTE_CONVERTER_VERSION,
+        ]
+    )
+    if save and changed:
+        revision.normalized_html = safe_html
+        revision.plain_text = plain_text
+        revision.converter_version = ONENOTE_CONVERTER_VERSION
+        revision.save(
+            update_fields=["normalized_html", "plain_text", "converter_version"]
+        )
+        document.current_revision = revision
+        index_document(document)
+    return {
+        "changed": changed,
+        "plain_text_length": len(plain_text),
+        "asset_count": len(resource_urls),
+    }
+
+
 def _save_page_revision(document, raw_bytes, downloaded_resources, source_modified_at):
     raw_hash = content_hash(raw_bytes)
     if (
@@ -159,6 +206,7 @@ def _save_page_revision(document, raw_bytes, downloaded_resources, source_modifi
                 raw_file="",
                 normalized_html="",
                 plain_text="",
+                converter_version=ONENOTE_CONVERTER_VERSION,
                 source_modified_at=source_modified_at,
             )
             revision.raw_file.save(
@@ -291,6 +339,8 @@ def _sync_page(client, source, section, page):
     if (
         not created
         and document.current_revision_id
+        and document.current_revision.converter_version
+        == ONENOTE_CONVERTER_VERSION
         and not metadata_changed
     ):
         return document, KnowledgeJobItem.STATUS_SKIPPED
@@ -301,6 +351,9 @@ def _sync_page(client, source, section, page):
         document.current_revision_id
         and document.current_revision.content_hash == raw_hash
     ):
+        if document.current_revision.converter_version != ONENOTE_CONVERTER_VERSION:
+            rebuild_document_normalized_content(document)
+            return document, KnowledgeJobItem.STATUS_UPDATED
         index_document(document)
         return document, KnowledgeJobItem.STATUS_SKIPPED
     resources = _download_page_resources(

@@ -16,6 +16,7 @@ SAFE_IMAGE_MIME_TYPES = {
     "image/png",
     "image/webp",
 }
+ONENOTE_CONVERTER_VERSION = "onenote-html-v2"
 DANGEROUS_MIME_TYPES = {
     "application/ecmascript",
     "application/javascript",
@@ -228,19 +229,23 @@ def suggested_filename(reference, mime_type):
 
 class OneNoteHTMLRewriter(HTMLParser):
     VOID_TAGS = {"br", "hr", "img"}
-    BLOCKED_TAGS = {
+    BLOCKED_CONTAINER_TAGS = {
         "applet",
-        "embed",
         "form",
-        "frame",
         "frameset",
+        "head",
         "iframe",
-        "input",
-        "link",
-        "meta",
         "noscript",
         "script",
         "style",
+    }
+    BLOCKED_VOID_TAGS = {
+        "base",
+        "embed",
+        "frame",
+        "input",
+        "link",
+        "meta",
     }
 
     def __init__(self, resource_urls):
@@ -252,7 +257,9 @@ class OneNoteHTMLRewriter(HTMLParser):
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
         attrs = dict(attrs)
-        if tag in self.BLOCKED_TAGS:
+        if tag in self.BLOCKED_VOID_TAGS:
+            return
+        if tag in self.BLOCKED_CONTAINER_TAGS:
             self.blocked_depth += 1
             return
         if self.blocked_depth:
@@ -296,11 +303,18 @@ class OneNoteHTMLRewriter(HTMLParser):
         self.output.append(f"<{tag}{rendered_attrs}>")
 
     def handle_startendtag(self, tag, attrs):
+        if tag.lower() in {
+            *self.BLOCKED_CONTAINER_TAGS,
+            *self.BLOCKED_VOID_TAGS,
+        }:
+            return
         self.handle_starttag(tag, attrs)
 
     def handle_endtag(self, tag):
         tag = tag.lower()
-        if tag in self.BLOCKED_TAGS:
+        if tag in self.BLOCKED_VOID_TAGS:
+            return
+        if tag in self.BLOCKED_CONTAINER_TAGS:
             if self.blocked_depth:
                 self.blocked_depth -= 1
             return

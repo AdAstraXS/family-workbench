@@ -1,12 +1,14 @@
 import tempfile
 import json
 from datetime import timedelta
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -16,7 +18,9 @@ from family_core.models import Family, FamilyMember
 from notes.models import InvestmentNote, InvestmentNoteType
 
 from .content import (
+    ONENOTE_CONVERTER_VERSION,
     UnsafeKnowledgeResourceError,
+    resource_external_id,
     normalize_onenote_html,
     validate_resource_mime,
     validate_resource_signature,
@@ -86,6 +90,20 @@ class KnowledgeSecurityUnitTests(SimpleTestCase):
         self.assertNotIn("tracker.png", safe_html)
         self.assertIn("https://example.com/article", safe_html)
         self.assertIn("/knowledge/assets/1/download/", safe_html)
+
+    def test_onenote_head_and_void_metadata_do_not_hide_body(self):
+        raw_html = (
+            "<html><head><title>不应进入正文的标题</title>"
+            '<meta charset="utf-8"><link rel="stylesheet" href="bad.css">'
+            "</head><body><iframe/><p>这里是原页面正文</p></body></html>"
+        )
+
+        safe_html, plain_text = normalize_onenote_html(raw_html, {})
+
+        self.assertNotIn("不应进入正文的标题", plain_text)
+        self.assertIn("这里是原页面正文", plain_text)
+        self.assertNotIn("meta", safe_html)
+        self.assertNotIn("iframe", safe_html)
 
     def test_resource_signature_rejects_spoofed_and_executable_files(self):
         with self.assertRaises(UnsafeKnowledgeResourceError):
@@ -672,6 +690,10 @@ class KnowledgeBaseTests(TestCase):
             page_one.current_revision.assets.get().mime_type,
             "image/png",
         )
+        self.assertEqual(
+            page_one.current_revision.converter_version,
+            ONENOTE_CONVERTER_VERSION,
+        )
         self.assertNotIn("script", page_one.current_revision.normalized_html)
         self.assertNotIn("alert", page_one.current_revision.normalized_html)
         self.assertIn("https://example.com/article", page_one.current_revision.normalized_html)
@@ -679,6 +701,24 @@ class KnowledgeBaseTests(TestCase):
         self.assertTrue(page_one.current_revision.raw_file.storage.exists(
             page_one.current_revision.raw_file.name
         ))
+
+        outdated_revision = page_one.current_revision
+        outdated_revision.normalized_html = "<p>只剩标题</p>"
+        outdated_revision.plain_text = "只剩标题"
+        outdated_revision.converter_version = "onenote-html-v1"
+        outdated_revision.save(
+            update_fields=["normalized_html", "plain_text", "converter_version"]
+        )
+        reprocessed = run_sync()
+        self.assertEqual(reprocessed.updated_count, 1)
+        self.assertEqual(reprocessed.skipped_count, 1)
+        page_one.refresh_from_db()
+        self.assertEqual(page_one.revisions.count(), 1)
+        self.assertIn("第一版", page_one.current_revision.plain_text)
+        self.assertEqual(
+            page_one.current_revision.converter_version,
+            ONENOTE_CONVERTER_VERSION,
+        )
 
         second = run_sync()
         self.assertEqual(second.status, KnowledgeJob.STATUS_SUCCESS)
@@ -704,6 +744,104 @@ class KnowledgeBaseTests(TestCase):
         )
         self.assertIsNotNone(page_two.source_deleted_at)
         self.assertEqual(reconciled.result["source_deleted_marked"], 1)
+
+    def test_rebuild_content_uses_immutable_raw_file_and_saved_assets(self):
+        source = self.make_source(suffix="rebuild-content")
+        document = self.make_document(
+            source=source,
+            external_id="rebuild-page",
+            title="德勤",
+            normalized_html="<p>德勤</p>",
+            plain_text="德勤",
+        )
+        revision = document.current_revision
+        image_url = (
+            "https://graph.microsoft.com/v1.0/me/onenote/"
+            "resources/rebuild-image/$value"
+        )
+        raw_html = (
+            "<html><head><title>德勤</title><meta charset=\"utf-8\"></head>"
+            "<body><p>完整的原页面正文</p>"
+            f'<img src="{image_url}" data-src-type="image/png"></body></html>'
+        ).encode("utf-8")
+        revision.raw_file.delete(save=False)
+        revision.raw_file.save("page.html", ContentFile(raw_html), save=True)
+        asset = KnowledgeAsset.objects.create(
+            revision=revision,
+            external_id=resource_external_id(image_url),
+            original_name="rebuild.png",
+            mime_type="image/png",
+            byte_size=12,
+            content_hash="b" * 64,
+            is_image=True,
+            file="",
+        )
+        asset.file.save(
+            "rebuild.png",
+            ContentFile(b"\x89PNG\r\n\x1a\nbody"),
+            save=True,
+        )
+        raw_name = revision.raw_file.name
+        asset_name = asset.file.name
+        preview_output = StringIO()
+
+        call_command(
+            "rebuild_knowledge_content",
+            source_id=source.pk,
+            dry_run=True,
+            stdout=preview_output,
+        )
+
+        revision.refresh_from_db()
+        self.assertEqual(revision.converter_version, "onenote-html-v1")
+        self.assertEqual(revision.plain_text, "德勤")
+        self.assertIn(
+            "previewed updated=1 skipped=0 failed=0",
+            preview_output.getvalue(),
+        )
+        output = StringIO()
+
+        call_command(
+            "rebuild_knowledge_content",
+            source_id=source.pk,
+            stdout=output,
+        )
+
+        revision.refresh_from_db()
+        self.assertEqual(revision.raw_file.name, raw_name)
+        with revision.raw_file.open("rb") as raw_file:
+            self.assertEqual(raw_file.read(), raw_html)
+        self.assertEqual(revision.revision_number, 1)
+        self.assertEqual(
+            revision.converter_version,
+            ONENOTE_CONVERTER_VERSION,
+        )
+        self.assertIn("完整的原页面正文", revision.plain_text)
+        self.assertIn(
+            reverse("knowledge:asset_download", kwargs={"pk": asset.pk}),
+            revision.normalized_html,
+        )
+        asset.refresh_from_db()
+        self.assertEqual(asset.file.name, asset_name)
+        with asset.file.open("rb") as asset_file:
+            self.assertEqual(asset_file.read(), b"\x89PNG\r\n\x1a\nbody")
+        search_entry = KnowledgeSearchEntry.objects.get(
+            item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
+            object_id=str(document.pk),
+        )
+        self.assertIn("完整的原页面正文", search_entry.body)
+        self.assertIn("rebuilt updated=1 skipped=0 failed=0", output.getvalue())
+
+        second_output = StringIO()
+        call_command(
+            "rebuild_knowledge_content",
+            source_id=source.pk,
+            stdout=second_output,
+        )
+        self.assertIn(
+            "rebuilt updated=0 skipped=1 failed=0",
+            second_output.getvalue(),
+        )
 
     def test_authorization_failure_marks_job_source_unavailable_without_deleting_data(self):
         source = self.make_source(suffix="auth-failure")
