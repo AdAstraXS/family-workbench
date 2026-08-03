@@ -46,6 +46,7 @@
       <header><span class="eyebrow">Properties</span><h2>文档信息</h2></header>
       <dl class="knowledge-property-list">
         <div><dt>来源</dt><dd>{{ document.source.name }}</dd></div>
+        {% if document.section_name %}<div><dt>原始位置</dt><dd>{{ document.source.name }}{% if document.hierarchy.section_group %} / {{ document.hierarchy.section_group }}{% endif %} / {{ document.section_name }}</dd></div>{% endif %}
         <div><dt>所属成员</dt><dd>{{ document.owner|default:"已转交家庭" }}</dd></div>
         <div><dt>可见范围</dt><dd>{{ document.get_visibility_display }}</dd></div>
         <div><dt>分类</dt><dd>{{ document.category|default:"未确认" }}</dd></div>

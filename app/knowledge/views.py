@@ -1,5 +1,6 @@
 import re
 from collections import Counter
+from datetime import timedelta
 from pathlib import Path
 
 from django.conf import settings
@@ -168,6 +169,70 @@ def _knowledge_stats(member):
     }
 
 
+def _build_source_directory(entries):
+    sources = {}
+    document_rows = entries.filter(
+        item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
+        document__isnull=False,
+    ).values(
+        "document__source_id",
+        "source_name",
+        "source_kind",
+        "document__section_name",
+        "document__hierarchy__section_group",
+    ).annotate(total=Count("id"))
+    for row in document_rows.iterator():
+        source_id = str(row["document__source_id"])
+        source = sources.setdefault(
+            source_id,
+            {
+                "id": source_id,
+                "name": row["source_name"],
+                "kind": row["source_kind"],
+                "count": 0,
+                "sections": {},
+            },
+        )
+        row_count = row["total"]
+        source["count"] += row_count
+        section_name = (row["document__section_name"] or "").strip()
+        section_group = str(
+            row["document__hierarchy__section_group"] or ""
+        ).strip()
+        section_key = (section_group, section_name)
+        section = source["sections"].setdefault(
+            section_key,
+            {
+                "name": section_name or "未分区",
+                "value": section_name,
+                "group": section_group,
+                "count": 0,
+            },
+        )
+        section["count"] += row_count
+
+    note_count = entries.filter(
+        item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE
+    ).count()
+    if note_count:
+        sources["notes"] = {
+            "id": "notes",
+            "name": "随手记",
+            "kind": KnowledgeSource.KIND_INTERNAL_NOTES,
+            "count": note_count,
+            "sections": {},
+        }
+
+    directory = []
+    for source in sources.values():
+        source["sections"] = sorted(
+            source["sections"].values(),
+            key=lambda item: (item["group"], item["name"]),
+        )
+        directory.append(source)
+    return sorted(directory, key=lambda item: (item["name"], item["id"]))
+
+
 @login_required
 def index(request):
     member = current_member(request)
@@ -227,8 +292,17 @@ def _library_response(
     tag = request.GET.get("tag", "").strip()
     author = request.GET.get("person", "").strip()
     content_type = request.GET.get("kind", "all").strip()
+    directory_mode = request.GET.get("directory", "category").strip()
+    category = request.GET.get("category", "").strip()
+    source_id = request.GET.get("source_id", "").strip()
+    section = request.GET.get("section", "").strip()
+    section_group = request.GET.get("section_group", "").strip()
+    quick_filter = request.GET.get("quick", "").strip()
     date_from = request.GET.get("date_from", "").strip()
     date_to = request.GET.get("date_to", "").strip()
+
+    if directory_mode not in {"category", "source"}:
+        directory_mode = "category"
 
     if scope == "personal":
         entries = entries.filter(owner=member)
@@ -256,6 +330,46 @@ def _library_response(
         entries = entries.filter(item_kind=KnowledgeSearchEntry.KIND_DOCUMENT)
     else:
         content_type = "all"
+
+    directory_entries = entries
+    directory_total = directory_entries.count()
+    category_directory = list(
+        directory_entries.exclude(category="")
+        .values("category")
+        .annotate(total=Count("id"))
+        .order_by("category")
+    )
+    uncategorized_count = directory_entries.filter(category="").count()
+    source_directory = _build_source_directory(directory_entries)
+
+    if category:
+        entries = entries.filter(category=category)
+    if source_id == "notes":
+        entries = entries.filter(
+            item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE
+        )
+    elif source_id.isdigit():
+        entries = entries.filter(
+            item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
+            document__source_id=int(source_id),
+        )
+        if section:
+            entries = entries.filter(document__section_name=section)
+        if section_group:
+            entries = entries.filter(
+                document__hierarchy__section_group=section_group
+            )
+    else:
+        source_id = ""
+        section = ""
+        section_group = ""
+
+    if quick_filter == "recent":
+        entries = entries.filter(content_time__gte=timezone.now() - timedelta(days=30))
+    elif quick_filter == "uncategorized":
+        entries = entries.filter(category="")
+    else:
+        quick_filter = ""
     if curation_status:
         entries = entries.filter(curation_status=curation_status)
     if tag:
@@ -295,6 +409,27 @@ def _library_response(
         .annotate(total=Count("id"))
         .order_by("source_name")
     )
+    selected_source_name = ""
+    for source in source_directory:
+        if source["id"] == source_id:
+            selected_source_name = source["name"]
+            break
+    if category:
+        directory_title = category
+    elif section:
+        directory_title = " / ".join(
+            value
+            for value in [selected_source_name, section_group, section]
+            if value
+        )
+    elif selected_source_name:
+        directory_title = selected_source_name
+    elif quick_filter == "recent":
+        directory_title = "最近 30 天"
+    elif quick_filter == "uncategorized":
+        directory_title = "未分类"
+    else:
+        directory_title = "全部知识"
     return render(
         request,
         "knowledge/index.html",
@@ -308,6 +443,18 @@ def _library_response(
             "selected_tag": tag,
             "selected_author": author,
             "selected_kind": content_type,
+            "directory_mode": directory_mode,
+            "category_directory": category_directory,
+            "source_directory": source_directory,
+            "directory_total": directory_total,
+            "uncategorized_count": uncategorized_count,
+            "selected_category": category,
+            "selected_source_id": source_id,
+            "selected_source_name": selected_source_name,
+            "selected_section": section,
+            "selected_section_group": section_group,
+            "quick_filter": quick_filter,
+            "directory_title": directory_title,
             "date_from": date_from,
             "date_to": date_to,
             "source_choices": source_choices,

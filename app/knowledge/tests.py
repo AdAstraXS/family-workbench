@@ -39,7 +39,7 @@ from .models import (
     KnowledgeVisibility,
     SourceConnection,
 )
-from .search import rebuild_family_search
+from .search import index_document, rebuild_family_search
 from .services import process_job, queue_knowledge_job, recover_stale_jobs
 
 
@@ -493,6 +493,76 @@ class KnowledgeBaseTests(TestCase):
             reverse("knowledge:library") + "?member=all",
         )
 
+    def test_library_directory_filters_by_category_and_onenote_source_path(self):
+        source = self.make_source(suffix="reading")
+        book_list = self.make_document(
+            source=source,
+            title="年度阅读书单",
+            external_id="book-list-page",
+        )
+        book_list.category = "书单"
+        book_list.section_name = "书单"
+        book_list.hierarchy = {
+            "notebook_name": source.name,
+            "section_group": "读书心得",
+        }
+        book_list.save(
+            update_fields=["category", "section_name", "hierarchy", "updated_at"]
+        )
+        index_document(book_list)
+
+        life_note = self.make_document(
+            source=source,
+            title="长期习惯记录",
+            external_id="life-page",
+        )
+        life_note.category = "人生经验"
+        life_note.section_name = "人生经验"
+        life_note.hierarchy = {
+            "notebook_name": source.name,
+            "section_group": "读书心得",
+        }
+        life_note.save(
+            update_fields=["category", "section_name", "hierarchy", "updated_at"]
+        )
+        index_document(life_note)
+
+        response = self.client.get(reverse("knowledge:library"))
+        self.assertContains(response, "知识目录")
+        self.assertContains(response, "按分类")
+        self.assertContains(response, "按来源")
+        self.assertContains(response, "分类：书单")
+        self.assertContains(
+            response,
+            f"原始位置：{source.name} / 读书心得 / 书单",
+        )
+
+        category_response = self.client.get(
+            reverse("knowledge:library"),
+            {"category": "书单", "directory": "category"},
+        )
+        self.assertContains(category_response, book_list.title)
+        self.assertNotContains(category_response, life_note.title)
+
+        source_response = self.client.get(
+            reverse("knowledge:library"),
+            {
+                "directory": "source",
+                "source_id": source.pk,
+                "section_group": "读书心得",
+                "section": "人生经验",
+            },
+        )
+        self.assertContains(source_response, life_note.title)
+        self.assertNotContains(source_response, book_list.title)
+        self.assertContains(source_response, "读书心得 / 人生经验")
+
+        detail = self.client.get(
+            reverse("knowledge:document_detail", kwargs={"pk": book_list.pk})
+        )
+        self.assertContains(detail, "原始位置")
+        self.assertContains(detail, f"{source.name} / 读书心得 / 书单")
+
     def test_source_selection_defaults_to_family_visibility_without_syncing(self):
         connection = self.make_connection()
         connection.available_notebooks = [
@@ -688,6 +758,8 @@ class KnowledgeBaseTests(TestCase):
         self.assertEqual(first.success_count, 2)
         self.assertEqual(source.documents.count(), 2)
         page_one = source.documents.get(external_id="page-1")
+        self.assertEqual(page_one.category, "财经资料")
+        self.assertEqual(page_one.section_name, "财经资料")
         self.assertEqual(page_one.revisions.count(), 1)
         self.assertEqual(page_one.current_revision.assets.count(), 1)
         self.assertEqual(
@@ -705,6 +777,13 @@ class KnowledgeBaseTests(TestCase):
         self.assertTrue(page_one.current_revision.raw_file.storage.exists(
             page_one.current_revision.raw_file.name
         ))
+        self.assertContains(
+            self.client.get(reverse("knowledge:library"), {"q": "研究"}),
+            page_one.title,
+        )
+
+        page_one.category = "人工修改分类"
+        page_one.save(update_fields=["category", "updated_at"])
 
         outdated_revision = page_one.current_revision
         outdated_revision.normalized_html = "<p>只剩标题</p>"
@@ -717,6 +796,7 @@ class KnowledgeBaseTests(TestCase):
         self.assertEqual(reprocessed.updated_count, 1)
         self.assertEqual(reprocessed.skipped_count, 1)
         page_one.refresh_from_db()
+        self.assertEqual(page_one.category, "人工修改分类")
         self.assertEqual(page_one.revisions.count(), 1)
         self.assertIn("第一版", page_one.current_revision.plain_text)
         self.assertEqual(

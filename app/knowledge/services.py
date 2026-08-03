@@ -284,6 +284,7 @@ def _sync_page(client, source, section, page):
     modified_at = _parse_graph_datetime(page.get("lastModifiedDateTime"))
     created_at = _parse_graph_datetime(page.get("createdDateTime"))
     title = str(page.get("title") or "未命名页面")[:500]
+    section_name = str(section.get("displayName", ""))[:300]
     document, created = KnowledgeDocument.objects.get_or_create(
         source=source,
         external_id=external_id,
@@ -291,7 +292,7 @@ def _sync_page(client, source, section, page):
             "family": source.family,
             "owner": source.owner,
             "title": title,
-            "section_name": str(section.get("displayName", ""))[:300],
+            "section_name": section_name,
             "hierarchy": {
                 "notebook_id": source.external_id,
                 "notebook_name": source.name,
@@ -307,18 +308,22 @@ def _sync_page(client, source, section, page):
             "content_created_at": created_at,
             "content_modified_at": modified_at,
             "curation_status": KnowledgeDocument.CURATION_INBOX,
+            # OneNote members already use sections as their notebook
+            # classification. Import it once as the editable default, then
+            # leave later human organization untouched by subsequent syncs.
+            "category": section_name[:100],
         },
     )
     metadata_changed = any(
         [
             document.title != title,
-            document.section_name != str(section.get("displayName", ""))[:300],
+            document.section_name != section_name,
             document.content_modified_at != modified_at,
             document.sync_status != KnowledgeDocument.SYNC_AVAILABLE,
         ]
     )
     document.title = title
-    document.section_name = str(section.get("displayName", ""))[:300]
+    document.section_name = section_name
     document.hierarchy = {
         "notebook_id": source.external_id,
         "notebook_name": source.name,

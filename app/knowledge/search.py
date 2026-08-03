@@ -94,6 +94,8 @@ def index_document(document):
         return None
     tags = document.tags or []
     revision = document.current_revision
+    hierarchy = document.hierarchy or {}
+    section_group = hierarchy.get("section_group", "")
     defaults = {
         "owner": document.owner,
         "visibility": document.visibility,
@@ -116,6 +118,8 @@ def index_document(document):
             _tags_text(tags),
             document.author,
             document.source.name,
+            section_group,
+            document.section_name,
         ),
         "curation_status": document.curation_status,
         "content_time": document.content_modified_at or document.updated_at,

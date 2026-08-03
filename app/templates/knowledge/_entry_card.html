@@ -8,6 +8,7 @@
       {% if entry.author_name %}<span>作者：{{ entry.author_name }}</span>{% endif %}
       {% if entry.content_time %}<time>{{ entry.content_time|date:"Y-m-d" }}</time>{% endif %}
       {% if entry.curation_status %}<span>{{ entry.get_curation_status_display|default:entry.curation_status }}</span>{% endif %}
+      {% if entry.category %}<span>分类：{{ entry.category }}</span>{% endif %}
     </div>
     <h2><a href="{{ entry.target_url }}">{{ entry.title }}</a></h2>
     <p class="{% if entry.summary %}knowledge-summary{% else %}knowledge-snippet{% endif %}">{{ entry.hit_snippet|truncatechars:240 }}</p>
@@ -17,6 +18,7 @@
       </div>
     {% endif %}
     <div class="knowledge-entry-evidence">
+      {% if entry.document and entry.document.section_name %}<span>原始位置：{{ entry.source_name }}{% if entry.document.hierarchy.section_group %} / {{ entry.document.hierarchy.section_group }}{% endif %} / {{ entry.document.section_name }}</span>{% endif %}
       {% if entry.has_original %}<span>有原文</span>{% else %}<span>原笔记</span>{% endif %}
       {% if entry.has_images %}<span>含图片</span>{% endif %}
       <span class="muted-chip">批注能力后续接入</span>
