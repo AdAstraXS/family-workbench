@@ -43,7 +43,7 @@
             <td>{{ row.asset_category }}</td>
             <td>{{ row.currency }}</td>
             {% for cell in row.cells %}
-              {% if cell %}
+              {% if cell and cell.original_amount != None %}
                 <td class="number">{{ cell.original_amount|money2 }}</td>
                 <td class="number">{{ cell.base_amount|money2 }}</td>
               {% else %}
@@ -51,8 +51,13 @@
                 <td class="number muted">-</td>
               {% endif %}
             {% endfor %}
-            <td class="number">{{ row.total_original|money2 }}</td>
-            <td class="number">{{ row.total_base|money2 }}</td>
+            {% if row.has_amount %}
+              <td class="number">{{ row.total_original|money2 }}</td>
+              <td class="number">{{ row.total_base|money2 }}</td>
+            {% else %}
+              <td class="number muted">-</td>
+              <td class="number muted">-</td>
+            {% endif %}
           </tr>
         {% empty %}
           <tr><td colspan="7">暂无明细</td></tr>
@@ -66,8 +71,13 @@
               <td class="number">{{ cell.original|money2 }}</td>
               <td class="number">{{ cell.base|money2 }}</td>
             {% endfor %}
-            <td class="number">{{ total.total_original|money2 }}</td>
-            <td class="number">{{ total.total_base|money2 }}</td>
+            {% if total.has_amount %}
+              <td class="number">{{ total.total_original|money2 }}</td>
+              <td class="number">{{ total.total_base|money2 }}</td>
+            {% else %}
+              <td class="number muted">-</td>
+              <td class="number muted">-</td>
+            {% endif %}
           </tr>
         {% endfor %}
         <tr class="base-total-row">

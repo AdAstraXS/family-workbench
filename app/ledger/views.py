@@ -1032,6 +1032,7 @@ def build_asset_snapshot_matrix(snapshot):
             "members": {},
             "total_original": Decimal("0"),
             "total_base": Decimal("0"),
+            "has_amount": False,
         }
         for code in currency_codes
     }
@@ -1040,6 +1041,7 @@ def build_asset_snapshot_matrix(snapshot):
         asset_category_name = entry.asset_category.name if entry.asset_category else ""
         original_amount = entry.original_amount or Decimal("0")
         base_amount = entry.base_amount or Decimal("0")
+        has_original_amount = original_amount != Decimal("0")
         if entry.member_id not in member_ids:
             members.append(entry.member)
             member_ids.add(entry.member_id)
@@ -1052,35 +1054,46 @@ def build_asset_snapshot_matrix(snapshot):
                 "members": {},
                 "total_original": Decimal("0"),
                 "total_base": Decimal("0"),
+                "has_amount": False,
                 "remark": entry.remark,
             }
-        rows[key]["members"][entry.member_id] = entry
-        rows[key]["total_original"] += original_amount
-        rows[key]["total_base"] += base_amount
+        member_cell = rows[key]["members"].setdefault(
+            entry.member_id,
+            {"original_amount": None, "base_amount": None},
+        )
+        if has_original_amount:
+            member_cell["original_amount"] = (member_cell["original_amount"] or Decimal("0")) + original_amount
+            member_cell["base_amount"] = (member_cell["base_amount"] or Decimal("0")) + base_amount
+            rows[key]["total_original"] += original_amount
+            rows[key]["total_base"] += base_amount
+            rows[key]["has_amount"] = True
         if entry.currency not in currency_totals:
             currency_totals[entry.currency] = {
                 "label": f"{entry.currency}合计",
                 "members": {},
                 "total_original": Decimal("0"),
                 "total_base": Decimal("0"),
+                "has_amount": False,
             }
         member_total = currency_totals[entry.currency]["members"].setdefault(
             entry.member_id,
-            {"original": Decimal("0"), "base": Decimal("0")},
+            {"original": None, "base": None},
         )
-        member_total["original"] += original_amount
-        member_total["base"] += base_amount
-        currency_totals[entry.currency]["total_original"] += original_amount
-        currency_totals[entry.currency]["total_base"] += base_amount
+        if has_original_amount:
+            member_total["original"] = (member_total["original"] or Decimal("0")) + original_amount
+            member_total["base"] = (member_total["base"] or Decimal("0")) + base_amount
+            currency_totals[entry.currency]["total_original"] += original_amount
+            currency_totals[entry.currency]["total_base"] += base_amount
+            currency_totals[entry.currency]["has_amount"] = True
     for row in rows.values():
         row["cells"] = [row["members"].get(member.id) for member in members]
     currency_total_rows = []
     member_base_totals = {member.id: Decimal("0") for member in members}
     for code, total in currency_totals.items():
-        total["cells"] = [total["members"].get(member.id, {"original": Decimal("0"), "base": Decimal("0")}) for member in members]
+        total["cells"] = [total["members"].get(member.id, {"original": None, "base": None}) for member in members]
         currency_total_rows.append(total)
         for member in members:
-            member_base_totals[member.id] += total["members"].get(member.id, {}).get("base", Decimal("0"))
+            member_base_totals[member.id] += total["members"].get(member.id, {}).get("base") or Decimal("0")
     grand_total = sum((row["total_base"] for row in rows.values()), Decimal("0"))
     base_grand_total = sum(member_base_totals.values(), Decimal("0"))
     base_total_row = {
@@ -1738,6 +1751,7 @@ def annual_budget_edit(request, pk):
 def asset_snapshot_list(request):
     snapshots = list(
         AssetBalanceSnapshot.objects.select_related("family")
+        .filter(is_draft=False)
         .prefetch_related("entries__member")
         .order_by("-snapshot_date", "-created_at")
     )
@@ -1825,6 +1839,7 @@ def asset_snapshot_list(request):
 def asset_snapshot_export(request):
     snapshots = list(
         AssetBalanceSnapshot.objects.select_related("family")
+        .filter(is_draft=False)
         .prefetch_related(
             "entries__member",
             "entries__account__account_region",

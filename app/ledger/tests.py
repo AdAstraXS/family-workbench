@@ -819,6 +819,37 @@ class AssetSnapshotImportTests(TestCase):
         self.assertNotIn("asset-trend-summary", rendered_html)
         self.assertIn('class="asset-trend-empty" hidden', rendered_html)
 
+    def test_asset_snapshot_list_hides_drafts(self):
+        draft = AssetBalanceSnapshot.objects.create(
+            family=self.family,
+            snapshot_date=date(2026, 6, 30),
+            is_draft=True,
+        )
+        AssetBalanceEntry.objects.create(
+            snapshot=draft,
+            member=self.me,
+            account=self.current_account,
+            account_name=self.current_account.account_name,
+            asset_category=self.cash,
+            currency="CNY",
+            original_amount=Decimal("999"),
+            base_amount=Decimal("999"),
+            display_order=1,
+        )
+        user = get_user_model().objects.create_user(
+            username="draft-list-tester",
+            password="password",
+        )
+        self.me.user = user
+        self.me.save(update_fields=["user", "updated_at"])
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("ledger:asset_snapshot_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(draft, [row["snapshot"] for row in response.context["rows"]])
+        self.assertNotContains(response, "999.00")
+
 
 class AssetSnapshotWorkspaceTests(TestCase):
     def setUp(self):
@@ -967,6 +998,42 @@ class AssetSnapshotWorkspaceTests(TestCase):
 
         self.assertEqual(exchange_gain_row["cells"], [Decimal("70.00")])
         self.assertEqual(exchange_gain_row["total"], Decimal("70.00"))
+
+    def test_snapshot_matrix_hides_base_amount_when_original_amount_is_empty(self):
+        snapshot = AssetBalanceSnapshot.objects.create(
+            family=self.family,
+            snapshot_date=date(2026, 6, 30),
+            usd_to_base=Decimal("7.20"),
+            hkd_to_base=Decimal("0.92"),
+        )
+        AssetBalanceEntry.objects.create(
+            snapshot=snapshot,
+            member=self.member,
+            account=self.account,
+            account_name=self.account.account_name,
+            asset_category=self.category,
+            currency="CNY",
+            original_amount=Decimal("0"),
+            base_amount=Decimal("123.45"),
+            display_order=1,
+        )
+
+        _members, rows, currency_totals, base_total_row, _exchange_gain_row, _grand_total = (
+            build_asset_snapshot_matrix(snapshot)
+        )
+        row = list(rows)[0]
+
+        self.assertFalse(row["has_amount"])
+        self.assertIsNone(row["cells"][0]["original_amount"])
+        self.assertIsNone(row["cells"][0]["base_amount"])
+        self.assertEqual(row["total_original"], Decimal("0"))
+        self.assertEqual(row["total_base"], Decimal("0"))
+        self.assertFalse(currency_totals[0]["has_amount"])
+        self.assertEqual(base_total_row["total"], Decimal("0"))
+
+        response = self.client.get(reverse("ledger:asset_snapshot_detail", args=[snapshot.pk]))
+        self.assertContains(response, '<td class="number muted">-</td>')
+        self.assertNotContains(response, "123.45")
 
     def test_export_contains_all_snapshot_blocks_and_two_decimal_format(self):
         snapshot = AssetBalanceSnapshot.objects.create(

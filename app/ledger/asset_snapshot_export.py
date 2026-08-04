@@ -16,7 +16,9 @@ MONEY_FORMAT = "#,##0.00"
 
 
 def _number(value):
-    return float(value or 0)
+    if value in (None, ""):
+        return None
+    return float(value)
 
 
 def build_asset_snapshot_workbook(snapshots, matrix_builder):
@@ -94,13 +96,16 @@ def build_asset_snapshot_workbook(snapshots, matrix_builder):
             for cell in row["cells"]:
                 if cell:
                     values.extend(
-                        [_number(cell.original_amount), _number(cell.base_amount)]
+                        [_number(cell["original_amount"]), _number(cell["base_amount"])]
                     )
                 else:
                     values.extend([None, None])
-            values.extend(
-                [_number(row["total_original"]), _number(row["total_base"])]
-            )
+            if row["has_amount"]:
+                values.extend(
+                    [_number(row["total_original"]), _number(row["total_base"])]
+                )
+            else:
+                values.extend([None, None])
             for column, value in enumerate(values, start=1):
                 cell = worksheet.cell(write_row, column, value)
                 cell.border = THIN_BORDER
@@ -113,9 +118,12 @@ def build_asset_snapshot_workbook(snapshots, matrix_builder):
             values = [total["label"], None, None]
             for cell in total["cells"]:
                 values.extend([_number(cell["original"]), _number(cell["base"])])
-            values.extend(
-                [_number(total["total_original"]), _number(total["total_base"])]
-            )
+            if total["has_amount"]:
+                values.extend(
+                    [_number(total["total_original"]), _number(total["total_base"])]
+                )
+            else:
+                values.extend([None, None])
             for column, value in enumerate(values, start=1):
                 cell = worksheet.cell(write_row, column, value)
                 cell.fill = TOTAL_FILL
