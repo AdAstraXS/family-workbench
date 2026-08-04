@@ -2867,6 +2867,10 @@ textarea {
   color: #6b7280;
 }
 
+.snapshot-table td.muted {
+  display: table-cell;
+}
+
 .snapshot-table tfoot td {
   background: #f0f6ff;
   color: #1d1d1f;
