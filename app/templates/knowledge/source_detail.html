@@ -9,7 +9,7 @@
   <div>
     <span class="eyebrow">{{ source.get_kind_display }}</span>
     <h1>{{ source.name }}</h1>
-    <p>原文自动同步；摘要、标签和分类建议仍需人工确认。</p>
+    <p>{% if source.kind == "onenote" %}原文自动同步到 NAS；每个分区可以选择直接入库、进入待整理或仅同步归档。{% else %}这里管理来源状态、权限和同步任务。{% endif %}</p>
   </div>
   <span class="status-pill status-{{ source.status }}">{{ source.get_status_display }}</span>
 </section>
@@ -57,6 +57,34 @@
           <input type="checkbox" name="allow_cloud_ai"{% if source.allow_cloud_ai %} checked{% endif %}>
           <span>允许向已配置的云端 AI 发送该来源正文</span>
         </label>
+        {% if source.kind == "onenote" %}
+          <label>
+            <span>新分区默认处理方式</span>
+            <select class="form-control" name="default_route">
+              {% for value, label in route_choices %}<option value="{{ value }}"{% if source.default_route == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+          </label>
+          {% if source_sections %}
+            <div class="knowledge-section-routing">
+              <strong>现有 OneNote 分区</strong>
+              <p>心得、经验等可直接入库；摘录、临时文字可进入待整理；仅备份资料可以只同步归档。</p>
+              {% for section in source_sections %}
+                <label>
+                  <span>{% if section.group %}{{ section.group }} / {% endif %}{{ section.name }}（{{ section.count }} 篇）</span>
+                  <input type="hidden" name="section_id" value="{{ section.id }}">
+                  <select class="form-control" name="section_route">
+                    {% for value, label in route_choices %}<option value="{{ value }}"{% if section.route == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                  </select>
+                </label>
+              {% endfor %}
+              <label class="checkbox-label">
+                <input type="checkbox" name="apply_existing">
+                <span>同时把上述分区规则应用到已有文档</span>
+              </label>
+              <small>不勾选时只影响以后首次同步的新页面；勾选不会删除原文，只调整它出现在知识库、待整理还是全部资料。</small>
+            </div>
+          {% endif %}
+        {% endif %}
         <small>修改默认可见范围只影响以后新同步的文档，不会静默批量改变已有内容。</small>
         <button class="button" type="submit">保存来源设置</button>
       </form>

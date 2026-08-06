@@ -1,22 +1,28 @@
 {% extends "knowledge_hub/base.html" %}
 
-{% block title %}知识列表 · 知识中心{% endblock %}
-{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>知识列表</span>{% endblock %}
+{% block title %}知识库 · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>知识库</span>{% endblock %}
 
 {% block hub_content %}
 <section class="knowledge-page-heading">
   <div>
-    <span class="eyebrow">Library / Catalog</span>
-    <h1>知识列表</h1>
+    <span class="eyebrow">Knowledge Library</span>
+    <h1>{% if selected_collection == "all" %}全部资料{% else %}知识库{% endif %}</h1>
     <p>{{ page_description }}</p>
   </div>
   <a class="button" href="{% url 'knowledge:topics' %}">按主题浏览</a>
 </section>
 
+<nav class="knowledge-kind-tabs" aria-label="资料范围">
+  <a href="?collection=library&amp;member={{ selected_member }}"{% if selected_collection == "library" %} class="active"{% endif %}>已入库知识</a>
+  <a href="?collection=all&amp;member={{ selected_member }}"{% if selected_collection == "all" %} class="active"{% endif %}>全部资料</a>
+  <a href="{% url 'knowledge:inbox' %}">待整理</a>
+</nav>
+
 <nav class="knowledge-kind-tabs" aria-label="知识类型">
-  <a href="?kind=all&amp;member={{ selected_member }}"{% if selected_kind == "all" %} class="active"{% endif %}>全部</a>
-  <a href="?kind=notes&amp;member={{ selected_member }}"{% if selected_kind == "notes" %} class="active"{% endif %}>个人笔记</a>
-  <a href="?kind=external&amp;member={{ selected_member }}"{% if selected_kind == "external" %} class="active"{% endif %}>外部文章</a>
+  <a href="?collection={{ selected_collection }}&amp;kind=all&amp;member={{ selected_member }}"{% if selected_kind == "all" %} class="active"{% endif %}>全部</a>
+  <a href="?collection={{ selected_collection }}&amp;kind=notes&amp;member={{ selected_member }}"{% if selected_kind == "notes" %} class="active"{% endif %}>已加入的随手记</a>
+  <a href="?collection={{ selected_collection }}&amp;kind=external&amp;member={{ selected_member }}"{% if selected_kind == "external" %} class="active"{% endif %}>外部资料</a>
   <a href="{% url 'knowledge:people' %}">人物动态 <small>待接入</small></a>
   <a href="{% url 'reading:index' %}">图书批注 <small>规划中</small></a>
 </nav>
@@ -26,16 +32,16 @@
     <summary><span>知识目录</span><small>当前成员可见范围</small></summary>
     <div class="knowledge-directory-body">
       <nav class="knowledge-directory-modes" aria-label="目录组织方式">
-        <a href="{% url 'knowledge:library' %}?member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=category"{% if directory_mode == "category" %} class="active"{% endif %}>按分类</a>
-        <a href="{% url 'knowledge:library' %}?member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=source"{% if directory_mode == "source" %} class="active"{% endif %}>按来源</a>
+        <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=category"{% if directory_mode == "category" %} class="active"{% endif %}>按分类</a>
+        <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=source"{% if directory_mode == "source" %} class="active"{% endif %}>按来源</a>
       </nav>
 
       <section class="knowledge-directory-section">
         <h2>快捷入口</h2>
         <nav class="knowledge-directory-links">
-          <a href="{% url 'knowledge:library' %}?member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory={{ directory_mode }}"{% if not selected_category and not selected_source_id and not quick_filter %} class="active"{% endif %}><span>全部知识</span><strong>{{ directory_total }}</strong></a>
-          <a href="{% url 'knowledge:library' %}?member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory={{ directory_mode }}&amp;quick=recent"{% if quick_filter == "recent" %} class="active"{% endif %}><span>最近 30 天</span></a>
-          <a href="{% url 'knowledge:library' %}?member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=category&amp;quick=uncategorized"{% if quick_filter == "uncategorized" %} class="active"{% endif %}><span>未分类</span><strong>{{ uncategorized_count }}</strong></a>
+          <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory={{ directory_mode }}"{% if not selected_category and not selected_source_id and not quick_filter %} class="active"{% endif %}><span>{% if selected_collection == "all" %}全部资料{% else %}全部知识{% endif %}</span><strong>{{ directory_total }}</strong></a>
+          <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory={{ directory_mode }}&amp;quick=recent"{% if quick_filter == "recent" %} class="active"{% endif %}><span>最近 30 天</span></a>
+          <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=category&amp;quick=uncategorized"{% if quick_filter == "uncategorized" %} class="active"{% endif %}><span>未分类</span><strong>{{ uncategorized_count }}</strong></a>
         </nav>
       </section>
 
@@ -44,7 +50,7 @@
           <h2>分类</h2>
           <nav class="knowledge-directory-links">
             {% for item in category_directory %}
-              <a href="{% url 'knowledge:library' %}?member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=category&amp;category={{ item.category|urlencode }}"{% if selected_category == item.category %} class="active"{% endif %}><span>{{ item.category }}</span><strong>{{ item.total }}</strong></a>
+              <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=category&amp;category={{ item.category|urlencode }}"{% if selected_category == item.category %} class="active"{% endif %}><span>{{ item.category }}</span><strong>{{ item.total }}</strong></a>
             {% empty %}<p>还没有分类；OneNote 新页面会采用所属分区作为默认分类。</p>{% endfor %}
           </nav>
         </section>
@@ -56,9 +62,9 @@
               <details{% if selected_source_id == source.id %} open{% endif %}>
                 <summary><span>{{ source.name }}</span><strong>{{ source.count }}</strong></summary>
                 <nav>
-                  <a href="{% url 'knowledge:library' %}?member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=source&amp;source_id={{ source.id|urlencode }}"{% if selected_source_id == source.id and not selected_section %} class="active"{% endif %}>全部内容</a>
+                  <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=source&amp;source_id={{ source.id|urlencode }}"{% if selected_source_id == source.id and not selected_section %} class="active"{% endif %}>全部内容</a>
                   {% for section in source.sections %}
-                    {% if section.value %}<a href="{% url 'knowledge:library' %}?member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=source&amp;source_id={{ source.id|urlencode }}{% if section.group %}&amp;section_group={{ section.group|urlencode }}{% endif %}&amp;section={{ section.value|urlencode }}"{% if selected_source_id == source.id and selected_section == section.value and selected_section_group == section.group %} class="active"{% endif %}><span>{% if section.group %}<small>{{ section.group }}</small>{% endif %}{{ section.name }}</span><strong>{{ section.count }}</strong></a>{% endif %}
+                    {% if section.value %}<a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=source&amp;source_id={{ source.id|urlencode }}{% if section.group %}&amp;section_group={{ section.group|urlencode }}{% endif %}&amp;section={{ section.value|urlencode }}"{% if selected_source_id == source.id and selected_section == section.value and selected_section_group == section.group %} class="active"{% endif %}><span>{% if section.group %}<small>{{ section.group }}</small>{% endif %}{{ section.name }}</span><strong>{{ section.count }}</strong></a>{% endif %}
                   {% endfor %}
                 </nav>
               </details>
@@ -72,6 +78,7 @@
   <main class="knowledge-library-results">
 <section class="panel knowledge-search-panel">
   <form method="get" class="knowledge-library-form">
+    <input type="hidden" name="collection" value="{{ selected_collection }}">
     <input type="hidden" name="kind" value="{{ selected_kind }}">
     <input type="hidden" name="directory" value="{{ directory_mode }}">
     <input type="hidden" name="category" value="{{ selected_category }}">
@@ -111,7 +118,7 @@
         <label><span>开始日期</span><input class="form-control" type="date" name="date_from" value="{{ date_from }}"></label>
         <label><span>结束日期</span><input class="form-control" type="date" name="date_to" value="{{ date_to }}"></label>
         <label>
-          <span>整理状态</span>
+          <span>AI 整理进度</span>
           <select class="form-control" name="status">
             <option value="">全部状态</option>
             {% for value, label in curation_choices %}<option value="{{ value }}"{% if selected_status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
@@ -127,7 +134,7 @@
         </label>
         <div class="knowledge-filter-actions">
           <button class="button primary" type="submit">应用筛选</button>
-          <a class="button" href="{% url 'knowledge:library' %}">清空</a>
+          <a class="button" href="{% url 'knowledge:library' %}?collection={{ selected_collection }}">清空</a>
         </div>
       </div>
     </details>
@@ -136,7 +143,7 @@
 
 <aside class="knowledge-list-explainer">
   <strong>这个页面的作用</strong>
-  <span>它是统一知识目录：首页负责提醒今天要做什么，动态收件箱负责处理新内容，人工确认页负责核对 AI 建议，人物页按人物组织时间线；这些视图最终都打开这里的同一知识条目和详情。</span>
+  <span>“知识库”只显示已经入库的内容；“全部资料”还包括待整理和仅同步归档的原文。随手记只有主动勾选后才会出现，关注人物和在线阅读保留各自独立流程。</span>
 </aside>
 
 <header class="knowledge-result-heading">

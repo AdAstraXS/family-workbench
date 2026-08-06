@@ -10,6 +10,7 @@
       <span>{{ note.note_date|date:"Y年m月d日" }}</span>
       <span>{{ note.member.display_name }}</span>
       <span>{% if note.visibility == "family" %}家庭共享{% else %}仅自己{% endif %}</span>
+      <span>{% if note.include_in_knowledge %}已加入知识库{% else %}仅保留在随手记{% endif %}</span>
     </div>
     <h1>{{ note.title }}</h1>
     {% if note.tags %}

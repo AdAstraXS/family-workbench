@@ -41,6 +41,9 @@ def ensure_internal_notes_source(family):
 
 
 def index_investment_note(note):
+    if not note.include_in_knowledge:
+        remove_investment_note_index(note)
+        return None
     ensure_internal_notes_source(note.family)
     tags = note.tags or []
     defaults = {
@@ -64,6 +67,7 @@ def index_investment_note(note):
             note.member.display_name,
         ),
         "curation_status": KnowledgeDocument.CURATION_CONFIRMED,
+        "knowledge_status": KnowledgeDocument.KNOWLEDGE_INCLUDED,
         "content_time": _note_content_time(note),
         "document": None,
     }
@@ -122,6 +126,7 @@ def index_document(document):
             document.section_name,
         ),
         "curation_status": document.curation_status,
+        "knowledge_status": document.knowledge_status,
         "content_time": document.content_modified_at or document.updated_at,
         "document": document,
     }
@@ -139,7 +144,7 @@ def rebuild_family_search(family):
     KnowledgeSearchEntry.objects.filter(family=family).delete()
     notes_count = 0
     for note in (
-        InvestmentNote.objects.filter(family=family)
+        InvestmentNote.objects.filter(family=family, include_in_knowledge=True)
         .select_related("member", "note_type")
         .iterator()
     ):

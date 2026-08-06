@@ -16,7 +16,15 @@ class InvestmentNoteForm(forms.ModelForm):
 
     class Meta:
         model = InvestmentNote
-        fields = ["title", "note_type", "note_date", "visibility", "tags_text", "content"]
+        fields = [
+            "title",
+            "note_type",
+            "note_date",
+            "visibility",
+            "include_in_knowledge",
+            "tags_text",
+            "content",
+        ]
         widgets = {
             "title": forms.TextInput(attrs={"placeholder": "给这篇笔记起个标题"}),
             "note_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
@@ -39,6 +47,9 @@ class InvestmentNoteForm(forms.ModelForm):
         ).order_by("sort_order", "id")
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
+        self.fields["include_in_knowledge"].help_text = (
+            "默认不加入。勾选后，这条随手记才会出现在家庭知识库；取消勾选不会删除原笔记。"
+        )
         if self.instance and self.instance.pk:
             self.fields["tags_text"].initial = "，".join(self.instance.tags or [])
 

@@ -58,6 +58,14 @@ def _safe_source_url(page):
     return str(url)[:1000] if str(url).startswith("https://") else ""
 
 
+def _knowledge_status_for_source_route(source, section_id):
+    route = source.route_for_section(section_id)
+    return {
+        KnowledgeSource.ROUTE_ORGANIZE: KnowledgeDocument.KNOWLEDGE_PENDING,
+        KnowledgeSource.ROUTE_ARCHIVE: KnowledgeDocument.KNOWLEDGE_ARCHIVED,
+    }.get(route, KnowledgeDocument.KNOWLEDGE_INCLUDED)
+
+
 def _job_item(job, external_id, title, status, error_message="", details=None):
     return KnowledgeJobItem.objects.update_or_create(
         job=job,
@@ -285,6 +293,7 @@ def _sync_page(client, source, section, page):
     created_at = _parse_graph_datetime(page.get("createdDateTime"))
     title = str(page.get("title") or "未命名页面")[:500]
     section_name = str(section.get("displayName", ""))[:300]
+    section_id = str(section.get("id", ""))
     document, created = KnowledgeDocument.objects.get_or_create(
         source=source,
         external_id=external_id,
@@ -296,7 +305,7 @@ def _sync_page(client, source, section, page):
             "hierarchy": {
                 "notebook_id": source.external_id,
                 "notebook_name": source.name,
-                "section_id": str(section.get("id", "")),
+                "section_id": section_id,
                 "section_group": (
                     (section.get("parentSectionGroup") or {}).get("displayName", "")
                 ),
@@ -308,6 +317,10 @@ def _sync_page(client, source, section, page):
             "content_created_at": created_at,
             "content_modified_at": modified_at,
             "curation_status": KnowledgeDocument.CURATION_INBOX,
+            "knowledge_status": _knowledge_status_for_source_route(
+                source,
+                section_id,
+            ),
             # OneNote members already use sections as their notebook
             # classification. Import it once as the editable default, then
             # leave later human organization untouched by subsequent syncs.
@@ -327,7 +340,7 @@ def _sync_page(client, source, section, page):
     document.hierarchy = {
         "notebook_id": source.external_id,
         "notebook_name": source.name,
-        "section_id": str(section.get("id", "")),
+        "section_id": section_id,
         "section_group": (
             (section.get("parentSectionGroup") or {}).get("displayName", "")
         ),

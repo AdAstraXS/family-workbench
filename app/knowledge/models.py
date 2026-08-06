@@ -123,6 +123,15 @@ class KnowledgeSource(TimestampedModel):
         (KIND_INTERNAL_NOTES, "随手记"),
     ]
 
+    ROUTE_KNOWLEDGE = "knowledge"
+    ROUTE_ORGANIZE = "organize"
+    ROUTE_ARCHIVE = "archive"
+    ROUTE_CHOICES = [
+        (ROUTE_KNOWLEDGE, "直接进入知识库"),
+        (ROUTE_ORGANIZE, "进入待整理"),
+        (ROUTE_ARCHIVE, "仅同步归档"),
+    ]
+
     STATUS_ACTIVE = "active"
     STATUS_ERROR = "error"
     STATUS_DISCONNECTED = "disconnected"
@@ -200,6 +209,16 @@ class KnowledgeSource(TimestampedModel):
     def __str__(self):
         return self.name
 
+    @property
+    def default_route(self):
+        value = (self.config or {}).get("default_route")
+        return value if value in dict(self.ROUTE_CHOICES) else self.ROUTE_KNOWLEDGE
+
+    def route_for_section(self, section_id):
+        routes = (self.config or {}).get("section_routes") or {}
+        value = routes.get(str(section_id or ""), self.default_route)
+        return value if value in dict(self.ROUTE_CHOICES) else self.default_route
+
 
 class KnowledgeDocument(TimestampedModel):
     SYNC_AVAILABLE = "available"
@@ -226,6 +245,15 @@ class KnowledgeDocument(TimestampedModel):
         (CURATION_CONFIRMED, "已确认"),
         (CURATION_IGNORED, "已忽略"),
         (CURATION_ARCHIVED, "已归档"),
+    ]
+
+    KNOWLEDGE_PENDING = "pending"
+    KNOWLEDGE_INCLUDED = "included"
+    KNOWLEDGE_ARCHIVED = "archived"
+    KNOWLEDGE_STATUS_CHOICES = [
+        (KNOWLEDGE_PENDING, "待整理"),
+        (KNOWLEDGE_INCLUDED, "已入库"),
+        (KNOWLEDGE_ARCHIVED, "仅同步归档"),
     ]
 
     family = models.ForeignKey(
@@ -272,6 +300,12 @@ class KnowledgeDocument(TimestampedModel):
         choices=CURATION_CHOICES,
         default=CURATION_INBOX,
     )
+    knowledge_status = models.CharField(
+        "知识状态",
+        max_length=20,
+        choices=KNOWLEDGE_STATUS_CHOICES,
+        default=KNOWLEDGE_INCLUDED,
+    )
     content_created_at = models.DateTimeField("内容创建时间", null=True, blank=True)
     content_modified_at = models.DateTimeField("内容修改时间", null=True, blank=True)
     source_deleted_at = models.DateTimeField("来源删除识别时间", null=True, blank=True)
@@ -301,6 +335,7 @@ class KnowledgeDocument(TimestampedModel):
             models.Index(fields=["family", "visibility", "owner"]),
             models.Index(fields=["source", "sync_status"]),
             models.Index(fields=["family", "curation_status"]),
+            models.Index(fields=["family", "knowledge_status"]),
             models.Index(fields=["content_modified_at"]),
         ]
 
@@ -652,6 +687,12 @@ class KnowledgeSearchEntry(TimestampedModel):
         choices=KnowledgeDocument.CURATION_CHOICES,
         blank=True,
     )
+    knowledge_status = models.CharField(
+        "知识状态",
+        max_length=20,
+        choices=KnowledgeDocument.KNOWLEDGE_STATUS_CHOICES,
+        default=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+    )
     content_time = models.DateTimeField("内容时间", null=True, blank=True)
 
     class Meta:
@@ -668,6 +709,7 @@ class KnowledgeSearchEntry(TimestampedModel):
             models.Index(fields=["family", "visibility", "owner"]),
             models.Index(fields=["family", "source_kind", "content_time"]),
             models.Index(fields=["family", "curation_status"]),
+            models.Index(fields=["family", "knowledge_status"]),
         ]
 
     def __str__(self):

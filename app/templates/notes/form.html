@@ -49,6 +49,14 @@
       <small>“仅自己”不会被其他家庭成员看到。</small>
       {% for error in form.visibility.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
     </div>
+    <div class="notes-form-row notes-form-wide">
+      <label class="checkbox-label" for="{{ form.include_in_knowledge.id_for_label }}">
+        {{ form.include_in_knowledge }}
+        <span>{{ form.include_in_knowledge.label }}</span>
+      </label>
+      <small>{{ form.include_in_knowledge.help_text }}</small>
+      {% for error in form.include_in_knowledge.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+    </div>
 
     <div class="notes-editor-actions">
       <button type="submit">{{ submit_label }}</button>

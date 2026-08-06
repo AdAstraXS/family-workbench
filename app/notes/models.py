@@ -64,6 +64,11 @@ class InvestmentNote(TimestampedModel):
     )
     tags = models.JSONField("标签", default=list, blank=True)
     ai_summary = models.TextField("AI 总结", blank=True)
+    include_in_knowledge = models.BooleanField(
+        "加入家庭知识库",
+        default=False,
+        help_text="勾选后才会在家庭知识中心建立可重建的搜索投影。",
+    )
     remark = models.TextField("备注", blank=True)
     extra_data = models.JSONField("扩展字段", default=dict, blank=True)
 

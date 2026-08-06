@@ -5,7 +5,7 @@
 
 {% block hub_content %}
 <section class="knowledge-page-heading">
-  <div><span class="eyebrow">People & timeline</span><h1>关注人物</h1><p>人物主页与时间线的第一版骨架；当前只展示知识中已有的作者，不把作者自动认定为“已关注人物”。</p></div>
+  <div><span class="eyebrow">Subscription & timeline</span><h1>关注人物</h1><p>这里将建设独立的多来源资讯订阅：聚合动态、AI 摘要和关键词；日常资讯不自动进入知识库。</p></div>
   <span class="status-pill">人物连接器待接入</span>
 </section>
 
@@ -40,7 +40,7 @@
       <div class="knowledge-person-empty">
         <span class="knowledge-hub-brand-mark" aria-hidden="true">人</span>
         <h2>选择作者查看已有内容</h2>
-        <p>正式“关注人物”将在人物身份、官方来源与来源等级模型完成后开放。马斯克、黄仁勋、奥特曼等不会以演示数据预先写入。</p>
+        <p>正式模块将在人物身份、官方来源、来源等级和事件聚合完成后开放。只有成员主动“保存为知识”的长文或重要观点才进入知识库。</p>
       </div>
     {% endif %}
   </article>
@@ -49,6 +49,6 @@
 <section class="knowledge-source-identity-guide">
   <header><span class="eyebrow">Source identity</span><h2>正式接入必须清楚区分</h2></header>
   <div><span class="direct">本人直接发言</span><span class="institution">所属机构发布</span><span class="interview">采访或演讲原文</span><span class="media">媒体转述</span><span class="ai">AI 提炼观点</span></div>
-  <p>AI 提炼必须带来源引用和醒目标记，不能用引号或人物口吻冒充原话；抓取前还需确认官方或授权来源、版权、频率、去重和正文保存范围。</p>
+  <p>AI 摘要用于快速获取资讯，不要求逐条人工确认，但必须带来源引用和醒目标记，不能冒充原话；保存为知识时再固化原文证据和人物身份。</p>
 </section>
 {% endblock %}

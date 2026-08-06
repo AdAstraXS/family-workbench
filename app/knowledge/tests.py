@@ -292,6 +292,7 @@ class KnowledgeBaseTests(TestCase):
             note_type=self.note_type,
             visibility=InvestmentNote.VISIBILITY_PRIVATE,
             tags=["风险控制"],
+            include_in_knowledge=True,
         )
         shared_note = InvestmentNote.objects.create(
             family=self.family,
@@ -300,6 +301,7 @@ class KnowledgeBaseTests(TestCase):
             content="家庭都可以看到",
             note_type=self.note_type,
             visibility=InvestmentNote.VISIBILITY_FAMILY,
+            include_in_knowledge=True,
         )
         hidden_note = InvestmentNote.objects.create(
             family=self.family,
@@ -308,6 +310,7 @@ class KnowledgeBaseTests(TestCase):
             content="不可泄露",
             note_type=self.note_type,
             visibility=InvestmentNote.VISIBILITY_PRIVATE,
+            include_in_knowledge=True,
         )
 
         response = self.client.get(
@@ -399,6 +402,13 @@ class KnowledgeBaseTests(TestCase):
         document.save(
             update_fields=["tags", "category", "author", "updated_at"]
         )
+        pending_document = self.make_document(
+            source=document.source,
+            title="等待提炼的摘录",
+            external_id="pending-hub-page",
+        )
+        pending_document.knowledge_status = KnowledgeDocument.KNOWLEDGE_PENDING
+        pending_document.save(update_fields=["knowledge_status", "updated_at"])
         InvestmentNote.objects.create(
             family=self.family,
             member=self.member,
@@ -411,14 +421,15 @@ class KnowledgeBaseTests(TestCase):
 
         home = self.client.get(reverse("knowledge:index"))
         self.assertContains(home, "今天需要做什么？")
-        self.assertContains(home, "动态收件箱")
+        self.assertContains(home, "待整理")
         self.assertContains(home, "在线阅读")
         self.assertContains(home, "交易复盘")
         self.assertContains(home, document.title)
 
         inbox = self.client.get(reverse("knowledge:inbox"))
-        self.assertContains(inbox, document.title)
-        self.assertContains(inbox, "AI 建议")
+        self.assertContains(inbox, pending_document.title)
+        self.assertContains(inbox, "AI 提炼")
+        self.assertNotContains(inbox, document.title)
 
         library = self.client.get(
             reverse("knowledge:library"),
@@ -590,7 +601,67 @@ class KnowledgeBaseTests(TestCase):
         self.assertEqual(source.owner, self.member)
         self.assertEqual(source.visibility, KnowledgeVisibility.FAMILY)
         self.assertFalse(source.allow_cloud_ai)
+        self.assertEqual(source.default_route, KnowledgeSource.ROUTE_KNOWLEDGE)
         self.assertFalse(KnowledgeJob.objects.exists())
+
+    def test_onenote_section_routes_can_reclassify_existing_documents(self):
+        source = self.make_source(suffix="section-routing")
+        direct = self.make_document(
+            source=source,
+            title="人生经验",
+            external_id="direct-page",
+        )
+        direct.section_name = "人生经验"
+        direct.hierarchy = {"section_id": "section-direct"}
+        direct.save(update_fields=["section_name", "hierarchy", "updated_at"])
+        organize = self.make_document(
+            source=source,
+            title="临时摘录",
+            external_id="organize-page",
+        )
+        organize.section_name = "快速笔记"
+        organize.hierarchy = {"section_id": "section-organize"}
+        organize.save(update_fields=["section_name", "hierarchy", "updated_at"])
+
+        response = self.client.post(
+            reverse("knowledge:source_update", kwargs={"pk": source.pk}),
+            {
+                "visibility": KnowledgeVisibility.FAMILY,
+                "default_route": KnowledgeSource.ROUTE_KNOWLEDGE,
+                "section_id": ["section-direct", "section-organize"],
+                "section_route": [
+                    KnowledgeSource.ROUTE_KNOWLEDGE,
+                    KnowledgeSource.ROUTE_ORGANIZE,
+                ],
+                "apply_existing": "on",
+            },
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("knowledge:source_detail", kwargs={"pk": source.pk}),
+        )
+        source.refresh_from_db()
+        direct.refresh_from_db()
+        organize.refresh_from_db()
+        self.assertEqual(
+            source.route_for_section("section-organize"),
+            KnowledgeSource.ROUTE_ORGANIZE,
+        )
+        self.assertEqual(
+            direct.knowledge_status,
+            KnowledgeDocument.KNOWLEDGE_INCLUDED,
+        )
+        self.assertEqual(
+            organize.knowledge_status,
+            KnowledgeDocument.KNOWLEDGE_PENDING,
+        )
+        self.assertContains(self.client.get(reverse("knowledge:library")), direct.title)
+        self.assertNotContains(
+            self.client.get(reverse("knowledge:library")),
+            organize.title,
+        )
+        self.assertContains(self.client.get(reverse("knowledge:inbox")), organize.title)
 
     @patch("knowledge.views.MicrosoftGraphClient")
     @patch("knowledge.views.finish_authorization_flow")
@@ -674,6 +745,13 @@ class KnowledgeBaseTests(TestCase):
 
     def test_sync_is_incremental_versioned_sanitized_and_reconciles_deletion(self):
         source = self.make_source(suffix="sync")
+        source.config = {
+            "default_route": KnowledgeSource.ROUTE_KNOWLEDGE,
+            "section_routes": {
+                "section-1": KnowledgeSource.ROUTE_ORGANIZE,
+            },
+        }
+        source.save(update_fields=["config", "updated_at"])
         image_url = (
             "https://graph.microsoft.com/v1.0/me/onenote/"
             "resources/image-1/$value"
@@ -758,6 +836,10 @@ class KnowledgeBaseTests(TestCase):
         self.assertEqual(first.success_count, 2)
         self.assertEqual(source.documents.count(), 2)
         page_one = source.documents.get(external_id="page-1")
+        self.assertEqual(
+            page_one.knowledge_status,
+            KnowledgeDocument.KNOWLEDGE_PENDING,
+        )
         self.assertEqual(page_one.category, "财经资料")
         self.assertEqual(page_one.section_name, "财经资料")
         self.assertEqual(page_one.revisions.count(), 1)
@@ -777,8 +859,19 @@ class KnowledgeBaseTests(TestCase):
         self.assertTrue(page_one.current_revision.raw_file.storage.exists(
             page_one.current_revision.raw_file.name
         ))
-        self.assertContains(
+        self.assertNotContains(
             self.client.get(reverse("knowledge:library"), {"q": "研究"}),
+            page_one.title,
+        )
+        self.assertContains(
+            self.client.get(
+                reverse("knowledge:library"),
+                {"q": "研究", "collection": "all"},
+            ),
+            page_one.title,
+        )
+        self.assertContains(
+            self.client.get(reverse("knowledge:inbox")),
             page_one.title,
         )
 
@@ -1263,6 +1356,7 @@ class KnowledgeBaseTests(TestCase):
             content="原始业务正文",
             note_type=self.note_type,
             visibility=InvestmentNote.VISIBILITY_PRIVATE,
+            include_in_knowledge=True,
         )
         document = self.make_document(
             external_id="rebuild-page",

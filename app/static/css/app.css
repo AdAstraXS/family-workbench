@@ -5163,6 +5163,22 @@ textarea {
   gap: 8px;
 }
 
+.knowledge-section-routing {
+  display: grid;
+  gap: 11px;
+  padding: 14px;
+  border: 1px solid #dce8e3;
+  border-radius: 12px;
+  background: #f7faf8;
+}
+
+.knowledge-section-routing > p,
+.knowledge-section-routing > small {
+  margin: 0;
+  color: #6d7e78;
+  line-height: 1.6;
+}
+
 .proposal-list-row {
   display: grid;
   grid-template-columns: auto minmax(180px, 0.9fr) minmax(260px, 1.8fr) auto;
@@ -5560,7 +5576,7 @@ textarea {
 
 .knowledge-home-shortcuts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }

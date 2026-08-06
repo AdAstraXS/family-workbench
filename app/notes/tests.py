@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from family_core.models import Family, FamilyMember
+from knowledge.models import KnowledgeSearchEntry
 
 from .models import InvestmentNote, InvestmentNoteType
 
@@ -97,6 +98,58 @@ class InvestmentNoteViewsTests(TestCase):
         self.assertEqual(note.family, self.family)
         self.assertEqual(note.member, self.member)
         self.assertEqual(note.tags, ["港股", "复盘"])
+        self.assertFalse(note.include_in_knowledge)
+        self.assertFalse(
+            KnowledgeSearchEntry.objects.filter(
+                item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE,
+                object_id=str(note.pk),
+            ).exists()
+        )
+
+    def test_note_only_enters_knowledge_when_explicitly_checked(self):
+        response = self.client.post(
+            reverse("notes:create"),
+            {
+                "title": "值得沉淀的灵感",
+                "note_type": self.strategy_type.pk,
+                "note_date": "2026-08-05",
+                "visibility": InvestmentNote.VISIBILITY_PRIVATE,
+                "include_in_knowledge": "on",
+                "tags_text": "长期",
+                "content": "已经形成相对完整的判断。",
+            },
+        )
+        note = InvestmentNote.objects.get(title="值得沉淀的灵感")
+
+        self.assertRedirects(response, reverse("notes:detail", kwargs={"pk": note.pk}))
+        self.assertTrue(note.include_in_knowledge)
+        self.assertTrue(
+            KnowledgeSearchEntry.objects.filter(
+                item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE,
+                object_id=str(note.pk),
+            ).exists()
+        )
+
+        response = self.client.post(
+            reverse("notes:edit", kwargs={"pk": note.pk}),
+            {
+                "title": note.title,
+                "note_type": note.note_type_id,
+                "note_date": "2026-08-05",
+                "visibility": note.visibility,
+                "tags_text": "长期",
+                "content": note.content,
+            },
+        )
+        note.refresh_from_db()
+        self.assertRedirects(response, reverse("notes:detail", kwargs={"pk": note.pk}))
+        self.assertFalse(note.include_in_knowledge)
+        self.assertFalse(
+            KnowledgeSearchEntry.objects.filter(
+                item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE,
+                object_id=str(note.pk),
+            ).exists()
+        )
 
     def test_search_matches_tags_and_category_filter(self):
         matched = self.make_note(title="一篇普通标题", tags=["风险控制"])

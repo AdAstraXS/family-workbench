@@ -7,14 +7,14 @@
       <span>所属成员：{{ entry.owner.display_name }}</span>
       {% if entry.author_name %}<span>作者：{{ entry.author_name }}</span>{% endif %}
       {% if entry.content_time %}<time>{{ entry.content_time|date:"Y-m-d" }}</time>{% endif %}
-      {% if entry.curation_status %}<span>{{ entry.get_curation_status_display|default:entry.curation_status }}</span>{% endif %}
+      <span>{{ entry.get_knowledge_status_display|default:entry.knowledge_status }}</span>
       {% if entry.category %}<span>分类：{{ entry.category }}</span>{% endif %}
     </div>
     <h2><a href="{{ entry.target_url }}">{{ entry.title }}</a></h2>
     <p class="{% if entry.summary %}knowledge-summary{% else %}knowledge-snippet{% endif %}">{{ entry.hit_snippet|truncatechars:240 }}</p>
     {% if entry.tags %}
       <div class="knowledge-tags">
-        {% for tag in entry.tags %}<a href="{% url 'knowledge:library' %}?tag={{ tag|urlencode }}">#{{ tag }}</a>{% endfor %}
+        {% for tag in entry.tags %}<a href="{% url 'knowledge:library' %}?collection={{ selected_collection|default:'library' }}&amp;tag={{ tag|urlencode }}">#{{ tag }}</a>{% endfor %}
       </div>
     {% endif %}
     <div class="knowledge-entry-evidence">

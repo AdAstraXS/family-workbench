@@ -59,13 +59,13 @@ class DocumentOrganizeForm(forms.ModelForm):
             "category",
             "tags_text",
             "visibility",
-            "curation_status",
+            "knowledge_status",
         ]
         labels = {
             "confirmed_summary": "正式摘要",
             "category": "分类",
             "visibility": "可见范围",
-            "curation_status": "整理状态",
+            "knowledge_status": "知识状态",
         }
         widgets = {
             "confirmed_summary": forms.Textarea(attrs={"rows": 8}),
@@ -73,11 +73,14 @@ class DocumentOrganizeForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["curation_status"].choices = [
-            (KnowledgeDocument.CURATION_CONFIRMED, "已确认"),
-            (KnowledgeDocument.CURATION_ARCHIVED, "已归档"),
-            (KnowledgeDocument.CURATION_IGNORED, "已忽略"),
+        self.fields["knowledge_status"].choices = [
+            (KnowledgeDocument.KNOWLEDGE_INCLUDED, "已入库"),
+            (KnowledgeDocument.KNOWLEDGE_PENDING, "待整理"),
+            (KnowledgeDocument.KNOWLEDGE_ARCHIVED, "仅同步归档"),
         ]
+        self.fields["knowledge_status"].help_text = (
+            "已入库会出现在默认知识库；待整理进入整理清单；仅同步归档只在“全部资料”中查看。"
+        )
         if self.instance and self.instance.pk:
             self.fields["tags_text"].initial = "，".join(self.instance.tags or [])
         for field in self.fields.values():

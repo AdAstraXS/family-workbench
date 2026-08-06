@@ -81,7 +81,7 @@
           <input type="checkbox" name="allow_cloud_ai">
           <span>允许把这个笔记本的正文发送给已配置的云端 AI 进行摘要、标签和分类建议</span>
         </label>
-        <small>不勾选仍可同步、浏览和搜索；AI 授权可稍后单独开启。</small>
+        <small>保存后可在来源详情中按 OneNote 分区选择“直接入库、待整理或仅同步归档”；不勾选 AI 仍可同步和阅读。</small>
         <button class="button primary" type="submit">保存试点来源</button>
       </form>
     {% else %}
@@ -109,7 +109,7 @@
         </div>
       </a>
     {% empty %}
-      <div class="empty-state compact"><p>暂无外部知识来源；现有随手记会通过内部投影接入。</p></div>
+      <div class="empty-state compact"><p>暂无外部知识来源；随手记只有明确勾选“加入家庭知识库”后才会建立内部投影。</p></div>
     {% endfor %}
   </div>
 </section>

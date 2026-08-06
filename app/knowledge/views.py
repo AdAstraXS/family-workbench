@@ -66,6 +66,41 @@ def _can_write(member):
     return member.role != FamilyMember.ROLE_VIEWER
 
 
+def _knowledge_status_for_route(route):
+    return {
+        KnowledgeSource.ROUTE_ORGANIZE: KnowledgeDocument.KNOWLEDGE_PENDING,
+        KnowledgeSource.ROUTE_ARCHIVE: KnowledgeDocument.KNOWLEDGE_ARCHIVED,
+    }.get(route, KnowledgeDocument.KNOWLEDGE_INCLUDED)
+
+
+def _source_sections(source):
+    sections = {}
+    for document in source.documents.order_by("section_name", "id").only(
+        "section_name",
+        "hierarchy",
+    ):
+        hierarchy = document.hierarchy or {}
+        section_id = str(hierarchy.get("section_id") or document.section_name)
+        if not section_id:
+            continue
+        item = sections.setdefault(
+            section_id,
+            {
+                "id": section_id,
+                "name": document.section_name or "未分区",
+                "group": str(hierarchy.get("section_group") or ""),
+                "count": 0,
+            },
+        )
+        item["count"] += 1
+    for item in sections.values():
+        item["route"] = source.route_for_section(item["id"])
+    return sorted(
+        sections.values(),
+        key=lambda item: (item["group"], item["name"], item["id"]),
+    )
+
+
 def _redirect_uri(request):
     return settings.KNOWLEDGE_MICROSOFT_REDIRECT_URI or request.build_absolute_uri(
         reverse("knowledge:microsoft_callback")
@@ -145,16 +180,16 @@ def _knowledge_stats(member):
     documents = accessible_documents(member).filter(owner=member)
     today = timezone.localdate()
     return {
-        "total": entries.count(),
-        "today_new": entries.filter(created_at__date=today).count(),
+        "total": entries.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+        ).count(),
+        "today_new": entries.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+            created_at__date=today,
+        ).count(),
         "inbox": entries.filter(
             item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
-            curation_status__in=[
-                KnowledgeDocument.CURATION_INBOX,
-                KnowledgeDocument.CURATION_NORMALIZED,
-                KnowledgeDocument.CURATION_PENDING_AI,
-                KnowledgeDocument.CURATION_PENDING_REVIEW,
-            ],
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
         ).count(),
         "pending_review": documents.filter(
             curation_status=KnowledgeDocument.CURATION_PENDING_REVIEW
@@ -239,18 +274,15 @@ def index(request):
     if member is None:
         return _membership_required_response(request)
 
-    entries = accessible_search_entries(member).filter(owner=member)
+    entries = accessible_search_entries(member).filter(
+        owner=member,
+        knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+    )
     recent_entries = _decorate_entries(list(entries[:6]))
     today_entries = _decorate_entries(
         list(entries.filter(created_at__date=timezone.localdate())[:6])
     )
-    recent_confirmed = _decorate_entries(
-        list(
-            entries.filter(
-                curation_status=KnowledgeDocument.CURATION_CONFIRMED,
-            )[:4]
-        )
-    )
+    recent_confirmed = _decorate_entries(list(entries[:4]))
     source_issues = list(
         visible_sources(member)
         .filter(
@@ -279,10 +311,18 @@ def _library_response(
     request,
     member,
     *,
-    page_title="知识列表",
-    page_description="统一查看可见知识；默认显示当前登录成员，可通过成员筛选切换到其他成员或全部。",
+    page_title="知识库",
+    page_description="默认查看已经入库的知识，并默认显示当前登录成员；可切换“全部资料”检查待整理或仅同步归档内容。",
 ):
     entries = accessible_search_entries(member)
+    collection = request.GET.get("collection", "library").strip()
+    if collection == "all":
+        pass
+    else:
+        collection = "library"
+        entries = entries.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+        )
     query = request.GET.get("q", "").strip()
     scope = request.GET.get("scope", "all")
     source_kind = request.GET.get("source", "").strip()
@@ -404,7 +444,7 @@ def _library_response(
     pagination_params.pop("page", None)
 
     source_choices = (
-        accessible_search_entries(member)
+        directory_entries
         .values("source_kind", "source_name")
         .annotate(total=Count("id"))
         .order_by("source_name")
@@ -429,7 +469,7 @@ def _library_response(
     elif quick_filter == "uncategorized":
         directory_title = "未分类"
     else:
-        directory_title = "全部知识"
+        directory_title = "全部资料" if collection == "all" else "全部知识"
     return render(
         request,
         "knowledge/index.html",
@@ -440,6 +480,7 @@ def _library_response(
             "selected_source": source_kind,
             "selected_member": owner_id,
             "selected_status": curation_status,
+            "selected_collection": collection,
             "selected_tag": tag,
             "selected_author": author,
             "selected_kind": content_type,
@@ -500,12 +541,7 @@ def inbox(request):
         return _membership_required_response(request)
     entries = accessible_search_entries(member).filter(
         item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
-        curation_status__in=[
-            KnowledgeDocument.CURATION_INBOX,
-            KnowledgeDocument.CURATION_NORMALIZED,
-            KnowledgeDocument.CURATION_PENDING_AI,
-            KnowledgeDocument.CURATION_PENDING_REVIEW,
-        ],
+        knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
     )
     status_counts = {
         item["curation_status"]: item["total"]
@@ -531,6 +567,7 @@ def inbox(request):
         "knowledge/inbox.html",
         {
             "page_obj": page_obj,
+            "selected_collection": "all",
             "status_counts": status_counts,
             "selected_status": selected_status,
             "curation_filters": [
@@ -551,7 +588,9 @@ def topics(request):
     member = current_member(request)
     if member is None:
         return _membership_required_response(request)
-    entries = accessible_search_entries(member)
+    entries = accessible_search_entries(member).filter(
+        knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+    )
     tag_counts = Counter()
     for tags in entries.values_list("tags", flat=True)[:5000]:
         tag_counts.update(str(tag).strip() for tag in (tags or []) if str(tag).strip())
@@ -578,7 +617,9 @@ def people(request):
     member = current_member(request)
     if member is None:
         return _membership_required_response(request)
-    entries = accessible_search_entries(member)
+    entries = accessible_search_entries(member).filter(
+        knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+    )
     authors = list(
         entries.exclude(author_name="")
         .order_by()
@@ -648,6 +689,11 @@ def document_organize(request, pk):
         if form.is_valid():
             with transaction.atomic():
                 document = form.save()
+                if document.knowledge_status == KnowledgeDocument.KNOWLEDGE_INCLUDED:
+                    document.curation_status = KnowledgeDocument.CURATION_CONFIRMED
+                    document.save(
+                        update_fields=["curation_status", "updated_at"]
+                    )
                 KnowledgeProposal.objects.filter(
                     document=document,
                     revision=document.current_revision,
@@ -935,6 +981,10 @@ def source_detail(request, pk):
             "source": source,
             "recent_jobs": source.jobs.select_related("requested_by").order_by("-created_at")[:10],
             "document_count": source.documents.count(),
+            "source_sections": _source_sections(source)
+            if source.kind == KnowledgeSource.KIND_ONENOTE
+            else [],
+            "route_choices": KnowledgeSource.ROUTE_CHOICES,
             "can_manage": _can_write(member) and can_manage_source(member, source),
             "can_change_settings": _can_write(member)
             and can_change_source_settings(member, source),
@@ -957,10 +1007,56 @@ def source_update(request, pk):
         return redirect("knowledge:source_detail", pk=source.pk)
     source.visibility = visibility
     source.allow_cloud_ai = request.POST.get("allow_cloud_ai") == "on"
-    source.save(update_fields=["visibility", "allow_cloud_ai", "updated_at"])
+    config = dict(source.config or {})
+    if source.kind == KnowledgeSource.KIND_ONENOTE:
+        valid_routes = dict(KnowledgeSource.ROUTE_CHOICES)
+        default_route = request.POST.get("default_route", source.default_route)
+        if default_route not in valid_routes:
+            messages.error(request, "OneNote 默认处理方式不正确。")
+            return redirect("knowledge:source_detail", pk=source.pk)
+        section_routes = dict(config.get("section_routes") or {})
+        section_ids = request.POST.getlist("section_id")
+        section_values = request.POST.getlist("section_route")
+        if len(section_ids) != len(section_values):
+            messages.error(request, "OneNote 分区设置不完整，请刷新后重试。")
+            return redirect("knowledge:source_detail", pk=source.pk)
+        for section_id, route in zip(section_ids, section_values):
+            if route not in valid_routes:
+                messages.error(request, "OneNote 分区处理方式不正确。")
+                return redirect("knowledge:source_detail", pk=source.pk)
+            section_routes[str(section_id)] = route
+        config["default_route"] = default_route
+        config["section_routes"] = section_routes
+    source.config = config
+    source.save(
+        update_fields=[
+            "visibility",
+            "allow_cloud_ai",
+            "config",
+            "updated_at",
+        ]
+    )
+    updated_documents = 0
+    if (
+        source.kind == KnowledgeSource.KIND_ONENOTE
+        and request.POST.get("apply_existing") == "on"
+    ):
+        for document in source.documents.iterator():
+            section_id = (document.hierarchy or {}).get("section_id")
+            desired_status = _knowledge_status_for_route(
+                source.route_for_section(section_id)
+            )
+            if document.knowledge_status != desired_status:
+                document.knowledge_status = desired_status
+                document.save(update_fields=["knowledge_status", "updated_at"])
+                updated_documents += 1
     messages.success(
         request,
-        "来源设置已更新；已有文档不会被静默批量改变可见范围。",
+        (
+            f"来源设置已更新，并按分区规则更新了 {updated_documents} 篇已有文档。"
+            if request.POST.get("apply_existing") == "on"
+            else "来源设置已更新；分区规则只影响以后首次同步的页面。"
+        ),
     )
     return redirect("knowledge:source_detail", pk=source.pk)
 
@@ -1190,7 +1286,15 @@ def _apply_proposal(proposal, member, *, accept, value=None):
         status=KnowledgeProposal.STATUS_PENDING,
     ).exists():
         document.curation_status = KnowledgeDocument.CURATION_CONFIRMED
-        document.save(update_fields=["curation_status", "updated_at"])
+        if document.knowledge_status == KnowledgeDocument.KNOWLEDGE_PENDING:
+            document.knowledge_status = KnowledgeDocument.KNOWLEDGE_INCLUDED
+        document.save(
+            update_fields=[
+                "curation_status",
+                "knowledge_status",
+                "updated_at",
+            ]
+        )
     document.refresh_from_db()
     index_document(document)
 

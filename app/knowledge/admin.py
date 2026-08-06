@@ -65,10 +65,18 @@ class KnowledgeDocumentAdmin(admin.ModelAdmin):
         "owner",
         "visibility",
         "sync_status",
+        "knowledge_status",
         "curation_status",
         "content_modified_at",
     )
-    list_filter = ("family", "source__kind", "visibility", "sync_status", "curation_status")
+    list_filter = (
+        "family",
+        "source__kind",
+        "visibility",
+        "sync_status",
+        "knowledge_status",
+        "curation_status",
+    )
     search_fields = ("title", "author", "external_id", "confirmed_summary")
     readonly_fields = ("current_revision", "source_deleted_at", "created_at", "updated_at")
     inlines = [KnowledgeRevisionInline]
@@ -151,8 +159,22 @@ class KnowledgeJobAdmin(admin.ModelAdmin):
 
 @admin.register(KnowledgeSearchEntry)
 class KnowledgeSearchEntryAdmin(admin.ModelAdmin):
-    list_display = ("title", "item_kind", "owner", "visibility", "source_name", "updated_at")
-    list_filter = ("family", "item_kind", "visibility", "source_kind")
+    list_display = (
+        "title",
+        "item_kind",
+        "owner",
+        "visibility",
+        "source_name",
+        "knowledge_status",
+        "updated_at",
+    )
+    list_filter = (
+        "family",
+        "item_kind",
+        "visibility",
+        "source_kind",
+        "knowledge_status",
+    )
     search_fields = ("title", "searchable_text")
     readonly_fields = [field.name for field in KnowledgeSearchEntry._meta.fields]
 
