@@ -46,6 +46,20 @@
   </article>
 </section>
 
+<section class="panel">
+  <header class="panel-heading"><div><span class="eyebrow">Historical accounts</span><h2>关注账号 · 历史文章</h2></div><a class="button" href="{% url 'knowledge:library' %}?collection=archive">打开公众号历史归档</a></header>
+  <div class="source-list">
+    {% for source in archive_sources %}
+      <a class="source-row" href="{% url 'knowledge:source_history' source.pk %}">
+        <div><strong>{{ source.name }}</strong><span>{{ source.get_kind_display }} · 统一知识底座</span></div>
+        <div><span class="status-pill warning">历史文章</span><span>{{ source.history_count }} 篇</span></div>
+      </a>
+    {% empty %}
+      <div class="empty-state compact"><p>导入公众号历史文章后，对应账号会在这里出现；日常人物动态仍保持独立流程。</p></div>
+    {% endfor %}
+  </div>
+</section>
+
 <section class="knowledge-source-identity-guide">
   <header><span class="eyebrow">Source identity</span><h2>正式接入必须清楚区分</h2></header>
   <div><span class="direct">本人直接发言</span><span class="institution">所属机构发布</span><span class="interview">采访或演讲原文</span><span class="media">媒体转述</span><span class="ai">AI 提炼观点</span></div>

@@ -21,9 +21,11 @@ from family_core.models import FamilyMember
 from .forms import (
     BulkProposalPreviewForm,
     DocumentOrganizeForm,
+    KnowledgeImportUploadForm,
     NotebookSelectionForm,
     ProposalReviewForm,
 )
+from .imports import KnowledgeImportError, create_uploaded_import_batch
 from .microsoft import (
     MicrosoftAuthorizationError,
     MicrosoftConfigurationError,
@@ -37,6 +39,7 @@ from .microsoft import (
 from .models import (
     KnowledgeAsset,
     KnowledgeDocument,
+    KnowledgeImportBatch,
     KnowledgeJob,
     KnowledgeProposal,
     KnowledgeSearchEntry,
@@ -182,9 +185,11 @@ def _knowledge_stats(member):
     return {
         "total": entries.filter(
             knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+            document__library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
         ).count(),
         "today_new": entries.filter(
             knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+            document__library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
             created_at__date=today,
         ).count(),
         "inbox": entries.filter(
@@ -277,6 +282,7 @@ def index(request):
     entries = accessible_search_entries(member).filter(
         owner=member,
         knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+        document__library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
     )
     recent_entries = _decorate_entries(list(entries[:6]))
     today_entries = _decorate_entries(
@@ -310,18 +316,31 @@ def index(request):
 def _library_response(
     request,
     member,
+    forced_source_id=None,
+    forced_library_tier=None,
     *,
-    page_title="知识库",
-    page_description="默认查看已经入库的知识，并默认显示当前登录成员；可切换“全部资料”检查待整理或仅同步归档内容。",
+    page_title="资料库",
+    page_description="统一知识底座的资料库；默认显示当前登录成员。公众号历史文章进入历史归档，成员确认后再提升为精选知识。",
 ):
     entries = accessible_search_entries(member)
     collection = request.GET.get("collection", "library").strip()
-    if collection == "all":
-        pass
-    else:
+    if collection not in {"all", "library", "curated", "archive"}:
         collection = "library"
+    if forced_library_tier == KnowledgeDocument.LIBRARY_ARCHIVE:
+        collection = "archive"
+    elif forced_library_tier == KnowledgeDocument.LIBRARY_KNOWLEDGE:
+        collection = "curated"
+    if collection != "all":
         entries = entries.filter(
             knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+        )
+    if collection == "curated":
+        entries = entries.filter(
+            document__library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
+        )
+    elif collection == "archive":
+        entries = entries.filter(
+            document__library_tier=KnowledgeDocument.LIBRARY_ARCHIVE,
         )
     query = request.GET.get("q", "").strip()
     scope = request.GET.get("scope", "all")
@@ -335,6 +354,8 @@ def _library_response(
     directory_mode = request.GET.get("directory", "category").strip()
     category = request.GET.get("category", "").strip()
     source_id = request.GET.get("source_id", "").strip()
+    if forced_source_id is not None:
+        source_id = str(forced_source_id)
     section = request.GET.get("section", "").strip()
     section_group = request.GET.get("section_group", "").strip()
     quick_filter = request.GET.get("quick", "").strip()
@@ -370,6 +391,17 @@ def _library_response(
         entries = entries.filter(item_kind=KnowledgeSearchEntry.KIND_DOCUMENT)
     else:
         content_type = "all"
+
+    if forced_source_id is not None:
+        entries = entries.filter(
+            item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
+            document__source_id=int(forced_source_id),
+        )
+    if forced_library_tier in {
+        KnowledgeDocument.LIBRARY_KNOWLEDGE,
+        KnowledgeDocument.LIBRARY_ARCHIVE,
+    }:
+        entries = entries.filter(document__library_tier=forced_library_tier)
 
     directory_entries = entries
     directory_total = directory_entries.count()
@@ -469,7 +501,12 @@ def _library_response(
     elif quick_filter == "uncategorized":
         directory_title = "未分类"
     else:
-        directory_title = "全部资料" if collection == "all" else "全部知识"
+        directory_title = {
+            "all": "全部资料",
+            "archive": "公众号历史归档",
+            "curated": "精选知识",
+            "library": "资料库",
+        }[collection]
     return render(
         request,
         "knowledge/index.html",
@@ -632,6 +669,26 @@ def people(request):
     if selected_person:
         timeline = entries.filter(author_name=selected_person)[:50]
     timeline = _decorate_entries(list(timeline))
+    archive_sources = list(
+        visible_sources(member)
+        .filter(
+            kind__in=[
+                KnowledgeSource.KIND_HTML_IMPORT,
+                KnowledgeSource.KIND_MARKDOWN_IMPORT,
+            ]
+        )
+        .annotate(
+            history_count=Count(
+                "documents",
+                filter=Q(
+                    documents__knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+                    documents__library_tier=KnowledgeDocument.LIBRARY_ARCHIVE,
+                ),
+            )
+        )
+        .filter(history_count__gt=0)
+        .order_by("name")
+    )
     return render(
         request,
         "knowledge/people.html",
@@ -639,6 +696,7 @@ def people(request):
             "authors": authors,
             "selected_person": selected_person,
             "timeline": timeline,
+            "archive_sources": archive_sources,
         },
     )
 @login_required
@@ -793,6 +851,157 @@ def sources(request):
             "can_write": _can_write(member),
         },
     )
+
+
+def _visible_import_batches(member):
+    queryset = KnowledgeImportBatch.objects.filter(family=member.family).select_related(
+        "source",
+        "requested_by",
+    )
+    if member.role == FamilyMember.ROLE_ADMIN:
+        return queryset
+    return queryset.filter(
+        Q(requested_by=member) | Q(visibility=KnowledgeVisibility.FAMILY)
+    )
+
+
+@login_required
+def imports(request):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    if request.method == "POST":
+        if not _can_write(member):
+            return HttpResponseForbidden("查看者不能创建导入批次。")
+        form = KnowledgeImportUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            try:
+                batch = create_uploaded_import_batch(
+                    member=member,
+                    source_name=form.cleaned_data["source_name"],
+                    category=form.cleaned_data["category"],
+                    visibility=form.cleaned_data["visibility"],
+                    uploaded_file=form.cleaned_data["package"],
+                )
+                queue_knowledge_job(
+                    family=member.family,
+                    source=batch.source,
+                    requested_by=member,
+                    job_type=KnowledgeJob.TYPE_PREVIEW_IMPORT,
+                    parameters={"batch_id": batch.pk},
+                )
+                messages.success(
+                    request,
+                    "导入包已保存并进入格式检查；确认前不会建立知识文档。",
+                )
+                return redirect("knowledge:import_batch_detail", pk=batch.pk)
+            except KnowledgeImportError as exc:
+                form.add_error("package", str(exc))
+    else:
+        form = KnowledgeImportUploadForm()
+    return render(
+        request,
+        "knowledge/imports.html",
+        {
+            "form": form,
+            "batches": _visible_import_batches(member)[:25],
+            "can_write": _can_write(member),
+        },
+    )
+
+
+@login_required
+def import_batch_detail(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    batch = get_object_or_404(_visible_import_batches(member), pk=pk)
+    may_view_items = (
+        batch.requested_by_id == member.id
+        or batch.visibility == KnowledgeVisibility.FAMILY
+    )
+    latest_job = batch.source.jobs.filter(parameters__batch_id=batch.pk).first()
+    can_retry_import = batch.status == KnowledgeImportBatch.STATUS_PREVIEW_READY or (
+        batch.status == KnowledgeImportBatch.STATUS_PARTIAL
+        and batch.rolled_back_at is None
+    )
+    return render(
+        request,
+        "knowledge/import_batch_detail.html",
+        {
+            "batch": batch,
+            "items": batch.items.all() if may_view_items else batch.items.none(),
+            "items_redacted": not may_view_items,
+            "latest_job": latest_job,
+            "can_retry_import": can_retry_import,
+            "can_manage": _can_write(member)
+            and (
+                batch.requested_by_id == member.id
+                or member.role == FamilyMember.ROLE_ADMIN
+            ),
+        },
+    )
+
+
+def _queue_import_batch_job(request, batch, job_type):
+    member = current_member(request)
+    if (
+        not _can_write(member)
+        or (
+            batch.requested_by_id != member.id
+            and member.role != FamilyMember.ROLE_ADMIN
+        )
+    ):
+        return HttpResponseForbidden("无权操作该导入批次。")
+    job, created = queue_knowledge_job(
+        family=batch.family,
+        source=batch.source,
+        requested_by=member,
+        job_type=job_type,
+        parameters={"batch_id": batch.pk},
+    )
+    messages.success(
+        request,
+        "任务已加入队列。"
+        if created
+        else "该来源已有同类型任务正在排队或运行。",
+    )
+    return redirect("knowledge:job_detail", pk=job.pk)
+
+
+@login_required
+@require_POST
+def import_batch_confirm(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    batch = get_object_or_404(_visible_import_batches(member), pk=pk)
+    if batch.status not in {
+        KnowledgeImportBatch.STATUS_PREVIEW_READY,
+        KnowledgeImportBatch.STATUS_PARTIAL,
+    } or (batch.status == KnowledgeImportBatch.STATUS_PARTIAL and batch.rolled_back_at):
+        messages.error(request, "只有完成格式检查或部分失败的批次可以导入。")
+        return redirect("knowledge:import_batch_detail", pk=batch.pk)
+    if batch.error_count and request.POST.get("accept_valid_items") != "on":
+        messages.error(request, "批次存在格式错误；请明确勾选只导入有效项目。")
+        return redirect("knowledge:import_batch_detail", pk=batch.pk)
+    return _queue_import_batch_job(request, batch, KnowledgeJob.TYPE_IMPORT_BATCH)
+
+
+@login_required
+@require_POST
+def import_batch_rollback(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    batch = get_object_or_404(_visible_import_batches(member), pk=pk)
+    if batch.status not in {
+        KnowledgeImportBatch.STATUS_COMPLETED,
+        KnowledgeImportBatch.STATUS_PARTIAL,
+    }:
+        messages.error(request, "当前批次不能回滚。")
+        return redirect("knowledge:import_batch_detail", pk=batch.pk)
+    return _queue_import_batch_job(request, batch, KnowledgeJob.TYPE_ROLLBACK_IMPORT)
 
 
 @login_required
@@ -981,6 +1190,10 @@ def source_detail(request, pk):
             "source": source,
             "recent_jobs": source.jobs.select_related("requested_by").order_by("-created_at")[:10],
             "document_count": source.documents.count(),
+            "archive_count": source.documents.filter(
+                knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+                library_tier=KnowledgeDocument.LIBRARY_ARCHIVE,
+            ).count(),
             "source_sections": _source_sections(source)
             if source.kind == KnowledgeSource.KIND_ONENOTE
             else [],
@@ -989,6 +1202,27 @@ def source_detail(request, pk):
             "can_change_settings": _can_write(member)
             and can_change_source_settings(member, source),
         },
+    )
+
+
+@login_required
+def source_history(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    source = get_object_or_404(visible_sources(member), pk=pk)
+    if source.kind not in {
+        KnowledgeSource.KIND_HTML_IMPORT,
+        KnowledgeSource.KIND_MARKDOWN_IMPORT,
+    }:
+        return redirect(reverse("knowledge:library") + f"?source_id={source.pk}")
+    return _library_response(
+        request,
+        member,
+        forced_source_id=source.pk,
+        forced_library_tier=KnowledgeDocument.LIBRARY_ARCHIVE,
+        page_title=f"{source.name} · 历史文章",
+        page_description="此账号的历史文章保存在统一知识底座中；只有成员主动整理后才会进入精选知识。",
     )
 
 

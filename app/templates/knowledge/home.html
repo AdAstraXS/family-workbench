@@ -16,15 +16,15 @@
       <button type="submit">搜索</button>
     </form>
     <div class="knowledge-home-import-actions" aria-label="资料导入入口">
-      <span class="button disabled" aria-disabled="true" title="文件上传将在批量导入连接器完成后开放">上传资料</span>
-      <span class="button disabled" aria-disabled="true" title="Markdown 与 HTML 导入将在下一阶段开放">导入</span>
+      <a class="button" href="{% url 'knowledge:imports' %}">上传资料</a>
+      <a class="button" href="{% url 'knowledge:imports' %}">导入记录</a>
     </div>
   </div>
 </section>
 
 <section class="knowledge-home-shortcuts" aria-label="知识空间快捷入口">
-  <a href="{% url 'knowledge:library' %}"><span>我的知识</span><strong>{{ stats.total }}</strong><small>默认只看当前账号</small></a>
-  <a href="{% url 'knowledge:library' %}?date_from={% now 'Y-m-d' %}"><span>今日入库</span><strong>{{ stats.today_new }}</strong><small>今天加入的正式知识</small></a>
+  <a href="{% url 'knowledge:library' %}?collection=curated"><span>我的精选知识</span><strong>{{ stats.total }}</strong><small>默认只看当前账号</small></a>
+  <a href="{% url 'knowledge:library' %}?collection=curated&amp;date_from={% now 'Y-m-d' %}"><span>今日精选</span><strong>{{ stats.today_new }}</strong><small>今天加入的精选知识</small></a>
   <a href="{% url 'knowledge:inbox' %}"><span>待整理</span><strong>{{ stats.inbox }}</strong><small>OneNote 摘录等候提炼</small></a>
   <a href="{% url 'knowledge:review' %}"><span>AI 待确认</span><strong>{{ stats.pending_review }}</strong><small>逐条对照原文</small></a>
   <a href="{% url 'knowledge:sources' %}"><span>同步异常</span><strong>{{ stats.source_errors }}</strong><small>账号失效与来源错误</small></a>
@@ -51,7 +51,7 @@
   </article>
 
   <article class="knowledge-home-section">
-    <header><div><span class="eyebrow">长期保存</span><h2>最近入库</h2></div><a href="{% url 'knowledge:library' %}">知识库</a></header>
+    <header><div><span class="eyebrow">长期保存</span><h2>最近精选</h2></div><a href="{% url 'knowledge:library' %}?collection=curated">精选知识</a></header>
     <div class="knowledge-compact-list">
       {% for entry in recent_confirmed %}{% include "knowledge/_compact_entry.html" %}
       {% empty %}<div class="knowledge-gentle-empty"><span>直接入库或整理完成的内容会显示在这里。</span></div>{% endfor %}
@@ -64,7 +64,7 @@
   </article>
 
   <article class="knowledge-home-section">
-    <header><div><span class="eyebrow">Recent</span><h2>最近更新</h2></div><a href="{% url 'knowledge:library' %}">知识库</a></header>
+    <header><div><span class="eyebrow">Recent</span><h2>最近更新</h2></div><a href="{% url 'knowledge:library' %}">资料库</a></header>
     <div class="knowledge-compact-list">
       {% for entry in recent_entries %}{% include "knowledge/_compact_entry.html" %}
       {% empty %}<div class="knowledge-gentle-empty"><span>绑定 OneNote 或继续使用随手记后，最近内容会显示在这里。</span></div>{% endfor %}

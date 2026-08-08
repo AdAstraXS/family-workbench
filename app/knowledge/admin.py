@@ -3,6 +3,8 @@ from django.contrib import admin
 from .models import (
     KnowledgeAsset,
     KnowledgeDocument,
+    KnowledgeImportBatch,
+    KnowledgeImportItem,
     KnowledgeJob,
     KnowledgeJobItem,
     KnowledgeProposal,
@@ -155,6 +157,58 @@ class KnowledgeJobAdmin(admin.ModelAdmin):
         "updated_at",
     )
     inlines = [KnowledgeJobItemInline]
+
+
+class KnowledgeImportItemInline(admin.TabularInline):
+    model = KnowledgeImportItem
+    fields = (
+        "relative_path",
+        "title",
+        "action",
+        "status",
+        "asset_count",
+        "error_message",
+    )
+    readonly_fields = fields
+    extra = 0
+    can_delete = False
+
+
+@admin.register(KnowledgeImportBatch)
+class KnowledgeImportBatchAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "source",
+        "requested_by",
+        "import_format",
+        "status",
+        "total_count",
+        "error_count",
+        "created_at",
+    )
+    list_filter = ("family", "import_format", "status", "visibility")
+    search_fields = ("source_filename", "source_sha256", "source__name")
+    readonly_fields = (
+        "batch_key",
+        "source_sha256",
+        "total_count",
+        "new_count",
+        "update_count",
+        "skipped_count",
+        "duplicate_count",
+        "error_count",
+        "asset_count",
+        "estimated_bytes",
+        "previewed_at",
+        "confirmed_at",
+        "completed_at",
+        "rolled_back_at",
+        "error_message",
+        "result",
+        "created_at",
+        "updated_at",
+    )
+    inlines = [KnowledgeImportItemInline]
 
 
 @admin.register(KnowledgeSearchEntry)

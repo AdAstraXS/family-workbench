@@ -27,7 +27,24 @@ urlpatterns = [
         name="revision_raw_download",
     ),
     path("sources/", views.sources, name="sources"),
+    path("imports/", views.imports, name="imports"),
+    path(
+        "imports/<int:pk>/",
+        views.import_batch_detail,
+        name="import_batch_detail",
+    ),
+    path(
+        "imports/<int:pk>/confirm/",
+        views.import_batch_confirm,
+        name="import_batch_confirm",
+    ),
+    path(
+        "imports/<int:pk>/rollback/",
+        views.import_batch_rollback,
+        name="import_batch_rollback",
+    ),
     path("sources/<int:pk>/", views.source_detail, name="source_detail"),
+    path("sources/<int:pk>/history/", views.source_history, name="source_history"),
     path("sources/<int:pk>/update/", views.source_update, name="source_update"),
     path("sources/<int:pk>/sync/", views.source_sync, name="source_sync"),
     path(

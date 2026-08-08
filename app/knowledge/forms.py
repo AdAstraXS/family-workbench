@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 from django import forms
 
@@ -45,6 +46,44 @@ class NotebookSelectionForm(forms.Form):
         return self.notebooks.get(notebook_id, {})
 
 
+class KnowledgeImportUploadForm(forms.Form):
+    source_name = forms.CharField(
+        label="来源名称",
+        max_length=300,
+        initial="微信公众号归档",
+        help_text="建议按公众号分别建立来源，例如“微信公众号 · 金渐成”。",
+    )
+    category = forms.CharField(
+        label="批次默认分类",
+        max_length=100,
+        initial="公众号归档",
+        required=False,
+        help_text="原目录会独立保留，不会被这个分类覆盖。",
+    )
+    visibility = forms.ChoiceField(
+        label="导入后的可见范围",
+        choices=KnowledgeVisibility.choices,
+        initial=KnowledgeVisibility.FAMILY,
+    )
+    package = forms.FileField(
+        label="HTML 或 ZIP 导入包",
+        help_text="支持单个 .html 或包含 HTML、图片和封面的 .zip；上传后只检查，不会立即入库。",
+        widget=forms.ClearableFileInput(attrs={"accept": ".html,.zip"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+
+    def clean_package(self):
+        uploaded = self.cleaned_data["package"]
+        suffix = Path(uploaded.name).suffix.lower()
+        if suffix not in {".html", ".zip"}:
+            raise forms.ValidationError("目前只支持 .html 或 .zip 导入包。")
+        return uploaded
+
+
 class DocumentOrganizeForm(forms.ModelForm):
     tags_text = forms.CharField(
         label="标签",
@@ -60,6 +99,7 @@ class DocumentOrganizeForm(forms.ModelForm):
             "tags_text",
             "visibility",
             "knowledge_status",
+            "library_tier",
         ]
         labels = {
             "confirmed_summary": "正式摘要",
@@ -80,6 +120,9 @@ class DocumentOrganizeForm(forms.ModelForm):
         ]
         self.fields["knowledge_status"].help_text = (
             "已入库会出现在默认知识库；待整理进入整理清单；仅同步归档只在“全部资料”中查看。"
+        )
+        self.fields["library_tier"].help_text = (
+            "历史导入资料默认留在资料库；成员确认有长期复用价值后，再提升为精选知识。"
         )
         if self.instance and self.instance.pk:
             self.fields["tags_text"].initial = "，".join(self.instance.tags or [])

@@ -8,6 +8,7 @@
       {% if entry.author_name %}<span>作者：{{ entry.author_name }}</span>{% endif %}
       {% if entry.content_time %}<time>{{ entry.content_time|date:"Y-m-d" }}</time>{% endif %}
       <span>{{ entry.get_knowledge_status_display|default:entry.knowledge_status }}</span>
+      {% if entry.document.library_tier == "archive" %}<span class="status-pill warning">历史归档</span>{% else %}<span class="status-pill">精选知识</span>{% endif %}
       {% if entry.category %}<span>分类：{{ entry.category }}</span>{% endif %}
     </div>
     <h2><a href="{{ entry.target_url }}">{{ entry.title }}</a></h2>

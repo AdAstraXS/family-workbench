@@ -1,3 +1,4 @@
+import uuid
 from pathlib import Path
 
 from django.db import models
@@ -33,6 +34,13 @@ def asset_upload_to(instance, filename):
         f"documents/{instance.revision.document_id}/"
         f"revisions/{instance.revision.revision_number}/assets/"
         f"{_safe_filename(filename, 'resource.bin')}"
+    )
+
+
+def import_package_upload_to(instance, filename):
+    return (
+        f"families/{instance.family_id}/imports/{instance.batch_key}/package/"
+        f"{_safe_filename(filename, 'knowledge-import.zip')}"
     )
 
 
@@ -118,9 +126,13 @@ class SourceConnection(TimestampedModel):
 class KnowledgeSource(TimestampedModel):
     KIND_ONENOTE = "onenote"
     KIND_INTERNAL_NOTES = "internal_notes"
+    KIND_HTML_IMPORT = "html_import"
+    KIND_MARKDOWN_IMPORT = "markdown_import"
     KIND_CHOICES = [
         (KIND_ONENOTE, "OneNote"),
         (KIND_INTERNAL_NOTES, "随手记"),
+        (KIND_HTML_IMPORT, "HTML 历史资料"),
+        (KIND_MARKDOWN_IMPORT, "Markdown 历史资料"),
     ]
 
     ROUTE_KNOWLEDGE = "knowledge"
@@ -256,6 +268,13 @@ class KnowledgeDocument(TimestampedModel):
         (KNOWLEDGE_ARCHIVED, "仅同步归档"),
     ]
 
+    LIBRARY_KNOWLEDGE = "knowledge"
+    LIBRARY_ARCHIVE = "archive"
+    LIBRARY_TIER_CHOICES = [
+        (LIBRARY_KNOWLEDGE, "精选知识"),
+        (LIBRARY_ARCHIVE, "资料库历史归档"),
+    ]
+
     family = models.ForeignKey(
         Family,
         verbose_name="所属家庭",
@@ -312,6 +331,13 @@ class KnowledgeDocument(TimestampedModel):
     confirmed_summary = models.TextField("已确认摘要", blank=True)
     category = models.CharField("已确认分类", max_length=100, blank=True)
     tags = models.JSONField("已确认标签", default=list, blank=True)
+    library_tier = models.CharField(
+        "资料库层级",
+        max_length=20,
+        choices=LIBRARY_TIER_CHOICES,
+        default=LIBRARY_KNOWLEDGE,
+        db_index=True,
+    )
     current_revision = models.ForeignKey(
         "KnowledgeRevision",
         verbose_name="当前内容版本",
@@ -336,6 +362,7 @@ class KnowledgeDocument(TimestampedModel):
             models.Index(fields=["source", "sync_status"]),
             models.Index(fields=["family", "curation_status"]),
             models.Index(fields=["family", "knowledge_status"]),
+            models.Index(fields=["family", "library_tier", "knowledge_status"]),
             models.Index(fields=["content_modified_at"]),
         ]
 
@@ -352,6 +379,7 @@ class KnowledgeRevision(models.Model):
     )
     revision_number = models.PositiveIntegerField("版本号")
     content_hash = models.CharField("内容哈希", max_length=64)
+    normalized_hash = models.CharField("规范正文哈希", max_length=64, blank=True)
     raw_file = models.FileField(
         "原始内容",
         storage=protected_knowledge_storage,
@@ -396,6 +424,7 @@ class KnowledgeAsset(models.Model):
     )
     external_id = models.CharField("外部资源 ID", max_length=500)
     original_name = models.CharField("原始文件名", max_length=300, blank=True)
+    source_path = models.CharField("原始相对路径", max_length=1000, blank=True)
     mime_type = models.CharField("MIME 类型", max_length=200)
     byte_size = models.PositiveBigIntegerField("文件大小")
     content_hash = models.CharField("文件哈希", max_length=64)
@@ -505,10 +534,16 @@ class KnowledgeJob(TimestampedModel):
     TYPE_SYNC_SOURCE = "sync_source"
     TYPE_GENERATE_PROPOSALS = "generate_proposals"
     TYPE_REBUILD_SEARCH = "rebuild_search"
+    TYPE_PREVIEW_IMPORT = "preview_import"
+    TYPE_IMPORT_BATCH = "import_batch"
+    TYPE_ROLLBACK_IMPORT = "rollback_import"
     TYPE_CHOICES = [
         (TYPE_SYNC_SOURCE, "同步来源"),
         (TYPE_GENERATE_PROPOSALS, "生成 AI 整理建议"),
         (TYPE_REBUILD_SEARCH, "重建搜索索引"),
+        (TYPE_PREVIEW_IMPORT, "检查导入资料"),
+        (TYPE_IMPORT_BATCH, "执行资料导入"),
+        (TYPE_ROLLBACK_IMPORT, "回滚导入批次"),
     ]
 
     STATUS_PENDING = "pending"
@@ -634,6 +669,215 @@ class KnowledgeJobItem(models.Model):
 
     def __str__(self):
         return self.title or self.external_id
+
+
+class KnowledgeImportBatch(TimestampedModel):
+    FORMAT_HTML = "html"
+    FORMAT_MARKDOWN = "markdown"
+    FORMAT_CHOICES = [
+        (FORMAT_HTML, "HTML"),
+        (FORMAT_MARKDOWN, "Markdown"),
+    ]
+
+    STATUS_UPLOADED = "uploaded"
+    STATUS_PREVIEWING = "previewing"
+    STATUS_PREVIEW_READY = "preview_ready"
+    STATUS_IMPORTING = "importing"
+    STATUS_COMPLETED = "completed"
+    STATUS_PARTIAL = "partial"
+    STATUS_FAILED = "failed"
+    STATUS_ROLLING_BACK = "rolling_back"
+    STATUS_ROLLED_BACK = "rolled_back"
+    STATUS_CHOICES = [
+        (STATUS_UPLOADED, "等待格式检查"),
+        (STATUS_PREVIEWING, "正在格式检查"),
+        (STATUS_PREVIEW_READY, "等待确认导入"),
+        (STATUS_IMPORTING, "正在导入"),
+        (STATUS_COMPLETED, "导入完成"),
+        (STATUS_PARTIAL, "部分完成"),
+        (STATUS_FAILED, "需要处理"),
+        (STATUS_ROLLING_BACK, "正在回滚"),
+        (STATUS_ROLLED_BACK, "已回滚"),
+    ]
+
+    batch_key = models.UUIDField("批次标识", default=uuid.uuid4, unique=True, editable=False)
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="knowledge_import_batches",
+    )
+    source = models.ForeignKey(
+        KnowledgeSource,
+        verbose_name="知识来源",
+        on_delete=models.PROTECT,
+        related_name="import_batches",
+    )
+    requested_by = models.ForeignKey(
+        FamilyMember,
+        verbose_name="发起成员",
+        on_delete=models.SET_NULL,
+        related_name="knowledge_import_batches",
+        null=True,
+        blank=True,
+    )
+    import_format = models.CharField("导入格式", max_length=20, choices=FORMAT_CHOICES)
+    source_filename = models.CharField("上传文件名", max_length=300)
+    source_sha256 = models.CharField("上传包校验值", max_length=64)
+    package_file = models.FileField(
+        "受保护的原始导入包",
+        storage=protected_knowledge_storage,
+        upload_to=import_package_upload_to,
+        max_length=1000,
+    )
+    visibility = models.CharField(
+        "默认可见范围",
+        max_length=20,
+        choices=KnowledgeVisibility.choices,
+        default=KnowledgeVisibility.FAMILY,
+    )
+    category = models.CharField("批次默认分类", max_length=100, blank=True)
+    status = models.CharField(
+        "批次状态",
+        max_length=30,
+        choices=STATUS_CHOICES,
+        default=STATUS_UPLOADED,
+    )
+    total_count = models.PositiveIntegerField("文件数", default=0)
+    new_count = models.PositiveIntegerField("预计新增", default=0)
+    update_count = models.PositiveIntegerField("预计更新", default=0)
+    skipped_count = models.PositiveIntegerField("预计跳过", default=0)
+    duplicate_count = models.PositiveIntegerField("强重复", default=0)
+    error_count = models.PositiveIntegerField("错误数", default=0)
+    asset_count = models.PositiveIntegerField("图片数", default=0)
+    estimated_bytes = models.PositiveBigIntegerField("预计保存字节", default=0)
+    previewed_at = models.DateTimeField("预览完成时间", null=True, blank=True)
+    confirmed_at = models.DateTimeField("确认导入时间", null=True, blank=True)
+    completed_at = models.DateTimeField("导入完成时间", null=True, blank=True)
+    rolled_back_at = models.DateTimeField("回滚完成时间", null=True, blank=True)
+    error_message = models.TextField("错误摘要", blank=True)
+    result = models.JSONField("批次结果", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "知识导入批次"
+        verbose_name_plural = "知识导入批次"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["family", "status", "created_at"]),
+            models.Index(fields=["source", "created_at"]),
+            models.Index(fields=["source_sha256"]),
+        ]
+
+    def __str__(self):
+        return f"{self.source} · {self.source_filename}"
+
+
+class KnowledgeImportItem(models.Model):
+    ACTION_NEW = "new"
+    ACTION_UPDATE = "update"
+    ACTION_UNCHANGED = "unchanged"
+    ACTION_DUPLICATE = "duplicate"
+    ACTION_ERROR = "error"
+    ACTION_CHOICES = [
+        (ACTION_NEW, "新增"),
+        (ACTION_UPDATE, "更新"),
+        (ACTION_UNCHANGED, "内容未变化"),
+        (ACTION_DUPLICATE, "强重复"),
+        (ACTION_ERROR, "无法导入"),
+    ]
+
+    STATUS_PREVIEWED = "previewed"
+    STATUS_IMPORTED = "imported"
+    STATUS_SKIPPED = "skipped"
+    STATUS_FAILED = "failed"
+    STATUS_ROLLED_BACK = "rolled_back"
+    STATUS_CHOICES = [
+        (STATUS_PREVIEWED, "已检查"),
+        (STATUS_IMPORTED, "已导入"),
+        (STATUS_SKIPPED, "已跳过"),
+        (STATUS_FAILED, "失败"),
+        (STATUS_ROLLED_BACK, "已回滚"),
+    ]
+
+    batch = models.ForeignKey(
+        KnowledgeImportBatch,
+        verbose_name="导入批次",
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    relative_path = models.CharField("原始相对路径", max_length=1000)
+    external_id = models.CharField("稳定文档 ID", max_length=500, blank=True)
+    title = models.CharField("标题", max_length=500, blank=True)
+    author = models.CharField("作者", max_length=300, blank=True)
+    source_url = models.URLField("原文链接", max_length=1000, blank=True)
+    published_at = models.DateTimeField("发布时间", null=True, blank=True)
+    directory_path = models.CharField("原始目录", max_length=1000, blank=True)
+    raw_sha256 = models.CharField("原文件哈希", max_length=64, blank=True)
+    normalized_sha256 = models.CharField("规范正文哈希", max_length=64, blank=True)
+    action = models.CharField(
+        "预览结论",
+        max_length=20,
+        choices=ACTION_CHOICES,
+        default=ACTION_ERROR,
+    )
+    status = models.CharField(
+        "处理状态",
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PREVIEWED,
+    )
+    asset_count = models.PositiveIntegerField("图片数", default=0)
+    asset_bytes = models.PositiveBigIntegerField("图片字节", default=0)
+    warnings = models.JSONField("格式警告", default=list, blank=True)
+    error_message = models.TextField("错误", blank=True)
+    details = models.JSONField("解析详情", default=dict, blank=True)
+    document = models.ForeignKey(
+        KnowledgeDocument,
+        verbose_name="导入后的文档",
+        on_delete=models.SET_NULL,
+        related_name="import_items",
+        null=True,
+        blank=True,
+    )
+    revision = models.ForeignKey(
+        KnowledgeRevision,
+        verbose_name="导入产生的版本",
+        on_delete=models.SET_NULL,
+        related_name="import_items",
+        null=True,
+        blank=True,
+    )
+    previous_revision = models.ForeignKey(
+        KnowledgeRevision,
+        verbose_name="导入前版本",
+        on_delete=models.SET_NULL,
+        related_name="superseded_by_import_items",
+        null=True,
+        blank=True,
+    )
+    previous_state = models.JSONField("导入前元数据", default=dict, blank=True)
+    created_at = models.DateTimeField("检查时间", auto_now_add=True)
+    updated_at = models.DateTimeField("更新时间", auto_now=True)
+
+    class Meta:
+        verbose_name = "知识导入项目"
+        verbose_name_plural = "知识导入项目"
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["batch", "relative_path"],
+                name="unique_knowledge_import_item_path",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["batch", "action"]),
+            models.Index(fields=["batch", "status"]),
+            models.Index(fields=["external_id"]),
+            models.Index(fields=["normalized_sha256"]),
+        ]
+
+    def __str__(self):
+        return self.title or self.relative_path
 
 
 class KnowledgeSearchEntry(TimestampedModel):

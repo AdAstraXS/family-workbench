@@ -26,6 +26,12 @@
       <div><dt>云端 AI</dt><dd>{% if source.allow_cloud_ai %}已由所有者允许{% else %}未授权发送正文{% endif %}</dd></div>
     </dl>
     {% if source.last_error %}<div class="notice warning">{{ source.last_error }}</div>{% endif %}
+    {% if source.kind == "html_import" or source.kind == "markdown_import" %}
+      <div class="knowledge-source-actions">
+        <a class="button primary" href="{% url 'knowledge:source_history' source.pk %}">查看历史文章（{{ archive_count }}）</a>
+      </div>
+      <p class="muted">这些文章已保存到统一知识底座，默认属于资料库历史归档；人工整理后才会进入精选知识。</p>
+    {% endif %}
     {% if can_manage and source.kind == "onenote" %}
       <div class="knowledge-source-actions">
         <form method="post" action="{% url 'knowledge:source_sync' source.pk %}">

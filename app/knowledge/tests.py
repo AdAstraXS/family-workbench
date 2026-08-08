@@ -1,13 +1,15 @@
 import tempfile
 import json
+import zipfile
 from datetime import timedelta
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
@@ -28,9 +30,12 @@ from .content import (
 from .ai import KnowledgeAiError, generate_proposals
 from .crypto import decrypt_json, encrypt_json
 from .microsoft import GraphResponse, MicrosoftAuthorizationError
+from .imports import create_uploaded_import_batch, parse_wechat_html
 from .models import (
     KnowledgeAsset,
     KnowledgeDocument,
+    KnowledgeImportBatch,
+    KnowledgeImportItem,
     KnowledgeJob,
     KnowledgeProposal,
     KnowledgeRevision,
@@ -130,6 +135,38 @@ class KnowledgeSecurityUnitTests(SimpleTestCase):
                 True,
                 b"not-an-image",
             )
+
+    def test_wechat_parser_extracts_article_body_and_metadata_only(self):
+        raw = b"""<!doctype html><html><head>
+        <meta name="author" content="Test Author">
+        <meta property="og:title" content="Test Title">
+        <meta property="og:url" content="https://mp.weixin.qq.com/s?__biz=biz&amp;mid=1&amp;idx=1">
+        </head><body><h1 id="activity-name">Fallback</h1>
+        <em id="publish_time">2026-08-08 09:30</em>
+        <div id="js_content"><p>Article body</p><script>bad()</script></div>
+        <div class="comment-item">Comment body</div></body></html>"""
+
+        article = parse_wechat_html(raw, "[202608080930]fallback.html")
+
+        self.assertEqual(article.title, "Test Title")
+        self.assertEqual(article.author, "Test Author")
+        self.assertEqual(article.published_at.strftime("%Y-%m-%d %H:%M"), "2026-08-08 09:30")
+        self.assertIn("Article body", article.body_template)
+        self.assertNotIn("bad()", article.body_template)
+        self.assertNotIn("Comment body", article.body_template)
+
+    def test_wechat_parser_recovers_text_only_post_from_metadata(self):
+        raw = b"""<!doctype html><html><head>
+        <meta property="og:title" content="First paragraph.\\n\\nSecond paragraph.">
+        <meta property="og:url" content="https://mp.weixin.qq.com/s?__biz=biz&amp;mid=2&amp;idx=1">
+        </head><body></body></html>"""
+
+        article = parse_wechat_html(raw, "[202608080930]long-filename.html")
+
+        self.assertEqual(article.title, "First paragraph.")
+        self.assertIn("First paragraph.", article.body_template)
+        self.assertIn("Second paragraph.", article.body_template)
+        self.assertIn("纯文字动态", article.warnings[1])
 
 
 @override_settings(
@@ -282,6 +319,306 @@ class KnowledgeBaseTests(TestCase):
         document.save(update_fields=["current_revision", "updated_at"])
         document.refresh_from_db()
         return document
+
+    def make_html_import_batch(
+        self,
+        *,
+        member=None,
+        visibility=KnowledgeVisibility.FAMILY,
+        title="测试文章",
+        timestamp="202608080930",
+        source_name="微信公众号 · 测试号",
+        mid="100",
+        body="正文内容",
+    ):
+        member = member or self.member
+        stem = f"[{timestamp}]{title}"
+        html_body = f"""<!doctype html><html><head>
+        <meta name="author" content="测试作者">
+        <meta property="og:title" content="{title}">
+        <meta property="og:url" content="https://mp.weixin.qq.com/s?__biz=testbiz&amp;mid={mid}&amp;idx=1">
+        </head><body><img src="https://example.com/cover.jpg">
+        <em id="publish_time">2026-08-08 09:30</em>
+        <div id="js_content"><p>{body}</p><script>bad()</script>
+        <img data-src="https://example.com/article.jpg" alt="正文图"></div>
+        <div class="comment-item">不应导入的评论</div></body></html>""".encode("utf-8")
+        package = BytesIO()
+        with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(f"{stem}.html", html_body)
+            archive.writestr(
+                f"图片/{title}/{stem}_{1}.jpg",
+                b"\xff\xd8\xffarticle-image",
+            )
+            archive.writestr(
+                f"封面/[{timestamp}]_{title}.jpg",
+                b"\xff\xd8\xffcover-image",
+            )
+        uploaded = SimpleUploadedFile(
+            "wechat-sample.zip",
+            package.getvalue(),
+            content_type="application/zip",
+        )
+        return create_uploaded_import_batch(
+            member=member,
+            source_name=source_name,
+            category="公众号归档",
+            visibility=visibility,
+            uploaded_file=uploaded,
+        )
+
+    def test_html_import_previews_imports_skips_repeat_and_rolls_back(self):
+        batch = self.make_html_import_batch()
+        preview_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_PREVIEW_IMPORT,
+            parameters={"batch_id": batch.pk},
+        )
+
+        process_job(preview_job)
+
+        preview_job.refresh_from_db()
+        batch.refresh_from_db()
+        self.assertEqual(preview_job.status, KnowledgeJob.STATUS_SUCCESS)
+        self.assertEqual(batch.status, KnowledgeImportBatch.STATUS_PREVIEW_READY)
+        self.assertEqual(batch.new_count, 1)
+        self.assertEqual(batch.asset_count, 2)
+        self.assertFalse(KnowledgeDocument.objects.exists())
+
+        import_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_IMPORT_BATCH,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(import_job)
+
+        import_job.refresh_from_db()
+        batch.refresh_from_db()
+        item = batch.items.get()
+        document = KnowledgeDocument.objects.get()
+        revision = document.current_revision
+        self.assertEqual(import_job.status, KnowledgeJob.STATUS_SUCCESS)
+        self.assertEqual(batch.status, KnowledgeImportBatch.STATUS_COMPLETED)
+        self.assertEqual(document.knowledge_status, KnowledgeDocument.KNOWLEDGE_INCLUDED)
+        self.assertEqual(document.library_tier, KnowledgeDocument.LIBRARY_ARCHIVE)
+        self.assertEqual(document.curation_status, KnowledgeDocument.CURATION_NORMALIZED)
+        self.assertEqual(document.author, "测试作者")
+        self.assertEqual(document.category, "公众号归档")
+        self.assertIn("正文内容", revision.plain_text)
+        self.assertNotIn("不应导入的评论", revision.plain_text)
+        self.assertNotIn("bad()", revision.normalized_html)
+        self.assertIn("/knowledge/assets/", revision.normalized_html)
+        self.assertEqual(revision.assets.count(), 2)
+        self.assertTrue(revision.raw_file.storage.exists(revision.raw_file.name))
+        self.assertEqual(item.status, KnowledgeImportItem.STATUS_IMPORTED)
+
+        repeat = self.make_html_import_batch()
+        repeat_preview, _ = queue_knowledge_job(
+            family=self.family,
+            source=repeat.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_PREVIEW_IMPORT,
+            parameters={"batch_id": repeat.pk},
+        )
+        process_job(repeat_preview)
+        repeat.refresh_from_db()
+        self.assertEqual(repeat.skipped_count, 1)
+        self.assertEqual(repeat.items.get().action, KnowledgeImportItem.ACTION_UNCHANGED)
+        self.assertEqual(KnowledgeDocument.objects.count(), 1)
+        self.assertEqual(KnowledgeRevision.objects.count(), 1)
+
+        rollback_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_ROLLBACK_IMPORT,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(rollback_job)
+        rollback_job.refresh_from_db()
+        batch.refresh_from_db()
+        self.assertEqual(rollback_job.status, KnowledgeJob.STATUS_SUCCESS)
+        self.assertEqual(batch.status, KnowledgeImportBatch.STATUS_ROLLED_BACK)
+        self.assertFalse(KnowledgeDocument.objects.exists())
+        self.assertTrue(batch.package_file.storage.exists(batch.package_file.name))
+
+    def test_html_import_rolls_back_database_when_search_indexing_fails(self):
+        batch = self.make_html_import_batch(title="索引失败样本", mid="150")
+        preview_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_PREVIEW_IMPORT,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(preview_job)
+        import_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_IMPORT_BATCH,
+            parameters={"batch_id": batch.pk},
+        )
+
+        with patch("knowledge.imports.index_document", side_effect=RuntimeError("索引失败")):
+            process_job(import_job)
+
+        import_job.refresh_from_db()
+        batch.refresh_from_db()
+        self.assertEqual(import_job.status, KnowledgeJob.STATUS_PARTIAL)
+        self.assertEqual(batch.status, KnowledgeImportBatch.STATUS_PARTIAL)
+        self.assertEqual(batch.items.get().status, KnowledgeImportItem.STATUS_FAILED)
+        self.assertFalse(KnowledgeDocument.objects.exists())
+        self.assertFalse(KnowledgeRevision.objects.exists())
+        self.assertFalse(KnowledgeAsset.objects.exists())
+        self.assertTrue(batch.package_file.storage.exists(batch.package_file.name))
+
+        retry_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_IMPORT_BATCH,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(retry_job)
+        retry_job.refresh_from_db()
+        batch.refresh_from_db()
+        self.assertEqual(retry_job.status, KnowledgeJob.STATUS_SUCCESS)
+        self.assertEqual(batch.status, KnowledgeImportBatch.STATUS_COMPLETED)
+        self.assertEqual(KnowledgeDocument.objects.count(), 1)
+        self.assertEqual(KnowledgeRevision.objects.count(), 1)
+
+    def test_html_import_rollback_refuses_to_overwrite_later_member_change(self):
+        batch = self.make_html_import_batch(title="回滚保护样本", mid="175")
+        preview_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_PREVIEW_IMPORT,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(preview_job)
+        import_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_IMPORT_BATCH,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(import_job)
+        document = KnowledgeDocument.objects.get()
+        document.title = "成员后来修改的标题"
+        document.save(update_fields=["title", "updated_at"])
+        rollback_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_ROLLBACK_IMPORT,
+            parameters={"batch_id": batch.pk},
+        )
+
+        process_job(rollback_job)
+
+        rollback_job.refresh_from_db()
+        batch.refresh_from_db()
+        document.refresh_from_db()
+        self.assertEqual(rollback_job.status, KnowledgeJob.STATUS_PARTIAL)
+        self.assertEqual(batch.status, KnowledgeImportBatch.STATUS_PARTIAL)
+        self.assertEqual(document.title, "成员后来修改的标题")
+        self.assertIn("已有修改", batch.items.get().error_message)
+        detail_response = self.client.get(
+            reverse("knowledge:import_batch_detail", kwargs={"pk": batch.pk})
+        )
+        self.assertContains(detail_response, "安全回滚这个批次")
+        self.assertNotContains(detail_response, "重试失败项目")
+
+    def test_html_import_web_upload_requires_confirmation_before_documents_exist(self):
+        package_batch = self.make_html_import_batch(title="网页上传样本", mid="200")
+        with package_batch.package_file.open("rb") as package:
+            uploaded = SimpleUploadedFile(
+                "browser-upload.zip",
+                package.read(),
+                content_type="application/zip",
+            )
+        package_batch.delete()
+
+        response = self.client.post(
+            reverse("knowledge:imports"),
+            {
+                "source_name": "微信公众号 · 网页测试",
+                "category": "公众号归档",
+                "visibility": KnowledgeVisibility.FAMILY,
+                "package": uploaded,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        batch = KnowledgeImportBatch.objects.get()
+        self.assertEqual(batch.status, KnowledgeImportBatch.STATUS_UPLOADED)
+        self.assertTrue(
+            KnowledgeJob.objects.filter(
+                job_type=KnowledgeJob.TYPE_PREVIEW_IMPORT,
+                parameters__batch_id=batch.pk,
+            ).exists()
+        )
+        self.assertFalse(KnowledgeDocument.objects.exists())
+
+    def test_private_import_items_are_hidden_from_other_members_and_admin(self):
+        batch = self.make_html_import_batch(
+            member=self.other_member,
+            visibility=KnowledgeVisibility.PRIVATE,
+            source_name="微信公众号 · 私密测试",
+            mid="300",
+        )
+        preview_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.other_member,
+            job_type=KnowledgeJob.TYPE_PREVIEW_IMPORT,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(preview_job)
+
+        admin_response = self.client.get(
+            reverse("knowledge:import_batch_detail", kwargs={"pk": batch.pk})
+        )
+        self.assertEqual(admin_response.status_code, 200)
+        self.assertContains(admin_response, "该批次属于其他成员的私密资料；这里只显示汇总")
+        self.assertNotContains(admin_response, "测试文章")
+
+        self.client.force_login(self.other_user)
+        owner_response = self.client.get(
+            reverse("knowledge:import_batch_detail", kwargs={"pk": batch.pk})
+        )
+        self.assertEqual(owner_response.status_code, 200)
+        self.assertContains(owner_response, "测试文章")
+
+    def test_viewer_cannot_upload_import_package(self):
+        batch = self.make_html_import_batch(title="只读成员上传", mid="400")
+        with batch.package_file.open("rb") as package:
+            uploaded = SimpleUploadedFile(
+                "viewer-upload.zip",
+                package.read(),
+                content_type="application/zip",
+            )
+        batch.delete()
+        self.client.force_login(self.viewer_user)
+
+        response = self.client.post(
+            reverse("knowledge:imports"),
+            {
+                "source_name": "微信公众号 · 只读测试",
+                "category": "公众号归档",
+                "visibility": KnowledgeVisibility.FAMILY,
+                "package": uploaded,
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(KnowledgeImportBatch.objects.exists())
 
     def test_existing_note_projection_updates_without_creating_editable_copy(self):
         own_note = InvestmentNote.objects.create(
@@ -503,6 +840,64 @@ class KnowledgeBaseTests(TestCase):
             self.client.get(reverse("knowledge:family_library")),
             reverse("knowledge:library") + "?member=all",
         )
+
+    def test_imported_articles_use_archive_views_until_manually_promoted(self):
+        source = self.make_source(suffix="wechat-history")
+        source.kind = KnowledgeSource.KIND_HTML_IMPORT
+        source.name = "微信公众号 · 测试账号"
+        source.save(update_fields=["kind", "name", "updated_at"])
+        document = self.make_document(
+            source=source,
+            title="公众号历史文章",
+            external_id="wechat-history-page",
+        )
+        document.library_tier = KnowledgeDocument.LIBRARY_ARCHIVE
+        document.author = "测试作者"
+        document.save(update_fields=["library_tier", "author", "updated_at"])
+        index_document(document)
+
+        library = self.client.get(reverse("knowledge:library"))
+        self.assertContains(library, document.title)
+        curated = self.client.get(
+            reverse("knowledge:library"), {"collection": "curated"}
+        )
+        self.assertNotContains(
+            curated,
+            f'href="/knowledge/documents/{document.pk}/"',
+        )
+        archive = self.client.get(
+            reverse("knowledge:library"), {"collection": "archive"}
+        )
+        self.assertContains(archive, document.title)
+
+        people = self.client.get(reverse("knowledge:people"))
+        self.assertContains(people, source.name)
+        self.assertContains(people, "历史文章")
+        history = self.client.get(
+            reverse("knowledge:source_history", kwargs={"pk": source.pk})
+        )
+        self.assertContains(history, document.title)
+        self.assertContains(history, "公众号历史归档")
+
+        organize = self.client.post(
+            reverse("knowledge:document_organize", kwargs={"pk": document.pk}),
+            {
+                "confirmed_summary": "",
+                "category": "",
+                "tags_text": "",
+                "visibility": KnowledgeVisibility.FAMILY,
+                "knowledge_status": KnowledgeDocument.KNOWLEDGE_INCLUDED,
+                "library_tier": KnowledgeDocument.LIBRARY_KNOWLEDGE,
+            },
+        )
+        self.assertRedirects(
+            organize,
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk}),
+        )
+        curated = self.client.get(
+            reverse("knowledge:library"), {"collection": "curated"}
+        )
+        self.assertContains(curated, document.title)
 
     def test_library_directory_filters_by_category_and_onenote_source_path(self):
         source = self.make_source(suffix="reading")

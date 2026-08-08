@@ -26,9 +26,17 @@ from .microsoft import (
     MicrosoftGraphClient,
     MicrosoftSourceUnavailableError,
 )
+from .imports import (
+    ImportJobCancelled,
+    import_knowledge_batch,
+    preview_import_batch,
+    rollback_knowledge_batch,
+)
 from .models import (
     KnowledgeAsset,
     KnowledgeDocument,
+    KnowledgeImportBatch,
+    KnowledgeImportItem,
     KnowledgeJob,
     KnowledgeJobItem,
     KnowledgeProposal,
@@ -43,6 +51,24 @@ logger = logging.getLogger(__name__)
 
 class KnowledgeJobCancelled(RuntimeError):
     pass
+
+
+def _mark_import_batch_failed(job, message):
+    batch_id = (job.parameters or {}).get("batch_id")
+    if batch_id:
+        status = (
+            KnowledgeImportBatch.STATUS_PARTIAL
+            if KnowledgeImportItem.objects.filter(
+                batch_id=batch_id,
+                status=KnowledgeImportItem.STATUS_IMPORTED,
+            ).exists()
+            else KnowledgeImportBatch.STATUS_FAILED
+        )
+        KnowledgeImportBatch.objects.filter(pk=batch_id).update(
+            status=status,
+            error_message=str(message)[:4000],
+            updated_at=timezone.now(),
+        )
 
 
 def _parse_graph_datetime(value):
@@ -171,15 +197,22 @@ def rebuild_document_normalized_content(document, *, save=True):
         [
             revision.normalized_html != safe_html,
             revision.plain_text != plain_text,
+            revision.normalized_hash != content_hash(plain_text.encode("utf-8")),
             revision.converter_version != ONENOTE_CONVERTER_VERSION,
         ]
     )
     if save and changed:
         revision.normalized_html = safe_html
         revision.plain_text = plain_text
+        revision.normalized_hash = content_hash(plain_text.encode("utf-8"))
         revision.converter_version = ONENOTE_CONVERTER_VERSION
         revision.save(
-            update_fields=["normalized_html", "plain_text", "converter_version"]
+            update_fields=[
+                "normalized_html",
+                "plain_text",
+                "normalized_hash",
+                "converter_version",
+            ]
         )
         document.current_revision = revision
         index_document(document)
@@ -252,7 +285,10 @@ def _save_page_revision(document, raw_bytes, downloaded_resources, source_modifi
             safe_html, plain_text = normalize_onenote_html(raw_html, resource_urls)
             revision.normalized_html = safe_html
             revision.plain_text = plain_text
-            revision.save(update_fields=["normalized_html", "plain_text"])
+            revision.normalized_hash = content_hash(plain_text.encode("utf-8"))
+            revision.save(
+                update_fields=["normalized_html", "plain_text", "normalized_hash"]
+            )
 
             KnowledgeProposal.objects.filter(
                 document=document,
@@ -614,6 +650,12 @@ def process_job(job):
             counters = generate_source_proposals(job)
         elif job.job_type == KnowledgeJob.TYPE_REBUILD_SEARCH:
             counters = rebuild_search_job(job)
+        elif job.job_type == KnowledgeJob.TYPE_PREVIEW_IMPORT:
+            counters = preview_import_batch(job)
+        elif job.job_type == KnowledgeJob.TYPE_IMPORT_BATCH:
+            counters = import_knowledge_batch(job)
+        elif job.job_type == KnowledgeJob.TYPE_ROLLBACK_IMPORT:
+            counters = rollback_knowledge_batch(job)
         else:
             raise ValueError(f"不支持的知识任务类型：{job.job_type}")
 
@@ -628,7 +670,8 @@ def process_job(job):
         job.finished_at = timezone.now()
         job.heartbeat_at = job.finished_at
         job.save()
-    except KnowledgeJobCancelled as exc:
+    except (KnowledgeJobCancelled, ImportJobCancelled) as exc:
+        _mark_import_batch_failed(job, exc)
         job.status = KnowledgeJob.STATUS_CANCELLED
         job.error_message = str(exc)
         job.finished_at = timezone.now()
@@ -667,6 +710,7 @@ def process_job(job):
         )
     except Exception as exc:
         logger.exception("Knowledge job %s failed", job.pk)
+        _mark_import_batch_failed(job, exc)
         job.status = KnowledgeJob.STATUS_FAILED
         job.error_message = str(exc)[:4000]
         job.finished_at = timezone.now()

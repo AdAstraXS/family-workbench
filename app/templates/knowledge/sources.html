@@ -10,6 +10,7 @@
     <h1>来源与同步</h1>
     <p>每名家庭成员只绑定自己的账户；管理员可以看状态，但不能查看令牌。</p>
   </div>
+  <a class="button" href="{% url 'knowledge:imports' %}">批量导入资料</a>
 </section>
 
 <section class="grid two knowledge-source-grid">
@@ -105,6 +106,7 @@
         </div>
         <div>
           <span class="status-pill status-{{ source.status }}">{{ source.get_status_display }}</span>
+          {% if source.kind == "html_import" or source.kind == "markdown_import" %}<span><a href="{% url 'knowledge:source_history' source.pk %}">历史文章</a></span>{% endif %}
           <span>{{ source.last_sync_at|date:"Y-m-d H:i"|default:"尚未同步" }}</span>
         </div>
       </a>

@@ -1,20 +1,22 @@
 {% extends "knowledge_hub/base.html" %}
 
-{% block title %}知识库 · 知识中心{% endblock %}
-{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>知识库</span>{% endblock %}
+{% block title %}{{ page_title }} · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>{{ page_title }}</span>{% endblock %}
 
 {% block hub_content %}
 <section class="knowledge-page-heading">
   <div>
     <span class="eyebrow">Knowledge Library</span>
-    <h1>{% if selected_collection == "all" %}全部资料{% else %}知识库{% endif %}</h1>
+    <h1>{{ page_title }}</h1>
     <p>{{ page_description }}</p>
   </div>
   <a class="button" href="{% url 'knowledge:topics' %}">按主题浏览</a>
 </section>
 
 <nav class="knowledge-kind-tabs" aria-label="资料范围">
-  <a href="?collection=library&amp;member={{ selected_member }}"{% if selected_collection == "library" %} class="active"{% endif %}>已入库知识</a>
+  <a href="?collection=library&amp;member={{ selected_member }}"{% if selected_collection == "library" %} class="active"{% endif %}>资料库</a>
+  <a href="?collection=curated&amp;member={{ selected_member }}"{% if selected_collection == "curated" %} class="active"{% endif %}>精选知识</a>
+  <a href="?collection=archive&amp;member={{ selected_member }}"{% if selected_collection == "archive" %} class="active"{% endif %}>公众号历史归档</a>
   <a href="?collection=all&amp;member={{ selected_member }}"{% if selected_collection == "all" %} class="active"{% endif %}>全部资料</a>
   <a href="{% url 'knowledge:inbox' %}">待整理</a>
 </nav>
@@ -39,7 +41,7 @@
       <section class="knowledge-directory-section">
         <h2>快捷入口</h2>
         <nav class="knowledge-directory-links">
-          <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory={{ directory_mode }}"{% if not selected_category and not selected_source_id and not quick_filter %} class="active"{% endif %}><span>{% if selected_collection == "all" %}全部资料{% else %}全部知识{% endif %}</span><strong>{{ directory_total }}</strong></a>
+          <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory={{ directory_mode }}"{% if not selected_category and not selected_source_id and not quick_filter %} class="active"{% endif %}><span>{% if selected_collection == "all" %}全部资料{% elif selected_collection == "archive" %}公众号历史归档{% elif selected_collection == "curated" %}精选知识{% else %}资料库{% endif %}</span><strong>{{ directory_total }}</strong></a>
           <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory={{ directory_mode }}&amp;quick=recent"{% if quick_filter == "recent" %} class="active"{% endif %}><span>最近 30 天</span></a>
           <a href="{% url 'knowledge:library' %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=category&amp;quick=uncategorized"{% if quick_filter == "uncategorized" %} class="active"{% endif %}><span>未分类</span><strong>{{ uncategorized_count }}</strong></a>
         </nav>
@@ -143,7 +145,7 @@
 
 <aside class="knowledge-list-explainer">
   <strong>这个页面的作用</strong>
-  <span>“知识库”只显示已经入库的内容；“全部资料”还包括待整理和仅同步归档的原文。随手记只有主动勾选后才会出现，关注人物和在线阅读保留各自独立流程。</span>
+  <span>资料库保存统一知识底座中的正式资料；公众号历史文章默认进入“公众号历史归档”，不会自动占据精选知识。成员确认长期复用价值后，可在人工整理中提升为精选知识。</span>
 </aside>
 
 <header class="knowledge-result-heading">

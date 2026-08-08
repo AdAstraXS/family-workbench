@@ -1,7 +1,7 @@
 {% extends "knowledge_hub/base.html" %}
 
 {% block title %}{{ document.title }} · 知识中心{% endblock %}
-{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:library' %}">知识库</a><span aria-hidden="true">›</span><span>{{ document.title|truncatechars:24 }}</span>{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:library' %}">资料库</a><span aria-hidden="true">›</span><span>{{ document.title|truncatechars:24 }}</span>{% endblock %}
 
 {% block hub_content %}
 <article class="knowledge-document-layout">
@@ -52,6 +52,7 @@
         <div><dt>分类</dt><dd>{{ document.category|default:"未确认" }}</dd></div>
         <div><dt>保存状态</dt><dd>{% if document.sync_status == "available" %}已保存到 NAS{% else %}{{ document.get_sync_status_display }}{% endif %}</dd></div>
         <div><dt>知识状态</dt><dd><span class="status-pill status-{{ document.knowledge_status }}">{{ document.get_knowledge_status_display }}</span></dd></div>
+        <div><dt>资料库层级</dt><dd><span class="status-pill{% if document.library_tier == 'archive' %} warning{% endif %}">{{ document.get_library_tier_display }}</span></dd></div>
         <div><dt>AI 整理进度</dt><dd>{{ document.get_curation_status_display }}</dd></div>
         <div><dt>来源修改</dt><dd>{{ document.content_modified_at|date:"Y-m-d H:i"|default:"-" }}</dd></div>
         <div><dt>同步版本</dt><dd>{% if revision %}v{{ revision.revision_number }} · {{ revision.created_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</dd></div>
