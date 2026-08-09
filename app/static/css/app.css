@@ -5815,7 +5815,7 @@ textarea {
   z-index: 30;
   top: calc(100% + 8px);
   left: 50%;
-  display: none;
+  visibility: hidden;
   width: max-content;
   max-width: min(360px, calc(100vw - 32px));
   padding: 9px 11px;
@@ -5827,8 +5827,11 @@ textarea {
   font-size: 12px;
   font-weight: 500;
   line-height: 1.55;
+  opacity: 0;
+  pointer-events: none;
   text-align: left;
   transform: translateX(-50%);
+  transition: opacity 0.12s ease, visibility 0s linear 0.12s;
 }
 
 .knowledge-help-tip-popup::before {
@@ -5844,10 +5847,12 @@ textarea {
   transform: translateX(-50%) rotate(45deg);
 }
 
-.knowledge-help-tip:hover .knowledge-help-tip-popup,
-.knowledge-help-tip:focus .knowledge-help-tip-popup,
-.knowledge-help-tip:focus-within .knowledge-help-tip-popup {
-  display: block;
+.knowledge-help-tip:hover > .knowledge-help-tip-popup,
+.knowledge-help-tip:focus-visible > .knowledge-help-tip-popup {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 0s;
 }
 
 .knowledge-page-heading h1 .knowledge-help-tip,
