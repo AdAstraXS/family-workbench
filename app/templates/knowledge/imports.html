@@ -8,7 +8,7 @@
   <div>
     <span class="eyebrow">历史资料</span>
     <h1>Markdown / HTML 批量导入</h1>
-    <p>上传后先做格式检查、重复识别和空间估算；确认后资料统一进入归档资料，并按作者出现在关注人物中，不会自动进入待整理或精选知识。</p>
+    {% include "knowledge/_help_tip.html" with text="上传后先做格式检查、重复识别和空间估算；确认后资料统一进入归档资料，并按作者出现在关注人物中，不会自动进入待整理或精选知识。" %}
   </div>
 </section>
 
@@ -23,27 +23,19 @@
           <label>
             <span>{{ field.label }}</span>
             {{ field }}
-            {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+            {% if field.help_text %}{% include "knowledge/_help_tip.html" with text=field.help_text %}{% endif %}
             {{ field.errors }}
           </label>
         {% endfor %}
         <button class="button primary" type="submit">上传并检查格式</button>
       </form>
     {% else %}
-      <p>当前成员只有查看权限，不能创建导入批次。</p>
+      {% include "knowledge/_help_tip.html" with text="当前成员只有查看权限，不能创建导入批次。" %}
     {% endif %}
   </article>
 
   <article class="panel">
-    <h2>当前安全边界</h2>
-    <ul>
-      <li>原始 HTML 和导入包保存在受保护目录，不直接在线渲染。</li>
-      <li>只提取微信公众号正文，脚本、广告、评论区和远程图片不会进入正文。</li>
-      <li>本地正文图片通过鉴权地址展示；缺图会作为单篇警告列出。</li>
-      <li>默认进入归档资料，不自动进入待整理或精选知识；云端 AI 保持关闭。</li>
-      <li>回滚不会覆盖导入后的人工整理或其他后续修改。</li>
-      <li>Markdown 入口将在取得真实 Markdown 样本并完成格式验收后开放。</li>
-    </ul>
+    <h2>当前安全边界{% include "knowledge/_help_tip.html" with text="原始 HTML 和导入包保存在受保护目录，不直接在线渲染；只提取微信公众号正文，脚本、广告、评论区和远程图片不会进入正文；本地正文图片通过鉴权地址展示，缺图会作为单篇警告列出；资料默认进入归档资料，不自动进入待整理或精选知识，云端 AI 保持关闭；回滚不会覆盖人工整理或其他后续修改；Markdown 入口将在真实样本完成格式验收后开放。" %}</h2>
   </article>
 </section>
 

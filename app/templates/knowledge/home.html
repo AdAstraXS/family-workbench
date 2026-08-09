@@ -7,7 +7,7 @@
   <div>
     <span class="eyebrow">家庭知识底座</span>
     <h1>今天需要做什么？</h1>
-    <p>正式资料统一进入归档底座，值得长期复用的内容再经过待整理进入精选知识；这里集中查看需要处理的事项。</p>
+    {% include "knowledge/_help_tip.html" with text="正式资料统一进入归档底座，值得长期复用的内容再经过待整理进入精选知识；这里集中查看需要处理的事项。" %}
   </div>
   <div class="knowledge-home-commandbar">
     <form method="get" action="{% url 'knowledge:library' %}" class="knowledge-global-search" role="search">
@@ -23,11 +23,11 @@
 </section>
 
 <section class="knowledge-home-shortcuts" aria-label="知识空间快捷入口">
-  <a href="{% url 'knowledge:library' %}?collection=curated"><span>我的精选知识</span><strong>{{ stats.total }}</strong><small>默认只看当前账号</small></a>
-  <a href="{% url 'knowledge:library' %}?collection=curated&amp;date_from={% now 'Y-m-d' %}"><span>今日精选</span><strong>{{ stats.today_new }}</strong><small>今天加入的精选知识</small></a>
-  <a href="{% url 'knowledge:inbox' %}"><span>待整理</span><strong>{{ stats.inbox }}</strong><small>OneNote 摘录等候提炼</small></a>
-  <a href="{% url 'knowledge:review' %}"><span>等待确认</span><strong>{{ stats.pending_review }}</strong><small>待整理中的 AI 建议</small></a>
-  <a href="{% url 'knowledge:sources' %}"><span>同步异常</span><strong>{{ stats.source_errors }}</strong><small>账号失效与来源错误</small></a>
+  <a href="{% url 'knowledge:library' %}?collection=curated"><span>我的精选知识</span><strong>{{ stats.total }}</strong>{% include "knowledge/_help_tip.html" with text="默认只看当前账号。" skip_focus=True %}</a>
+  <a href="{% url 'knowledge:library' %}?collection=curated&amp;date_from={% now 'Y-m-d' %}"><span>今日精选</span><strong>{{ stats.today_new }}</strong>{% include "knowledge/_help_tip.html" with text="今天加入的精选知识。" skip_focus=True %}</a>
+  <a href="{% url 'knowledge:inbox' %}"><span>待整理</span><strong>{{ stats.inbox }}</strong>{% include "knowledge/_help_tip.html" with text="OneNote 摘录等候提炼。" skip_focus=True %}</a>
+  <a href="{% url 'knowledge:review' %}"><span>等待确认</span><strong>{{ stats.pending_review }}</strong>{% include "knowledge/_help_tip.html" with text="待整理或精选知识产生的新建议。" skip_focus=True %}</a>
+  <a href="{% url 'knowledge:sources' %}"><span>同步异常</span><strong>{{ stats.source_errors }}</strong>{% include "knowledge/_help_tip.html" with text="账号失效与来源错误。" skip_focus=True %}</a>
 </section>
 
 <section class="knowledge-home-grid">
@@ -80,7 +80,7 @@
 {% endif %}
 
 <section class="knowledge-future-ribbon">
-  <div><span class="eyebrow">逐步开放</span><strong>在线阅读与交易复盘保持独立模块</strong><p>书籍、批注和评论由阅读模块负责；交易案例、纪律版本和复盘由交易日志模块负责。两者只把可检索知识投影到知识底座。</p></div>
+  <div><span class="eyebrow">逐步开放</span><strong>在线阅读与交易复盘保持独立模块</strong>{% include "knowledge/_help_tip.html" with text="书籍、批注和评论由阅读模块负责；交易案例、纪律版本和复盘由交易日志模块负责。两者只把可检索知识投影到知识底座。" %}</div>
   <a href="{% url 'knowledge:architecture' %}">查看完整边界与后续工作</a>
 </section>
 {% endblock %}

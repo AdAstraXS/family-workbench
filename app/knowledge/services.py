@@ -4,7 +4,7 @@ from datetime import timedelta, timezone as datetime_timezone
 
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -34,6 +34,7 @@ from .imports import (
 )
 from .models import (
     KnowledgeAsset,
+    KnowledgeCurationRevision,
     KnowledgeDocument,
     KnowledgeImportBatch,
     KnowledgeImportItem,
@@ -47,6 +48,31 @@ from .search import index_document, rebuild_family_search
 
 
 logger = logging.getLogger(__name__)
+
+
+def record_curation_revision(
+    document,
+    *,
+    changed_by,
+    change_type,
+    proposal_run=None,
+):
+    sequence = (
+        KnowledgeCurationRevision.objects.filter(document=document).aggregate(
+            maximum=Max("sequence")
+        )["maximum"]
+        or 0
+    ) + 1
+    return KnowledgeCurationRevision.objects.create(
+        document=document,
+        sequence=sequence,
+        summary=document.confirmed_summary,
+        category=document.category,
+        tags=document.tags,
+        change_type=change_type,
+        changed_by=changed_by,
+        proposal_run=proposal_run,
+    )
 
 
 class KnowledgeJobCancelled(RuntimeError):
@@ -539,18 +565,18 @@ def restore_ai_processing_documents(job):
         KnowledgeDocument.objects.filter(
             pk__in=document_ids,
             family=job.family,
-            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
             curation_status=KnowledgeDocument.CURATION_PENDING_AI,
         ).select_related("source", "owner", "current_revision")
     )
     if not documents:
         return 0
-    KnowledgeDocument.objects.filter(pk__in=[item.pk for item in documents]).update(
-        curation_status=KnowledgeDocument.CURATION_NORMALIZED,
-        updated_at=timezone.now(),
-    )
     for document in documents:
-        document.curation_status = KnowledgeDocument.CURATION_NORMALIZED
+        document.curation_status = (
+            KnowledgeDocument.CURATION_CONFIRMED
+            if document.library_tier == KnowledgeDocument.LIBRARY_KNOWLEDGE
+            else KnowledgeDocument.CURATION_NORMALIZED
+        )
+        document.save(update_fields=["curation_status", "updated_at"])
         index_document(document)
     return len(documents)
 
@@ -559,16 +585,27 @@ def mark_ai_processing_documents(job):
     document_ids = _job_document_ids(job, "document_ids")
     if not document_ids:
         return 0
-    documents = list(
-        KnowledgeDocument.objects.filter(
-            pk__in=document_ids,
-            family=job.family,
+    reorganization = (job.parameters or {}).get("selection_scope") == "curated_reorganization"
+    queryset = KnowledgeDocument.objects.filter(
+        pk__in=document_ids,
+        family=job.family,
+    )
+    if reorganization:
+        queryset = queryset.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+            library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
+            curation_status=KnowledgeDocument.CURATION_CONFIRMED,
+        )
+    else:
+        queryset = queryset.filter(
             knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
             curation_status__in=[
                 KnowledgeDocument.CURATION_INBOX,
                 KnowledgeDocument.CURATION_NORMALIZED,
             ],
-        ).select_related("source", "owner", "current_revision")
+        )
+    documents = list(
+        queryset.select_related("source", "owner", "current_revision")
     )
     if not documents:
         return 0
@@ -590,11 +627,20 @@ def generate_source_proposals(job):
         raise KnowledgeAiError("AI 整理任务未包含成员明确选择的资料，已停止运行。")
     if not source.allow_cloud_ai and not selected_ids.issubset(one_time_ids):
         raise KnowledgeAiError("该来源未授权向云端 AI 发送正文。")
+    reorganization = (job.parameters or {}).get("selection_scope") == "curated_reorganization"
     document_queryset = source.documents.filter(
         current_revision__isnull=False,
         sync_status=KnowledgeDocument.SYNC_AVAILABLE,
-        knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
     )
+    if reorganization:
+        document_queryset = document_queryset.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+            library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
+        )
+    else:
+        document_queryset = document_queryset.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
+        )
     document_queryset = document_queryset.filter(pk__in=selected_ids)
     documents = list(
         document_queryset.select_related("current_revision", "source", "owner", "family")
@@ -618,9 +664,9 @@ def generate_source_proposals(job):
         revision = document.current_revision
         existing = KnowledgeProposal.objects.filter(
             revision=revision,
-            prompt_version="knowledge-organize-v1",
+            status=KnowledgeProposal.STATUS_PENDING,
         )
-        if existing.count() == 3:
+        if not reorganization and existing.count() == 3:
             document.curation_status = KnowledgeDocument.CURATION_PENDING_REVIEW
             document.save(update_fields=["curation_status", "updated_at"])
             index_document(document)
@@ -638,6 +684,7 @@ def generate_source_proposals(job):
                     cloud_ai_consent=(
                         "one_time" if document.pk in one_time_ids else "source"
                     ),
+                    requested_by=job.requested_by,
                 )
                 index_document(document)
                 _job_item(
@@ -650,7 +697,11 @@ def generate_source_proposals(job):
             except Exception as exc:
                 logger.exception("Knowledge proposal generation failed for %s", document.pk)
                 if document.curation_status == KnowledgeDocument.CURATION_PENDING_AI:
-                    document.curation_status = KnowledgeDocument.CURATION_NORMALIZED
+                    document.curation_status = (
+                        KnowledgeDocument.CURATION_CONFIRMED
+                        if document.library_tier == KnowledgeDocument.LIBRARY_KNOWLEDGE
+                        else KnowledgeDocument.CURATION_NORMALIZED
+                    )
                     document.save(update_fields=["curation_status", "updated_at"])
                     index_document(document)
                 _job_item(

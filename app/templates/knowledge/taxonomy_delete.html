@@ -1,0 +1,19 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}删除{{ label }} · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:topics' %}">分类与标签</a><span aria-hidden="true">›</span><span>删除{{ label }}</span>{% endblock %}
+
+{% block hub_content %}
+<section class="headline"><h1>删除{{ label }}“{{ item.name }}”{% include "knowledge/_help_tip.html" with text="只有从未被资料使用、也没有承接历史合并关系的项目才能永久删除。" %}</h1></section>
+<section class="panel form-panel knowledge-taxonomy-form-panel">
+  {% if usage %}
+    <div class="notice warning">这个{{ label }}仍被 {{ usage }} 篇资料使用，不能删除。可以返回后停用，或者把它合并到含义相同的项目。</div>
+  {% elif has_merge_history %}
+    <div class="notice warning">这个{{ label }}保存着历史合并关系，不能删除，可以保持停用。</div>
+  {% else %}
+    <div class="notice warning">删除后无法恢复。该项目目前没有资料使用。</div>
+    <form method="post" class="stacked-form">{% csrf_token %}<button class="button danger-outline" type="submit">确认永久删除</button></form>
+  {% endif %}
+  <div class="form-actions"><a class="button" href="{% url 'knowledge:topics' %}">返回分类与标签</a>{% if usage and not item.merged_into %}<a class="button" href="{% url 'knowledge:taxonomy_merge' kind item.pk %}">合并处理</a>{% endif %}</div>
+</section>
+{% endblock %}

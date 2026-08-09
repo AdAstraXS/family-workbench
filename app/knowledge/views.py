@@ -22,9 +22,12 @@ from .ai import KnowledgeAiError, knowledge_ai_provider
 from .forms import (
     BulkProposalPreviewForm,
     DocumentOrganizeForm,
+    KnowledgeCategoryForm,
     KnowledgeImportUploadForm,
+    KnowledgeTagForm,
     NotebookSelectionForm,
     ProposalReviewForm,
+    TaxonomyMergeForm,
 )
 from .imports import KnowledgeImportError, create_uploaded_import_batch
 from .microsoft import (
@@ -39,12 +42,15 @@ from .microsoft import (
 )
 from .models import (
     KnowledgeAsset,
+    KnowledgeCategory,
+    KnowledgeCurationRevision,
     KnowledgeDocument,
     KnowledgeImportBatch,
     KnowledgeJob,
     KnowledgeProposal,
     KnowledgeSearchEntry,
     KnowledgeSource,
+    KnowledgeTag,
     KnowledgeVisibility,
     SourceConnection,
 )
@@ -62,7 +68,18 @@ from .search import index_document
 from .services import (
     mark_ai_processing_documents,
     queue_knowledge_job,
+    record_curation_revision,
     restore_ai_processing_documents,
+)
+from .taxonomy import (
+    category_usage,
+    ensure_category,
+    ensure_tags,
+    merge_category,
+    merge_tag,
+    rename_category,
+    rename_tag,
+    tag_usage,
 )
 
 
@@ -143,7 +160,6 @@ def _hit_snippet(entry, query):
 def _manageable_proposals(member):
     queryset = KnowledgeProposal.objects.filter(
         document__in=accessible_documents(member),
-        document__knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
         revision=models_current_revision(),
     ).select_related(
         "document",
@@ -229,7 +245,6 @@ def _knowledge_stats(member):
             knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
         ).count(),
         "pending_review": documents.filter(
-            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
             curation_status=KnowledgeDocument.CURATION_PENDING_REVIEW
         ).count(),
         "source_errors": visible_sources(member).filter(
@@ -790,21 +805,201 @@ def topics(request):
     tag_counts = Counter()
     for tags in entries.values_list("tags", flat=True)[:5000]:
         tag_counts.update(str(tag).strip() for tag in (tags or []) if str(tag).strip())
-    category_counts = list(
-        entries.exclude(category="")
+    category_counts = {
+        item["category"]: item["total"]
+        for item in entries.exclude(category="")
         .order_by()
         .values("category")
         .annotate(total=Count("id"))
-        .order_by("-total", "category")[:30]
+    }
+    categories = list(
+        KnowledgeCategory.objects.filter(family=member.family)
+        .select_related("merged_into")
+        .order_by("-is_active", "name", "id")
     )
+    tags = list(
+        KnowledgeTag.objects.filter(family=member.family)
+        .select_related("merged_into")
+        .order_by("-is_active", "name", "id")
+    )
+    for item in categories:
+        item.visible_usage_count = category_counts.get(item.name, 0)
+    for item in tags:
+        item.visible_usage_count = tag_counts.get(item.name, 0)
+    category_catalog_names = {item.name for item in categories}
+    for name, total in sorted(category_counts.items()):
+        if name not in category_catalog_names:
+            categories.append(
+                {
+                    "name": name,
+                    "visible_usage_count": total,
+                    "is_active": True,
+                    "description": "既有资料使用的分类，编辑资料后会自动纳入目录。",
+                }
+            )
+    tag_catalog_names = {item.name for item in tags}
+    for name, total in tag_counts.most_common():
+        if name not in tag_catalog_names:
+            tags.append(
+                {
+                    "name": name,
+                    "visible_usage_count": total,
+                    "is_active": True,
+                    "description": "既有资料使用的标签，编辑资料后会自动纳入目录。",
+                }
+            )
     return render(
         request,
         "knowledge/topics.html",
         {
-            "tags": tag_counts.most_common(60),
-            "categories": category_counts,
+            "tags": tags,
+            "categories": categories,
             "entry_count": entries.count(),
+            "can_manage_taxonomy": member.role == FamilyMember.ROLE_ADMIN,
         },
+    )
+
+
+def _taxonomy_config(kind):
+    if kind == "category":
+        return {
+            "model": KnowledgeCategory,
+            "form": KnowledgeCategoryForm,
+            "label": "分类",
+            "rename": rename_category,
+            "merge": merge_category,
+            "usage": category_usage,
+        }
+    if kind == "tag":
+        return {
+            "model": KnowledgeTag,
+            "form": KnowledgeTagForm,
+            "label": "标签",
+            "rename": rename_tag,
+            "merge": merge_tag,
+            "usage": tag_usage,
+        }
+    raise Http404("未知的分类或标签类型。")
+
+
+def _taxonomy_admin_member(request):
+    member = current_member(request)
+    if member is None:
+        return None, _membership_required_response(request)
+    if member.role != FamilyMember.ROLE_ADMIN:
+        return member, HttpResponseForbidden("只有家庭管理员可以维护分类与标签目录。")
+    return member, None
+
+
+@login_required
+def taxonomy_create(request, kind):
+    member, denied = _taxonomy_admin_member(request)
+    if denied:
+        return denied
+    config = _taxonomy_config(kind)
+    form = config["form"](request.POST or None, family=member.family)
+    if request.method == "POST" and form.is_valid():
+        item = form.save(commit=False)
+        item.family = member.family
+        item.created_by = member
+        item.save()
+        messages.success(request, f"已新增{config['label']}“{item.name}”。")
+        return redirect("knowledge:topics")
+    return render(
+        request,
+        "knowledge/taxonomy_form.html",
+        {"form": form, "label": config["label"], "mode": "create"},
+    )
+
+
+@login_required
+def taxonomy_edit(request, kind, pk):
+    member, denied = _taxonomy_admin_member(request)
+    if denied:
+        return denied
+    config = _taxonomy_config(kind)
+    item = get_object_or_404(config["model"], family=member.family, pk=pk)
+    original_name = item.name
+    form = config["form"](request.POST or None, instance=item, family=member.family)
+    if request.method == "POST" and form.is_valid():
+        new_name = form.cleaned_data["name"]
+        if original_name != new_name:
+            item.name = original_name
+            config["rename"](item, new_name)
+            item.refresh_from_db()
+        item.description = form.cleaned_data["description"]
+        item.is_active = form.cleaned_data["is_active"]
+        item.save(update_fields=["description", "is_active", "updated_at"])
+        messages.success(request, f"已更新{config['label']}“{item.name}”。")
+        return redirect("knowledge:topics")
+    return render(
+        request,
+        "knowledge/taxonomy_form.html",
+        {"form": form, "label": config["label"], "mode": "edit", "item": item},
+    )
+
+
+@login_required
+def taxonomy_delete(request, kind, pk):
+    member, denied = _taxonomy_admin_member(request)
+    if denied:
+        return denied
+    config = _taxonomy_config(kind)
+    item = get_object_or_404(config["model"], family=member.family, pk=pk)
+    usage = config["usage"](item)
+    has_merge_history = (
+        item.merged_categories.exists()
+        if kind == "category"
+        else item.merged_tags.exists()
+    )
+    if request.method != "POST":
+        return render(
+            request,
+            "knowledge/taxonomy_delete.html",
+            {
+                "item": item,
+                "kind": kind,
+                "label": config["label"],
+                "usage": usage,
+                "has_merge_history": has_merge_history,
+            },
+        )
+    if usage:
+        messages.error(
+            request,
+            f"“{item.name}”仍被 {usage} 篇资料使用，不能删除；请停用或合并。",
+        )
+    elif has_merge_history:
+        messages.error(request, "该项目保存着历史合并关系，不能删除，可以保持停用。")
+    else:
+        name = item.name
+        item.delete()
+        messages.success(request, f"已删除未使用的{config['label']}“{name}”。")
+    return redirect("knowledge:topics")
+
+
+@login_required
+def taxonomy_merge(request, kind, pk):
+    member, denied = _taxonomy_admin_member(request)
+    if denied:
+        return denied
+    config = _taxonomy_config(kind)
+    item = get_object_or_404(
+        config["model"], family=member.family, pk=pk, merged_into__isnull=True
+    )
+    form = TaxonomyMergeForm(request.POST or None, item=item)
+    if request.method == "POST" and form.is_valid():
+        target = form.cleaned_data["target"]
+        config["merge"](item, target)
+        messages.success(
+            request,
+            f"已把{config['label']}“{item.name}”合并到“{target.name}”。",
+        )
+        return redirect("knowledge:topics")
+    return render(
+        request,
+        "knowledge/taxonomy_merge.html",
+        {"form": form, "label": config["label"], "item": item},
     )
 
 
@@ -876,9 +1071,49 @@ def document_detail(request, pk):
     ).strip().lower()
     if line_spacing not in {"compact", "normal"}:
         line_spacing = "normal"
-    proposals = document.proposals.filter(
-        revision=document.current_revision,
-    ).select_related("confirmed_by")
+    proposals = list(
+        document.proposals.filter(revision=document.current_revision)
+        .select_related("confirmed_by", "run")
+        .order_by("-run__sequence", "proposal_type", "id")
+    )
+    pending_proposals = [
+        proposal
+        for proposal in proposals
+        if proposal.status == KnowledgeProposal.STATUS_PENDING
+    ]
+    proposal_runs = list(
+        document.proposal_runs.select_related("revision")
+        .prefetch_related("proposals__confirmed_by")
+        .order_by("-sequence", "-id")
+    )
+    history_runs = []
+    for proposal_run in proposal_runs:
+        run_proposals = list(proposal_run.proposals.all())
+        proposal_run.accepted_count = sum(
+            item.status == KnowledgeProposal.STATUS_ACCEPTED for item in run_proposals
+        )
+        proposal_run.rejected_count = sum(
+            item.status == KnowledgeProposal.STATUS_REJECTED for item in run_proposals
+        )
+        proposal_run.stale_count = sum(
+            item.status == KnowledgeProposal.STATUS_STALE for item in run_proposals
+        )
+        if not any(
+            item.status == KnowledgeProposal.STATUS_PENDING for item in run_proposals
+        ):
+            history_runs.append(proposal_run)
+    confirmed_summary_proposal = next(
+        (
+            proposal
+            for proposal in document.proposals.filter(
+                proposal_type=KnowledgeProposal.TYPE_SUMMARY,
+                status=KnowledgeProposal.STATUS_ACCEPTED,
+                confirmed_by__isnull=False,
+            ).select_related("confirmed_by").order_by("-confirmed_at", "-id")
+            if proposal.proposal_type == KnowledgeProposal.TYPE_SUMMARY
+        ),
+        None,
+    )
     response = render(
         request,
         "knowledge/document_detail.html",
@@ -886,6 +1121,9 @@ def document_detail(request, pk):
             "document": document,
             "revision": document.current_revision,
             "proposals": proposals,
+            "pending_proposals": pending_proposals,
+            "history_runs": history_runs,
+            "confirmed_summary_proposal": confirmed_summary_proposal,
             "reading_font_size": font_size,
             "reading_line_spacing": line_spacing,
             "reading_font_size_options": [
@@ -987,7 +1225,7 @@ def document_cancel_organizing(request, pk):
     return redirect("knowledge:document_detail", pk=document.pk)
 
 
-def _selected_ai_documents(member, raw_ids):
+def _selected_ai_documents(member, raw_ids, *, mode="pending_documents"):
     document_ids = []
     for raw_id in raw_ids:
         value = str(raw_id).strip()
@@ -995,25 +1233,33 @@ def _selected_ai_documents(member, raw_ids):
             document_ids.append(int(value))
     if not document_ids:
         raise KnowledgeAiError("请先选择至少一篇尚未整理的资料。")
+    if mode == "curated_reorganization" and len(document_ids) != 1:
+        raise KnowledgeAiError("精选知识重新整理目前一次只处理一篇资料。")
     if len(document_ids) > 100:
         raise KnowledgeAiError("一次最多选择 100 篇资料进行 AI 整理。")
-    documents = list(
-        accessible_documents(member)
-        .filter(
-            pk__in=document_ids,
-            current_revision__isnull=False,
-            sync_status=KnowledgeDocument.SYNC_AVAILABLE,
+    queryset = accessible_documents(member).filter(
+        pk__in=document_ids,
+        current_revision__isnull=False,
+        sync_status=KnowledgeDocument.SYNC_AVAILABLE,
+    )
+    if mode == "curated_reorganization":
+        queryset = queryset.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+            library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
+            curation_status=KnowledgeDocument.CURATION_CONFIRMED,
+        )
+    else:
+        queryset = queryset.filter(
             knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
             curation_status__in=[
                 KnowledgeDocument.CURATION_INBOX,
                 KnowledgeDocument.CURATION_NORMALIZED,
             ],
         )
-        .order_by("source__name", "title", "id")
-    )
+    documents = list(queryset.order_by("source__name", "title", "id"))
     if len(documents) != len(document_ids):
         raise KnowledgeAiError(
-            "部分资料已不在“尚未整理”状态，请刷新待整理页面后重新选择。"
+            "部分资料当前不能发起 AI 整理，可能正在处理、等待确认或状态已经变化。"
         )
     if any(not can_organize_document(member, document) for document in documents):
         raise KnowledgeAiError("只能为自己有权整理的资料创建 AI 任务。")
@@ -1069,14 +1315,30 @@ def document_ai_organize(request):
         return _membership_required_response(request)
     if not _can_write(member):
         return HttpResponseForbidden("只读成员不能创建 AI 整理任务。")
+    mode = request.POST.get("mode", "pending_documents").strip()
+    if mode not in {"pending_documents", "curated_reorganization"}:
+        mode = "pending_documents"
+    raw_return_document_id = request.POST.get("return_document_id", "").strip()
+
+    def error_redirect():
+        if raw_return_document_id.isdigit():
+            return redirect(
+                "knowledge:document_detail", pk=int(raw_return_document_id)
+            )
+        return redirect("knowledge:inbox")
+
     try:
-        documents = _selected_ai_documents(member, request.POST.getlist("document_ids"))
+        documents = _selected_ai_documents(
+            member,
+            request.POST.getlist("document_ids"),
+            mode=mode,
+        )
         groups = _ai_document_groups(member, documents)
     except KnowledgeAiError as exc:
         messages.error(request, str(exc))
-        return redirect("knowledge:inbox")
+        return error_redirect()
 
-    return_document_id = request.POST.get("return_document_id", "").strip()
+    return_document_id = raw_return_document_id
     if not return_document_id.isdigit() or int(return_document_id) not in {
         document.pk for document in documents
     }:
@@ -1094,6 +1356,8 @@ def document_ai_organize(request):
                 "unauthorized_groups": unauthorized_groups,
                 "document_count": len(documents),
                 "return_document_id": return_document_id,
+                "mode": mode,
+                "is_reorganization": mode == "curated_reorganization",
                 "can_authorize_all_sources": all(
                     group["can_authorize_source"] for group in unauthorized_groups
                 ),
@@ -1103,10 +1367,10 @@ def document_ai_organize(request):
     authorization = request.POST.get("authorization", "existing")
     if request.POST.get("acknowledge") != "yes":
         messages.error(request, "请先确认本次正文发送范围和人工核对责任。")
-        return redirect("knowledge:inbox")
+        return error_redirect()
     if unauthorized_groups and authorization not in {"once", "source"}:
         messages.error(request, "请选择本次 AI 正文发送授权方式。")
-        return redirect("knowledge:inbox")
+        return error_redirect()
     if authorization == "source" and any(
         not group["can_authorize_source"] for group in unauthorized_groups
     ):
@@ -1128,7 +1392,7 @@ def document_ai_organize(request):
             f"“{active_job.source.name}”已有 AI 整理任务正在排队或运行，"
             "请完成后再选择下一批。",
         )
-        return redirect("knowledge:inbox")
+        return error_redirect()
 
     jobs = []
     try:
@@ -1143,7 +1407,7 @@ def document_ai_organize(request):
                 document_ids = [document.pk for document in group["documents"]]
                 parameters = {
                     "document_ids": document_ids,
-                    "selection_scope": "pending_documents",
+                    "selection_scope": mode,
                 }
                 if not group["source"].allow_cloud_ai and authorization == "once":
                     parameters["one_time_document_ids"] = document_ids
@@ -1165,12 +1429,17 @@ def document_ai_organize(request):
                 jobs.append(job)
     except KnowledgeAiError as exc:
         messages.error(request, str(exc))
-        return redirect("knowledge:inbox")
+        return error_redirect()
 
     messages.success(
         request,
-        f"已为 {len(documents)} 篇资料创建 {len(jobs)} 个 AI 整理任务；"
-        "完成后仍留在待整理，并进入“等待确认”。",
+        (
+            "已创建精选知识重新整理任务；当前精选结果保持不变，"
+            "新建议生成后等待你确认。"
+            if mode == "curated_reorganization"
+            else f"已为 {len(documents)} 篇资料创建 {len(jobs)} 个 AI 整理任务；"
+            "完成后仍留在待整理，并进入“等待确认”。"
+        ),
     )
     if return_document_id:
         return redirect("knowledge:document_detail", pk=int(return_document_id))
@@ -1192,7 +1461,12 @@ def document_organize(request, pk):
         messages.info(request, "请先把这项归档资料加入待整理。")
         return redirect("knowledge:document_detail", pk=document.pk)
     if request.method == "POST":
-        form = DocumentOrganizeForm(request.POST, instance=document)
+        form = DocumentOrganizeForm(
+            request.POST,
+            instance=document,
+            family=member.family,
+            created_by=member,
+        )
         if form.is_valid():
             with transaction.atomic():
                 document = form.save()
@@ -1206,6 +1480,11 @@ def document_organize(request, pk):
                         "curation_status",
                         "updated_at",
                     ]
+                )
+                record_curation_revision(
+                    document,
+                    changed_by=member,
+                    change_type=KnowledgeCurationRevision.TYPE_MANUAL,
                 )
                 KnowledgeProposal.objects.filter(
                     document=document,
@@ -1221,11 +1500,21 @@ def document_organize(request, pk):
             messages.success(request, "正式整理结果已保存，并进入精选知识。")
             return redirect("knowledge:document_detail", pk=document.pk)
     else:
-        form = DocumentOrganizeForm(instance=document)
+        form = DocumentOrganizeForm(
+            instance=document,
+            family=member.family,
+            created_by=member,
+        )
     return render(
         request,
         "knowledge/document_organize.html",
-        {"document": document, "form": form},
+        {
+            "document": document,
+            "form": form,
+            "existing_categories": form.existing_categories,
+            "existing_tags": form.existing_tags,
+            "is_reediting": document.library_tier == KnowledgeDocument.LIBRARY_KNOWLEDGE,
+        },
     )
 
 
@@ -1946,6 +2235,10 @@ def _proposal_value(proposal, raw_value=None):
 
 def _apply_proposal(proposal, member, *, accept, value=None):
     document = proposal.document
+    was_curated = (
+        document.knowledge_status == KnowledgeDocument.KNOWLEDGE_INCLUDED
+        and document.library_tier == KnowledgeDocument.LIBRARY_KNOWLEDGE
+    )
     if (
         proposal.status != KnowledgeProposal.STATUS_PENDING
         or proposal.revision_id != document.current_revision_id
@@ -1959,10 +2252,22 @@ def _apply_proposal(proposal, member, *, accept, value=None):
             document.confirmed_summary = final_value
             changed_field = "confirmed_summary"
         elif proposal.proposal_type == KnowledgeProposal.TYPE_TAGS:
-            document.tags = final_value
+            tag_items = ensure_tags(
+                document.family,
+                final_value,
+                created_by=member,
+            )
+            document.tags = [item.name for item, _ in tag_items]
+            final_value = document.tags
             changed_field = "tags"
         elif proposal.proposal_type == KnowledgeProposal.TYPE_CATEGORY:
-            document.category = final_value
+            category, _ = ensure_category(
+                document.family,
+                final_value,
+                created_by=member,
+            )
+            document.category = category.name if category else ""
+            final_value = document.category
             changed_field = "category"
         proposal.status = KnowledgeProposal.STATUS_ACCEPTED
         proposal.human_value = {"value": final_value}
@@ -1979,10 +2284,21 @@ def _apply_proposal(proposal, member, *, accept, value=None):
         revision=document.current_revision,
         status=KnowledgeProposal.STATUS_PENDING,
     ).exists():
-        document.curation_status = KnowledgeDocument.CURATION_CONFIRMED
-        if document.knowledge_status == KnowledgeDocument.KNOWLEDGE_PENDING:
+        run_has_accepted = document.proposals.filter(
+            run=proposal.run,
+            status=KnowledgeProposal.STATUS_ACCEPTED,
+        ).exists()
+        has_formal_result = bool(
+            document.confirmed_summary or document.category or document.tags
+        )
+        if was_curated or run_has_accepted or has_formal_result:
+            document.curation_status = KnowledgeDocument.CURATION_CONFIRMED
             document.knowledge_status = KnowledgeDocument.KNOWLEDGE_INCLUDED
-        document.library_tier = KnowledgeDocument.LIBRARY_KNOWLEDGE
+            document.library_tier = KnowledgeDocument.LIBRARY_KNOWLEDGE
+        else:
+            document.curation_status = KnowledgeDocument.CURATION_NORMALIZED
+            document.knowledge_status = KnowledgeDocument.KNOWLEDGE_PENDING
+            document.library_tier = KnowledgeDocument.LIBRARY_ARCHIVE
         document.save(
             update_fields=[
                 "curation_status",
@@ -1991,6 +2307,13 @@ def _apply_proposal(proposal, member, *, accept, value=None):
                 "updated_at",
             ]
         )
+        if run_has_accepted:
+            record_curation_revision(
+                document,
+                changed_by=member,
+                change_type=KnowledgeCurationRevision.TYPE_AI_CONFIRMED,
+                proposal_run=proposal.run,
+            )
     document.refresh_from_db()
     index_document(document)
 

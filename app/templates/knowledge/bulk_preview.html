@@ -7,7 +7,7 @@
 {% block hub_content %}
 <section class="headline">
   <h1>批量确认预览</h1>
-  <p>以下 {{ proposals|length }} 项将按 AI 原建议直接接受。需要修改的项目请返回原文逐项处理。</p>
+  {% include "knowledge/_help_tip.html" with text="以下项目将按 AI 原建议直接接受；需要修改的项目请返回原文逐项处理。" %}
 </section>
 <section class="panel">
   <div class="proposal-list">

@@ -5,18 +5,18 @@
 
 {% block hub_content %}
 <section class="knowledge-page-heading">
-  <div><span class="eyebrow">Product map</span><h1>规划与架构边界</h1><p>这是一张防遗忘地图：说明每类数据由谁负责，以及后续实现时不能突破的边界。</p></div>
+  <div><span class="eyebrow">Product map</span><h1>规划与架构边界{% include "knowledge/_help_tip.html" with text="这是一张防遗忘地图：说明每类数据由谁负责，以及后续实现时不能突破的边界。" %}</h1></div>
   <span class="status-pill source">模块化 Django 单体</span>
 </section>
 
 <section class="knowledge-boundary-map">
-  <article><header><span>核心</span><h2>family_core</h2></header><p>成员、角色、家庭权限。</p><small>所有模块复用同一家庭身份，不各自建立账户体系。</small></article>
-  <article class="accent"><header><span>底座</span><h2>knowledge</h2></header><p>来源、文档、版本、附件、标签、关联、人工确认、搜索、统一详情和同步记录。</p><small>原文、业务事实与 AI 派生结果必须明确区分。</small></article>
-  <article><header><span>连接</span><h2>knowledge/connectors</h2></header><p>OneNote、Markdown/HTML、人物动态和内部模块搜索投影。</p><small>每种外部来源独立确认授权、版权、频率和失败策略。</small></article>
-  <article><header><span>阅读</span><h2>reading</h2></header><p>图书与版本、阅读计划、进度、划线、批注和评论。</p><small>书籍与阅读行为由本模块负责，仅向知识底座提供可检索投影。</small></article>
-  <article><header><span>复盘</span><h2>trading_journal</h2></header><p>交易案例、交易纪律版本和复盘。</p><small>不复制交易流水；事实继续来自 portfolio。</small></article>
-  <article><header><span>事实源</span><h2>portfolio / ledger / notes</h2></header><p>继续拥有交易、资产、收支和随手记业务事实。</p><small>知识底座只索引、引用或发布报告，不反向改写事实。</small></article>
-  <article><header><span>能力</span><h2>ai_analysis</h2></header><p>统一提供 AI 调用、审计、模型与成本能力。</p><small>AI 结果归属业务模块，ai_analysis 不拥有知识、阅读或复盘结果。</small></article>
+  <article><header><span>核心</span><h2>family_core{% include "knowledge/_help_tip.html" with text="成员、角色、家庭权限。所有模块复用同一家庭身份，不各自建立账户体系。" %}</h2></header></article>
+  <article class="accent"><header><span>底座</span><h2>knowledge{% include "knowledge/_help_tip.html" with text="来源、文档、版本、附件、标签、关联、人工确认、搜索、统一详情和同步记录。原文、业务事实与 AI 派生结果必须明确区分。" %}</h2></header></article>
+  <article><header><span>连接</span><h2>knowledge/connectors{% include "knowledge/_help_tip.html" with text="OneNote、Markdown/HTML、人物动态和内部模块搜索投影。每种外部来源独立确认授权、版权、频率和失败策略。" %}</h2></header></article>
+  <article><header><span>阅读</span><h2>reading{% include "knowledge/_help_tip.html" with text="图书与版本、阅读计划、进度、划线、批注和评论。书籍与阅读行为由本模块负责，仅向知识底座提供可检索投影。" %}</h2></header></article>
+  <article><header><span>复盘</span><h2>trading_journal{% include "knowledge/_help_tip.html" with text="交易案例、交易纪律版本和复盘。不复制交易流水；事实继续来自 portfolio。" %}</h2></header></article>
+  <article><header><span>事实源</span><h2>portfolio / ledger / notes{% include "knowledge/_help_tip.html" with text="继续拥有交易、资产、收支和随手记业务事实。知识底座只索引、引用或发布报告，不反向改写事实。" %}</h2></header></article>
+  <article><header><span>能力</span><h2>ai_analysis{% include "knowledge/_help_tip.html" with text="统一提供 AI 调用、审计、模型与成本能力。AI 结果归属业务模块，ai_analysis 不拥有知识、阅读或复盘结果。" %}</h2></header></article>
 </section>
 
 <section class="knowledge-roadmap-grid">
@@ -29,12 +29,12 @@
 <section class="knowledge-guardrails">
   <header><span class="eyebrow">落地注意事项</span><h2>后续开发不得遗忘</h2></header>
   <div>
-    <p><strong>权限：</strong>先过滤权限再搜索、摘要或推荐；私密内容不能通过片段、统计和 AI 输出泄露。</p>
-    <p><strong>原文：</strong>同步与人工确认解耦，AI 不覆盖原文；版本、来源链接和附件必须可追溯。</p>
-    <p><strong>外部来源：</strong>不承诺抓取整个互联网；X、公众号、采访和演讲逐一确认合法接口、版权和保存范围。</p>
-    <p><strong>生产安全：</strong>NAS PostgreSQL 是权威数据源，部署前联合备份数据库与知识文件，不能用本地数据覆盖。</p>
-    <p><strong>前端：</strong>日常流程优先于运维状态；桌面端和移动端都要完成浏览、搜索、确认和继续阅读。</p>
-    <p><strong>AI：</strong>AI 可以整理知识，也可以只摘要资讯；使用 AI 不等于内容自动进入知识库。云端发送仍需来源所有者明确同意。</p>
+    <p><strong>权限</strong>{% include "knowledge/_help_tip.html" with text="先过滤权限再搜索、摘要或推荐；私密内容不能通过片段、统计和 AI 输出泄露。" %}</p>
+    <p><strong>原文</strong>{% include "knowledge/_help_tip.html" with text="同步与人工确认解耦，AI 不覆盖原文；版本、来源链接和附件必须可追溯。" %}</p>
+    <p><strong>外部来源</strong>{% include "knowledge/_help_tip.html" with text="不承诺抓取整个互联网；X、公众号、采访和演讲逐一确认合法接口、版权和保存范围。" %}</p>
+    <p><strong>生产安全</strong>{% include "knowledge/_help_tip.html" with text="NAS PostgreSQL 是权威数据源，部署前联合备份数据库与知识文件，不能用本地数据覆盖。" %}</p>
+    <p><strong>前端</strong>{% include "knowledge/_help_tip.html" with text="日常流程优先于运维状态；桌面端和移动端都要完成浏览、搜索、确认和继续阅读。" %}</p>
+    <p><strong>AI</strong>{% include "knowledge/_help_tip.html" with text="AI 可以整理知识，也可以只摘要资讯；使用 AI 不等于内容自动进入知识库。云端发送仍需来源所有者明确同意。" %}</p>
   </div>
 </section>
 {% endblock %}

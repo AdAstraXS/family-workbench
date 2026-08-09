@@ -1,36 +1,70 @@
 {% extends "knowledge_hub/base.html" %}
 
-{% block title %}主题与标签 · 知识中心{% endblock %}
-{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>主题与标签</span>{% endblock %}
+{% block title %}分类与标签 · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>分类与标签</span>{% endblock %}
 
 {% block hub_content %}
 <section class="knowledge-page-heading">
-  <div><span class="eyebrow">Explore</span><h1>主题与标签</h1><p>从主题进入相关资料，比把关系图放在首页更适合日常查找。</p></div>
-  <span class="status-pill">{{ entry_count }} 项可见知识</span>
+  <div><span class="eyebrow">Knowledge organization</span><h1>分类与标签{% include "knowledge/_help_tip.html" with text="分类是精选知识的单选目录，标签用于补充多个检索维度；人物和来源仍作为独立属性管理。" %}</h1></div>
+  <span class="status-pill">{{ entry_count }} 项可见精选知识</span>
 </section>
 
-<section class="knowledge-topic-grid">
-  <article class="knowledge-topic-panel">
-    <header><span class="eyebrow">Tags</span><h2>常用标签</h2></header>
-    <div class="knowledge-topic-cloud">
-      {% for tag, total in tags %}
-        <a href="{% url 'knowledge:library' %}?tag={{ tag|urlencode }}"><strong>#{{ tag }}</strong><span>{{ total }}</span></a>
-      {% empty %}<div class="knowledge-gentle-empty"><span>人工确认标签后，将在这里形成主题入口。</span></div>{% endfor %}
+{% if can_manage_taxonomy %}
+  <section class="knowledge-taxonomy-actions" aria-label="分类与标签管理">
+    <a class="button primary" href="{% url 'knowledge:taxonomy_create' 'category' %}">新增分类</a>
+    <a class="button" href="{% url 'knowledge:taxonomy_create' 'tag' %}">新增标签</a>
+    {% include "knowledge/_help_tip.html" with text="家庭管理员可以新增、改名、停用、合并或删除未使用项目。已被资料使用的项目不会被直接删除。" %}
+  </section>
+{% endif %}
+
+<section class="knowledge-topic-grid knowledge-taxonomy-grid">
+  <article class="knowledge-topic-panel knowledge-taxonomy-panel-category">
+    <header><span class="eyebrow">Categories</span><h2>分类目录{% include "knowledge/_help_tip.html" with text="AI 和手工整理优先从这里选择一个分类。" %}</h2></header>
+    <div class="knowledge-taxonomy-list">
+      {% for item in categories %}
+        <article class="knowledge-taxonomy-item{% if not item.is_active %} inactive{% endif %}">
+          <div class="knowledge-taxonomy-item-main">
+            <a class="knowledge-taxonomy-name" href="{% url 'knowledge:library' %}?collection=curated&amp;category={{ item.name|urlencode }}"><strong>{{ item.name }}</strong></a>
+            <span class="knowledge-taxonomy-count">{{ item.visible_usage_count }} 篇可见知识</span>
+            {% if item.merged_into %}<small class="knowledge-taxonomy-note">已合并到 {{ item.merged_into.name }}</small>{% elif not item.is_active %}<small class="knowledge-taxonomy-note">已停用，不再提供给 AI 和整理表单</small>{% elif item.description %}<small class="knowledge-taxonomy-note">{{ item.description }}</small>{% endif %}
+          </div>
+          {% if can_manage_taxonomy and item.pk and not item.merged_into %}
+            <div class="knowledge-taxonomy-item-actions">
+              <a href="{% url 'knowledge:taxonomy_edit' 'category' item.pk %}">编辑</a>
+              <a href="{% url 'knowledge:taxonomy_merge' 'category' item.pk %}">合并</a>
+              <a class="danger-link" href="{% url 'knowledge:taxonomy_delete' 'category' item.pk %}">删除</a>
+            </div>
+          {% endif %}
+        </article>
+      {% empty %}<div class="knowledge-gentle-empty"><span>还没有分类。可以先新增少量稳定分类，再让 AI 从中选择。</span></div>{% endfor %}
     </div>
   </article>
 
-  <article class="knowledge-topic-panel">
-    <header><span class="eyebrow">Categories</span><h2>已确认分类</h2></header>
-    <div class="knowledge-category-list">
-      {% for item in categories %}
-        <a href="{% url 'knowledge:library' %}?q={{ item.category|urlencode }}"><span>{{ item.category }}</span><strong>{{ item.total }}</strong></a>
-      {% empty %}<div class="knowledge-gentle-empty"><span>当前还没有已确认分类。</span></div>{% endfor %}
+  <article class="knowledge-topic-panel knowledge-taxonomy-panel-tag">
+    <header><span class="eyebrow">Tags</span><h2>标签目录{% include "knowledge/_help_tip.html" with text="标签可以多选；同义标签请通过合并收敛。" %}</h2></header>
+    <div class="knowledge-taxonomy-list">
+      {% for item in tags %}
+        <article class="knowledge-taxonomy-item{% if not item.is_active %} inactive{% endif %}">
+          <div class="knowledge-taxonomy-item-main">
+            <a class="knowledge-taxonomy-name" href="{% url 'knowledge:library' %}?collection=curated&amp;tag={{ item.name|urlencode }}"><strong>#{{ item.name }}</strong></a>
+            <span class="knowledge-taxonomy-count">{{ item.visible_usage_count }} 篇可见知识</span>
+            {% if item.merged_into %}<small class="knowledge-taxonomy-note">已合并到 #{{ item.merged_into.name }}</small>{% elif not item.is_active %}<small class="knowledge-taxonomy-note">已停用，不再提供给 AI 和整理表单</small>{% elif item.description %}<small class="knowledge-taxonomy-note">{{ item.description }}</small>{% endif %}
+          </div>
+          {% if can_manage_taxonomy and item.pk and not item.merged_into %}
+            <div class="knowledge-taxonomy-item-actions">
+              <a href="{% url 'knowledge:taxonomy_edit' 'tag' item.pk %}">编辑</a>
+              <a href="{% url 'knowledge:taxonomy_merge' 'tag' item.pk %}">合并</a>
+              <a class="danger-link" href="{% url 'knowledge:taxonomy_delete' 'tag' item.pk %}">删除</a>
+            </div>
+          {% endif %}
+        </article>
+      {% empty %}<div class="knowledge-gentle-empty"><span>还没有标签。确认 AI 建议或手工整理时，可以建立第一批标签。</span></div>{% endfor %}
     </div>
   </article>
 </section>
 
 <section class="knowledge-planning-note">
-  <strong>后续工作提醒</strong>
-  <p>正式落地时需要把标签从文档 JSON 升级为可治理实体，并增加人物、机构、主题和资料之间的明确关系；相关内容和反向链接优先，关系图谱仅作为后续辅助分析页面。</p>
+  <strong>AI 使用规则</strong>
+  {% include "knowledge/_help_tip.html" with text="AI 会优先使用启用中的分类和标签；确实没有合适项目时，新词会标记为“建议新增”，只有人工确认后才会进入目录。" %}
 </section>
 {% endblock %}

@@ -3,7 +3,14 @@ from pathlib import Path
 
 from django import forms
 
-from .models import KnowledgeDocument, KnowledgeVisibility
+from .models import (
+    KnowledgeCategory,
+    KnowledgeDocument,
+    KnowledgeTag,
+    KnowledgeVisibility,
+    normalize_taxonomy_name,
+)
+from .taxonomy import canonicalize_document_taxonomy
 
 
 class NotebookSelectionForm(forms.Form):
@@ -91,10 +98,18 @@ class KnowledgeImportUploadForm(forms.Form):
 
 
 class DocumentOrganizeForm(forms.ModelForm):
+    category = forms.CharField(
+        label="分类",
+        required=False,
+        max_length=100,
+        help_text="优先选择家庭已有分类；手工填写新分类时，保存后会加入分类目录。",
+        widget=forms.TextInput(attrs={"list": "knowledge-category-options"}),
+    )
     tags_text = forms.CharField(
         label="标签",
         required=False,
-        help_text="多个标签使用逗号、中文逗号或顿号分隔，最多 20 个。",
+        help_text="优先使用下方已有标签；多个标签使用逗号、中文逗号或顿号分隔，最多 20 个。",
+        widget=forms.Textarea(attrs={"rows": 2}),
     )
 
     class Meta:
@@ -114,8 +129,25 @@ class DocumentOrganizeForm(forms.ModelForm):
             "confirmed_summary": forms.Textarea(attrs={"rows": 8}),
         }
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, family=None, created_by=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self.family = family or getattr(self.instance, "family", None)
+        self.created_by = created_by
+        categories = KnowledgeCategory.objects.none()
+        tags = KnowledgeTag.objects.none()
+        if self.family and getattr(self.family, "pk", None):
+            categories = KnowledgeCategory.objects.filter(
+                family=self.family,
+                is_active=True,
+                merged_into__isnull=True,
+            ).order_by("name", "id")
+            tags = KnowledgeTag.objects.filter(
+                family=self.family,
+                is_active=True,
+                merged_into__isnull=True,
+            ).order_by("name", "id")
+        self.existing_categories = list(categories)
+        self.existing_tags = list(tags)
         if self.instance and self.instance.pk:
             self.fields["tags_text"].initial = "，".join(self.instance.tags or [])
         for field in self.fields.values():
@@ -149,9 +181,68 @@ class DocumentOrganizeForm(forms.ModelForm):
     def save(self, commit=True):
         document = super().save(commit=False)
         document.tags = self.cleaned_data["tags_text"]
+        canonicalize_document_taxonomy(document, created_by=self.created_by)
         if commit:
             document.save()
         return document
+
+
+class _TaxonomyForm(forms.ModelForm):
+    def __init__(self, *args, family=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.family = family or getattr(self.instance, "family", None)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+
+    def clean_name(self):
+        name = " ".join(self.cleaned_data["name"].strip().split())
+        model = self._meta.model
+        queryset = model.objects.filter(
+            family=self.family,
+            normalized_name=normalize_taxonomy_name(name),
+        )
+        if self.instance.pk:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise forms.ValidationError("家庭中已经存在同名项目，请直接使用或执行合并。")
+        return name
+
+
+class KnowledgeCategoryForm(_TaxonomyForm):
+    class Meta:
+        model = KnowledgeCategory
+        fields = ["name", "description", "is_active"]
+        labels = {
+            "name": "分类名称",
+            "description": "分类说明",
+            "is_active": "允许继续用于整理",
+        }
+
+
+class KnowledgeTagForm(_TaxonomyForm):
+    class Meta:
+        model = KnowledgeTag
+        fields = ["name", "description", "is_active"]
+        labels = {
+            "name": "标签名称",
+            "description": "标签说明",
+            "is_active": "允许继续用于整理",
+        }
+
+
+class TaxonomyMergeForm(forms.Form):
+    target = forms.ModelChoiceField(label="合并到", queryset=KnowledgeCategory.objects.none())
+
+    def __init__(self, *args, item=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.item = item
+        if item:
+            self.fields["target"].queryset = item.__class__.objects.filter(
+                family=item.family,
+                is_active=True,
+                merged_into__isnull=True,
+            ).exclude(pk=item.pk).order_by("name", "id")
+        self.fields["target"].widget.attrs.setdefault("class", "form-control")
 
 
 class ProposalReviewForm(forms.Form):

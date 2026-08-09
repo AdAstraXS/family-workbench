@@ -1,0 +1,16 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}合并{{ label }} · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:topics' %}">分类与标签</a><span aria-hidden="true">›</span><span>合并{{ label }}</span>{% endblock %}
+
+{% block hub_content %}
+<section class="headline"><h1>合并{{ label }}“{{ item.name }}”{% include "knowledge/_help_tip.html" with text="使用这个目录项目的资料会统一改到目标项目；原名称将作为别名保留，历史记录不会丢失。" %}</h1></section>
+<section class="panel form-panel knowledge-taxonomy-form-panel">
+  <form method="post" class="stacked-form">
+    {% csrf_token %}
+    <label><span>{{ form.target.label }}</span>{{ form.target }}{% for error in form.target.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</label>
+    <div class="notice warning">合并会更新家庭资料中的正式分类或标签。请确认两个项目确实表达同一含义。</div>
+    <div class="form-actions"><button class="button primary" type="submit">确认合并</button><a class="button" href="{% url 'knowledge:topics' %}">取消</a></div>
+  </form>
+</section>
+{% endblock %}

@@ -5,7 +5,7 @@
 
 {% block hub_content %}
 <section class="knowledge-page-heading">
-  <div><span class="eyebrow">Subscription & timeline</span><h1>关注人物</h1><p>历史公众号和 Markdown 文章按作者归入人物档案；未来每日资讯仍先留在人物信息流，由成员主动归档。</p></div>
+  <div><span class="eyebrow">Subscription & timeline</span><h1>关注人物{% include "knowledge/_help_tip.html" with text="历史公众号和 Markdown 文章按作者归入人物档案；未来每日资讯仍先留在人物信息流，由成员主动归档。" %}</h1></div>
   <span class="status-pill">人物连接器待接入</span>
 </section>
 
@@ -22,7 +22,7 @@
   <article class="knowledge-person-profile">
     {% if selected_person %}
       <header class="knowledge-person-heading">
-        <div><span class="eyebrow">Author found in knowledge</span><h2>{{ selected_person }}</h2><p>这里汇总该作者已经归档的历史产出；身份和来源等级尚未核验，不能默认视为本人直接发言。</p></div>
+        <div><span class="eyebrow">Author found in knowledge</span><h2>{{ selected_person }}{% include "knowledge/_help_tip.html" with text="这里汇总该作者已经归档的历史产出；身份和来源等级尚未核验，不能默认视为本人直接发言。" %}</h2></div>
         <span class="status-pill warning">身份待核验</span>
       </header>
       <nav class="knowledge-person-filters" aria-label="人物动态类型">
@@ -40,7 +40,7 @@
       <div class="knowledge-person-empty">
         <span class="knowledge-hub-brand-mark" aria-hidden="true">人</span>
         <h2>选择作者查看已有内容</h2>
-        <p>正式模块将在人物身份、官方来源、来源等级和事件聚合完成后开放。只有成员主动选择的长文或重要观点才归档，并可继续加入待整理。</p>
+        {% include "knowledge/_help_tip.html" with text="正式模块将在人物身份、官方来源、来源等级和事件聚合完成后开放。只有成员主动选择的长文或重要观点才归档，并可继续加入待整理。" %}
       </div>
     {% endif %}
   </article>
@@ -62,12 +62,12 @@
 
 <aside class="knowledge-planning-note">
   <strong>未来每日资讯的归档流程</strong>
-  <p>每日抓取内容默认只留在人物信息流；接入后提供“归档”和“归档并加入待整理”两个明确动作，不自动进入家庭知识底座。</p>
+  {% include "knowledge/_help_tip.html" with text="每日抓取内容默认只留在人物信息流；接入后提供“归档”和“归档并加入待整理”两个明确动作，不自动进入家庭知识底座。" %}
 </aside>
 
 <section class="knowledge-source-identity-guide">
   <header><span class="eyebrow">Source identity</span><h2>正式接入必须清楚区分</h2></header>
   <div><span class="direct">本人直接发言</span><span class="institution">所属机构发布</span><span class="interview">采访或演讲原文</span><span class="media">媒体转述</span><span class="ai">AI 提炼观点</span></div>
-  <p>AI 摘要用于快速获取资讯，不要求逐条人工确认，但必须带来源引用和醒目标记，不能冒充原话；执行归档时再固化原文证据和人物身份。</p>
+  {% include "knowledge/_help_tip.html" with text="AI 摘要用于快速获取资讯，不要求逐条人工确认，但必须带来源引用和醒目标记，不能冒充原话；执行归档时再固化原文证据和人物身份。" %}
 </section>
 {% endblock %}

@@ -9,7 +9,7 @@
   <div>
     <span class="eyebrow">{{ source.get_kind_display }}</span>
     <h1>{{ source.name }}</h1>
-    <p>{% if source.kind == "onenote" %}原文自动同步到 NAS；每个分区可以选择进入归档资料、归档并加入待整理或仅同步。{% else %}这里管理来源身份、权限和导入记录；文章整理统一在“待整理”中完成。{% endif %}</p>
+    {% if source.kind == "onenote" %}{% include "knowledge/_help_tip.html" with text="原文自动同步到 NAS；每个分区可以选择进入归档资料、归档并加入待整理或仅同步。" %}{% else %}{% include "knowledge/_help_tip.html" with text="这里管理来源身份、权限和导入记录；文章整理统一在“待整理”中完成。" %}{% endif %}
   </div>
   <span class="status-pill status-{{ source.status }}">{{ source.get_status_display }}</span>
 </section>
@@ -34,7 +34,7 @@
         <a class="button primary" href="{% url 'knowledge:source_history' source.pk %}">查看历史文章（{{ archive_count }}）</a>
         {% if pending_count %}<a class="button" href="{% url 'knowledge:inbox' %}?directory=source&amp;source_id={{ source.pk }}">查看待整理（{{ pending_count }}）</a>{% endif %}
       </div>
-      <p class="muted">这些文章已保存在归档资料中；加入待整理并完成人工确认后，会同时出现在精选知识。</p>
+      {% include "knowledge/_help_tip.html" with text="这些文章已保存在归档资料中；加入待整理并完成人工确认后，会同时出现在精选知识。" %}
     {% endif %}
     {% if can_manage and source.kind == "onenote" %}
       <div class="knowledge-source-actions">
@@ -63,7 +63,7 @@
           <input type="checkbox" name="allow_cloud_ai"{% if source.allow_cloud_ai %} checked{% endif %}>
           <span>今后允许将本来源正文发送给云端 AI 整理</span>
         </label>
-        <small>开启后仍需在“待整理”中主动选择文章，不会自动处理整个来源；关闭时，每次 AI 整理都会单独询问本次发送授权。</small>
+        {% include "knowledge/_help_tip.html" with text="开启后仍需在“待整理”中主动选择文章，不会自动处理整个来源；关闭时，每次 AI 整理都会单独询问本次发送授权。" %}
         {% if source.kind == "onenote" %}
           <label>
             <span>新分区默认处理方式</span>
@@ -74,7 +74,7 @@
           {% if source_sections %}
             <div class="knowledge-section-routing">
               <strong>现有 OneNote 分区</strong>
-              <p>所有正式内容先进入归档资料；真正准备提炼的分区可以同时加入待整理，纯备份内容只同步。</p>
+              {% include "knowledge/_help_tip.html" with text="所有正式内容先进入归档资料；真正准备提炼的分区可以同时加入待整理，纯备份内容只同步。" %}
               {% for section in source_sections %}
                 <label>
                   <span>{% if section.group %}{{ section.group }} / {% endif %}{{ section.name }}（{{ section.count }} 篇）</span>
@@ -88,15 +88,15 @@
                 <input type="checkbox" name="apply_existing">
                 <span>同时把上述分区规则应用到已有文档</span>
               </label>
-              <small>不勾选时只影响以后首次同步的新页面；勾选不会删除原文，只调整是否进入归档资料或待整理。</small>
+              {% include "knowledge/_help_tip.html" with text="不勾选时只影响以后首次同步的新页面；勾选不会删除原文，只调整是否进入归档资料或待整理。" %}
             </div>
           {% endif %}
         {% endif %}
-        <small>修改默认可见范围只影响以后新同步的文档，不会静默批量改变已有内容。</small>
+        {% include "knowledge/_help_tip.html" with text="修改默认可见范围只影响以后新同步的文档，不会静默批量改变已有内容。" %}
         <button class="button" type="submit">保存来源设置</button>
       </form>
     {% else %}
-      <p>只有来源所有者可以修改可见范围和持续云端 AI 授权；家庭管理员不能代替其他成员授权正文外发。</p>
+      {% include "knowledge/_help_tip.html" with text="只有来源所有者可以修改可见范围和持续云端 AI 授权；家庭管理员不能代替其他成员授权正文外发。" %}
     {% endif %}
   </article>
 </section>

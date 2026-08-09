@@ -1,13 +1,13 @@
 {% extends "knowledge_hub/base.html" %}
 
-{% block title %}整理为精选知识 · {{ document.title }}{% endblock %}
+{% block title %}{% if is_reediting %}重新编辑精选结果{% else %}整理为精选知识{% endif %} · {{ document.title }}{% endblock %}
 
 {% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:document_detail' document.pk %}">{{ document.title|truncatechars:20 }}</a><span aria-hidden="true">›</span><span>人工整理</span>{% endblock %}
 
 {% block hub_content %}
 <section class="headline">
-  <h1>整理为精选知识</h1>
-  <p>{{ document.title }} · 完成摘要、分类或标签后，确认进入精选知识。</p>
+  <h1>{% if is_reediting %}重新编辑精选结果{% else %}整理为精选知识{% endif %}</h1>
+  <p>{{ document.title }}{% include "knowledge/_help_tip.html" with text="保存后会形成新的人工整理版本；首次整理完成摘要、分类或标签后，确认进入精选知识，旧的 AI 建议和确认历史保持不变。" %}</p>
 </section>
 <section class="panel form-panel">
   <form method="post" class="stacked-form">
@@ -17,12 +17,20 @@
       <label>
         <span>{{ field.label }}</span>
         {{ field }}
-        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+        {% if field.help_text %}{% include "knowledge/_help_tip.html" with text=field.help_text %}{% endif %}
         {% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}
       </label>
     {% endfor %}
+    {% if existing_categories %}<datalist id="knowledge-category-options">{% for category in existing_categories %}<option value="{{ category.name }}">{% endfor %}</datalist>{% endif %}
+    {% if existing_tags %}
+      <aside class="knowledge-existing-taxonomy">
+        <strong>已有标签</strong>
+        {% include "knowledge/_help_tip.html" with text="优先复用下面的标签；需要新标签时，也可以直接填写，保存后会加入家庭标签目录。" %}
+        <div class="knowledge-tags">{% for tag in existing_tags %}<span>#{{ tag.name }}</span>{% endfor %}</div>
+      </aside>
+    {% endif %}
     <div class="form-actions">
-      <button class="button primary" type="submit">确认进入精选知识</button>
+      <button class="button primary" type="submit">{% if is_reediting %}保存新的精选结果{% else %}确认进入精选知识{% endif %}</button>
       <a class="button" href="{% url 'knowledge:document_detail' document.pk %}">取消</a>
     </div>
   </form>

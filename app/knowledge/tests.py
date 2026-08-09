@@ -37,14 +37,18 @@ from .imports import (
 )
 from .models import (
     KnowledgeAsset,
+    KnowledgeCategory,
+    KnowledgeCurationRevision,
     KnowledgeDocument,
     KnowledgeImportBatch,
     KnowledgeImportItem,
     KnowledgeJob,
     KnowledgeProposal,
+    KnowledgeProposalRun,
     KnowledgeRevision,
     KnowledgeSearchEntry,
     KnowledgeSource,
+    KnowledgeTag,
     KnowledgeVisibility,
     SourceConnection,
 )
@@ -872,6 +876,7 @@ class KnowledgeBaseTests(TestCase):
         self.assertContains(home, "在线阅读")
         self.assertContains(home, "交易复盘")
         self.assertContains(home, document.title)
+        self.assertContains(home, "knowledge-help-tip-icon")
 
         inbox = self.client.get(reverse("knowledge:inbox"))
         self.assertContains(inbox, pending_document.title)
@@ -893,6 +898,7 @@ class KnowledgeBaseTests(TestCase):
         topics = self.client.get(reverse("knowledge:topics"))
         self.assertContains(topics, "#半导体")
         self.assertContains(topics, "投资研究")
+        self.assertContains(topics, "knowledge-help-tip-icon")
 
         architecture = self.client.get(reverse("knowledge:architecture"))
         self.assertContains(architecture, "模块化 Django 单体")
@@ -984,6 +990,7 @@ class KnowledgeBaseTests(TestCase):
             reverse("knowledge:library"), {"collection": "archive"}
         )
         self.assertContains(formal_library, document.title)
+        self.assertNotContains(formal_library, "查看原文")
         curated = self.client.get(
             reverse("knowledge:library"), {"collection": "curated"}
         )
@@ -1056,6 +1063,24 @@ class KnowledgeBaseTests(TestCase):
         self.assertRedirects(
             organize,
             reverse("knowledge:document_detail", kwargs={"pk": document.pk}),
+        )
+        document.refresh_from_db()
+        self.assertTrue(
+            KnowledgeCategory.objects.filter(
+                family=self.family,
+                name="投资经验",
+            ).exists()
+        )
+        self.assertTrue(
+            KnowledgeTag.objects.filter(
+                family=self.family,
+                name="长期复用",
+            ).exists()
+        )
+        curation_revision = document.curation_revisions.get()
+        self.assertEqual(
+            curation_revision.change_type,
+            KnowledgeCurationRevision.TYPE_MANUAL,
         )
         curated = self.client.get(
             reverse("knowledge:library"), {"collection": "curated"}
@@ -1147,6 +1172,111 @@ class KnowledgeBaseTests(TestCase):
         self.client.cookies[cookie_name] = "unsupported"
         fallback = self.client.get(reverse("knowledge:library"))
         self.assertEqual(fallback.context["display_mode"], "standard")
+
+    def test_compact_pending_view_uses_a_separate_selection_rail(self):
+        self.make_pending_document(
+            external_id="compact-selection-page",
+            title="紧凑视图选择栏",
+        )
+        cookie_name = f"knowledge_library_display_mode_{self.member.pk}"
+        self.client.cookies[cookie_name] = "compact"
+
+        response = self.client.get(reverse("knowledge:inbox"))
+
+        self.assertContains(response, "knowledge-compact-row-layout")
+        self.assertContains(response, "knowledge-ai-select knowledge-compact-select")
+        html = response.content.decode("utf-8")
+        select_position = html.index("knowledge-ai-select knowledge-compact-select")
+        meta_position = html.index("knowledge-compact-meta", select_position)
+        self.assertLess(select_position, meta_position)
+
+    def test_taxonomy_management_renames_merges_and_protects_used_items(self):
+        created = self.client.post(
+            reverse("knowledge:taxonomy_create", kwargs={"kind": "category"}),
+            {
+                "name": "人生经验",
+                "description": "长期生活经验",
+                "is_active": "on",
+            },
+        )
+        self.assertRedirects(created, reverse("knowledge:topics"))
+        self.assertTrue(
+            KnowledgeCategory.objects.filter(
+                family=self.family,
+                name="人生经验",
+            ).exists()
+        )
+        category = KnowledgeCategory.objects.create(
+            family=self.family,
+            name="投资经验",
+            created_by=self.member,
+        )
+        source_tag = KnowledgeTag.objects.create(
+            family=self.family,
+            name="长期投资",
+            created_by=self.member,
+        )
+        target_tag = KnowledgeTag.objects.create(
+            family=self.family,
+            name="长期主义",
+            created_by=self.member,
+        )
+        document = self.make_document(
+            external_id="taxonomy-page",
+            title="分类标签治理",
+        )
+        document.category = category.name
+        document.tags = [source_tag.name]
+        document.save(update_fields=["category", "tags", "updated_at"])
+        index_document(document)
+
+        renamed = self.client.post(
+            reverse(
+                "knowledge:taxonomy_edit",
+                kwargs={"kind": "category", "pk": category.pk},
+            ),
+            {
+                "name": "投资方法",
+                "description": "可复用的投资方法",
+                "is_active": "on",
+            },
+        )
+        self.assertRedirects(renamed, reverse("knowledge:topics"))
+        category.refresh_from_db()
+        document.refresh_from_db()
+        self.assertEqual(category.name, "投资方法")
+        self.assertIn("投资经验", category.aliases)
+        self.assertEqual(document.category, "投资方法")
+        self.assertEqual(document.search_entry.category, "投资方法")
+
+        merged = self.client.post(
+            reverse(
+                "knowledge:taxonomy_merge",
+                kwargs={"kind": "tag", "pk": source_tag.pk},
+            ),
+            {"target": target_tag.pk},
+        )
+        self.assertRedirects(merged, reverse("knowledge:topics"))
+        source_tag.refresh_from_db()
+        document.refresh_from_db()
+        self.assertEqual(source_tag.merged_into, target_tag)
+        self.assertEqual(document.tags, ["长期主义"])
+
+        protected = self.client.post(
+            reverse(
+                "knowledge:taxonomy_delete",
+                kwargs={"kind": "tag", "pk": target_tag.pk},
+            )
+        )
+        self.assertRedirects(protected, reverse("knowledge:topics"))
+        self.assertTrue(KnowledgeTag.objects.filter(pk=target_tag.pk).exists())
+
+        self.client.force_login(self.other_user)
+        denied = self.client.post(
+            reverse("knowledge:taxonomy_create", kwargs={"kind": "tag"}),
+            {"name": "越权标签", "is_active": "on"},
+        )
+        self.assertEqual(denied.status_code, 403)
 
     def test_library_directory_filters_by_category_and_onenote_source_path(self):
         source = self.make_source(suffix="reading")
@@ -1838,9 +1968,10 @@ class KnowledgeBaseTests(TestCase):
             KnowledgeDocument.CURATION_NORMALIZED,
         )
 
-        def fake_generate(document, *, cloud_ai_consent):
+        def fake_generate(document, *, cloud_ai_consent, requested_by=None):
             self.assertEqual(document.pk, selected.pk)
             self.assertEqual(cloud_ai_consent, "one_time")
+            self.assertEqual(requested_by, self.member)
             document.curation_status = KnowledgeDocument.CURATION_PENDING_REVIEW
             document.save(update_fields=["curation_status", "updated_at"])
             return []
@@ -2014,10 +2145,20 @@ class KnowledgeBaseTests(TestCase):
             KnowledgeProposal.TYPE_TAGS: {"items": ["投资", "风险"]},
             KnowledgeProposal.TYPE_CATEGORY: {"value": "投资"},
         }
+        proposal_run = KnowledgeProposalRun.objects.create(
+            document=document,
+            revision=document.current_revision,
+            sequence=1,
+            requested_by=self.member,
+            model_name="test-model",
+            prompt_version="knowledge-organize-v1",
+            content_hash=document.current_revision.content_hash,
+        )
         for proposal_type, value in suggested.items():
             proposals[proposal_type] = KnowledgeProposal.objects.create(
                 document=document,
                 revision=document.current_revision,
+                run=proposal_run,
                 proposal_type=proposal_type,
                 suggested_value=value,
                 model_name="test-model",
@@ -2102,6 +2243,223 @@ class KnowledgeBaseTests(TestCase):
             document.curation_status,
             KnowledgeDocument.CURATION_CONFIRMED,
         )
+        self.assertEqual(document.curation_revisions.count(), 1)
+        self.assertEqual(
+            document.curation_revisions.get().proposal_run,
+            proposal_run,
+        )
+
+    def test_curated_document_can_queue_ai_reorganization_without_leaving_curated(self):
+        source = self.make_source(suffix="curated-reorganize", allow_cloud_ai=True)
+        document = self.make_document(
+            source=source,
+            external_id="curated-reorganize-page",
+            title="精选知识重新整理",
+        )
+        document.knowledge_status = KnowledgeDocument.KNOWLEDGE_INCLUDED
+        document.library_tier = KnowledgeDocument.LIBRARY_KNOWLEDGE
+        document.curation_status = KnowledgeDocument.CURATION_CONFIRMED
+        document.confirmed_summary = "当前正式摘要"
+        document.save(
+            update_fields=[
+                "knowledge_status",
+                "library_tier",
+                "curation_status",
+                "confirmed_summary",
+                "updated_at",
+            ]
+        )
+        index_document(document)
+        self.make_text_ai_provider()
+
+        confirmation = self.client.post(
+            reverse("knowledge:document_ai_organize"),
+            {
+                "document_ids": document.pk,
+                "return_document_id": document.pk,
+                "mode": "curated_reorganization",
+            },
+        )
+        self.assertEqual(confirmation.status_code, 200)
+        self.assertContains(confirmation, "当前精选结果保持不变")
+
+        queued = self.client.post(
+            reverse("knowledge:document_ai_organize"),
+            {
+                "document_ids": document.pk,
+                "return_document_id": document.pk,
+                "mode": "curated_reorganization",
+                "confirm": "yes",
+                "authorization": "existing",
+                "acknowledge": "yes",
+            },
+        )
+        self.assertRedirects(
+            queued,
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk}),
+        )
+        document.refresh_from_db()
+        job = KnowledgeJob.objects.get(job_type=KnowledgeJob.TYPE_GENERATE_PROPOSALS)
+        self.assertEqual(job.parameters["selection_scope"], "curated_reorganization")
+        self.assertEqual(document.curation_status, KnowledgeDocument.CURATION_PENDING_AI)
+        self.assertEqual(document.knowledge_status, KnowledgeDocument.KNOWLEDGE_INCLUDED)
+        self.assertEqual(document.library_tier, KnowledgeDocument.LIBRARY_KNOWLEDGE)
+        self.assertEqual(document.confirmed_summary, "当前正式摘要")
+        self.assertNotContains(self.client.get(reverse("knowledge:inbox")), document.title)
+
+    def test_rejecting_all_ai_suggestions_keeps_unorganized_document_pending(self):
+        document = self.make_pending_document(
+            external_id="reject-all-page",
+            title="全部拒绝仍待整理",
+        )
+        proposal_run = KnowledgeProposalRun.objects.create(
+            document=document,
+            revision=document.current_revision,
+            sequence=1,
+            requested_by=self.member,
+            model_name="test-model",
+            prompt_version="knowledge-organize-v2-taxonomy",
+            content_hash=document.current_revision.content_hash,
+        )
+        proposals = [
+            KnowledgeProposal.objects.create(
+                document=document,
+                revision=document.current_revision,
+                run=proposal_run,
+                proposal_type=proposal_type,
+                suggested_value=value,
+                model_name="test-model",
+                prompt_version="knowledge-organize-v2-taxonomy",
+                content_hash=document.current_revision.content_hash,
+            )
+            for proposal_type, value in [
+                (KnowledgeProposal.TYPE_SUMMARY, {"text": "不采用摘要"}),
+                (KnowledgeProposal.TYPE_CATEGORY, {"value": "不采用分类"}),
+                (KnowledgeProposal.TYPE_TAGS, {"items": ["不采用标签"]}),
+            ]
+        ]
+        document.curation_status = KnowledgeDocument.CURATION_PENDING_REVIEW
+        document.save(update_fields=["curation_status", "updated_at"])
+
+        for proposal in proposals:
+            response = self.client.post(
+                reverse("knowledge:proposal_review", kwargs={"pk": proposal.pk}),
+                {"action": "reject", "value": ""},
+            )
+            self.assertRedirects(
+                response,
+                reverse("knowledge:document_detail", kwargs={"pk": document.pk}),
+            )
+
+        document.refresh_from_db()
+        self.assertEqual(document.knowledge_status, KnowledgeDocument.KNOWLEDGE_PENDING)
+        self.assertEqual(document.library_tier, KnowledgeDocument.LIBRARY_ARCHIVE)
+        self.assertEqual(document.curation_status, KnowledgeDocument.CURATION_NORMALIZED)
+        self.assertFalse(document.curation_revisions.exists())
+
+    @patch("knowledge.ai.socket.getaddrinfo")
+    @patch("knowledge.ai.urllib.request.urlopen")
+    def test_ai_reorganization_preserves_runs_and_marks_new_taxonomy(
+        self,
+        urlopen,
+        getaddrinfo,
+    ):
+        source = self.make_source(suffix="ai-runs", allow_cloud_ai=True)
+        document = self.make_document(
+            source=source,
+            external_id="ai-runs-page",
+            title="多轮 AI 整理",
+        )
+        category = KnowledgeCategory.objects.create(
+            family=self.family,
+            name="投资纪律",
+            created_by=self.member,
+        )
+        tag = KnowledgeTag.objects.create(
+            family=self.family,
+            name="长期主义",
+            created_by=self.member,
+        )
+        provider = self.make_text_ai_provider()
+        getaddrinfo.return_value = [(2, 1, 6, "", ("1.1.1.1", 443))]
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self, size):
+                return json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": json.dumps(
+                                        {
+                                            "summary": "新的整理摘要。",
+                                            "category": category.name,
+                                            "new_category": "",
+                                            "tags": [tag.name],
+                                            "new_tags": ["现金流"],
+                                        },
+                                        ensure_ascii=False,
+                                    )
+                                }
+                            }
+                        ],
+                        "usage": {"total_tokens": 88},
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8")
+
+        urlopen.side_effect = [FakeResponse(), FakeResponse()]
+        with patch.dict("os.environ", {"TEST_KNOWLEDGE_AI_KEY": "secret-key"}):
+            first = generate_proposals(document, requested_by=self.member)
+            second = generate_proposals(document, requested_by=self.member)
+
+        self.assertEqual(KnowledgeProposalRun.objects.filter(document=document).count(), 2)
+        self.assertEqual(KnowledgeProposal.objects.filter(document=document).count(), 6)
+        self.assertEqual(
+            set(
+                KnowledgeProposal.objects.filter(
+                    pk__in=[item.pk for item in first]
+                ).values_list("status", flat=True)
+            ),
+            {KnowledgeProposal.STATUS_STALE},
+        )
+        self.assertTrue(
+            all(item.status == KnowledgeProposal.STATUS_PENDING for item in second)
+        )
+        category_proposal = next(
+            item for item in second if item.proposal_type == KnowledgeProposal.TYPE_CATEGORY
+        )
+        tag_proposal = next(
+            item for item in second if item.proposal_type == KnowledgeProposal.TYPE_TAGS
+        )
+        self.assertFalse(category_proposal.suggested_value["is_new"])
+        self.assertEqual(tag_proposal.suggested_value["new_items"], ["现金流"])
+        self.assertFalse(KnowledgeTag.objects.filter(name="现金流").exists())
+        self.assertEqual(first[0].run.sequence, 1)
+        self.assertEqual(second[0].run.sequence, 2)
+        self.assertEqual(second[0].run.analysis_request.provider, provider)
+
+        accepted = self.client.post(
+            reverse("knowledge:proposal_review", kwargs={"pk": tag_proposal.pk}),
+            {"action": "accept", "value": "长期主义，现金流"},
+        )
+        self.assertRedirects(
+            accepted,
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk}),
+        )
+        self.assertTrue(KnowledgeTag.objects.filter(name="现金流").exists())
+        detail = self.client.get(
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk})
+        )
+        self.assertContains(detail, "本次整理建议")
+        self.assertContains(detail, "AI 整理历史")
+        self.assertContains(detail, "第 1 次")
 
     @patch("knowledge.ai.socket.getaddrinfo")
     @patch("knowledge.ai.urllib.request.urlopen")
@@ -2291,9 +2649,19 @@ class KnowledgeBaseTests(TestCase):
     def test_viewer_can_browse_but_cannot_create_tasks_or_confirm(self):
         source = self.make_source(suffix="viewer")
         document = self.make_document(source=source, external_id="viewer-page")
+        proposal_run = KnowledgeProposalRun.objects.create(
+            document=document,
+            revision=document.current_revision,
+            sequence=1,
+            requested_by=self.member,
+            model_name="test-model",
+            prompt_version="knowledge-organize-v1",
+            content_hash=document.current_revision.content_hash,
+        )
         proposal = KnowledgeProposal.objects.create(
             document=document,
             revision=document.current_revision,
+            run=proposal_run,
             proposal_type=KnowledgeProposal.TYPE_SUMMARY,
             suggested_value={"text": "摘要"},
             model_name="test-model",

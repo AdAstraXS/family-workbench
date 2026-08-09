@@ -2,17 +2,55 @@ from django.contrib import admin
 
 from .models import (
     KnowledgeAsset,
+    KnowledgeCategory,
+    KnowledgeCurationRevision,
     KnowledgeDocument,
     KnowledgeImportBatch,
     KnowledgeImportItem,
     KnowledgeJob,
     KnowledgeJobItem,
     KnowledgeProposal,
+    KnowledgeProposalRun,
     KnowledgeRevision,
     KnowledgeSearchEntry,
     KnowledgeSource,
+    KnowledgeTag,
     SourceConnection,
 )
+
+
+@admin.register(KnowledgeCategory)
+class KnowledgeCategoryAdmin(admin.ModelAdmin):
+    list_display = ("name", "family", "is_active", "merged_into", "updated_at")
+    list_filter = ("family", "is_active")
+    search_fields = ("name", "normalized_name", "description")
+    readonly_fields = ("normalized_name", "aliases", "created_at", "updated_at")
+
+
+@admin.register(KnowledgeTag)
+class KnowledgeTagAdmin(admin.ModelAdmin):
+    list_display = ("name", "family", "is_active", "merged_into", "updated_at")
+    list_filter = ("family", "is_active")
+    search_fields = ("name", "normalized_name", "description")
+    readonly_fields = ("normalized_name", "aliases", "created_at", "updated_at")
+
+
+@admin.register(KnowledgeCurationRevision)
+class KnowledgeCurationRevisionAdmin(admin.ModelAdmin):
+    list_display = ("document", "sequence", "change_type", "changed_by", "created_at")
+    list_filter = ("change_type",)
+    search_fields = ("document__title", "summary", "category")
+    readonly_fields = (
+        "document",
+        "sequence",
+        "summary",
+        "category",
+        "tags",
+        "change_type",
+        "changed_by",
+        "proposal_run",
+        "created_at",
+    )
 
 
 @admin.register(SourceConnection)
@@ -106,6 +144,7 @@ class KnowledgeProposalAdmin(admin.ModelAdmin):
     readonly_fields = (
         "document",
         "revision",
+        "run",
         "proposal_type",
         "suggested_value",
         "human_value",
@@ -114,6 +153,30 @@ class KnowledgeProposalAdmin(admin.ModelAdmin):
         "content_hash",
         "confirmed_by",
         "confirmed_at",
+        "created_at",
+    )
+
+
+@admin.register(KnowledgeProposalRun)
+class KnowledgeProposalRunAdmin(admin.ModelAdmin):
+    list_display = (
+        "document",
+        "sequence",
+        "model_name",
+        "requested_by",
+        "created_at",
+    )
+    list_filter = ("model_name", "prompt_version")
+    search_fields = ("document__title", "content_hash")
+    readonly_fields = (
+        "document",
+        "revision",
+        "sequence",
+        "requested_by",
+        "analysis_request",
+        "model_name",
+        "prompt_version",
+        "content_hash",
         "created_at",
     )
 

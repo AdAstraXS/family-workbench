@@ -7,10 +7,9 @@
 <section class="knowledge-page-heading">
   <div>
     <span class="eyebrow">AI organization</span>
-    <h1>确认 AI 整理范围</h1>
-    <p>将为 {{ document_count }} 篇已选资料生成摘要、分类和标签建议。AI 结果仍留在待整理，只有你核对确认后才会进入精选知识。</p>
+    <h1>确认 AI 整理范围（{{ document_count }} 篇）{% if is_reorganization %}{% include "knowledge/_help_tip.html" with text="将为这篇精选知识生成一轮新的摘要、分类和标签建议。当前精选结果保持不变，只有你核对确认后才会更新。" %}{% else %}{% include "knowledge/_help_tip.html" with text="AI 只生成摘要、分类和标签建议；结果仍留在待整理，只有你核对确认后才会进入精选知识。" %}{% endif %}</h1>
   </div>
-  <a class="button" href="{% url 'knowledge:inbox' %}">返回待整理</a>
+  {% if return_document_id %}<a class="button" href="{% url 'knowledge:document_detail' return_document_id %}">返回文章</a>{% else %}<a class="button" href="{% url 'knowledge:inbox' %}">返回待整理</a>{% endif %}
 </section>
 
 <div class="knowledge-ai-confirm-layout">
@@ -39,21 +38,22 @@
 
   <aside class="panel knowledge-ai-consent-panel">
     <h2>正文发送授权</h2>
-    <p>整理需要把所选文章的标题、来源和正文发送到 NAS 之外的云端 AI。原始文件和原文不会被修改。</p>
+    {% include "knowledge/_help_tip.html" with text="整理需要把所选文章的标题、来源和正文发送到 NAS 之外的云端 AI。原始文件和原文不会被修改。" %}
     <form method="post" action="{% url 'knowledge:document_ai_organize' %}" class="stacked-form">
       {% csrf_token %}
       {% for document in documents %}<input type="hidden" name="document_ids" value="{{ document.pk }}">{% endfor %}
       {% if return_document_id %}<input type="hidden" name="return_document_id" value="{{ return_document_id }}">{% endif %}
+      <input type="hidden" name="mode" value="{{ mode }}">
       <input type="hidden" name="confirm" value="yes">
       {% if unauthorized_groups %}
         <label class="knowledge-ai-consent-option">
           <input type="radio" name="authorization" value="once" checked>
-          <span><strong>仅允许本次选中的文章</strong><small>任务结束后不保留来源级授权。推荐用于首次试用。</small></span>
+            <span><strong>仅允许本次选中的文章{% include "knowledge/_help_tip.html" with text="任务结束后不保留来源级授权，推荐用于首次试用。" %}</strong></span>
         </label>
         {% if can_authorize_all_sources %}
           <label class="knowledge-ai-consent-option">
             <input type="radio" name="authorization" value="source">
-            <span><strong>今后允许这些来源使用云端 AI</strong><small>以后仍需在待整理中主动选择文章，不会自动批量处理。</small></span>
+            <span><strong>今后允许这些来源使用云端 AI{% include "knowledge/_help_tip.html" with text="以后仍需在待整理中主动选择文章，不会自动批量处理。" %}</strong></span>
           </label>
         {% endif %}
       {% else %}

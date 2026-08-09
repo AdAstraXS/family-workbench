@@ -8,7 +8,7 @@
 <section class="headline knowledge-headline">
   <div>
     <h1>来源与同步</h1>
-    <p>每名家庭成员只绑定自己的账户；管理员可以看状态，但不能查看令牌。</p>
+    {% include "knowledge/_help_tip.html" with text="每名家庭成员只绑定自己的账户；管理员可以看状态，但不能查看令牌。" %}
   </div>
   <a class="button" href="{% url 'knowledge:imports' %}">批量导入资料</a>
 </section>
@@ -48,7 +48,7 @@
         </div>
       {% endif %}
     {% else %}
-      <p>只申请读取 OneNote 所需的最小委托权限，不会回写或删除 OneNote 内容。</p>
+      {% include "knowledge/_help_tip.html" with text="只申请读取 OneNote 所需的最小委托权限，不会回写或删除 OneNote 内容。" %}
       {% if can_write %}
         <form method="post" action="{% url 'knowledge:microsoft_start' %}">
           {% csrf_token %}<button class="button primary" type="submit">绑定我的 Microsoft 账户</button>
@@ -82,12 +82,12 @@
           <input type="checkbox" name="allow_cloud_ai">
           <span>允许把这个笔记本的正文发送给已配置的云端 AI 进行摘要、标签和分类建议</span>
         </label>
-        <small>保存后可在来源详情中按 OneNote 分区选择“归档资料、归档并加入待整理或仅同步”；不勾选 AI 仍可同步和阅读。</small>
+        {% include "knowledge/_help_tip.html" with text="保存后可在来源详情中按 OneNote 分区选择“归档资料、归档并加入待整理或仅同步”；不勾选 AI 仍可同步和阅读。" %}
         <button class="button primary" type="submit">保存试点来源</button>
       </form>
     {% else %}
       <div class="empty-state compact">
-        <p>完成账户绑定并刷新笔记本列表后，在这里选择第一轮验证内容。</p>
+        {% include "knowledge/_help_tip.html" with text="完成账户绑定并刷新笔记本列表后，在这里选择第一轮验证内容。" %}
       </div>
     {% endif %}
   </article>
@@ -119,7 +119,7 @@
 {% if connections|length > 1 %}
 <section class="panel">
   <h2>家庭连接状态</h2>
-  <p class="muted">管理员只能看到健康状态和错误摘要，看不到任何成员令牌。</p>
+      {% include "knowledge/_help_tip.html" with text="管理员只能看到健康状态和错误摘要，看不到任何成员令牌。" %}
   <table>
     <thead><tr><th>成员</th><th>服务商</th><th>状态</th><th>最近成功</th><th>错误摘要</th></tr></thead>
     <tbody>

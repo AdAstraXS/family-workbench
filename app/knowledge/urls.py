@@ -12,6 +12,26 @@ urlpatterns = [
     path("library/mine/", views.personal_library, name="personal_library"),
     path("library/family/", views.family_library, name="family_library"),
     path("topics/", views.topics, name="topics"),
+    path(
+        "topics/<str:kind>/new/",
+        views.taxonomy_create,
+        name="taxonomy_create",
+    ),
+    path(
+        "topics/<str:kind>/<int:pk>/edit/",
+        views.taxonomy_edit,
+        name="taxonomy_edit",
+    ),
+    path(
+        "topics/<str:kind>/<int:pk>/delete/",
+        views.taxonomy_delete,
+        name="taxonomy_delete",
+    ),
+    path(
+        "topics/<str:kind>/<int:pk>/merge/",
+        views.taxonomy_merge,
+        name="taxonomy_merge",
+    ),
     path("people/", views.people, name="people"),
     path("architecture/", views.architecture, name="architecture"),
     path("documents/<int:pk>/", views.document_detail, name="document_detail"),

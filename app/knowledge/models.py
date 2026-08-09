@@ -1,4 +1,5 @@
 import uuid
+import unicodedata
 from pathlib import Path
 
 from django.db import models
@@ -10,6 +11,12 @@ from family_core.models import Family, FamilyMember, TimestampedModel
 
 from .crypto import decrypt_json, encrypt_json
 from .storage import protected_knowledge_storage
+
+
+def normalize_taxonomy_name(value):
+    """Return a stable comparison key without changing the displayed name."""
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return " ".join(normalized.strip().split()).casefold()
 
 
 def _safe_filename(filename, fallback):
@@ -230,6 +237,106 @@ class KnowledgeSource(TimestampedModel):
         routes = (self.config or {}).get("section_routes") or {}
         value = routes.get(str(section_id or ""), self.default_route)
         return value if value in dict(self.ROUTE_CHOICES) else self.default_route
+
+
+class KnowledgeCategory(TimestampedModel):
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="knowledge_categories",
+    )
+    name = models.CharField("分类名称", max_length=100)
+    normalized_name = models.CharField("规范名称", max_length=100)
+    description = models.CharField("说明", max_length=300, blank=True)
+    aliases = models.JSONField("历史名称与别名", default=list, blank=True)
+    is_active = models.BooleanField("是否启用", default=True)
+    merged_into = models.ForeignKey(
+        "self",
+        verbose_name="已合并到",
+        on_delete=models.PROTECT,
+        related_name="merged_categories",
+        null=True,
+        blank=True,
+    )
+    created_by = models.ForeignKey(
+        FamilyMember,
+        verbose_name="创建人",
+        on_delete=models.SET_NULL,
+        related_name="created_knowledge_categories",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "知识分类"
+        verbose_name_plural = "知识分类"
+        ordering = ["name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["family", "normalized_name"],
+                name="unique_knowledge_category_name_per_family",
+            )
+        ]
+        indexes = [models.Index(fields=["family", "is_active", "name"])]
+
+    def save(self, *args, **kwargs):
+        self.name = " ".join(str(self.name or "").strip().split())
+        self.normalized_name = normalize_taxonomy_name(self.name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
+
+class KnowledgeTag(TimestampedModel):
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="knowledge_tags",
+    )
+    name = models.CharField("标签名称", max_length=30)
+    normalized_name = models.CharField("规范名称", max_length=30)
+    description = models.CharField("说明", max_length=300, blank=True)
+    aliases = models.JSONField("历史名称与别名", default=list, blank=True)
+    is_active = models.BooleanField("是否启用", default=True)
+    merged_into = models.ForeignKey(
+        "self",
+        verbose_name="已合并到",
+        on_delete=models.PROTECT,
+        related_name="merged_tags",
+        null=True,
+        blank=True,
+    )
+    created_by = models.ForeignKey(
+        FamilyMember,
+        verbose_name="创建人",
+        on_delete=models.SET_NULL,
+        related_name="created_knowledge_tags",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "知识标签"
+        verbose_name_plural = "知识标签"
+        ordering = ["name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["family", "normalized_name"],
+                name="unique_knowledge_tag_name_per_family",
+            )
+        ]
+        indexes = [models.Index(fields=["family", "is_active", "name"])]
+
+    def save(self, *args, **kwargs):
+        self.name = " ".join(str(self.name or "").strip().split())
+        self.normalized_name = normalize_taxonomy_name(self.name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
 
 
 class KnowledgeDocument(TimestampedModel):
@@ -455,6 +562,114 @@ class KnowledgeAsset(models.Model):
         return self.original_name or self.external_id
 
 
+class KnowledgeProposalRun(models.Model):
+    document = models.ForeignKey(
+        KnowledgeDocument,
+        verbose_name="知识文档",
+        on_delete=models.CASCADE,
+        related_name="proposal_runs",
+    )
+    revision = models.ForeignKey(
+        KnowledgeRevision,
+        verbose_name="对应内容版本",
+        on_delete=models.CASCADE,
+        related_name="proposal_runs",
+    )
+    sequence = models.PositiveIntegerField("整理轮次")
+    requested_by = models.ForeignKey(
+        FamilyMember,
+        verbose_name="发起成员",
+        on_delete=models.SET_NULL,
+        related_name="knowledge_proposal_runs",
+        null=True,
+        blank=True,
+    )
+    analysis_request = models.OneToOneField(
+        "ai_analysis.AiAnalysisRequest",
+        verbose_name="AI 请求",
+        on_delete=models.SET_NULL,
+        related_name="knowledge_proposal_run",
+        null=True,
+        blank=True,
+    )
+    model_name = models.CharField("模型", max_length=200)
+    prompt_version = models.CharField("提示词版本", max_length=50)
+    content_hash = models.CharField("输入内容哈希", max_length=64)
+    created_at = models.DateTimeField("生成时间", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "知识 AI 整理轮次"
+        verbose_name_plural = "知识 AI 整理轮次"
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["document", "sequence"],
+                name="unique_knowledge_proposal_run_sequence",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["document", "created_at"]),
+            models.Index(fields=["revision", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.document} · 第 {self.sequence} 次 AI 整理"
+
+
+class KnowledgeCurationRevision(models.Model):
+    TYPE_MANUAL = "manual"
+    TYPE_AI_CONFIRMED = "ai_confirmed"
+    TYPE_LEGACY = "legacy"
+    TYPE_CHOICES = [
+        (TYPE_MANUAL, "人工整理"),
+        (TYPE_AI_CONFIRMED, "确认 AI 建议"),
+        (TYPE_LEGACY, "既有整理结果"),
+    ]
+
+    document = models.ForeignKey(
+        KnowledgeDocument,
+        verbose_name="知识文档",
+        on_delete=models.CASCADE,
+        related_name="curation_revisions",
+    )
+    sequence = models.PositiveIntegerField("整理版本")
+    summary = models.TextField("正式摘要", blank=True)
+    category = models.CharField("正式分类", max_length=100, blank=True)
+    tags = models.JSONField("正式标签", default=list, blank=True)
+    change_type = models.CharField("整理方式", max_length=30, choices=TYPE_CHOICES)
+    changed_by = models.ForeignKey(
+        FamilyMember,
+        verbose_name="整理人",
+        on_delete=models.SET_NULL,
+        related_name="knowledge_curation_revisions",
+        null=True,
+        blank=True,
+    )
+    proposal_run = models.ForeignKey(
+        KnowledgeProposalRun,
+        verbose_name="采用的 AI 整理轮次",
+        on_delete=models.SET_NULL,
+        related_name="curation_revisions",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField("保存时间", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "知识正式整理版本"
+        verbose_name_plural = "知识正式整理版本"
+        ordering = ["-sequence", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["document", "sequence"],
+                name="unique_knowledge_curation_revision_sequence",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.document} · 整理版本 {self.sequence}"
+
+
 class KnowledgeProposal(models.Model):
     TYPE_SUMMARY = "summary"
     TYPE_TAGS = "tags"
@@ -488,6 +703,12 @@ class KnowledgeProposal(models.Model):
         on_delete=models.CASCADE,
         related_name="proposals",
     )
+    run = models.ForeignKey(
+        KnowledgeProposalRun,
+        verbose_name="整理轮次",
+        on_delete=models.CASCADE,
+        related_name="proposals",
+    )
     proposal_type = models.CharField("建议类型", max_length=30, choices=TYPE_CHOICES)
     suggested_value = models.JSONField("AI 建议", default=dict)
     human_value = models.JSONField("人工确认值", default=dict, blank=True)
@@ -517,8 +738,8 @@ class KnowledgeProposal(models.Model):
         ordering = ["created_at", "id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["revision", "proposal_type", "prompt_version"],
-                name="unique_knowledge_proposal_per_revision_type_prompt",
+                fields=["run", "proposal_type"],
+                name="unique_knowledge_proposal_type_per_run",
             )
         ]
         indexes = [

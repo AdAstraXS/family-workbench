@@ -8,12 +8,12 @@
   <div>
     <span class="eyebrow">Knowledge Library</span>
     <h1>{{ page_title }}</h1>
-    <p>{{ page_description }}</p>
+    {% include "knowledge/_help_tip.html" with text=page_description %}
   </div>
   {% if selected_collection == "pending" %}
     <a class="button primary" href="{% url 'knowledge:review' %}">等待确认 {{ workflow_counts.waiting_review }}</a>
   {% else %}
-    <a class="button" href="{% url 'knowledge:topics' %}">按主题浏览</a>
+    <a class="button" href="{% url 'knowledge:topics' %}">管理分类与标签</a>
   {% endif %}
 </section>
 
