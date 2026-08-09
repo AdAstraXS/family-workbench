@@ -381,6 +381,13 @@ class TransactionFormTests(TestCase):
         self.assertContains(form_page, "家庭")
         self.assertContains(form_page, "用户")
         self.assertContains(form_page, "证券账户")
+        self.assertContains(form_page, "金融品种")
+        self.assertContains(form_page, "同时新增债券")
+        self.assertContains(form_page, "账户与标的")
+        self.assertContains(form_page, "新期权合约")
+        self.assertContains(form_page, "新债券资料")
+        self.assertContains(form_page, 'id="option-contract-section"')
+        self.assertContains(form_page, 'id="bond-security-section"')
         self.assertContains(form_page, "测试券商账户")
         self.assertContains(form_page, "自动根据交易标的")
         self.assertNotContains(form_page, "外部流水号")
@@ -535,7 +542,7 @@ class TransactionFormTests(TestCase):
             code="USD",
             defaults={"name": "美元", "symbol": "$", "is_active": True},
         )
-        AssetCategory.objects.create(
+        derivative_category = AssetCategory.objects.create(
             family=family,
             name="衍生品",
             code="derivatives",
@@ -566,7 +573,8 @@ class TransactionFormTests(TestCase):
                 "family": family.pk,
                 "member": member.pk,
                 "bank_account": bank_account.pk,
-                "asset_category": "",
+                "asset_category": derivative_category.pk,
+                "asset_type": Security.TYPE_OPTION,
                 "security": "",
                 "create_option_contract": "on",
                 "option_underlying": underlying.pk,
@@ -610,6 +618,102 @@ class TransactionFormTests(TestCase):
         resolution = resolve_position_prices([position], trade_date)[position.pk]
         self.assertEqual(resolution.price, Decimal("2.50"))
         self.assertEqual(resolution.status, PricingStatusChoices.MANUAL)
+
+    def test_transaction_form_can_create_bond_and_trade_together(self):
+        user = get_user_model().objects.create_user(username="inline-bond-tester")
+        family = Family.objects.create(name="债券交易家庭")
+        member = FamilyMember.objects.create(
+            family=family,
+            user=user,
+            display_name="成员",
+        )
+        account_type = AccountType.objects.create(family=family, name="券商")
+        bank_account = BankAccount.objects.create(
+            family=family,
+            member=member,
+            account_type_ref=account_type,
+            account_name="美债账户",
+            supports_investment=True,
+        )
+        Currency.objects.update_or_create(
+            code="USD",
+            defaults={"name": "美元", "symbol": "$", "is_active": True},
+        )
+        fixed_income = AssetCategory.objects.create(
+            family=family,
+            name="固定收益类",
+            code="fixed_income",
+        )
+        buy_option = InvestmentOption.objects.get(
+            category=InvestmentOption.CATEGORY_TRANSACTION_TYPE,
+            code=TradeTypeChoices.BUY,
+        )
+        trade_date = timezone.localdate()
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("portfolio:transaction_create"),
+            {
+                "family": family.pk,
+                "member": member.pk,
+                "bank_account": bank_account.pk,
+                "asset_category": fixed_income.pk,
+                "asset_type": Security.TYPE_BOND,
+                "security": "",
+                "create_bond": "on",
+                "bond_symbol": "UST2032",
+                "bond_name": "美国国债 2032",
+                "bond_market": "US",
+                "bond_exchange": "",
+                "bond_isin": "US0000000032",
+                "bond_issuer": "美国财政部",
+                "bond_type": BondDetail.GOVERNMENT,
+                "bond_face_value": "100",
+                "bond_coupon_rate": "4.25",
+                "bond_coupon_frequency": "2",
+                "bond_maturity_date": "2032-06-30",
+                "bond_redemption_price": "100",
+                "bond_quote_basis": BondDetail.PER_100,
+                "bond_accrued_interest": "1.5",
+                "trade_date": trade_date.isoformat(),
+                "trade_type_option": buy_option.pk,
+                "position_effect": "",
+                "currency": "USD",
+                "quantity": "1000",
+                "price": "98",
+                "amount": "980",
+                "fee": "2",
+                "tax": "0",
+                "trade_logic": "",
+                "information_source_option": "",
+                "strategy_option": "",
+                "strategy_other": "",
+                "emotion_option": "",
+                "exit_condition": "",
+                "remark": "新增美债并买入",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        bond = Security.objects.select_related("bond_detail").get(
+            symbol="UST2032",
+            market="US",
+        )
+        transaction = InvestmentTransaction.objects.get(remark="新增美债并买入")
+        position = InvestmentPosition.objects.get(
+            account__bank_account=bank_account,
+            security=bond,
+        )
+        self.assertEqual(bond.asset_type, Security.TYPE_BOND)
+        self.assertEqual(bond.asset_category, fixed_income)
+        self.assertEqual(bond.bond_detail.quote_basis, BondDetail.PER_100)
+        self.assertEqual(bond.bond_detail.accrued_interest, Decimal("1.5"))
+        self.assertEqual(transaction.security, bond)
+        self.assertEqual(transaction.amount, Decimal("980.00"))
+        self.assertEqual(position.quantity, Decimal("1000"))
+        self.assertTrue(
+            WatchlistItem.objects.filter(family=family, security=bond).exists()
+        )
 
 
 class AccountPrototypeTests(TestCase):
@@ -2601,7 +2705,12 @@ class PortfolioReconciliationTests(TestCase):
 class PositionAccountingTests(TestCase):
     def setUp(self):
         family = Family.objects.create(name="核算测试家庭")
-        member = FamilyMember.objects.create(family=family, display_name="成员甲")
+        self.user = get_user_model().objects.create_user(username="position-accounting")
+        member = FamilyMember.objects.create(
+            family=family,
+            user=self.user,
+            display_name="成员甲",
+        )
         self.account = create_broker_investment_account(
             family,
             member,
@@ -2613,6 +2722,7 @@ class PositionAccountingTests(TestCase):
             market="HK",
             currency="HKD",
         )
+        self.client.force_login(self.user)
 
     def add_trade(self, trade_date, trade_type, quantity, price, fee="0"):
         return InvestmentTransaction.objects.create(
@@ -2821,6 +2931,72 @@ class PositionAccountingTests(TestCase):
             close_transaction.extra_data["underlying_transaction_id"],
             underlying_transaction.pk,
         )
+
+    def test_expired_short_put_assignment_button_buys_underlying(self):
+        option = Security.objects.create(
+            symbol="OPT-ASSIGNMENT",
+            name="到期被指派看跌期权",
+            market="HK",
+            asset_type=Security.TYPE_OPTION,
+            currency="HKD",
+        )
+        OptionContract.objects.create(
+            security=option,
+            underlying=self.security,
+            option_type=OptionContract.PUT,
+            strike_price=Decimal("80"),
+            expiration_date=date(2026, 7, 31),
+            multiplier=100,
+        )
+        InvestmentTransaction.objects.create(
+            account=self.account,
+            security=option,
+            trade_date=date(2026, 7, 25),
+            trade_type=TradeTypeChoices.SELL,
+            position_effect=InvestmentTransaction.EFFECT_OPEN,
+            quantity=Decimal("1"),
+            price=Decimal("3"),
+            amount=Decimal("300"),
+            currency="HKD",
+        )
+        position = rebuild_position(self.account, option)
+
+        page = self.client.get(
+            self.account.get_absolute_url(),
+            {"tab": "positions"},
+        )
+        self.assertContains(page, "到期指派")
+        self.assertContains(page, "holding-action holding-action-accent")
+        self.assertNotContains(page, "到期行权")
+
+        response = self.client.post(
+            reverse(
+                "portfolio:option_position_action",
+                args=[position.pk, "assignment"],
+            ),
+            {
+                "action_date": "2026-07-31",
+                "quantity": "1",
+                "fee": "5",
+                "remark": "券商确认被指派",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        position.refresh_from_db()
+        underlying_position = InvestmentPosition.objects.get(
+            account=self.account,
+            security=self.security,
+        )
+        underlying_transaction = InvestmentTransaction.objects.get(
+            security=self.security,
+            extra_data__option_action="assignment",
+        )
+        self.assertEqual(position.quantity, Decimal("0"))
+        self.assertEqual(underlying_position.quantity, Decimal("100"))
+        self.assertEqual(underlying_transaction.trade_type, TradeTypeChoices.BUY)
+        self.assertEqual(underlying_transaction.price, Decimal("80"))
+        self.assertEqual(underlying_transaction.fee, Decimal("5"))
 
     def test_transaction_numbers_are_unique_without_max_plus_one(self):
         first = self.add_trade(date(2026, 1, 1), TradeTypeChoices.BUY, "1", "100")

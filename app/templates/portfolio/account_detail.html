@@ -71,10 +71,11 @@
         <td class="{% if item.realized_for_year > 0 %}positive{% elif item.realized_for_year < 0 %}negative{% endif %}"><span class="money-stack">{{ item.realized_for_year|signed_currency0:item.original_currency }}<small>本位币 {{ item.realized_base|signed_currency0:account.family.base_currency }}</small></span></td>
         <td>{{ item.position_ratio|floatformat:2 }}%</td>
         <td><span class="row-actions holding-actions">
-          <a class="text-action" href="{% url 'portfolio:manual_security_price' item.security.pk %}">更新价格</a>
-          <a class="text-action" href="{% url 'portfolio:transaction_create' %}?account={{ item.account.pk }}&security={{ item.security.pk }}&action=sell">{% if item.is_option %}平仓{% else %}卖出{% endif %}</a>
-          {% if item.is_option and item.option_expired %}<a class="text-action" href="{% url 'portfolio:option_position_action' item.pk 'expire' %}">到期作废</a>{% endif %}
-          {% if item.is_long_option %}<a class="text-action" href="{% url 'portfolio:option_position_action' item.pk 'exercise' %}">行权</a>{% endif %}
+          <a class="holding-action holding-action-secondary" href="{% url 'portfolio:manual_security_price' item.security.pk %}">更新价格</a>
+          <a class="holding-action holding-action-primary" href="{% url 'portfolio:transaction_create' %}?account={{ item.account.pk }}&security={{ item.security.pk }}&action=sell">{% if item.is_option %}平仓{% else %}卖出{% endif %}</a>
+          {% if item.is_option and item.option_expired %}<a class="holding-action holding-action-warning" href="{% url 'portfolio:option_position_action' item.pk 'expire' %}">到期作废</a>{% endif %}
+          {% if item.is_long_option and item.option_expired %}<a class="holding-action holding-action-accent" href="{% url 'portfolio:option_position_action' item.pk 'exercise' %}">到期行权</a>{% endif %}
+          {% if item.is_short_option and item.option_expired %}<a class="holding-action holding-action-accent" href="{% url 'portfolio:option_position_action' item.pk 'assignment' %}">到期指派</a>{% endif %}
         </span></td>
       </tr>{% empty %}<tr><td colspan="12">暂无持仓。</td></tr>{% endfor %}</tbody>
     </table></div>

@@ -445,6 +445,7 @@ def _account_dashboard_data(request, account=None):
             and option_contract.expiration_date <= timezone.localdate()
         )
         item.is_long_option = bool(option_contract and item.quantity > 0)
+        item.is_short_option = bool(option_contract and item.quantity < 0)
         item.display_cost = (
             item.diluted_cost
             if cost_method == "diluted"
@@ -2248,7 +2249,7 @@ def position_edit(request, pk):
 
 @login_required
 def option_position_action(request, pk, action):
-    if action not in {"expire", "exercise"}:
+    if action not in {"expire", "exercise", "assignment"}:
         raise PermissionDenied("不支持的期权操作。")
     position = get_object_or_404(
         InvestmentPosition.objects.filter(account__in=_visible_accounts(request))
@@ -2292,7 +2293,11 @@ def option_position_action(request, pk, action):
         else:
             messages.success(
                 request,
-                "期权到期作废已记录。" if action == "expire" else "期权行权及正股交易已记录。",
+                {
+                    "expire": "期权到期作废已记录。",
+                    "exercise": "期权行权及正股交易已记录。",
+                    "assignment": "期权到期指派及正股交易已记录。",
+                }[action],
             )
             return redirect(f"{position.account.get_absolute_url()}?tab=positions")
     return render(
@@ -2303,12 +2308,20 @@ def option_position_action(request, pk, action):
             "title": (
                 f"到期作废 · {position.security.name}"
                 if action == "expire"
-                else f"行权 · {position.security.name}"
+                else (
+                    f"到期行权 · {position.security.name}"
+                    if action == "exercise"
+                    else f"到期指派 · {position.security.name}"
+                )
             ),
             "form_intro": (
                 "系统将以 0 价格平仓该期权。"
                 if action == "expire"
-                else "系统将关闭期权持仓，并按行权价自动生成对应正股买入或卖出交易。"
+                else (
+                    "系统将关闭多头期权，并按行权价自动生成对应正股买入或卖出交易。"
+                    if action == "exercise"
+                    else "系统将关闭空头期权，并按行权价自动生成对应正股卖出或买入交易。"
+                )
             ),
             "page_parent_url": (
                 f"{position.account.get_absolute_url()}?tab=positions"
@@ -2396,8 +2409,11 @@ def transaction_form_options(request):
         is_active=True,
     ).order_by("display_order", "name")
     securities = Security.objects.filter(
-        watchlist_items__family_id=family_id,
-        watchlist_items__is_active=True,
+        Q(
+            watchlist_items__family_id=family_id,
+            watchlist_items__is_active=True,
+        )
+        | Q(positions__account__bank_account__family_id=family_id)
     ).distinct().order_by("market", "symbol")
     underlyings = securities.exclude(asset_type=Security.TYPE_OPTION)
     return JsonResponse(
@@ -2410,7 +2426,10 @@ def transaction_form_options(request):
                 }
                 for item in accounts
             ],
-            "categories": [{"id": item.pk, "name": item.name} for item in categories],
+            "categories": [
+                {"id": item.pk, "name": item.name, "code": item.code}
+                for item in categories
+            ],
             "securities": [
                 {
                     "id": item.pk,
@@ -2536,6 +2555,7 @@ def save_transaction_form(request, title, instance=None):
                 {
                     "security": selected_position.security,
                     "asset_category": selected_position.security.asset_category,
+                    "asset_type": selected_position.security.asset_type,
                     "trade_date": timezone.localdate(),
                     "trade_type_option": InvestmentOption.objects.filter(
                         category=InvestmentOption.CATEGORY_TRANSACTION_TYPE,

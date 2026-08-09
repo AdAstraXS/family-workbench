@@ -256,16 +256,18 @@ def settle_option_position(
     user=None,
 ):
     if position.security.asset_type != position.security.TYPE_OPTION:
-        raise ValidationError("只有期权持仓可以执行到期作废或行权。")
+        raise ValidationError("只有期权持仓可以执行到期作废、行权或指派。")
     if quantity <= 0 or quantity > abs(position.quantity):
         raise ValidationError("处理张数必须大于 0，且不能超过当前持仓。")
-    if action not in {"expire", "exercise"}:
+    if action not in {"expire", "exercise", "assignment"}:
         raise ValidationError("不支持的期权处理方式。")
 
     contract = position.security.option_contract
     is_long = position.quantity > 0
     if action == "exercise" and not is_long:
-        raise ValidationError("空头期权不能行权，请按实际指派结果录入交易。")
+        raise ValidationError("空头期权不能行权，请使用到期指派。")
+    if action == "assignment" and is_long:
+        raise ValidationError("多头期权不能被指派，请使用到期行权。")
 
     close_trade_type = TradeTypeChoices.SELL if is_long else TradeTypeChoices.BUY
     close_transaction = InvestmentTransaction.objects.create(
@@ -282,7 +284,11 @@ def settle_option_position(
         currency=position.security.currency,
         source=TransactionSourceChoices.MANUAL,
         remark=(
-            ("期权到期作废" if action == "expire" else "期权行权关闭合约")
+            {
+                "expire": "期权到期作废",
+                "exercise": "期权行权关闭合约",
+                "assignment": "期权被指派关闭合约",
+            }[action]
             + (f"；{remark}" if remark else "")
         ),
         created_by=user,
@@ -295,12 +301,19 @@ def settle_option_position(
     rebuild_position(position.account, position.security)
 
     underlying_transaction = None
-    if action == "exercise":
-        underlying_trade_type = (
-            TradeTypeChoices.BUY
-            if contract.option_type == OptionContract.CALL
-            else TradeTypeChoices.SELL
-        )
+    if action in {"exercise", "assignment"}:
+        if action == "exercise":
+            underlying_trade_type = (
+                TradeTypeChoices.BUY
+                if contract.option_type == OptionContract.CALL
+                else TradeTypeChoices.SELL
+            )
+        else:
+            underlying_trade_type = (
+                TradeTypeChoices.SELL
+                if contract.option_type == OptionContract.CALL
+                else TradeTypeChoices.BUY
+            )
         underlying_quantity = quantity * contract.multiplier
         underlying_transaction = InvestmentTransaction.objects.create(
             account=position.account,
@@ -315,7 +328,9 @@ def settle_option_position(
             currency=contract.underlying.currency,
             source=TransactionSourceChoices.MANUAL,
             remark=(
-                f"由 {position.security.symbol} 行权产生"
+                f"由 {position.security.symbol} "
+                + ("行权" if action == "exercise" else "被指派")
+                + "产生"
                 + (f"；{remark}" if remark else "")
             ),
             created_by=user,

@@ -19,7 +19,9 @@ class CleanDecimalInput(forms.NumberInput):
             quantum = Decimal("1").scaleb(-self.fixed_places)
             amount = amount.quantize(quantum, rounding=ROUND_HALF_UP)
             return f"{amount:.{self.fixed_places}f}"
-        rendered = format(amount, "f").rstrip("0").rstrip(".")
+        rendered = format(amount, "f")
+        if "." in rendered:
+            rendered = rendered.rstrip("0").rstrip(".")
         return rendered or "0"
 
 
