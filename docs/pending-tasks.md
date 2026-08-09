@@ -1,5 +1,8 @@
 # 家庭工作台待办事项
 
+投资板块 2026-07-03 至 2026-08-09 的设计决策、主要交付、版本节点和部署经验，已归档到
+[`investment-module-development-history.md`](investment-module-development-history.md)。
+
 更新时间：2026-08-09
 
 ## 当前结论
