@@ -20,6 +20,7 @@ class Command(BaseCommand):
         )
         parser.add_argument("--source-name", default="微信公众号 · 金渐成")
         parser.add_argument("--source-key", default="html-import:wechat-jinjiancheng")
+        parser.add_argument("--person-name", default="金渐成")
         parser.add_argument("--category", default="公众号归档")
         parser.add_argument(
             "--visibility",
@@ -40,6 +41,7 @@ class Command(BaseCommand):
                 member=member,
                 source_name=options["source_name"],
                 source_key=f"{options['source_key']}:{member.pk}",
+                person_name=options["person_name"],
                 visibility=options["visibility"],
                 category=options["category"],
             )

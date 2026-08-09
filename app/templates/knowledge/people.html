@@ -5,13 +5,13 @@
 
 {% block hub_content %}
 <section class="knowledge-page-heading">
-  <div><span class="eyebrow">Subscription & timeline</span><h1>关注人物</h1><p>这里将建设独立的多来源资讯订阅：聚合动态、AI 摘要和关键词；日常资讯不自动进入知识库。</p></div>
+  <div><span class="eyebrow">Subscription & timeline</span><h1>关注人物</h1><p>历史公众号和 Markdown 文章按作者归入人物档案；未来每日资讯仍先留在人物信息流，由成员主动归档。</p></div>
   <span class="status-pill">人物连接器待接入</span>
 </section>
 
 <section class="knowledge-people-layout">
   <aside class="knowledge-people-directory">
-    <header><span class="eyebrow">Directory</span><h2>知识中出现的作者</h2></header>
+    <header><span class="eyebrow">Directory</span><h2>人物与作者</h2></header>
     <nav aria-label="已有作者">
       {% for item in authors %}
         <a href="?person={{ item.author_name|urlencode }}"{% if selected_person == item.author_name %} class="active"{% endif %}><span>{{ item.author_name }}</span><strong>{{ item.total }}</strong></a>
@@ -22,7 +22,7 @@
   <article class="knowledge-person-profile">
     {% if selected_person %}
       <header class="knowledge-person-heading">
-        <div><span class="eyebrow">Author found in knowledge</span><h2>{{ selected_person }}</h2><p>尚未登记官方来源、机构身份和关注主题，因此不能把下列内容默认视为本人直接发言。</p></div>
+        <div><span class="eyebrow">Author found in knowledge</span><h2>{{ selected_person }}</h2><p>这里汇总该作者已经归档的历史产出；身份和来源等级尚未核验，不能默认视为本人直接发言。</p></div>
         <span class="status-pill warning">身份待核验</span>
       </header>
       <nav class="knowledge-person-filters" aria-label="人物动态类型">
@@ -32,7 +32,7 @@
         {% for entry in timeline %}
           <article>
             <time>{% if entry.content_time %}{{ entry.content_time|date:"Y-m-d" }}{% else %}日期未知{% endif %}</time>
-            <div><span class="status-pill">来源身份待核验</span><h3><a href="{{ entry.target_url }}">{{ entry.title }}</a></h3><p>{{ entry.hit_snippet|truncatechars:180 }}</p><small>{{ entry.source_name }} · 所属成员 {{ entry.owner.display_name }}</small></div>
+            <div><span class="status-pill">{% if entry.knowledge_status == "pending" %}待整理{% elif entry.item_kind == "investment_note" or entry.document.library_tier == "knowledge" %}精选知识{% else %}已归档{% endif %}</span><h3><a href="{{ entry.target_url }}">{{ entry.title }}</a></h3><p>{{ entry.hit_snippet|truncatechars:180 }}</p><small>{{ entry.source_name }} · 所属成员 {{ entry.owner.display_name }}</small></div>
           </article>
         {% empty %}<div class="knowledge-gentle-empty"><span>没有与该作者精确匹配的可见知识。</span></div>{% endfor %}
       </div>
@@ -40,29 +40,34 @@
       <div class="knowledge-person-empty">
         <span class="knowledge-hub-brand-mark" aria-hidden="true">人</span>
         <h2>选择作者查看已有内容</h2>
-        <p>正式模块将在人物身份、官方来源、来源等级和事件聚合完成后开放。只有成员主动“保存为知识”的长文或重要观点才进入知识库。</p>
+        <p>正式模块将在人物身份、官方来源、来源等级和事件聚合完成后开放。只有成员主动选择的长文或重要观点才归档，并可继续加入待整理。</p>
       </div>
     {% endif %}
   </article>
 </section>
 
 <section class="panel">
-  <header class="panel-heading"><div><span class="eyebrow">Historical accounts</span><h2>关注账号 · 历史文章</h2></div><a class="button" href="{% url 'knowledge:library' %}?collection=archive">打开公众号历史归档</a></header>
+  <header class="panel-heading"><div><span class="eyebrow">Historical archive</span><h2>人物历史产出</h2></div><a class="button" href="{% url 'knowledge:library' %}?collection=archive&amp;directory=source&amp;source_group=people">在归档资料中查看</a></header>
   <div class="source-list">
-    {% for source in archive_sources %}
-      <a class="source-row" href="{% url 'knowledge:source_history' source.pk %}">
-        <div><strong>{{ source.name }}</strong><span>{{ source.get_kind_display }} · 统一知识底座</span></div>
-        <div><span class="status-pill warning">历史文章</span><span>{{ source.history_count }} 篇</span></div>
+    {% for person in historical_people %}
+      <a class="source-row" href="?person={{ person.author_name|urlencode }}">
+        <div><strong>{{ person.author_name }}</strong><span>公众号 / Markdown 历史产出 · 已归档</span></div>
+        <div><span class="status-pill warning">历史文章</span><span>{{ person.history_count }} 篇</span></div>
       </a>
     {% empty %}
-      <div class="empty-state compact"><p>导入公众号历史文章后，对应账号会在这里出现；日常人物动态仍保持独立流程。</p></div>
+      <div class="empty-state compact"><p>导入带作者信息的公众号或 Markdown 文章后，对应人物会出现在这里。</p></div>
     {% endfor %}
   </div>
 </section>
 
+<aside class="knowledge-planning-note">
+  <strong>未来每日资讯的归档流程</strong>
+  <p>每日抓取内容默认只留在人物信息流；接入后提供“归档”和“归档并加入待整理”两个明确动作，不自动进入家庭知识底座。</p>
+</aside>
+
 <section class="knowledge-source-identity-guide">
   <header><span class="eyebrow">Source identity</span><h2>正式接入必须清楚区分</h2></header>
   <div><span class="direct">本人直接发言</span><span class="institution">所属机构发布</span><span class="interview">采访或演讲原文</span><span class="media">媒体转述</span><span class="ai">AI 提炼观点</span></div>
-  <p>AI 摘要用于快速获取资讯，不要求逐条人工确认，但必须带来源引用和醒目标记，不能冒充原话；保存为知识时再固化原文证据和人物身份。</p>
+  <p>AI 摘要用于快速获取资讯，不要求逐条人工确认，但必须带来源引用和醒目标记，不能冒充原话；执行归档时再固化原文证据和人物身份。</p>
 </section>
 {% endblock %}

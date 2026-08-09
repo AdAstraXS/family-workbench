@@ -25,4 +25,4 @@ class ReadingPlanningPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "尚未开放业务功能")
         self.assertContains(response, "当前不使用演示书籍伪造数据")
-        self.assertContains(response, "knowledge 只保存索引和引用")
+        self.assertContains(response, "成员主动点击后才进入归档资料")

@@ -26,6 +26,7 @@
 <section class="panel">
   <dl class="knowledge-metadata">
     <div><dt>发起成员</dt><dd>{{ batch.requested_by|default:"已停用成员" }}</dd></div>
+    <div><dt>归属人物</dt><dd>{{ batch.person_name|default:"按每篇原始署名" }}</dd></div>
     <div><dt>默认分类</dt><dd>{{ batch.category|default:"未设置" }}</dd></div>
     <div><dt>上传包 SHA-256</dt><dd><code>{{ batch.source_sha256 }}</code></dd></div>
     <div><dt>预计保存空间</dt><dd>{{ batch.estimated_bytes|filesizeformat }}</dd></div>

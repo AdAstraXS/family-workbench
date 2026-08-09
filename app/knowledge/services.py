@@ -295,11 +295,7 @@ def _save_page_revision(document, raw_bytes, downloaded_resources, source_modifi
                 status=KnowledgeProposal.STATUS_PENDING,
             ).exclude(revision=revision).update(status=KnowledgeProposal.STATUS_STALE)
             document.current_revision = revision
-            document.curation_status = (
-                KnowledgeDocument.CURATION_PENDING_AI
-                if document.source.allow_cloud_ai
-                else KnowledgeDocument.CURATION_NORMALIZED
-            )
+            document.curation_status = KnowledgeDocument.CURATION_NORMALIZED
             document.sync_status = KnowledgeDocument.SYNC_AVAILABLE
             document.source_deleted_at = None
             document.save(
@@ -357,10 +353,7 @@ def _sync_page(client, source, section, page):
                 source,
                 section_id,
             ),
-            # OneNote members already use sections as their notebook
-            # classification. Import it once as the editable default, then
-            # leave later human organization untouched by subsequent syncs.
-            "category": section_name[:100],
+            "library_tier": KnowledgeDocument.LIBRARY_ARCHIVE,
         },
     )
     metadata_changed = any(
@@ -529,19 +522,97 @@ def sync_onenote_source(job):
     return counters
 
 
+def _job_document_ids(job, key):
+    values = (job.parameters or {}).get(key) or []
+    return {
+        int(value)
+        for value in values
+        if str(value).isdigit()
+    }
+
+
+def restore_ai_processing_documents(job):
+    document_ids = _job_document_ids(job, "document_ids")
+    if not document_ids:
+        return 0
+    documents = list(
+        KnowledgeDocument.objects.filter(
+            pk__in=document_ids,
+            family=job.family,
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
+            curation_status=KnowledgeDocument.CURATION_PENDING_AI,
+        ).select_related("source", "owner", "current_revision")
+    )
+    if not documents:
+        return 0
+    KnowledgeDocument.objects.filter(pk__in=[item.pk for item in documents]).update(
+        curation_status=KnowledgeDocument.CURATION_NORMALIZED,
+        updated_at=timezone.now(),
+    )
+    for document in documents:
+        document.curation_status = KnowledgeDocument.CURATION_NORMALIZED
+        index_document(document)
+    return len(documents)
+
+
+def mark_ai_processing_documents(job):
+    document_ids = _job_document_ids(job, "document_ids")
+    if not document_ids:
+        return 0
+    documents = list(
+        KnowledgeDocument.objects.filter(
+            pk__in=document_ids,
+            family=job.family,
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
+            curation_status__in=[
+                KnowledgeDocument.CURATION_INBOX,
+                KnowledgeDocument.CURATION_NORMALIZED,
+            ],
+        ).select_related("source", "owner", "current_revision")
+    )
+    if not documents:
+        return 0
+    KnowledgeDocument.objects.filter(pk__in=[item.pk for item in documents]).update(
+        curation_status=KnowledgeDocument.CURATION_PENDING_AI,
+        updated_at=timezone.now(),
+    )
+    for document in documents:
+        document.curation_status = KnowledgeDocument.CURATION_PENDING_AI
+        index_document(document)
+    return len(documents)
+
+
 def generate_source_proposals(job):
     source = KnowledgeSource.objects.select_related("family", "owner").get(pk=job.source_id)
-    if not source.allow_cloud_ai:
+    selected_ids = _job_document_ids(job, "document_ids")
+    one_time_ids = _job_document_ids(job, "one_time_document_ids")
+    if not selected_ids:
+        raise KnowledgeAiError("AI 整理任务未包含成员明确选择的资料，已停止运行。")
+    if not source.allow_cloud_ai and not selected_ids.issubset(one_time_ids):
         raise KnowledgeAiError("该来源未授权向云端 AI 发送正文。")
-    documents = list(
-        source.documents.filter(
-            current_revision__isnull=False,
-            sync_status=KnowledgeDocument.SYNC_AVAILABLE,
-        ).select_related("current_revision", "source", "owner", "family")
+    document_queryset = source.documents.filter(
+        current_revision__isnull=False,
+        sync_status=KnowledgeDocument.SYNC_AVAILABLE,
+        knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
     )
-    job.total_count = len(documents)
+    document_queryset = document_queryset.filter(pk__in=selected_ids)
+    documents = list(
+        document_queryset.select_related("current_revision", "source", "owner", "family")
+    )
+    documents_by_id = {document.pk: document for document in documents}
+    missing_ids = selected_ids - documents_by_id.keys()
+    job.total_count = len(selected_ids)
     job.save(update_fields=["total_count", "updated_at"])
     counters = {"success_count": 0, "updated_count": 0, "skipped_count": 0, "failed_count": 0}
+    for document_id in sorted(missing_ids):
+        _job_item(
+            job,
+            f"document-{document_id}",
+            f"资料 #{document_id}",
+            KnowledgeJobItem.STATUS_FAILED,
+            "资料已不在待整理、正文不可用或不属于当前来源。",
+        )
+        counters["failed_count"] += 1
     for document in documents:
         _check_cancelled(job)
         revision = document.current_revision
@@ -550,6 +621,9 @@ def generate_source_proposals(job):
             prompt_version="knowledge-organize-v1",
         )
         if existing.count() == 3:
+            document.curation_status = KnowledgeDocument.CURATION_PENDING_REVIEW
+            document.save(update_fields=["curation_status", "updated_at"])
+            index_document(document)
             _job_item(
                 job,
                 f"document-{document.pk}",
@@ -559,7 +633,13 @@ def generate_source_proposals(job):
             counters["skipped_count"] += 1
         else:
             try:
-                generate_proposals(document)
+                generate_proposals(
+                    document,
+                    cloud_ai_consent=(
+                        "one_time" if document.pk in one_time_ids else "source"
+                    ),
+                )
+                index_document(document)
                 _job_item(
                     job,
                     f"document-{document.pk}",
@@ -569,6 +649,10 @@ def generate_source_proposals(job):
                 counters["success_count"] += 1
             except Exception as exc:
                 logger.exception("Knowledge proposal generation failed for %s", document.pk)
+                if document.curation_status == KnowledgeDocument.CURATION_PENDING_AI:
+                    document.curation_status = KnowledgeDocument.CURATION_NORMALIZED
+                    document.save(update_fields=["curation_status", "updated_at"])
+                    index_document(document)
                 _job_item(
                     job,
                     f"document-{document.pk}",
@@ -600,15 +684,24 @@ def rebuild_search_job(job):
 def recover_stale_jobs():
     now = timezone.now()
     threshold = now - timedelta(minutes=30)
-    return KnowledgeJob.objects.filter(status=KnowledgeJob.STATUS_RUNNING).filter(
-        Q(heartbeat_at__lt=threshold)
-        | Q(heartbeat_at__isnull=True, started_at__lt=threshold)
-    ).update(
+    stale_jobs = list(
+        KnowledgeJob.objects.filter(status=KnowledgeJob.STATUS_RUNNING).filter(
+            Q(heartbeat_at__lt=threshold)
+            | Q(heartbeat_at__isnull=True, started_at__lt=threshold)
+        )
+    )
+    if not stale_jobs:
+        return 0
+    KnowledgeJob.objects.filter(pk__in=[job.pk for job in stale_jobs]).update(
         status=KnowledgeJob.STATUS_FAILED,
         finished_at=now,
         updated_at=now,
         error_message="任务心跳超过 30 分钟，已标记失败，可安全重试。",
     )
+    for job in stale_jobs:
+        if job.job_type == KnowledgeJob.TYPE_GENERATE_PROPOSALS:
+            restore_ai_processing_documents(job)
+    return len(stale_jobs)
 
 
 def claim_next_job():
@@ -672,6 +765,8 @@ def process_job(job):
         job.save()
     except (KnowledgeJobCancelled, ImportJobCancelled) as exc:
         _mark_import_batch_failed(job, exc)
+        if job.job_type == KnowledgeJob.TYPE_GENERATE_PROPOSALS:
+            restore_ai_processing_documents(job)
         job.status = KnowledgeJob.STATUS_CANCELLED
         job.error_message = str(exc)
         job.finished_at = timezone.now()
@@ -708,9 +803,26 @@ def process_job(job):
                 "updated_at",
             ]
         )
+    except KnowledgeAiError as exc:
+        restore_ai_processing_documents(job)
+        job.status = KnowledgeJob.STATUS_FAILED
+        job.error_message = str(exc)[:4000]
+        job.finished_at = timezone.now()
+        job.heartbeat_at = job.finished_at
+        job.save(
+            update_fields=[
+                "status",
+                "error_message",
+                "finished_at",
+                "heartbeat_at",
+                "updated_at",
+            ]
+        )
     except Exception as exc:
         logger.exception("Knowledge job %s failed", job.pk)
         _mark_import_batch_failed(job, exc)
+        if job.job_type == KnowledgeJob.TYPE_GENERATE_PROPOSALS:
+            restore_ai_processing_documents(job)
         job.status = KnowledgeJob.STATUS_FAILED
         job.error_message = str(exc)[:4000]
         job.finished_at = timezone.now()

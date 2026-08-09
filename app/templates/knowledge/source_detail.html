@@ -9,7 +9,7 @@
   <div>
     <span class="eyebrow">{{ source.get_kind_display }}</span>
     <h1>{{ source.name }}</h1>
-    <p>{% if source.kind == "onenote" %}原文自动同步到 NAS；每个分区可以选择直接入库、进入待整理或仅同步归档。{% else %}这里管理来源状态、权限和同步任务。{% endif %}</p>
+    <p>{% if source.kind == "onenote" %}原文自动同步到 NAS；每个分区可以选择进入归档资料、归档并加入待整理或仅同步。{% else %}这里管理来源身份、权限和导入记录；文章整理统一在“待整理”中完成。{% endif %}</p>
   </div>
   <span class="status-pill status-{{ source.status }}">{{ source.get_status_display }}</span>
 </section>
@@ -23,14 +23,18 @@
       <div><dt>文档数量</dt><dd>{{ document_count }}</dd></div>
       <div><dt>最近同步</dt><dd>{{ source.last_sync_at|date:"Y-m-d H:i"|default:"尚未同步" }}</dd></div>
       <div><dt>最近完整对账</dt><dd>{{ source.last_reconciled_at|date:"Y-m-d H:i"|default:"尚未对账" }}</dd></div>
-      <div><dt>云端 AI</dt><dd>{% if source.allow_cloud_ai %}已由所有者允许{% else %}未授权发送正文{% endif %}</dd></div>
+      <div><dt>云端 AI 正文发送</dt><dd>{% if source.allow_cloud_ai %}已由所有者持续允许{% else %}每次使用前确认{% endif %}</dd></div>
     </dl>
     {% if source.last_error %}<div class="notice warning">{{ source.last_error }}</div>{% endif %}
+    {% if pending_count and source.kind != "html_import" and source.kind != "markdown_import" %}
+      <div class="knowledge-source-actions"><a class="button" href="{% url 'knowledge:inbox' %}?directory=source&amp;source_id={{ source.pk }}">查看待整理（{{ pending_count }}）</a></div>
+    {% endif %}
     {% if source.kind == "html_import" or source.kind == "markdown_import" %}
       <div class="knowledge-source-actions">
         <a class="button primary" href="{% url 'knowledge:source_history' source.pk %}">查看历史文章（{{ archive_count }}）</a>
+        {% if pending_count %}<a class="button" href="{% url 'knowledge:inbox' %}?directory=source&amp;source_id={{ source.pk }}">查看待整理（{{ pending_count }}）</a>{% endif %}
       </div>
-      <p class="muted">这些文章已保存到统一知识底座，默认属于资料库历史归档；人工整理后才会进入精选知识。</p>
+      <p class="muted">这些文章已保存在归档资料中；加入待整理并完成人工确认后，会同时出现在精选知识。</p>
     {% endif %}
     {% if can_manage and source.kind == "onenote" %}
       <div class="knowledge-source-actions">
@@ -38,10 +42,6 @@
           {% csrf_token %}
           <label class="checkbox-label"><input type="checkbox" name="full_reconcile"><span>同时完整对账来源删除状态</span></label>
           <button class="button primary" type="submit">创建同步任务</button>
-        </form>
-        <form method="post" action="{% url 'knowledge:source_generate_proposals' source.pk %}">
-          {% csrf_token %}
-          <button class="button" type="submit"{% if not source.allow_cloud_ai %} disabled{% endif %}>创建 AI 整理任务</button>
         </form>
       </div>
     {% endif %}
@@ -61,8 +61,9 @@
         </label>
         <label class="checkbox-label">
           <input type="checkbox" name="allow_cloud_ai"{% if source.allow_cloud_ai %} checked{% endif %}>
-          <span>允许向已配置的云端 AI 发送该来源正文</span>
+          <span>今后允许将本来源正文发送给云端 AI 整理</span>
         </label>
+        <small>开启后仍需在“待整理”中主动选择文章，不会自动处理整个来源；关闭时，每次 AI 整理都会单独询问本次发送授权。</small>
         {% if source.kind == "onenote" %}
           <label>
             <span>新分区默认处理方式</span>
@@ -73,7 +74,7 @@
           {% if source_sections %}
             <div class="knowledge-section-routing">
               <strong>现有 OneNote 分区</strong>
-              <p>心得、经验等可直接入库；摘录、临时文字可进入待整理；仅备份资料可以只同步归档。</p>
+              <p>所有正式内容先进入归档资料；真正准备提炼的分区可以同时加入待整理，纯备份内容只同步。</p>
               {% for section in source_sections %}
                 <label>
                   <span>{% if section.group %}{{ section.group }} / {% endif %}{{ section.name }}（{{ section.count }} 篇）</span>
@@ -87,7 +88,7 @@
                 <input type="checkbox" name="apply_existing">
                 <span>同时把上述分区规则应用到已有文档</span>
               </label>
-              <small>不勾选时只影响以后首次同步的新页面；勾选不会删除原文，只调整它出现在知识库、待整理还是全部资料。</small>
+              <small>不勾选时只影响以后首次同步的新页面；勾选不会删除原文，只调整是否进入归档资料或待整理。</small>
             </div>
           {% endif %}
         {% endif %}
@@ -95,7 +96,7 @@
         <button class="button" type="submit">保存来源设置</button>
       </form>
     {% else %}
-      <p>只有来源所有者可以修改可见范围和云端 AI 授权；家庭管理员只能查看健康状态和运行任务。</p>
+      <p>只有来源所有者可以修改可见范围和持续云端 AI 授权；家庭管理员不能代替其他成员授权正文外发。</p>
     {% endif %}
   </article>
 </section>

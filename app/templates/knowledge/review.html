@@ -1,11 +1,11 @@
 {% extends "knowledge_hub/base.html" %}
 
-{% block title %}待人工确认 · 知识中心{% endblock %}
-{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>待人工确认</span>{% endblock %}
+{% block title %}等待确认 · 待整理 · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:inbox' %}">待整理</a><span aria-hidden="true">›</span><span>等待确认</span>{% endblock %}
 
 {% block hub_content %}
 <section class="knowledge-page-heading knowledge-review-heading">
-  <div><span class="eyebrow">Human review</span><h1>AI 人工确认</h1><p>左侧只读原文，右侧逐项核对 AI 摘要、分类和标签；AI 建议不会覆盖原文。</p></div>
+  <div><span class="eyebrow">Human review</span><h1>等待确认</h1><p>这是待整理中的确认步骤：左侧阅读原文，右侧核对 AI 提出的摘要、分类和标签；AI 建议不会覆盖原文。</p></div>
   <span class="status-pill warning">{{ pending_document_count }} 篇待处理</span>
 </section>
 
@@ -71,7 +71,7 @@
   </div>
 </section>
 {% else %}
-<section class="panel empty-state knowledge-review-empty"><h2>当前没有待确认建议</h2><p>待整理资料可以由来源所有者生成 AI 建议；已经入库的知识也可以按需使用 AI 辅助整理。</p><a class="button" href="{% url 'knowledge:inbox' %}">查看待整理</a></section>
+<section class="panel empty-state knowledge-review-empty"><h2>当前没有等待确认的资料</h2><p>可以返回待整理，手工整理资料，或为待整理文档生成 AI 建议。</p><a class="button" href="{% url 'knowledge:inbox' %}">返回待整理</a></section>
 {% endif %}
 
 <aside class="knowledge-planning-note"><strong>后续动作边界</strong><p>“标记重复”和“忽略低价值”需要文档级状态、原因与审计记录后才能开放；确认全部仍保留预览步骤，避免一次误操作覆盖多项正式结果。</p></aside>

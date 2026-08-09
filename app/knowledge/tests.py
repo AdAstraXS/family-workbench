@@ -27,10 +27,14 @@ from .content import (
     validate_resource_mime,
     validate_resource_signature,
 )
-from .ai import KnowledgeAiError, generate_proposals
+from .ai import KnowledgeAiError, generate_proposals, knowledge_ai_provider
 from .crypto import decrypt_json, encrypt_json
 from .microsoft import GraphResponse, MicrosoftAuthorizationError
-from .imports import create_uploaded_import_batch, parse_wechat_html
+from .imports import (
+    assign_import_batch_person,
+    create_uploaded_import_batch,
+    parse_wechat_html,
+)
 from .models import (
     KnowledgeAsset,
     KnowledgeDocument,
@@ -301,6 +305,7 @@ class KnowledgeBaseTests(TestCase):
             visibility=visibility,
             content_modified_at=timezone.now(),
             curation_status=KnowledgeDocument.CURATION_NORMALIZED,
+            library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
         )
         revision = KnowledgeRevision.objects.create(
             document=document,
@@ -320,6 +325,31 @@ class KnowledgeBaseTests(TestCase):
         document.refresh_from_db()
         return document
 
+    def make_pending_document(self, **kwargs):
+        document = self.make_document(**kwargs)
+        document.knowledge_status = KnowledgeDocument.KNOWLEDGE_PENDING
+        document.library_tier = KnowledgeDocument.LIBRARY_ARCHIVE
+        document.curation_status = KnowledgeDocument.CURATION_NORMALIZED
+        document.save(
+            update_fields=[
+                "knowledge_status",
+                "library_tier",
+                "curation_status",
+                "updated_at",
+            ]
+        )
+        index_document(document)
+        return document
+
+    def make_text_ai_provider(self):
+        return AiProvider.objects.create(
+            name="文本测试服务",
+            provider_type="openai_compatible",
+            base_url="https://api.example.com/v1",
+            model_name="test-text-model",
+            extra_data={"api_key_env_var": "TEST_KNOWLEDGE_AI_KEY"},
+        )
+
     def make_html_import_batch(
         self,
         *,
@@ -328,6 +358,7 @@ class KnowledgeBaseTests(TestCase):
         title="测试文章",
         timestamp="202608080930",
         source_name="微信公众号 · 测试号",
+        person_name="",
         mid="100",
         body="正文内容",
     ):
@@ -361,6 +392,7 @@ class KnowledgeBaseTests(TestCase):
         return create_uploaded_import_batch(
             member=member,
             source_name=source_name,
+            person_name=person_name,
             category="公众号归档",
             visibility=visibility,
             uploaded_file=uploaded,
@@ -444,6 +476,84 @@ class KnowledgeBaseTests(TestCase):
         self.assertEqual(batch.status, KnowledgeImportBatch.STATUS_ROLLED_BACK)
         self.assertFalse(KnowledgeDocument.objects.exists())
         self.assertTrue(batch.package_file.storage.exists(batch.package_file.name))
+
+    def test_html_import_can_unify_source_bylines_under_one_person(self):
+        batch = self.make_html_import_batch(person_name="金渐成", mid="125")
+        preview_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_PREVIEW_IMPORT,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(preview_job)
+
+        item = batch.items.get()
+        self.assertEqual(item.author, "金渐成")
+        self.assertEqual(item.details["source_author"], "测试作者")
+
+        import_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_IMPORT_BATCH,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(import_job)
+
+        document = KnowledgeDocument.objects.get()
+        self.assertEqual(document.author, "金渐成")
+        self.assertEqual(document.import_items.get().details["source_author"], "测试作者")
+
+    def test_html_import_reuses_person_for_the_same_source(self):
+        first = self.make_html_import_batch(person_name="金渐成", mid="130")
+        second = self.make_html_import_batch(person_name="", mid="131")
+
+        self.assertEqual(first.source_id, second.source_id)
+        self.assertEqual(second.person_name, "金渐成")
+
+    def test_completed_import_can_assign_person_without_breaking_safe_rollback(self):
+        batch = self.make_html_import_batch(mid="135")
+        preview_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_PREVIEW_IMPORT,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(preview_job)
+        import_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_IMPORT_BATCH,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(import_job)
+
+        result = assign_import_batch_person(batch, "金渐成")
+        batch.refresh_from_db()
+        item = batch.items.get()
+        document = KnowledgeDocument.objects.get()
+        self.assertEqual(result["source_aliases"], ["测试作者"])
+        self.assertEqual(batch.person_name, "金渐成")
+        self.assertEqual(item.author, "金渐成")
+        self.assertEqual(item.details["source_author"], "测试作者")
+        self.assertEqual(document.author, "金渐成")
+        self.assertEqual(
+            item.details["document_updated_at"],
+            document.updated_at.isoformat(),
+        )
+
+        rollback_job, _ = queue_knowledge_job(
+            family=self.family,
+            source=batch.source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_ROLLBACK_IMPORT,
+            parameters={"batch_id": batch.pk},
+        )
+        process_job(rollback_job)
+        self.assertFalse(KnowledgeDocument.objects.exists())
 
     def test_html_import_rolls_back_database_when_search_indexing_fails(self):
         batch = self.make_html_import_batch(title="索引失败样本", mid="150")
@@ -765,7 +875,13 @@ class KnowledgeBaseTests(TestCase):
 
         inbox = self.client.get(reverse("knowledge:inbox"))
         self.assertContains(inbox, pending_document.title)
-        self.assertContains(inbox, "AI 提炼")
+        self.assertContains(inbox, "知识目录")
+        self.assertContains(inbox, "精选知识")
+        self.assertContains(inbox, "尚未整理")
+        self.assertContains(inbox, "等待确认")
+        self.assertNotContains(inbox, "收件箱")
+        self.assertNotContains(inbox, "已规范化")
+        self.assertNotContains(inbox, "AI 建议确认")
         self.assertNotContains(inbox, document.title)
 
         library = self.client.get(
@@ -819,10 +935,12 @@ class KnowledgeBaseTests(TestCase):
         )
 
         default_library = self.client.get(reverse("knowledge:library"))
+        self.assertEqual(default_library.context["selected_collection"], "curated")
         self.assertContains(default_library, private_document.title)
         self.assertContains(default_library, family_document.title)
         self.assertNotContains(default_library, other_family_document.title)
-        self.assertContains(default_library, "默认显示当前登录成员")
+        self.assertContains(default_library, "默认显示当前成员的精选知识")
+        self.assertContains(default_library, "资料分区")
 
         all_members = self.client.get(
             reverse("knowledge:library"),
@@ -857,7 +975,15 @@ class KnowledgeBaseTests(TestCase):
         index_document(document)
 
         library = self.client.get(reverse("knowledge:library"))
-        self.assertContains(library, document.title)
+        self.assertEqual(library.context["selected_collection"], "curated")
+        self.assertNotContains(
+            library,
+            f'href="/knowledge/documents/{document.pk}/"',
+        )
+        formal_library = self.client.get(
+            reverse("knowledge:library"), {"collection": "archive"}
+        )
+        self.assertContains(formal_library, document.title)
         curated = self.client.get(
             reverse("knowledge:library"), {"collection": "curated"}
         )
@@ -869,25 +995,62 @@ class KnowledgeBaseTests(TestCase):
             reverse("knowledge:library"), {"collection": "archive"}
         )
         self.assertContains(archive, document.title)
+        source_directory = self.client.get(
+            reverse("knowledge:library"),
+            {"collection": "archive", "directory": "source"},
+        )
+        self.assertContains(source_directory, "关注人物")
+        self.assertContains(source_directory, document.author)
 
         people = self.client.get(reverse("knowledge:people"))
-        self.assertContains(people, source.name)
+        self.assertContains(people, document.author)
         self.assertContains(people, "历史文章")
         history = self.client.get(
             reverse("knowledge:source_history", kwargs={"pk": source.pk})
         )
         self.assertContains(history, document.title)
-        self.assertContains(history, "公众号历史归档")
+        self.assertContains(history, "归档资料")
+
+        queue = self.client.post(
+            reverse("knowledge:document_add_to_inbox", kwargs={"pk": document.pk})
+        )
+        self.assertRedirects(
+            queue,
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk}),
+        )
+        document.refresh_from_db()
+        self.assertEqual(
+            document.knowledge_status,
+            KnowledgeDocument.KNOWLEDGE_PENDING,
+        )
+        self.assertContains(self.client.get(reverse("knowledge:inbox")), document.title)
+
+        cancel = self.client.post(
+            reverse(
+                "knowledge:document_cancel_organizing",
+                kwargs={"pk": document.pk},
+            )
+        )
+        self.assertRedirects(
+            cancel,
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk}),
+        )
+        document.refresh_from_db()
+        self.assertEqual(
+            document.knowledge_status,
+            KnowledgeDocument.KNOWLEDGE_INCLUDED,
+        )
+        self.client.post(
+            reverse("knowledge:document_add_to_inbox", kwargs={"pk": document.pk})
+        )
 
         organize = self.client.post(
             reverse("knowledge:document_organize", kwargs={"pk": document.pk}),
             {
-                "confirmed_summary": "",
-                "category": "",
-                "tags_text": "",
+                "confirmed_summary": "值得长期复用的摘要",
+                "category": "投资经验",
+                "tags_text": "长期复用",
                 "visibility": KnowledgeVisibility.FAMILY,
-                "knowledge_status": KnowledgeDocument.KNOWLEDGE_INCLUDED,
-                "library_tier": KnowledgeDocument.LIBRARY_KNOWLEDGE,
             },
         )
         self.assertRedirects(
@@ -898,6 +1061,92 @@ class KnowledgeBaseTests(TestCase):
             reverse("knowledge:library"), {"collection": "curated"}
         )
         self.assertContains(curated, document.title)
+        self.assertContains(
+            self.client.get(
+                reverse("knowledge:source_history", kwargs={"pk": source.pk})
+            ),
+            document.title,
+        )
+
+    def test_document_detail_reading_controls_and_import_spacing_class(self):
+        source = self.make_source(suffix="wechat-reading-controls")
+        source.kind = KnowledgeSource.KIND_HTML_IMPORT
+        source.save(update_fields=["kind", "updated_at"])
+        document = self.make_document(
+            source=source,
+            title="阅读显示设置",
+            external_id="wechat-reading-controls-page",
+            normalized_html="<p>第一段</p><p><br></p><p>第二段</p>",
+        )
+
+        response = self.client.get(
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk}),
+            {"font_size": "large", "line_spacing": "compact"},
+        )
+
+        self.assertEqual(response.context["reading_font_size"], "large")
+        self.assertEqual(response.context["reading_line_spacing"], "compact")
+        self.assertContains(
+            response,
+            "knowledge-rich-content reading-size-large reading-spacing-compact knowledge-rich-content-imported",
+        )
+        self.assertContains(response, "字号")
+        self.assertContains(response, "行间距")
+        self.assertContains(response, 'name="font_size" value="small"')
+        self.assertContains(response, 'name="line_spacing" value="compact"')
+
+        saved = self.client.post(
+            reverse(
+                "knowledge:document_reading_preferences",
+                kwargs={"pk": document.pk},
+            ),
+            {"font_size": "large", "line_spacing": "compact"},
+        )
+        self.assertRedirects(
+            saved,
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk}),
+        )
+        self.member.refresh_from_db()
+        self.assertEqual(
+            self.member.extra_data["knowledge_reading"],
+            {"font_size": "large", "line_spacing": "compact"},
+        )
+        self.client.logout()
+        self.client.force_login(self.user)
+        persisted = self.client.get(
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk})
+        )
+        self.assertContains(
+            persisted,
+            "knowledge-rich-content reading-size-large reading-spacing-compact knowledge-rich-content-imported",
+        )
+
+        fallback = self.client.get(
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk}),
+            {"font_size": "unknown", "line_spacing": "unknown"},
+        )
+        self.assertContains(
+            fallback,
+            "knowledge-rich-content reading-size-medium reading-spacing-normal knowledge-rich-content-imported",
+        )
+
+    def test_library_display_mode_uses_member_cookie(self):
+        cookie_name = f"knowledge_library_display_mode_{self.member.pk}"
+
+        self.client.cookies[cookie_name] = "compact"
+        compact = self.client.get(reverse("knowledge:library"))
+        self.assertEqual(compact.context["display_mode"], "compact")
+        self.assertContains(compact, "knowledge-compact-table")
+        self.assertNotContains(compact, "knowledge-result-list-cards")
+
+        self.client.cookies[cookie_name] = "cards"
+        cards = self.client.get(reverse("knowledge:library"))
+        self.assertEqual(cards.context["display_mode"], "cards")
+        self.assertContains(cards, "knowledge-result-list-cards")
+
+        self.client.cookies[cookie_name] = "unsupported"
+        fallback = self.client.get(reverse("knowledge:library"))
+        self.assertEqual(fallback.context["display_mode"], "standard")
 
     def test_library_directory_filters_by_category_and_onenote_source_path(self):
         source = self.make_source(suffix="reading")
@@ -963,6 +1212,13 @@ class KnowledgeBaseTests(TestCase):
         self.assertNotContains(source_response, book_list.title)
         self.assertContains(source_response, "读书心得 / 人生经验")
 
+        source_directory = self.client.get(
+            reverse("knowledge:library"),
+            {"directory": "source"},
+        )
+        self.assertContains(source_directory, "OneNote")
+        self.assertContains(source_directory, source.name)
+
         detail = self.client.get(
             reverse("knowledge:document_detail", kwargs={"pk": book_list.pk})
         )
@@ -998,6 +1254,43 @@ class KnowledgeBaseTests(TestCase):
         self.assertFalse(source.allow_cloud_ai)
         self.assertEqual(source.default_route, KnowledgeSource.ROUTE_KNOWLEDGE)
         self.assertFalse(KnowledgeJob.objects.exists())
+
+    def test_source_detail_only_manages_ai_consent_and_links_to_pending(self):
+        source = self.make_source(suffix="source-boundary")
+        document = self.make_pending_document(
+            source=source,
+            title="来源下的待整理文章",
+            external_id="source-boundary-page",
+        )
+
+        response = self.client.get(
+            reverse("knowledge:source_detail", kwargs={"pk": source.pk})
+        )
+
+        self.assertContains(response, "云端 AI 正文发送")
+        self.assertContains(response, "每次使用前确认")
+        self.assertContains(response, "今后允许将本来源正文发送给云端 AI 整理")
+        self.assertContains(response, "查看待整理（1）")
+        self.assertContains(response, f"source_id={source.pk}")
+        self.assertNotContains(response, "为待整理资料创建 AI 任务")
+        self.assertNotContains(response, "generate-proposals")
+        self.assertEqual(document.knowledge_status, KnowledgeDocument.KNOWLEDGE_PENDING)
+
+    def test_source_list_keeps_history_link_outside_source_detail_link(self):
+        source = self.make_source(suffix="source-list-links")
+        source.kind = KnowledgeSource.KIND_HTML_IMPORT
+        source.name = "公众号历史资料 · 测试账号"
+        source.key = "html:source-list-links"
+        source.save(update_fields=["kind", "name", "key", "updated_at"])
+
+        response = self.client.get(reverse("knowledge:sources"))
+
+        self.assertContains(response, f'href="/knowledge/sources/{source.pk}/"')
+        self.assertContains(
+            response,
+            f'href="/knowledge/sources/{source.pk}/history/"',
+        )
+        self.assertNotContains(response, '<a class="source-row"')
 
     def test_onenote_section_routes_can_reclassify_existing_documents(self):
         source = self.make_source(suffix="section-routing")
@@ -1051,7 +1344,16 @@ class KnowledgeBaseTests(TestCase):
             organize.knowledge_status,
             KnowledgeDocument.KNOWLEDGE_PENDING,
         )
-        self.assertContains(self.client.get(reverse("knowledge:library")), direct.title)
+        self.assertNotContains(
+            self.client.get(reverse("knowledge:library")),
+            f'href="/knowledge/documents/{direct.pk}/"',
+        )
+        self.assertContains(
+            self.client.get(
+                reverse("knowledge:library"), {"collection": "archive"}
+            ),
+            direct.title,
+        )
         self.assertNotContains(
             self.client.get(reverse("knowledge:library")),
             organize.title,
@@ -1235,7 +1537,11 @@ class KnowledgeBaseTests(TestCase):
             page_one.knowledge_status,
             KnowledgeDocument.KNOWLEDGE_PENDING,
         )
-        self.assertEqual(page_one.category, "财经资料")
+        self.assertEqual(page_one.category, "")
+        self.assertEqual(
+            page_one.library_tier,
+            KnowledgeDocument.LIBRARY_ARCHIVE,
+        )
         self.assertEqual(page_one.section_name, "财经资料")
         self.assertEqual(page_one.revisions.count(), 1)
         self.assertEqual(page_one.current_revision.assets.count(), 1)
@@ -1255,6 +1561,10 @@ class KnowledgeBaseTests(TestCase):
             page_one.current_revision.raw_file.name
         ))
         self.assertNotContains(
+            self.client.get(reverse("knowledge:library")),
+            f'href="/knowledge/documents/{page_one.pk}/"',
+        )
+        self.assertContains(
             self.client.get(reverse("knowledge:library"), {"q": "研究"}),
             page_one.title,
         )
@@ -1461,6 +1771,236 @@ class KnowledgeBaseTests(TestCase):
             KnowledgeDocument.SYNC_AVAILABLE,
         )
 
+    def test_single_ai_organization_uses_one_time_consent_and_selected_scope(self):
+        source = self.make_source(suffix="single-ai", allow_cloud_ai=False)
+        selected = self.make_pending_document(
+            source=source,
+            title="准备 AI 整理的文章",
+            external_id="single-ai-selected",
+        )
+        untouched = self.make_pending_document(
+            source=source,
+            title="本次不处理的文章",
+            external_id="single-ai-untouched",
+        )
+        self.make_text_ai_provider()
+
+        inbox = self.client.get(reverse("knowledge:inbox"))
+        self.assertContains(inbox, "AI 批量整理所选文章")
+        self.assertContains(inbox, f'name="document_ids" value="{selected.pk}"')
+        detail = self.client.get(
+            reverse("knowledge:document_detail", kwargs={"pk": selected.pk})
+        )
+        self.assertContains(detail, "AI 整理")
+        self.assertContains(detail, reverse("knowledge:document_ai_organize"))
+
+        preview = self.client.post(
+            reverse("knowledge:document_ai_organize"),
+            {
+                "document_ids": [selected.pk],
+                "return_document_id": selected.pk,
+            },
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertContains(preview, "确认 AI 整理范围")
+        self.assertContains(preview, "仅允许本次选中的文章")
+        self.assertContains(preview, "文本测试服务 · test-text-model")
+        self.assertContains(preview, selected.title)
+        self.assertNotContains(preview, untouched.title)
+
+        queued = self.client.post(
+            reverse("knowledge:document_ai_organize"),
+            {
+                "document_ids": [selected.pk],
+                "return_document_id": selected.pk,
+                "confirm": "yes",
+                "authorization": "once",
+                "acknowledge": "yes",
+            },
+        )
+        self.assertRedirects(
+            queued,
+            reverse("knowledge:document_detail", kwargs={"pk": selected.pk}),
+        )
+        source.refresh_from_db()
+        selected.refresh_from_db()
+        untouched.refresh_from_db()
+        job = KnowledgeJob.objects.get(job_type=KnowledgeJob.TYPE_GENERATE_PROPOSALS)
+        self.assertFalse(source.allow_cloud_ai)
+        self.assertEqual(job.parameters["document_ids"], [selected.pk])
+        self.assertEqual(job.parameters["one_time_document_ids"], [selected.pk])
+        self.assertEqual(
+            selected.curation_status,
+            KnowledgeDocument.CURATION_PENDING_AI,
+        )
+        self.assertEqual(
+            untouched.curation_status,
+            KnowledgeDocument.CURATION_NORMALIZED,
+        )
+
+        def fake_generate(document, *, cloud_ai_consent):
+            self.assertEqual(document.pk, selected.pk)
+            self.assertEqual(cloud_ai_consent, "one_time")
+            document.curation_status = KnowledgeDocument.CURATION_PENDING_REVIEW
+            document.save(update_fields=["curation_status", "updated_at"])
+            return []
+
+        with patch("knowledge.services.generate_proposals", side_effect=fake_generate) as generate:
+            process_job(job)
+
+        self.assertEqual(generate.call_count, 1)
+        job.refresh_from_db()
+        selected.refresh_from_db()
+        untouched.refresh_from_db()
+        self.assertEqual(job.status, KnowledgeJob.STATUS_SUCCESS)
+        self.assertEqual(
+            selected.curation_status,
+            KnowledgeDocument.CURATION_PENDING_REVIEW,
+        )
+        self.assertEqual(selected.knowledge_status, KnowledgeDocument.KNOWLEDGE_PENDING)
+        self.assertEqual(
+            untouched.curation_status,
+            KnowledgeDocument.CURATION_NORMALIZED,
+        )
+        self.assertEqual(
+            KnowledgeSearchEntry.objects.get(document=selected).curation_status,
+            KnowledgeDocument.CURATION_PENDING_REVIEW,
+        )
+
+    def test_persistent_ai_consent_does_not_process_unselected_source_documents(self):
+        source = self.make_source(suffix="persistent-ai", allow_cloud_ai=False)
+        selected = self.make_pending_document(
+            source=source,
+            title="本批次选中文章",
+            external_id="persistent-ai-selected",
+        )
+        untouched = self.make_pending_document(
+            source=source,
+            title="同来源未选文章",
+            external_id="persistent-ai-untouched",
+        )
+        self.make_text_ai_provider()
+
+        response = self.client.post(
+            reverse("knowledge:document_ai_organize"),
+            {
+                "document_ids": [selected.pk],
+                "confirm": "yes",
+                "authorization": "source",
+                "acknowledge": "yes",
+            },
+        )
+
+        self.assertRedirects(response, reverse("knowledge:inbox"))
+        source.refresh_from_db()
+        selected.refresh_from_db()
+        untouched.refresh_from_db()
+        job = KnowledgeJob.objects.get(job_type=KnowledgeJob.TYPE_GENERATE_PROPOSALS)
+        self.assertTrue(source.allow_cloud_ai)
+        self.assertEqual(job.parameters["document_ids"], [selected.pk])
+        self.assertNotIn("one_time_document_ids", job.parameters)
+        self.assertEqual(
+            selected.curation_status,
+            KnowledgeDocument.CURATION_PENDING_AI,
+        )
+        self.assertEqual(
+            untouched.curation_status,
+            KnowledgeDocument.CURATION_NORMALIZED,
+        )
+
+    def test_admin_cannot_authorize_ai_for_another_members_source(self):
+        source = self.make_source(
+            member=self.other_member,
+            visibility=KnowledgeVisibility.FAMILY,
+            suffix="other-ai-consent",
+        )
+        document = self.make_pending_document(
+            source=source,
+            owner=self.other_member,
+            visibility=KnowledgeVisibility.FAMILY,
+            title="其他成员的待整理资料",
+            external_id="other-ai-consent-page",
+        )
+        self.make_text_ai_provider()
+
+        response = self.client.post(
+            reverse("knowledge:document_ai_organize"),
+            {"document_ids": [document.pk]},
+        )
+
+        self.assertRedirects(response, reverse("knowledge:inbox"))
+        source.refresh_from_db()
+        self.assertFalse(source.allow_cloud_ai)
+        self.assertFalse(
+            KnowledgeJob.objects.filter(
+                job_type=KnowledgeJob.TYPE_GENERATE_PROPOSALS
+            ).exists()
+        )
+
+    def test_failed_ai_item_returns_to_unorganized_and_can_be_retried(self):
+        source = self.make_source(suffix="failed-ai", allow_cloud_ai=True)
+        document = self.make_pending_document(
+            source=source,
+            title="AI 整理失败文章",
+            external_id="failed-ai-page",
+        )
+        document.curation_status = KnowledgeDocument.CURATION_PENDING_AI
+        document.save(update_fields=["curation_status", "updated_at"])
+        index_document(document)
+        job = KnowledgeJob.objects.create(
+            family=self.family,
+            source=source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_GENERATE_PROPOSALS,
+            parameters={"document_ids": [document.pk]},
+        )
+
+        with patch(
+            "knowledge.services.generate_proposals",
+            side_effect=KnowledgeAiError("测试 AI 失败"),
+        ):
+            process_job(job)
+
+        job.refresh_from_db()
+        document.refresh_from_db()
+        self.assertEqual(job.status, KnowledgeJob.STATUS_PARTIAL)
+        self.assertEqual(job.failed_count, 1)
+        self.assertEqual(
+            document.curation_status,
+            KnowledgeDocument.CURATION_NORMALIZED,
+        )
+        self.assertEqual(
+            KnowledgeSearchEntry.objects.get(document=document).curation_status,
+            KnowledgeDocument.CURATION_NORMALIZED,
+        )
+
+    def test_unscoped_ai_job_stops_instead_of_processing_a_whole_source(self):
+        source = self.make_source(suffix="unscoped-ai", allow_cloud_ai=True)
+        document = self.make_pending_document(
+            source=source,
+            title="不能整来源自动处理",
+            external_id="unscoped-ai-page",
+        )
+        job = KnowledgeJob.objects.create(
+            family=self.family,
+            source=source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_GENERATE_PROPOSALS,
+        )
+
+        with patch("knowledge.services.generate_proposals") as generate:
+            process_job(job)
+
+        job.refresh_from_db()
+        document.refresh_from_db()
+        self.assertEqual(job.status, KnowledgeJob.STATUS_FAILED)
+        self.assertIn("明确选择", job.error_message)
+        self.assertEqual(generate.call_count, 0)
+        self.assertEqual(
+            document.curation_status,
+            KnowledgeDocument.CURATION_NORMALIZED,
+        )
+
     def test_proposals_require_owner_review_and_bulk_has_preview_step(self):
         source = self.make_source(suffix="proposal", allow_cloud_ai=True)
         document = self.make_document(
@@ -1485,7 +2025,17 @@ class KnowledgeBaseTests(TestCase):
                 content_hash=document.current_revision.content_hash,
             )
         document.curation_status = KnowledgeDocument.CURATION_PENDING_REVIEW
-        document.save(update_fields=["curation_status", "updated_at"])
+        document.knowledge_status = KnowledgeDocument.KNOWLEDGE_PENDING
+        document.library_tier = KnowledgeDocument.LIBRARY_ARCHIVE
+        document.save(
+            update_fields=[
+                "curation_status",
+                "knowledge_status",
+                "library_tier",
+                "updated_at",
+            ]
+        )
+        index_document(document)
 
         self.client.force_login(self.other_user)
         denied = self.client.post(
@@ -1499,10 +2049,20 @@ class KnowledgeBaseTests(TestCase):
 
         self.client.force_login(self.user)
         review_page = self.client.get(reverse("knowledge:review"))
-        self.assertContains(review_page, "AI 人工确认")
+        self.assertContains(review_page, "等待确认")
         self.assertContains(review_page, document.title)
         self.assertContains(review_page, "原文 · 不可由 AI 修改")
         self.assertContains(review_page, "预览并确认本篇全部建议")
+        waiting_filter = self.client.get(
+            reverse("knowledge:inbox"),
+            {"stage": "waiting_review"},
+        )
+        self.assertContains(waiting_filter, document.title)
+        unorganized_filter = self.client.get(
+            reverse("knowledge:inbox"),
+            {"stage": "unorganized"},
+        )
+        self.assertNotContains(unorganized_filter, document.title)
         summary = proposals[KnowledgeProposal.TYPE_SUMMARY]
         accepted = self.client.post(
             reverse("knowledge:proposal_review", kwargs={"pk": summary.pk}),
@@ -1610,6 +2170,7 @@ class KnowledgeBaseTests(TestCase):
         self.assertEqual(request.status, AiAnalysisRequest.STATUS_SUCCESS)
         self.assertNotIn(document.current_revision.plain_text, str(request.sanitized_input))
         self.assertEqual(request.scope["content_hash"], document.current_revision.content_hash)
+        self.assertEqual(request.scope["cloud_ai_consent"], "source")
         self.assertEqual(AiAnalysisResult.objects.get(request=request).tokens_used, 123)
         document.refresh_from_db()
         self.assertEqual(
@@ -1632,6 +2193,19 @@ class KnowledgeBaseTests(TestCase):
 
         self.assertFalse(AiAnalysisRequest.objects.exists())
         self.assertFalse(KnowledgeProposal.objects.exists())
+
+    def test_knowledge_ai_does_not_reuse_ipo_vision_provider(self):
+        source = self.make_source(suffix="text-provider")
+        text_provider = self.make_text_ai_provider()
+        AiProvider.objects.create(
+            name="IPO 视觉识别",
+            provider_type="openai_compatible",
+            base_url="https://vision.example.com/v1",
+            model_name="vision-only-model",
+            extra_data={"usage": "ipo_image_recognition"},
+        )
+
+        self.assertEqual(knowledge_ai_provider(source), text_provider)
 
     def test_protected_asset_requires_current_document_permission(self):
         source = self.make_source(
@@ -1838,6 +2412,41 @@ class KnowledgeBaseTests(TestCase):
         )
         self.assertTrue(created)
         self.assertNotEqual(retried.pk, stale.pk)
+
+    def test_stale_ai_job_returns_selected_document_to_unorganized(self):
+        source = self.make_source(suffix="stale-ai", allow_cloud_ai=True)
+        document = self.make_pending_document(
+            source=source,
+            title="超时的 AI 整理资料",
+            external_id="stale-ai-page",
+        )
+        document.curation_status = KnowledgeDocument.CURATION_PENDING_AI
+        document.save(update_fields=["curation_status", "updated_at"])
+        index_document(document)
+        stale = KnowledgeJob.objects.create(
+            family=self.family,
+            source=source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_GENERATE_PROPOSALS,
+            status=KnowledgeJob.STATUS_RUNNING,
+            parameters={"document_ids": [document.pk]},
+            started_at=timezone.now() - timedelta(hours=1),
+            heartbeat_at=timezone.now() - timedelta(hours=1),
+        )
+
+        self.assertEqual(recover_stale_jobs(), 1)
+
+        stale.refresh_from_db()
+        document.refresh_from_db()
+        self.assertEqual(stale.status, KnowledgeJob.STATUS_FAILED)
+        self.assertEqual(
+            document.curation_status,
+            KnowledgeDocument.CURATION_NORMALIZED,
+        )
+        self.assertEqual(
+            KnowledgeSearchEntry.objects.get(document=document).curation_status,
+            KnowledgeDocument.CURATION_NORMALIZED,
+        )
 
     def test_pending_job_can_be_cancelled_immediately(self):
         source = self.make_source(suffix="cancel-job")

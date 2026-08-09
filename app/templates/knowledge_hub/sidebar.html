@@ -4,17 +4,8 @@
     <a href="{% url 'knowledge:index' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "index" %} class="active"{% endif %}>
       <span aria-hidden="true">总</span><strong>总览</strong>
     </a>
-    <a href="{% url 'knowledge:review' %}"{% if request.resolver_match.app_name == "knowledge" and "review" in request.resolver_match.url_name or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "proposal_bulk_preview" or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "proposal_bulk_apply" %} class="active"{% endif %}>
-      <span aria-hidden="true">审</span><strong>AI 建议确认</strong>
-    </a>
-    <a href="{% url 'knowledge:library' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "library" or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "document_detail" or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "document_organize" %} class="active"{% endif %}>
+    <a href="{% url 'knowledge:library' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "library" or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "inbox" or request.resolver_match.app_name == "knowledge" and "review" in request.resolver_match.url_name or request.resolver_match.app_name == "knowledge" and "proposal_bulk" in request.resolver_match.url_name or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "document_detail" or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "document_organize" %} class="active"{% endif %}>
       <span aria-hidden="true">知</span><strong>资料库</strong>
-    </a>
-    <a href="{% url 'knowledge:inbox' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "inbox" %} class="active"{% endif %}>
-      <span aria-hidden="true">整</span><strong>待整理</strong>
-    </a>
-    <a href="{% url 'knowledge:library' %}?collection=curated"{% if request.resolver_match.url_name == "library" and request.GET.collection == "curated" %} class="active"{% endif %}>
-      <span aria-hidden="true">选</span><strong>精选知识</strong>
     </a>
     <a href="{% url 'knowledge:people' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "people" %} class="active"{% endif %}>
       <span aria-hidden="true">人</span><strong>关注人物</strong><small>待接入</small>

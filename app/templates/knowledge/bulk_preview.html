@@ -2,7 +2,7 @@
 
 {% block title %}批量确认预览 · 知识中心{% endblock %}
 
-{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:review' %}">待人工确认</a><span aria-hidden="true">›</span><span>批量预览</span>{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:inbox' %}">待整理</a><span aria-hidden="true">›</span><a href="{% url 'knowledge:review' %}">等待确认</a><span aria-hidden="true">›</span><span>批量预览</span>{% endblock %}
 
 {% block hub_content %}
 <section class="headline">

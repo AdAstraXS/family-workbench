@@ -21,6 +21,7 @@ class InvestmentNoteAdmin(admin.ModelAdmin):
         "note_date",
         "visibility",
         "include_in_knowledge",
+        "knowledge_state",
         "updated_at",
     )
     list_filter = (
@@ -29,6 +30,7 @@ class InvestmentNoteAdmin(admin.ModelAdmin):
         "note_type",
         "visibility",
         "include_in_knowledge",
+        "knowledge_state",
         "note_date",
     )
     search_fields = ("title", "content", "remark")

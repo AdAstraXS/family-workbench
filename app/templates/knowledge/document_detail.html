@@ -17,7 +17,28 @@
       <div class="knowledge-document-actions">
         {% if document.source_url %}<a class="button" href="{{ document.source_url }}" rel="noopener noreferrer" target="_blank">打开原文链接</a>{% endif %}
         {% if revision %}<a class="button" href="{% url 'knowledge:revision_raw_download' revision.pk %}">下载原始版本</a>{% endif %}
-        {% if can_organize %}<a class="button primary" href="{% url 'knowledge:document_organize' document.pk %}">人工整理</a>{% endif %}
+        {% if can_organize %}
+          {% if document.knowledge_status == "pending" %}
+            {% if document.curation_status == "pending_ai" %}
+              <button class="button primary" type="button" disabled>AI 整理中</button>
+            {% elif document.curation_status == "pending_review" %}
+              <a class="button primary" href="{% url 'knowledge:review' %}?document={{ document.pk }}">查看并确认 AI 建议</a>
+            {% else %}
+              <form method="post" action="{% url 'knowledge:document_ai_organize' %}">
+                {% csrf_token %}
+                <input type="hidden" name="document_ids" value="{{ document.pk }}">
+                <input type="hidden" name="return_document_id" value="{{ document.pk }}">
+                <button class="button primary" type="submit">AI 整理</button>
+              </form>
+            {% endif %}
+            <a class="button" href="{% url 'knowledge:document_organize' document.pk %}">手动整理为精选</a>
+            <form method="post" action="{% url 'knowledge:document_cancel_organizing' document.pk %}">{% csrf_token %}<button class="button" type="submit">取消待整理</button></form>
+          {% elif document.library_tier == "knowledge" %}
+            <a class="button primary" href="{% url 'knowledge:document_organize' document.pk %}">重新整理精选结果</a>
+          {% elif document.knowledge_status == "included" %}
+            <form method="post" action="{% url 'knowledge:document_add_to_inbox' document.pk %}">{% csrf_token %}<button class="button primary" type="submit">加入待整理</button></form>
+          {% endif %}
+        {% endif %}
       </div>
     </header>
 
@@ -31,7 +52,31 @@
     {% endif %}
 
     <div class="knowledge-original-label"><span>原始正文</span><strong>同步版本 v{{ revision.revision_number|default:"-" }} · AI 无权修改</strong></div>
-    <div class="knowledge-rich-content">
+    <div class="knowledge-reading-controls" aria-label="正文显示设置">
+      <div class="knowledge-reading-control-group">
+        <span class="knowledge-reading-control-label">字号</span>
+        {% for option in reading_font_size_options %}
+          <form method="post" action="{% url 'knowledge:document_reading_preferences' document.pk %}" class="knowledge-reading-control-form">
+            {% csrf_token %}
+            <input type="hidden" name="font_size" value="{{ option.value }}">
+            <input type="hidden" name="line_spacing" value="{{ reading_line_spacing }}">
+            <button type="submit" class="knowledge-reading-control{% if reading_font_size == option.value %} active{% endif %}"{% if reading_font_size == option.value %} aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ option.label }}</button>
+          </form>
+        {% endfor %}
+      </div>
+      <div class="knowledge-reading-control-group">
+        <span class="knowledge-reading-control-label">行间距</span>
+        {% for option in reading_line_spacing_options %}
+          <form method="post" action="{% url 'knowledge:document_reading_preferences' document.pk %}" class="knowledge-reading-control-form">
+            {% csrf_token %}
+            <input type="hidden" name="font_size" value="{{ reading_font_size }}">
+            <input type="hidden" name="line_spacing" value="{{ option.value }}">
+            <button type="submit" class="knowledge-reading-control{% if reading_line_spacing == option.value %} active{% endif %}"{% if reading_line_spacing == option.value %} aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ option.label }}</button>
+          </form>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="knowledge-rich-content reading-size-{{ reading_font_size }} reading-spacing-{{ reading_line_spacing }}{% if document.source.kind == 'html_import' or document.source.kind == 'markdown_import' %} knowledge-rich-content-imported{% endif %}">
       {% if revision %}{{ revision.normalized_html|safe }}{% else %}<p>正文尚未同步成功。</p>{% endif %}
     </div>
 
@@ -51,9 +96,9 @@
         <div><dt>可见范围</dt><dd>{{ document.get_visibility_display }}</dd></div>
         <div><dt>分类</dt><dd>{{ document.category|default:"未确认" }}</dd></div>
         <div><dt>保存状态</dt><dd>{% if document.sync_status == "available" %}已保存到 NAS{% else %}{{ document.get_sync_status_display }}{% endif %}</dd></div>
-        <div><dt>知识状态</dt><dd><span class="status-pill status-{{ document.knowledge_status }}">{{ document.get_knowledge_status_display }}</span></dd></div>
-        <div><dt>资料库层级</dt><dd><span class="status-pill{% if document.library_tier == 'archive' %} warning{% endif %}">{{ document.get_library_tier_display }}</span></dd></div>
-        <div><dt>AI 整理进度</dt><dd>{{ document.get_curation_status_display }}</dd></div>
+        <div><dt>归档状态</dt><dd><span class="status-pill">{% if document.knowledge_status == "archived" %}仅同步，未进入资料库{% else %}已归档{% endif %}</span></dd></div>
+        <div><dt>整理结果</dt><dd><span class="status-pill{% if document.knowledge_status == 'pending' %} warning{% endif %}">{% if document.knowledge_status == "pending" %}待整理{% elif document.library_tier == "knowledge" %}精选知识{% else %}尚未选择整理{% endif %}</span></dd></div>
+        <div><dt>整理进度</dt><dd>{% if document.curation_status == "pending_review" %}等待确认{% elif document.curation_status == "pending_ai" %}AI 整理中{% elif document.knowledge_status == "pending" %}尚未整理{% elif document.library_tier == "knowledge" %}已确认精选{% else %}未选择整理{% endif %}</dd></div>
         <div><dt>来源修改</dt><dd>{{ document.content_modified_at|date:"Y-m-d H:i"|default:"-" }}</dd></div>
         <div><dt>同步版本</dt><dd>{% if revision %}v{{ revision.revision_number }} · {{ revision.created_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</dd></div>
         <div><dt>相关人物</dt><dd>{{ document.author|default:"待识别" }}</dd></div>
@@ -77,7 +122,7 @@
             </form>
           {% elif proposal.confirmed_by %}<small>由 {{ proposal.confirmed_by }} 于 {{ proposal.confirmed_at|date:"Y-m-d H:i" }} 处理</small>{% endif %}
         </article>
-      {% empty %}<div class="empty-state compact"><p>当前版本还没有 AI 建议。可以直接人工整理，或由来源所有者创建 AI 任务。</p></div>{% endfor %}
+      {% empty %}<div class="empty-state compact"><p>{% if document.knowledge_status == "pending" %}当前版本还没有 AI 建议。可以点击正文上方“AI 整理”，或直接手动整理。{% else %}当前版本还没有 AI 建议；资料加入待整理后才能使用 AI 整理。{% endif %}</p></div>{% endfor %}
       {% if proposals %}<a class="button knowledge-review-entry" href="{% url 'knowledge:review' %}?document={{ document.pk }}">进入左右对照确认</a>{% endif %}
     </section>
 

@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from family_core.models import Family, FamilyMember
-from knowledge.models import KnowledgeSearchEntry
+from knowledge.models import KnowledgeDocument, KnowledgeSearchEntry
 
 from .models import InvestmentNote, InvestmentNoteType
 
@@ -123,12 +123,54 @@ class InvestmentNoteViewsTests(TestCase):
 
         self.assertRedirects(response, reverse("notes:detail", kwargs={"pk": note.pk}))
         self.assertTrue(note.include_in_knowledge)
-        self.assertTrue(
-            KnowledgeSearchEntry.objects.filter(
-                item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE,
-                object_id=str(note.pk),
-            ).exists()
+        self.assertEqual(note.knowledge_state, InvestmentNote.KNOWLEDGE_PENDING)
+        entry = KnowledgeSearchEntry.objects.get(
+            item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE,
+            object_id=str(note.pk),
         )
+        self.assertEqual(entry.knowledge_status, KnowledgeDocument.KNOWLEDGE_PENDING)
+        self.assertContains(self.client.get(reverse("knowledge:inbox")), note.title)
+        self.assertContains(
+            self.client.get(reverse("knowledge:library"), {"collection": "archive"}),
+            note.title,
+        )
+        source_directory = self.client.get(
+            reverse("knowledge:library"),
+            {"collection": "archive", "directory": "source"},
+        )
+        self.assertContains(source_directory, "随手记")
+        self.assertContains(source_directory, self.member.display_name)
+        self.assertNotContains(
+            self.client.get(reverse("knowledge:library")),
+            f'href="/notes/{note.pk}/"',
+        )
+
+        confirm = self.client.post(
+            reverse("notes:confirm_knowledge", kwargs={"pk": note.pk})
+        )
+        note.refresh_from_db()
+        self.assertRedirects(confirm, reverse("notes:detail", kwargs={"pk": note.pk}))
+        self.assertEqual(note.knowledge_state, InvestmentNote.KNOWLEDGE_CURATED)
+        self.assertContains(self.client.get(reverse("knowledge:library")), note.title)
+
+        changed = self.client.post(
+            reverse("notes:edit", kwargs={"pk": note.pk}),
+            {
+                "title": note.title,
+                "note_type": note.note_type_id,
+                "note_date": "2026-08-05",
+                "visibility": note.visibility,
+                "include_in_knowledge": "on",
+                "tags_text": "长期",
+                "content": f"{note.content}\n补充一个需要重新确认的判断。",
+            },
+        )
+        note.refresh_from_db()
+        self.assertRedirects(changed, reverse("notes:detail", kwargs={"pk": note.pk}))
+        self.assertEqual(note.knowledge_state, InvestmentNote.KNOWLEDGE_PENDING)
+        self.assertContains(self.client.get(reverse("knowledge:inbox")), note.title)
+        self.client.post(reverse("notes:confirm_knowledge", kwargs={"pk": note.pk}))
+        note.refresh_from_db()
 
         response = self.client.post(
             reverse("notes:edit", kwargs={"pk": note.pk}),
@@ -211,6 +253,12 @@ class InvestmentNoteViewsTests(TestCase):
         )
         self.assertEqual(
             self.client.post(reverse("notes:delete", kwargs={"pk": note.pk})).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(
+                reverse("notes:confirm_knowledge", kwargs={"pk": note.pk})
+            ).status_code,
             403,
         )
 

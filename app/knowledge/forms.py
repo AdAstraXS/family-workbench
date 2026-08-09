@@ -53,6 +53,12 @@ class KnowledgeImportUploadForm(forms.Form):
         initial="微信公众号归档",
         help_text="建议按公众号分别建立来源，例如“微信公众号 · 金渐成”。",
     )
+    person_name = forms.CharField(
+        label="归属人物",
+        max_length=300,
+        required=False,
+        help_text="同一人的不同笔名或账号统一填写同一个人物名；例如“金渐成”。留空时沿用同来源最近确认的人物，原始署名仍会保留。",
+    )
     category = forms.CharField(
         label="批次默认分类",
         max_length=100,
@@ -98,14 +104,11 @@ class DocumentOrganizeForm(forms.ModelForm):
             "category",
             "tags_text",
             "visibility",
-            "knowledge_status",
-            "library_tier",
         ]
         labels = {
             "confirmed_summary": "正式摘要",
             "category": "分类",
             "visibility": "可见范围",
-            "knowledge_status": "知识状态",
         }
         widgets = {
             "confirmed_summary": forms.Textarea(attrs={"rows": 8}),
@@ -113,17 +116,6 @@ class DocumentOrganizeForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["knowledge_status"].choices = [
-            (KnowledgeDocument.KNOWLEDGE_INCLUDED, "已入库"),
-            (KnowledgeDocument.KNOWLEDGE_PENDING, "待整理"),
-            (KnowledgeDocument.KNOWLEDGE_ARCHIVED, "仅同步归档"),
-        ]
-        self.fields["knowledge_status"].help_text = (
-            "已入库会出现在默认知识库；待整理进入整理清单；仅同步归档只在“全部资料”中查看。"
-        )
-        self.fields["library_tier"].help_text = (
-            "历史导入资料默认留在资料库；成员确认有长期复用价值后，再提升为精选知识。"
-        )
         if self.instance and self.instance.pk:
             self.fields["tags_text"].initial = "，".join(self.instance.tags or [])
         for field in self.fields.values():
@@ -141,6 +133,18 @@ class DocumentOrganizeForm(forms.ModelForm):
         if any(len(tag) > 30 for tag in tags):
             raise forms.ValidationError("每个标签不能超过 30 个字符。")
         return tags
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if not any(
+            [
+                str(cleaned_data.get("confirmed_summary") or "").strip(),
+                str(cleaned_data.get("category") or "").strip(),
+                cleaned_data.get("tags_text"),
+            ]
+        ):
+            raise forms.ValidationError("摘要、分类和标签至少需要完成一项。")
+        return cleaned_data
 
     def save(self, commit=True):
         document = super().save(commit=False)

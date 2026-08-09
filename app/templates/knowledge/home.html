@@ -7,7 +7,7 @@
   <div>
     <span class="eyebrow">家庭知识底座</span>
     <h1>今天需要做什么？</h1>
-    <p>不同来源按自己的规则进入知识库或待整理；这里集中查看需要处理的事项和最近知识。</p>
+    <p>正式资料统一进入归档底座，值得长期复用的内容再经过待整理进入精选知识；这里集中查看需要处理的事项。</p>
   </div>
   <div class="knowledge-home-commandbar">
     <form method="get" action="{% url 'knowledge:library' %}" class="knowledge-global-search" role="search">
@@ -26,7 +26,7 @@
   <a href="{% url 'knowledge:library' %}?collection=curated"><span>我的精选知识</span><strong>{{ stats.total }}</strong><small>默认只看当前账号</small></a>
   <a href="{% url 'knowledge:library' %}?collection=curated&amp;date_from={% now 'Y-m-d' %}"><span>今日精选</span><strong>{{ stats.today_new }}</strong><small>今天加入的精选知识</small></a>
   <a href="{% url 'knowledge:inbox' %}"><span>待整理</span><strong>{{ stats.inbox }}</strong><small>OneNote 摘录等候提炼</small></a>
-  <a href="{% url 'knowledge:review' %}"><span>AI 待确认</span><strong>{{ stats.pending_review }}</strong><small>逐条对照原文</small></a>
+  <a href="{% url 'knowledge:review' %}"><span>等待确认</span><strong>{{ stats.pending_review }}</strong><small>待整理中的 AI 建议</small></a>
   <a href="{% url 'knowledge:sources' %}"><span>同步异常</span><strong>{{ stats.source_errors }}</strong><small>账号失效与来源错误</small></a>
 </section>
 
@@ -35,9 +35,9 @@
     <header><div><span class="eyebrow">Today</span><h2>今日入库</h2></div><a href="{% url 'knowledge:library' %}">打开知识库</a></header>
     <div class="knowledge-flow-strip" aria-label="知识整理流程">
       <span><strong>1</strong>来源决定去向</span><i aria-hidden="true">→</i>
-      <span><strong>2</strong>直接入库或待整理</span><i aria-hidden="true">→</i>
-      <span><strong>3</strong>需要时使用 AI</span><i aria-hidden="true">→</i>
-      <span><strong>4</strong>长期知识</span>
+      <span><strong>2</strong>进入归档资料</span><i aria-hidden="true">→</i>
+      <span><strong>3</strong>选择后人工或 AI 整理</span><i aria-hidden="true">→</i>
+      <span><strong>4</strong>确认精选知识</span>
     </div>
     <div class="knowledge-compact-list">
       {% for entry in today_entries %}{% include "knowledge/_compact_entry.html" %}
@@ -54,7 +54,7 @@
     <header><div><span class="eyebrow">长期保存</span><h2>最近精选</h2></div><a href="{% url 'knowledge:library' %}?collection=curated">精选知识</a></header>
     <div class="knowledge-compact-list">
       {% for entry in recent_confirmed %}{% include "knowledge/_compact_entry.html" %}
-      {% empty %}<div class="knowledge-gentle-empty"><span>直接入库或整理完成的内容会显示在这里。</span></div>{% endfor %}
+      {% empty %}<div class="knowledge-gentle-empty"><span>完成整理并由成员确认的内容会显示在这里。</span></div>{% endfor %}
     </div>
   </article>
 

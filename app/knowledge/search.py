@@ -46,6 +46,7 @@ def index_investment_note(note):
         return None
     ensure_internal_notes_source(note.family)
     tags = note.tags or []
+    is_curated = note.knowledge_state == InvestmentNote.KNOWLEDGE_CURATED
     defaults = {
         "owner": note.member,
         "visibility": note.visibility,
@@ -66,8 +67,16 @@ def index_investment_note(note):
             _tags_text(tags),
             note.member.display_name,
         ),
-        "curation_status": KnowledgeDocument.CURATION_CONFIRMED,
-        "knowledge_status": KnowledgeDocument.KNOWLEDGE_INCLUDED,
+        "curation_status": (
+            KnowledgeDocument.CURATION_CONFIRMED
+            if is_curated
+            else KnowledgeDocument.CURATION_INBOX
+        ),
+        "knowledge_status": (
+            KnowledgeDocument.KNOWLEDGE_INCLUDED
+            if is_curated
+            else KnowledgeDocument.KNOWLEDGE_PENDING
+        ),
         "content_time": _note_content_time(note),
         "document": None,
     }

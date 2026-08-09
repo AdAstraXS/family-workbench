@@ -40,13 +40,29 @@ def _active_provider(provider_id=None):
     )
     if provider_id:
         try:
-            return providers.get(pk=provider_id)
+            provider = providers.get(pk=provider_id)
         except AiProvider.DoesNotExist as exc:
             raise KnowledgeAiError("所选 AI 服务商不可用。") from exc
-    provider = providers.first()
+        if (provider.extra_data or {}).get("usage") == "ipo_image_recognition":
+            raise KnowledgeAiError("所选 AI 服务商只用于图片识别，不能整理知识正文。")
+        return provider
+    provider = next(
+        (
+            item
+            for item in providers
+            if (item.extra_data or {}).get("usage") != "ipo_image_recognition"
+        ),
+        None,
+    )
     if not provider:
         raise KnowledgeAiError("尚未配置可用的文本 AI 服务商。")
     return provider
+
+
+def knowledge_ai_provider(source):
+    """Return the configured text provider without exposing credentials."""
+    provider_id = (source.config or {}).get("ai_provider_id")
+    return _active_provider(provider_id)
 
 
 def _api_key(provider):
@@ -140,15 +156,18 @@ def _parse_result(payload):
     return {"summary": summary, "tags": tags, "category": category}
 
 
-def generate_proposals(document):
+def generate_proposals(document, *, cloud_ai_consent="source"):
     revision = document.current_revision
     if revision is None:
         raise KnowledgeAiError("文档尚无可分析的正文版本。")
-    if not document.source.allow_cloud_ai:
+    if document.source.allow_cloud_ai:
+        consent_scope = "source"
+    elif cloud_ai_consent == "one_time":
+        consent_scope = "one_time"
+    else:
         raise KnowledgeAiError("该来源未授权向云端 AI 发送正文。")
 
-    provider_id = (document.source.config or {}).get("ai_provider_id")
-    provider = _active_provider(provider_id)
+    provider = knowledge_ai_provider(document.source)
     api_key = _api_key(provider)
     chat_url = _chat_url(provider)
     system_prompt, user_prompt, truncated = _prompt(document, revision)
@@ -162,6 +181,7 @@ def generate_proposals(document):
             "document_id": document.pk,
             "revision_id": revision.pk,
             "content_hash": revision.content_hash,
+            "cloud_ai_consent": consent_scope,
         },
         prompt=system_prompt,
         sanitized_input={

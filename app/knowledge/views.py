@@ -18,6 +18,7 @@ from django.views.decorators.http import require_POST
 
 from family_core.models import FamilyMember
 
+from .ai import KnowledgeAiError, knowledge_ai_provider
 from .forms import (
     BulkProposalPreviewForm,
     DocumentOrganizeForm,
@@ -58,7 +59,11 @@ from .permissions import (
     visible_sources,
 )
 from .search import index_document
-from .services import queue_knowledge_job
+from .services import (
+    mark_ai_processing_documents,
+    queue_knowledge_job,
+    restore_ai_processing_documents,
+)
 
 
 def _membership_required_response(request):
@@ -138,6 +143,7 @@ def _hit_snippet(entry, query):
 def _manageable_proposals(member):
     queryset = KnowledgeProposal.objects.filter(
         document__in=accessible_documents(member),
+        document__knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
         revision=models_current_revision(),
     ).select_related(
         "document",
@@ -157,7 +163,7 @@ def models_current_revision():
     return F("document__current_revision")
 
 
-def _decorate_entries(entries, query=""):
+def _decorate_entries(entries, query="", member=None):
     document_ids = [
         entry.document_id
         for entry in entries
@@ -175,7 +181,41 @@ def _decorate_entries(entries, query=""):
         entry.hit_snippet = _hit_snippet(entry, query)
         entry.has_original = entry.item_kind == KnowledgeSearchEntry.KIND_DOCUMENT
         entry.has_images = entry.document_id in image_document_ids
+        if entry.curation_status == KnowledgeDocument.CURATION_PENDING_REVIEW:
+            entry.workflow_stage = "waiting_review"
+            entry.workflow_stage_label = "等待确认"
+        elif entry.curation_status == KnowledgeDocument.CURATION_PENDING_AI:
+            entry.workflow_stage = "processing"
+            entry.workflow_stage_label = "AI 整理中"
+        else:
+            entry.workflow_stage = "unorganized"
+            entry.workflow_stage_label = "尚未整理"
+        entry.can_ai_organize = bool(
+            member
+            and entry.document_id
+            and entry.workflow_stage == "unorganized"
+            and _can_write(member)
+            and can_organize_document(member, entry.document)
+        )
     return entries
+
+
+def _formal_entries(entries):
+    return entries.filter(
+        knowledge_status__in=[
+            KnowledgeDocument.KNOWLEDGE_INCLUDED,
+            KnowledgeDocument.KNOWLEDGE_PENDING,
+        ]
+    )
+
+
+def _curated_entries(entries):
+    return entries.filter(
+        knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+    ).filter(
+        Q(item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE)
+        | Q(document__library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE)
+    )
 
 
 def _knowledge_stats(member):
@@ -183,20 +223,13 @@ def _knowledge_stats(member):
     documents = accessible_documents(member).filter(owner=member)
     today = timezone.localdate()
     return {
-        "total": entries.filter(
-            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
-            document__library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
-        ).count(),
-        "today_new": entries.filter(
-            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
-            document__library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
-            created_at__date=today,
-        ).count(),
+        "total": _curated_entries(entries).count(),
+        "today_new": _curated_entries(entries).filter(created_at__date=today).count(),
         "inbox": entries.filter(
-            item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
             knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
         ).count(),
         "pending_review": documents.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
             curation_status=KnowledgeDocument.CURATION_PENDING_REVIEW
         ).count(),
         "source_errors": visible_sources(member).filter(
@@ -210,67 +243,129 @@ def _knowledge_stats(member):
 
 
 def _build_source_directory(entries):
-    sources = {}
-    document_rows = entries.filter(
-        item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
-        document__isnull=False,
-    ).values(
-        "document__source_id",
-        "source_name",
-        "source_kind",
-        "document__section_name",
-        "document__hierarchy__section_group",
-    ).annotate(total=Count("id"))
-    for row in document_rows.iterator():
-        source_id = str(row["document__source_id"])
-        source = sources.setdefault(
-            source_id,
-            {
-                "id": source_id,
-                "name": row["source_name"],
-                "kind": row["source_kind"],
-                "count": 0,
-                "sections": {},
-            },
-        )
-        row_count = row["total"]
-        source["count"] += row_count
-        section_name = (row["document__section_name"] or "").strip()
-        section_group = str(
-            row["document__hierarchy__section_group"] or ""
-        ).strip()
-        section_key = (section_group, section_name)
-        section = source["sections"].setdefault(
-            section_key,
-            {
-                "name": section_name or "未分区",
-                "value": section_name,
-                "group": section_group,
-                "count": 0,
-            },
-        )
-        section["count"] += row_count
+    groups = []
 
-    note_count = entries.filter(
-        item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE
-    ).count()
-    if note_count:
-        sources["notes"] = {
-            "id": "notes",
-            "name": "随手记",
-            "kind": KnowledgeSource.KIND_INTERNAL_NOTES,
-            "count": note_count,
-            "sections": {},
-        }
-
-    directory = []
-    for source in sources.values():
-        source["sections"] = sorted(
-            source["sections"].values(),
-            key=lambda item: (item["group"], item["name"]),
+    onenote_nodes = list(
+        entries.filter(
+            item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
+            source_kind=KnowledgeSource.KIND_ONENOTE,
+            document__isnull=False,
         )
-        directory.append(source)
-    return sorted(directory, key=lambda item: (item["name"], item["id"]))
+        .order_by()
+        .values("document__source_id", "source_name")
+        .annotate(count=Count("id"))
+        .order_by("source_name")
+    )
+    if onenote_nodes:
+        groups.append(
+            {
+                "id": "onenote",
+                "name": "OneNote",
+                "count": sum(item["count"] for item in onenote_nodes),
+                "nodes": [
+                    {
+                        "name": item["source_name"],
+                        "count": item["count"],
+                        "source_id": str(item["document__source_id"]),
+                        "author": "",
+                    }
+                    for item in onenote_nodes
+                ],
+            }
+        )
+
+    note_nodes = list(
+        entries.filter(item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE)
+        .order_by()
+        .values("author_name")
+        .annotate(count=Count("id"))
+        .order_by("author_name")
+    )
+    if note_nodes:
+        groups.append(
+            {
+                "id": "notes",
+                "name": "随手记",
+                "count": sum(item["count"] for item in note_nodes),
+                "nodes": [
+                    {
+                        "name": item["author_name"] or "作者未标注",
+                        "count": item["count"],
+                        "source_id": "",
+                        "author": item["author_name"],
+                    }
+                    for item in note_nodes
+                ],
+            }
+        )
+
+    people_rows = list(
+        entries.filter(
+            item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
+            source_kind__in=[
+                KnowledgeSource.KIND_HTML_IMPORT,
+                KnowledgeSource.KIND_MARKDOWN_IMPORT,
+            ],
+        )
+        .order_by()
+        .values("author_name", "source_name")
+        .annotate(count=Count("id"))
+        .order_by("author_name", "source_name")
+    )
+    people_nodes = {}
+    for item in people_rows:
+        author = (item["author_name"] or item["source_name"] or "作者未标注").strip()
+        node = people_nodes.setdefault(
+            author,
+            {"name": author, "count": 0, "source_id": "", "author": author},
+        )
+        node["count"] += item["count"]
+    if people_nodes:
+        ordered_people = sorted(people_nodes.values(), key=lambda item: item["name"])
+        groups.append(
+            {
+                "id": "people",
+                "name": "关注人物",
+                "count": sum(item["count"] for item in ordered_people),
+                "nodes": ordered_people,
+            }
+        )
+
+    other_nodes = list(
+        entries.filter(
+            item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
+            document__isnull=False,
+        )
+        .exclude(
+            source_kind__in=[
+                KnowledgeSource.KIND_ONENOTE,
+                KnowledgeSource.KIND_HTML_IMPORT,
+                KnowledgeSource.KIND_MARKDOWN_IMPORT,
+            ]
+        )
+        .order_by()
+        .values("document__source_id", "source_name")
+        .annotate(count=Count("id"))
+        .order_by("source_name")
+    )
+    if other_nodes:
+        groups.append(
+            {
+                "id": "other",
+                "name": "其他来源",
+                "count": sum(item["count"] for item in other_nodes),
+                "nodes": [
+                    {
+                        "name": item["source_name"],
+                        "count": item["count"],
+                        "source_id": str(item["document__source_id"]),
+                        "author": "",
+                    }
+                    for item in other_nodes
+                ],
+            }
+        )
+    return groups
 
 
 @login_required
@@ -279,10 +374,8 @@ def index(request):
     if member is None:
         return _membership_required_response(request)
 
-    entries = accessible_search_entries(member).filter(
-        owner=member,
-        knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
-        document__library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
+    entries = _curated_entries(
+        accessible_search_entries(member).filter(owner=member)
     )
     recent_entries = _decorate_entries(list(entries[:6]))
     today_entries = _decorate_entries(
@@ -317,32 +410,38 @@ def _library_response(
     request,
     member,
     forced_source_id=None,
-    forced_library_tier=None,
+    forced_collection=None,
     *,
     page_title="资料库",
-    page_description="统一知识底座的资料库；默认显示当前登录成员。公众号历史文章进入历史归档，成员确认后再提升为精选知识。",
+    page_description="归档资料保存全部正式内容；待整理和精选知识是归档资料中的整理状态。默认显示当前成员的精选知识。",
 ):
     entries = accessible_search_entries(member)
-    collection = request.GET.get("collection", "library").strip()
-    if collection not in {"all", "library", "curated", "archive"}:
-        collection = "library"
-    if forced_library_tier == KnowledgeDocument.LIBRARY_ARCHIVE:
+    display_mode_cookie_name = f"knowledge_library_display_mode_{member.pk}"
+    display_mode = request.COOKIES.get(display_mode_cookie_name, "standard").strip().lower()
+    if display_mode not in {"standard", "compact", "cards"}:
+        display_mode = "standard"
+    query = request.GET.get("q", "").strip()
+    collection = request.GET.get("collection", "curated").strip()
+    if collection == "library":
         collection = "archive"
-    elif forced_library_tier == KnowledgeDocument.LIBRARY_KNOWLEDGE:
+    if collection not in {"all", "curated", "pending", "archive"}:
         collection = "curated"
-    if collection != "all":
-        entries = entries.filter(
-            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
-        )
+    if forced_collection in {"all", "curated", "pending", "archive"}:
+        collection = forced_collection
+    if (
+        query
+        and forced_collection is None
+        and request.GET.get("search_scope", "archive") == "archive"
+    ):
+        collection = "archive"
     if collection == "curated":
+        entries = _curated_entries(entries)
+    elif collection == "pending":
         entries = entries.filter(
-            document__library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE,
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
         )
     elif collection == "archive":
-        entries = entries.filter(
-            document__library_tier=KnowledgeDocument.LIBRARY_ARCHIVE,
-        )
-    query = request.GET.get("q", "").strip()
+        entries = _formal_entries(entries)
     scope = request.GET.get("scope", "all")
     source_kind = request.GET.get("source", "").strip()
     owner_id = request.GET.get("member")
@@ -354,16 +453,24 @@ def _library_response(
     directory_mode = request.GET.get("directory", "category").strip()
     category = request.GET.get("category", "").strip()
     source_id = request.GET.get("source_id", "").strip()
+    source_group = request.GET.get("source_group", "").strip()
+    source_author = request.GET.get("source_author", "").strip()
     if forced_source_id is not None:
         source_id = str(forced_source_id)
     section = request.GET.get("section", "").strip()
     section_group = request.GET.get("section_group", "").strip()
     quick_filter = request.GET.get("quick", "").strip()
+    workflow_stage = request.GET.get("stage", "").strip()
     date_from = request.GET.get("date_from", "").strip()
     date_to = request.GET.get("date_to", "").strip()
 
     if directory_mode not in {"category", "source"}:
         directory_mode = "category"
+    if source_group not in {"onenote", "notes", "people", "other"}:
+        source_group = ""
+    if source_id == "notes":
+        source_group = "notes"
+        source_id = ""
 
     if scope == "personal":
         entries = entries.filter(owner=member)
@@ -397,14 +504,24 @@ def _library_response(
             item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
             document__source_id=int(forced_source_id),
         )
-    if forced_library_tier in {
-        KnowledgeDocument.LIBRARY_KNOWLEDGE,
-        KnowledgeDocument.LIBRARY_ARCHIVE,
-    }:
-        entries = entries.filter(document__library_tier=forced_library_tier)
 
     directory_entries = entries
     directory_total = directory_entries.count()
+    workflow_counts = {
+        "all": directory_total,
+        "unorganized": directory_entries.filter(
+            curation_status__in=[
+                KnowledgeDocument.CURATION_INBOX,
+                KnowledgeDocument.CURATION_NORMALIZED,
+            ]
+        ).count(),
+        "processing": directory_entries.filter(
+            curation_status=KnowledgeDocument.CURATION_PENDING_AI,
+        ).count(),
+        "waiting_review": directory_entries.filter(
+            curation_status=KnowledgeDocument.CURATION_PENDING_REVIEW,
+        ).count(),
+    }
     category_directory = list(
         directory_entries.exclude(category="")
         .values("category")
@@ -416,11 +533,31 @@ def _library_response(
 
     if category:
         entries = entries.filter(category=category)
-    if source_id == "notes":
+    if source_group == "onenote":
+        entries = entries.filter(source_kind=KnowledgeSource.KIND_ONENOTE)
+    elif source_group == "notes":
         entries = entries.filter(
             item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE
         )
-    elif source_id.isdigit():
+    elif source_group == "people":
+        entries = entries.filter(
+            source_kind__in=[
+                KnowledgeSource.KIND_HTML_IMPORT,
+                KnowledgeSource.KIND_MARKDOWN_IMPORT,
+            ]
+        )
+    elif source_group == "other":
+        entries = entries.exclude(
+            source_kind__in=[
+                KnowledgeSource.KIND_ONENOTE,
+                KnowledgeSource.KIND_INTERNAL_NOTES,
+                KnowledgeSource.KIND_HTML_IMPORT,
+                KnowledgeSource.KIND_MARKDOWN_IMPORT,
+            ]
+        )
+    if source_author:
+        entries = entries.filter(author_name=source_author)
+    if source_id.isdigit():
         entries = entries.filter(
             item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
             document__source_id=int(source_id),
@@ -431,7 +568,7 @@ def _library_response(
             entries = entries.filter(
                 document__hierarchy__section_group=section_group
             )
-    else:
+    elif source_id:
         source_id = ""
         section = ""
         section_group = ""
@@ -442,8 +579,23 @@ def _library_response(
         entries = entries.filter(category="")
     else:
         quick_filter = ""
-    if curation_status:
+    if collection == "pending" and workflow_stage == "unorganized":
+        entries = entries.filter(
+            curation_status__in=[
+                KnowledgeDocument.CURATION_INBOX,
+                KnowledgeDocument.CURATION_NORMALIZED,
+            ]
+        )
+    elif collection == "pending" and workflow_stage == "waiting_review":
+        entries = entries.filter(
+            curation_status=KnowledgeDocument.CURATION_PENDING_REVIEW,
+        )
+    else:
+        workflow_stage = ""
+    if curation_status and collection != "pending":
         entries = entries.filter(curation_status=curation_status)
+    elif collection == "pending":
+        curation_status = ""
     if tag:
         entries = entries.filter(tags__contains=[tag])
     if author:
@@ -471,21 +623,48 @@ def _library_response(
         ).order_by("search_rank", "-content_time", "-updated_at")
 
     page_obj = Paginator(entries, 20).get_page(request.GET.get("page"))
-    _decorate_entries(page_obj.object_list, query)
+    _decorate_entries(page_obj.object_list, query, member)
+    ai_selectable_count = sum(
+        1 for entry in page_obj.object_list if entry.can_ai_organize
+    )
     pagination_params = request.GET.copy()
     pagination_params.pop("page", None)
 
-    source_choices = (
-        directory_entries
-        .values("source_kind", "source_name")
+    source_labels = dict(KnowledgeSource.KIND_CHOICES)
+    source_choices = list(
+        directory_entries.order_by()
+        .values("source_kind")
         .annotate(total=Count("id"))
-        .order_by("source_name")
+        .order_by("source_kind")
     )
+    for item in source_choices:
+        item["label"] = source_labels.get(item["source_kind"], item["source_kind"])
     selected_source_name = ""
-    for source in source_directory:
-        if source["id"] == source_id:
-            selected_source_name = source["name"]
-            break
+    for group in source_directory:
+        group["is_selected"] = group["id"] == source_group
+        if group["id"] == source_group and not source_id and not source_author:
+            selected_source_name = group["name"]
+        for node in group["nodes"]:
+            node["is_selected"] = False
+            if source_id and node["source_id"] == source_id:
+                selected_source_name = node["name"]
+                group["is_selected"] = True
+                node["is_selected"] = True
+            elif (
+                source_author
+                and group["id"] == source_group
+                and node["author"] == source_author
+            ):
+                selected_source_name = node["name"]
+                group["is_selected"] = True
+                node["is_selected"] = True
+    if forced_source_id is not None and not selected_source_name:
+        selected_source_name = (
+            KnowledgeSource.objects.filter(pk=forced_source_id)
+            .values_list("name", flat=True)
+            .first()
+            or ""
+        )
     if category:
         directory_title = category
     elif section:
@@ -502,10 +681,10 @@ def _library_response(
         directory_title = "未分类"
     else:
         directory_title = {
-            "all": "全部资料",
-            "archive": "公众号历史归档",
+            "all": "全部资料（含仅同步）",
+            "archive": "归档资料",
+            "pending": "全部待整理",
             "curated": "精选知识",
-            "library": "资料库",
         }[collection]
     return render(
         request,
@@ -528,10 +707,14 @@ def _library_response(
             "uncategorized_count": uncategorized_count,
             "selected_category": category,
             "selected_source_id": source_id,
+            "selected_source_group": source_group,
+            "selected_source_author": source_author,
             "selected_source_name": selected_source_name,
             "selected_section": section,
             "selected_section_group": section_group,
             "quick_filter": quick_filter,
+            "selected_stage": workflow_stage,
+            "workflow_counts": workflow_counts,
             "directory_title": directory_title,
             "date_from": date_from,
             "date_to": date_to,
@@ -542,7 +725,20 @@ def _library_response(
             "page_title": page_title,
             "page_description": page_description,
             "current_member": member,
+            "directory_view_name": (
+                "knowledge:inbox"
+                if collection == "pending"
+                else "knowledge:library"
+            ),
             "pagination_query": pagination_params.urlencode(),
+            "ai_selectable_count": ai_selectable_count,
+            "display_mode": display_mode,
+            "display_mode_cookie_name": display_mode_cookie_name,
+            "display_mode_choices": [
+                {"value": "standard", "label": "标准列表"},
+                {"value": "compact", "label": "紧凑表格"},
+                {"value": "cards", "label": "卡片"},
+            ],
         },
     )
 
@@ -576,47 +772,12 @@ def inbox(request):
     member = current_member(request)
     if member is None:
         return _membership_required_response(request)
-    entries = accessible_search_entries(member).filter(
-        item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
-        knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
-    )
-    status_counts = {
-        item["curation_status"]: item["total"]
-        for item in entries.order_by()
-        .values("curation_status")
-        .annotate(total=Count("id"))
-    }
-    selected_status = request.GET.get("status", "").strip()
-    allowed_statuses = {
-        KnowledgeDocument.CURATION_INBOX,
-        KnowledgeDocument.CURATION_NORMALIZED,
-        KnowledgeDocument.CURATION_PENDING_AI,
-        KnowledgeDocument.CURATION_PENDING_REVIEW,
-    }
-    if selected_status in allowed_statuses:
-        entries = entries.filter(curation_status=selected_status)
-    else:
-        selected_status = ""
-    page_obj = Paginator(entries, 20).get_page(request.GET.get("page"))
-    _decorate_entries(page_obj.object_list)
-    return render(
+    return _library_response(
         request,
-        "knowledge/inbox.html",
-        {
-            "page_obj": page_obj,
-            "selected_collection": "all",
-            "status_counts": status_counts,
-            "selected_status": selected_status,
-            "curation_filters": [
-                {
-                    "value": value,
-                    "label": label,
-                    "total": status_counts.get(value, 0),
-                }
-                for value, label in KnowledgeDocument.CURATION_CHOICES
-                if value in allowed_statuses
-            ],
-        },
+        member,
+        forced_collection="pending",
+        page_title="待整理",
+        page_description="这里只放已经准备进入精选知识、但尚未完成摘要、分类或标签整理的资料；可以手工整理，也可以使用 AI 辅助。",
     )
 
 
@@ -625,9 +786,7 @@ def topics(request):
     member = current_member(request)
     if member is None:
         return _membership_required_response(request)
-    entries = accessible_search_entries(member).filter(
-        knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
-    )
+    entries = _curated_entries(accessible_search_entries(member))
     tag_counts = Counter()
     for tags in entries.values_list("tags", flat=True)[:5000]:
         tag_counts.update(str(tag).strip() for tag in (tags or []) if str(tag).strip())
@@ -654,9 +813,7 @@ def people(request):
     member = current_member(request)
     if member is None:
         return _membership_required_response(request)
-    entries = accessible_search_entries(member).filter(
-        knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
-    )
+    entries = _formal_entries(accessible_search_entries(member))
     authors = list(
         entries.exclude(author_name="")
         .order_by()
@@ -669,25 +826,18 @@ def people(request):
     if selected_person:
         timeline = entries.filter(author_name=selected_person)[:50]
     timeline = _decorate_entries(list(timeline))
-    archive_sources = list(
-        visible_sources(member)
-        .filter(
-            kind__in=[
+    historical_people = list(
+        entries.filter(
+            source_kind__in=[
                 KnowledgeSource.KIND_HTML_IMPORT,
                 KnowledgeSource.KIND_MARKDOWN_IMPORT,
             ]
         )
-        .annotate(
-            history_count=Count(
-                "documents",
-                filter=Q(
-                    documents__knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
-                    documents__library_tier=KnowledgeDocument.LIBRARY_ARCHIVE,
-                ),
-            )
-        )
-        .filter(history_count__gt=0)
-        .order_by("name")
+        .exclude(author_name="")
+        .order_by()
+        .values("author_name")
+        .annotate(history_count=Count("id"))
+        .order_by("author_name")
     )
     return render(
         request,
@@ -696,7 +846,7 @@ def people(request):
             "authors": authors,
             "selected_person": selected_person,
             "timeline": timeline,
-            "archive_sources": archive_sources,
+            "historical_people": historical_people,
         },
     )
 @login_required
@@ -713,6 +863,19 @@ def document_detail(request, pk):
     if member is None:
         return _membership_required_response(request)
     document = get_object_or_404(accessible_documents(member), pk=pk)
+    stored_reading = (member.extra_data or {}).get("knowledge_reading") or {}
+    font_size = request.GET.get(
+        "font_size",
+        stored_reading.get("font_size", "medium"),
+    ).strip().lower()
+    if font_size not in {"small", "medium", "large"}:
+        font_size = "medium"
+    line_spacing = request.GET.get(
+        "line_spacing",
+        stored_reading.get("line_spacing", "normal"),
+    ).strip().lower()
+    if line_spacing not in {"compact", "normal"}:
+        line_spacing = "normal"
     proposals = document.proposals.filter(
         revision=document.current_revision,
     ).select_related("confirmed_by")
@@ -723,6 +886,17 @@ def document_detail(request, pk):
             "document": document,
             "revision": document.current_revision,
             "proposals": proposals,
+            "reading_font_size": font_size,
+            "reading_line_spacing": line_spacing,
+            "reading_font_size_options": [
+                {"value": "small", "label": "小"},
+                {"value": "medium", "label": "中"},
+                {"value": "large", "label": "大"},
+            ],
+            "reading_line_spacing_options": [
+                {"value": "compact", "label": "紧凑"},
+                {"value": "normal", "label": "正常"},
+            ],
             "can_organize": _can_write(member)
             and can_organize_document(member, document),
         },
@@ -735,6 +909,275 @@ def document_detail(request, pk):
 
 
 @login_required
+@require_POST
+def document_reading_preferences(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    get_object_or_404(accessible_documents(member), pk=pk)
+    font_size = request.POST.get("font_size", "medium").strip().lower()
+    line_spacing = request.POST.get("line_spacing", "normal").strip().lower()
+    if font_size not in {"small", "medium", "large"}:
+        font_size = "medium"
+    if line_spacing not in {"compact", "normal"}:
+        line_spacing = "normal"
+    extra_data = dict(member.extra_data or {})
+    extra_data["knowledge_reading"] = {
+        "font_size": font_size,
+        "line_spacing": line_spacing,
+    }
+    member.extra_data = extra_data
+    member.save(update_fields=["extra_data", "updated_at"])
+    return redirect("knowledge:document_detail", pk=pk)
+
+
+@login_required
+@require_POST
+def document_add_to_inbox(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    document = get_object_or_404(accessible_documents(member), pk=pk)
+    if not _can_write(member) or not can_organize_document(member, document):
+        return HttpResponseForbidden("只有资料所有者或家庭管理员可以整理这项资料。")
+    if document.knowledge_status == KnowledgeDocument.KNOWLEDGE_ARCHIVED:
+        messages.error(request, "这项内容目前仅同步保存，尚未进入归档资料。")
+    elif document.library_tier == KnowledgeDocument.LIBRARY_KNOWLEDGE:
+        messages.info(request, "这项内容已经是精选知识。")
+    else:
+        document.knowledge_status = KnowledgeDocument.KNOWLEDGE_PENDING
+        document.library_tier = KnowledgeDocument.LIBRARY_ARCHIVE
+        document.curation_status = KnowledgeDocument.CURATION_INBOX
+        document.save(
+            update_fields=[
+                "knowledge_status",
+                "library_tier",
+                "curation_status",
+                "updated_at",
+            ]
+        )
+        index_document(document)
+        messages.success(request, "已加入待整理；原文仍保留在归档资料中。")
+    return redirect("knowledge:document_detail", pk=document.pk)
+
+
+@login_required
+@require_POST
+def document_cancel_organizing(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    document = get_object_or_404(accessible_documents(member), pk=pk)
+    if not _can_write(member) or not can_organize_document(member, document):
+        return HttpResponseForbidden("只有资料所有者或家庭管理员可以整理这项资料。")
+    if document.knowledge_status == KnowledgeDocument.KNOWLEDGE_PENDING:
+        document.knowledge_status = KnowledgeDocument.KNOWLEDGE_INCLUDED
+        document.library_tier = KnowledgeDocument.LIBRARY_ARCHIVE
+        document.curation_status = KnowledgeDocument.CURATION_NORMALIZED
+        document.save(
+            update_fields=[
+                "knowledge_status",
+                "library_tier",
+                "curation_status",
+                "updated_at",
+            ]
+        )
+        index_document(document)
+        messages.success(request, "已取消整理；资料继续保留在归档资料中。")
+    return redirect("knowledge:document_detail", pk=document.pk)
+
+
+def _selected_ai_documents(member, raw_ids):
+    document_ids = []
+    for raw_id in raw_ids:
+        value = str(raw_id).strip()
+        if value.isdigit() and int(value) not in document_ids:
+            document_ids.append(int(value))
+    if not document_ids:
+        raise KnowledgeAiError("请先选择至少一篇尚未整理的资料。")
+    if len(document_ids) > 100:
+        raise KnowledgeAiError("一次最多选择 100 篇资料进行 AI 整理。")
+    documents = list(
+        accessible_documents(member)
+        .filter(
+            pk__in=document_ids,
+            current_revision__isnull=False,
+            sync_status=KnowledgeDocument.SYNC_AVAILABLE,
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
+            curation_status__in=[
+                KnowledgeDocument.CURATION_INBOX,
+                KnowledgeDocument.CURATION_NORMALIZED,
+            ],
+        )
+        .order_by("source__name", "title", "id")
+    )
+    if len(documents) != len(document_ids):
+        raise KnowledgeAiError(
+            "部分资料已不在“尚未整理”状态，请刷新待整理页面后重新选择。"
+        )
+    if any(not can_organize_document(member, document) for document in documents):
+        raise KnowledgeAiError("只能为自己有权整理的资料创建 AI 任务。")
+    return documents
+
+
+def _can_authorize_ai_once(member, source, documents):
+    if source.allow_cloud_ai or source.owner_id == member.id:
+        return True
+    return source.owner_id is None and all(
+        document.owner_id == member.id for document in documents
+    )
+
+
+def _ai_document_groups(member, documents):
+    grouped = {}
+    for document in documents:
+        grouped.setdefault(document.source_id, []).append(document)
+    groups = []
+    for source_id, source_documents in grouped.items():
+        source = source_documents[0].source
+        if not _can_authorize_ai_once(member, source, source_documents):
+            raise KnowledgeAiError(
+                f"“{source.name}”尚未获得来源所有者的云端 AI 授权，"
+                "家庭管理员不能代替其他成员授权。"
+            )
+        provider = knowledge_ai_provider(source)
+        provider_extra = provider.extra_data or {}
+        groups.append(
+            {
+                "source": source,
+                "documents": source_documents,
+                "provider": provider,
+                "character_count": sum(
+                    len(document.current_revision.plain_text or "")
+                    for document in source_documents
+                ),
+                "retention_policy": provider_extra.get("data_retention_policy")
+                or "以服务商当前条款为准",
+                "cost_limit": provider_extra.get("knowledge_cost_limit")
+                or "尚未配置单独费用上限",
+                "can_authorize_source": can_change_source_settings(member, source),
+            }
+        )
+    return sorted(groups, key=lambda item: (item["source"].name, item["source"].pk))
+
+
+@login_required
+@require_POST
+def document_ai_organize(request):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    if not _can_write(member):
+        return HttpResponseForbidden("只读成员不能创建 AI 整理任务。")
+    try:
+        documents = _selected_ai_documents(member, request.POST.getlist("document_ids"))
+        groups = _ai_document_groups(member, documents)
+    except KnowledgeAiError as exc:
+        messages.error(request, str(exc))
+        return redirect("knowledge:inbox")
+
+    return_document_id = request.POST.get("return_document_id", "").strip()
+    if not return_document_id.isdigit() or int(return_document_id) not in {
+        document.pk for document in documents
+    }:
+        return_document_id = ""
+    unauthorized_groups = [
+        group for group in groups if not group["source"].allow_cloud_ai
+    ]
+    if request.POST.get("confirm") != "yes":
+        return render(
+            request,
+            "knowledge/ai_organize_confirm.html",
+            {
+                "documents": documents,
+                "groups": groups,
+                "unauthorized_groups": unauthorized_groups,
+                "document_count": len(documents),
+                "return_document_id": return_document_id,
+                "can_authorize_all_sources": all(
+                    group["can_authorize_source"] for group in unauthorized_groups
+                ),
+            },
+        )
+
+    authorization = request.POST.get("authorization", "existing")
+    if request.POST.get("acknowledge") != "yes":
+        messages.error(request, "请先确认本次正文发送范围和人工核对责任。")
+        return redirect("knowledge:inbox")
+    if unauthorized_groups and authorization not in {"once", "source"}:
+        messages.error(request, "请选择本次 AI 正文发送授权方式。")
+        return redirect("knowledge:inbox")
+    if authorization == "source" and any(
+        not group["can_authorize_source"] for group in unauthorized_groups
+    ):
+        return HttpResponseForbidden("只能由来源所有者设置今后持续授权。")
+
+    source_ids = [group["source"].pk for group in groups]
+    active_job = (
+        KnowledgeJob.objects.filter(
+            source_id__in=source_ids,
+            job_type=KnowledgeJob.TYPE_GENERATE_PROPOSALS,
+            status__in=KnowledgeJob.ACTIVE_STATUSES,
+        )
+        .select_related("source")
+        .first()
+    )
+    if active_job:
+        messages.error(
+            request,
+            f"“{active_job.source.name}”已有 AI 整理任务正在排队或运行，"
+            "请完成后再选择下一批。",
+        )
+        return redirect("knowledge:inbox")
+
+    jobs = []
+    try:
+        with transaction.atomic():
+            if authorization == "source":
+                for group in unauthorized_groups:
+                    group["source"].allow_cloud_ai = True
+                    group["source"].save(
+                        update_fields=["allow_cloud_ai", "updated_at"]
+                    )
+            for group in groups:
+                document_ids = [document.pk for document in group["documents"]]
+                parameters = {
+                    "document_ids": document_ids,
+                    "selection_scope": "pending_documents",
+                }
+                if not group["source"].allow_cloud_ai and authorization == "once":
+                    parameters["one_time_document_ids"] = document_ids
+                job, created = queue_knowledge_job(
+                    family=member.family,
+                    source=group["source"],
+                    requested_by=member,
+                    job_type=KnowledgeJob.TYPE_GENERATE_PROPOSALS,
+                    parameters=parameters,
+                )
+                if not created:
+                    raise KnowledgeAiError(
+                        f"“{group['source'].name}”刚刚创建了另一项 AI 任务，"
+                        "请稍后重试。"
+                    )
+                job.total_count = len(document_ids)
+                job.save(update_fields=["total_count", "updated_at"])
+                mark_ai_processing_documents(job)
+                jobs.append(job)
+    except KnowledgeAiError as exc:
+        messages.error(request, str(exc))
+        return redirect("knowledge:inbox")
+
+    messages.success(
+        request,
+        f"已为 {len(documents)} 篇资料创建 {len(jobs)} 个 AI 整理任务；"
+        "完成后仍留在待整理，并进入“等待确认”。",
+    )
+    if return_document_id:
+        return redirect("knowledge:document_detail", pk=int(return_document_id))
+    return redirect("knowledge:inbox")
+
+
+@login_required
 def document_organize(request, pk):
     member = current_member(request)
     if member is None:
@@ -742,16 +1185,28 @@ def document_organize(request, pk):
     document = get_object_or_404(accessible_documents(member), pk=pk)
     if not _can_write(member) or not can_organize_document(member, document):
         return HttpResponseForbidden("只有资料所有者或家庭管理员可以整理这项知识。")
+    if (
+        document.knowledge_status != KnowledgeDocument.KNOWLEDGE_PENDING
+        and document.library_tier != KnowledgeDocument.LIBRARY_KNOWLEDGE
+    ):
+        messages.info(request, "请先把这项归档资料加入待整理。")
+        return redirect("knowledge:document_detail", pk=document.pk)
     if request.method == "POST":
         form = DocumentOrganizeForm(request.POST, instance=document)
         if form.is_valid():
             with transaction.atomic():
                 document = form.save()
-                if document.knowledge_status == KnowledgeDocument.KNOWLEDGE_INCLUDED:
-                    document.curation_status = KnowledgeDocument.CURATION_CONFIRMED
-                    document.save(
-                        update_fields=["curation_status", "updated_at"]
-                    )
+                document.knowledge_status = KnowledgeDocument.KNOWLEDGE_INCLUDED
+                document.library_tier = KnowledgeDocument.LIBRARY_KNOWLEDGE
+                document.curation_status = KnowledgeDocument.CURATION_CONFIRMED
+                document.save(
+                    update_fields=[
+                        "knowledge_status",
+                        "library_tier",
+                        "curation_status",
+                        "updated_at",
+                    ]
+                )
                 KnowledgeProposal.objects.filter(
                     document=document,
                     revision=document.current_revision,
@@ -763,7 +1218,7 @@ def document_organize(request, pk):
                     human_value={"reason": "manual_organization"},
                 )
                 index_document(document)
-            messages.success(request, "正式摘要、分类和标签已保存。")
+            messages.success(request, "正式整理结果已保存，并进入精选知识。")
             return redirect("knowledge:document_detail", pk=document.pk)
     else:
         form = DocumentOrganizeForm(instance=document)
@@ -879,6 +1334,7 @@ def imports(request):
                 batch = create_uploaded_import_batch(
                     member=member,
                     source_name=form.cleaned_data["source_name"],
+                    person_name=form.cleaned_data["person_name"],
                     category=form.cleaned_data["category"],
                     visibility=form.cleaned_data["visibility"],
                     uploaded_file=form.cleaned_data["package"],
@@ -1191,8 +1647,13 @@ def source_detail(request, pk):
             "recent_jobs": source.jobs.select_related("requested_by").order_by("-created_at")[:10],
             "document_count": source.documents.count(),
             "archive_count": source.documents.filter(
-                knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
-                library_tier=KnowledgeDocument.LIBRARY_ARCHIVE,
+                knowledge_status__in=[
+                    KnowledgeDocument.KNOWLEDGE_INCLUDED,
+                    KnowledgeDocument.KNOWLEDGE_PENDING,
+                ],
+            ).count(),
+            "pending_count": source.documents.filter(
+                knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
             ).count(),
             "source_sections": _source_sections(source)
             if source.kind == KnowledgeSource.KIND_ONENOTE
@@ -1220,9 +1681,9 @@ def source_history(request, pk):
         request,
         member,
         forced_source_id=source.pk,
-        forced_library_tier=KnowledgeDocument.LIBRARY_ARCHIVE,
+        forced_collection="archive",
         page_title=f"{source.name} · 历史文章",
-        page_description="此账号的历史文章保存在统一知识底座中；只有成员主动整理后才会进入精选知识。",
+        page_description="此人物的历史文章保存在归档资料中；加入待整理并完成人工确认后，才会同时出现在精选知识。",
     )
 
 
@@ -1280,18 +1741,28 @@ def source_update(request, pk):
             desired_status = _knowledge_status_for_route(
                 source.route_for_section(section_id)
             )
+            update_fields = []
             if document.knowledge_status != desired_status:
                 document.knowledge_status = desired_status
-                document.save(update_fields=["knowledge_status", "updated_at"])
+                update_fields.append("knowledge_status")
+            if (
+                document.curation_status != KnowledgeDocument.CURATION_CONFIRMED
+                and document.library_tier != KnowledgeDocument.LIBRARY_ARCHIVE
+            ):
+                document.library_tier = KnowledgeDocument.LIBRARY_ARCHIVE
+                update_fields.append("library_tier")
+            if update_fields:
+                document.save(update_fields=[*update_fields, "updated_at"])
                 updated_documents += 1
-    messages.success(
-        request,
-        (
+    if source.kind == KnowledgeSource.KIND_ONENOTE:
+        success_message = (
             f"来源设置已更新，并按分区规则更新了 {updated_documents} 篇已有文档。"
             if request.POST.get("apply_existing") == "on"
             else "来源设置已更新；分区规则只影响以后首次同步的页面。"
-        ),
-    )
+        )
+    else:
+        success_message = "来源设置已更新。"
+    messages.success(request, success_message)
     return redirect("knowledge:source_detail", pk=source.pk)
 
 
@@ -1327,23 +1798,6 @@ def source_sync(request, pk):
         source,
         KnowledgeJob.TYPE_SYNC_SOURCE,
         {"full_reconcile": request.POST.get("full_reconcile") == "on"},
-    )
-
-
-@login_required
-@require_POST
-def source_generate_proposals(request, pk):
-    member = current_member(request)
-    if member is None:
-        return _membership_required_response(request)
-    source = get_object_or_404(KnowledgeSource, pk=pk, family=member.family)
-    if not source.allow_cloud_ai:
-        messages.error(request, "请先明确勾选该来源允许发送正文给云端 AI。")
-        return redirect("knowledge:source_detail", pk=source.pk)
-    return _queue_source_job(
-        request,
-        source,
-        KnowledgeJob.TYPE_GENERATE_PROPOSALS,
     )
 
 
@@ -1426,6 +1880,8 @@ def job_cancel(request, pk):
                 "updated_at",
             ]
         )
+        if job.job_type == KnowledgeJob.TYPE_GENERATE_PROPOSALS:
+            restore_ai_processing_documents(job)
         messages.success(request, "排队任务已取消。")
     elif job.status == KnowledgeJob.STATUS_RUNNING:
         job.status = KnowledgeJob.STATUS_CANCEL_REQUESTED
@@ -1457,13 +1913,17 @@ def job_retry(request, pk):
     }:
         messages.error(request, "当前任务状态不需要重试。")
         return redirect("knowledge:job_detail", pk=previous.pk)
-    job, _ = queue_knowledge_job(
+    job, created = queue_knowledge_job(
         family=previous.family,
         source=previous.source,
         requested_by=member,
         job_type=previous.job_type,
         parameters=previous.parameters,
     )
+    if created and job.job_type == KnowledgeJob.TYPE_GENERATE_PROPOSALS:
+        job.total_count = len((job.parameters or {}).get("document_ids") or [])
+        job.save(update_fields=["total_count", "updated_at"])
+        mark_ai_processing_documents(job)
     messages.success(request, "已创建重试任务。")
     return redirect("knowledge:job_detail", pk=job.pk)
 
@@ -1522,10 +1982,12 @@ def _apply_proposal(proposal, member, *, accept, value=None):
         document.curation_status = KnowledgeDocument.CURATION_CONFIRMED
         if document.knowledge_status == KnowledgeDocument.KNOWLEDGE_PENDING:
             document.knowledge_status = KnowledgeDocument.KNOWLEDGE_INCLUDED
+        document.library_tier = KnowledgeDocument.LIBRARY_KNOWLEDGE
         document.save(
             update_fields=[
                 "curation_status",
                 "knowledge_status",
+                "library_tier",
                 "updated_at",
             ]
         )

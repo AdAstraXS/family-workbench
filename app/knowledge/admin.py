@@ -179,6 +179,7 @@ class KnowledgeImportBatchAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "source",
+        "person_name",
         "requested_by",
         "import_format",
         "status",
@@ -187,7 +188,7 @@ class KnowledgeImportBatchAdmin(admin.ModelAdmin):
         "created_at",
     )
     list_filter = ("family", "import_format", "status", "visibility")
-    search_fields = ("source_filename", "source_sha256", "source__name")
+    search_fields = ("source_filename", "source_sha256", "source__name", "person_name")
     readonly_fields = (
         "batch_key",
         "source_sha256",

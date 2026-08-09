@@ -16,9 +16,29 @@ urlpatterns = [
     path("architecture/", views.architecture, name="architecture"),
     path("documents/<int:pk>/", views.document_detail, name="document_detail"),
     path(
+        "documents/<int:pk>/reading-preferences/",
+        views.document_reading_preferences,
+        name="document_reading_preferences",
+    ),
+    path(
+        "documents/<int:pk>/add-to-inbox/",
+        views.document_add_to_inbox,
+        name="document_add_to_inbox",
+    ),
+    path(
+        "documents/<int:pk>/cancel-organizing/",
+        views.document_cancel_organizing,
+        name="document_cancel_organizing",
+    ),
+    path(
         "documents/<int:pk>/organize/",
         views.document_organize,
         name="document_organize",
+    ),
+    path(
+        "documents/ai-organize/",
+        views.document_ai_organize,
+        name="document_ai_organize",
     ),
     path("assets/<int:pk>/download/", views.asset_download, name="asset_download"),
     path(
@@ -47,11 +67,6 @@ urlpatterns = [
     path("sources/<int:pk>/history/", views.source_history, name="source_history"),
     path("sources/<int:pk>/update/", views.source_update, name="source_update"),
     path("sources/<int:pk>/sync/", views.source_sync, name="source_sync"),
-    path(
-        "sources/<int:pk>/generate-proposals/",
-        views.source_generate_proposals,
-        name="source_generate_proposals",
-    ),
     path("microsoft/start/", views.microsoft_start, name="microsoft_start"),
     path("microsoft/callback/", views.microsoft_callback, name="microsoft_callback"),
     path(

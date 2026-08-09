@@ -82,7 +82,7 @@
           <input type="checkbox" name="allow_cloud_ai">
           <span>允许把这个笔记本的正文发送给已配置的云端 AI 进行摘要、标签和分类建议</span>
         </label>
-        <small>保存后可在来源详情中按 OneNote 分区选择“直接入库、待整理或仅同步归档”；不勾选 AI 仍可同步和阅读。</small>
+        <small>保存后可在来源详情中按 OneNote 分区选择“归档资料、归档并加入待整理或仅同步”；不勾选 AI 仍可同步和阅读。</small>
         <button class="button primary" type="submit">保存试点来源</button>
       </form>
     {% else %}
@@ -99,9 +99,9 @@
   </div>
   <div class="source-list">
     {% for source in sources %}
-      <a class="source-row" href="{% url 'knowledge:source_detail' source.pk %}">
+      <div class="source-row">
         <div>
-          <strong>{{ source.name }}</strong>
+          <a href="{% url 'knowledge:source_detail' source.pk %}"><strong>{{ source.name }}</strong></a>
           <span>{{ source.get_kind_display }} · {% if source.visibility == "family" %}家庭可见{% else %}仅所有者{% endif %}</span>
         </div>
         <div>
@@ -109,7 +109,7 @@
           {% if source.kind == "html_import" or source.kind == "markdown_import" %}<span><a href="{% url 'knowledge:source_history' source.pk %}">历史文章</a></span>{% endif %}
           <span>{{ source.last_sync_at|date:"Y-m-d H:i"|default:"尚未同步" }}</span>
         </div>
-      </a>
+      </div>
     {% empty %}
       <div class="empty-state compact"><p>暂无外部知识来源；随手记只有明确勾选“加入家庭知识库”后才会建立内部投影。</p></div>
     {% endfor %}

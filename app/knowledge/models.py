@@ -139,9 +139,9 @@ class KnowledgeSource(TimestampedModel):
     ROUTE_ORGANIZE = "organize"
     ROUTE_ARCHIVE = "archive"
     ROUTE_CHOICES = [
-        (ROUTE_KNOWLEDGE, "直接进入知识库"),
-        (ROUTE_ORGANIZE, "进入待整理"),
-        (ROUTE_ARCHIVE, "仅同步归档"),
+        (ROUTE_KNOWLEDGE, "进入归档资料"),
+        (ROUTE_ORGANIZE, "归档并加入待整理"),
+        (ROUTE_ARCHIVE, "仅同步（不进入资料库）"),
     ]
 
     STATUS_ACTIVE = "active"
@@ -264,15 +264,15 @@ class KnowledgeDocument(TimestampedModel):
     KNOWLEDGE_ARCHIVED = "archived"
     KNOWLEDGE_STATUS_CHOICES = [
         (KNOWLEDGE_PENDING, "待整理"),
-        (KNOWLEDGE_INCLUDED, "已入库"),
-        (KNOWLEDGE_ARCHIVED, "仅同步归档"),
+        (KNOWLEDGE_INCLUDED, "归档资料"),
+        (KNOWLEDGE_ARCHIVED, "仅同步"),
     ]
 
     LIBRARY_KNOWLEDGE = "knowledge"
     LIBRARY_ARCHIVE = "archive"
     LIBRARY_TIER_CHOICES = [
         (LIBRARY_KNOWLEDGE, "精选知识"),
-        (LIBRARY_ARCHIVE, "资料库历史归档"),
+        (LIBRARY_ARCHIVE, "仅归档"),
     ]
 
     family = models.ForeignKey(
@@ -332,10 +332,10 @@ class KnowledgeDocument(TimestampedModel):
     category = models.CharField("已确认分类", max_length=100, blank=True)
     tags = models.JSONField("已确认标签", default=list, blank=True)
     library_tier = models.CharField(
-        "资料库层级",
+        "精选状态",
         max_length=20,
         choices=LIBRARY_TIER_CHOICES,
-        default=LIBRARY_KNOWLEDGE,
+        default=LIBRARY_ARCHIVE,
         db_index=True,
     )
     current_revision = models.ForeignKey(
@@ -735,6 +735,12 @@ class KnowledgeImportBatch(TimestampedModel):
         max_length=20,
         choices=KnowledgeVisibility.choices,
         default=KnowledgeVisibility.FAMILY,
+    )
+    person_name = models.CharField(
+        "归属人物",
+        max_length=300,
+        blank=True,
+        help_text="填写后统一作为本批次文章的作者；HTML 原始署名仍保留在逐篇记录中。",
     )
     category = models.CharField("批次默认分类", max_length=100, blank=True)
     status = models.CharField(

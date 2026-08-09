@@ -614,9 +614,12 @@ def preview_import_batch(job):
             try:
                 raw = _read_package_file(archive, names, relative_path)
                 article = parse_wechat_html(raw, relative_path)
+                source_author = article.author
                 if not article.author:
                     article.author = batch.source.name.split("·")[-1].strip()[:300]
                     article.warnings.append("页面未标注作者，已采用本批次公众号来源名称。")
+                if batch.person_name:
+                    article.author = batch.person_name
                 safe_html, plain_text = _render_article(article, {})
                 assets, asset_warnings = _asset_map(names, relative_path, article)
                 asset_hashes = []
@@ -670,6 +673,7 @@ def preview_import_batch(job):
                 item.warnings = [*article.warnings, *asset_warnings]
                 item.details = {
                     "publisher": article.publisher,
+                    "source_author": source_author,
                     "plain_text_length": len(plain_text),
                     "assets": valid_assets,
                     "safe_html_length": len(safe_html),
@@ -981,6 +985,74 @@ def import_knowledge_batch(job):
     return counters
 
 
+@transaction.atomic
+def assign_import_batch_person(batch, person_name):
+    person_name = str(person_name or "").strip()[:300]
+    if not person_name:
+        raise KnowledgeImportError("归属人物不能为空。")
+    if batch.status in {
+        KnowledgeImportBatch.STATUS_ROLLING_BACK,
+        KnowledgeImportBatch.STATUS_ROLLED_BACK,
+    }:
+        raise KnowledgeImportError("正在回滚或已经回滚的批次不能修改归属人物。")
+
+    batch = KnowledgeImportBatch.objects.select_for_update().select_related("family").get(
+        pk=batch.pk
+    )
+    items = list(
+        batch.items.select_for_update()
+        .order_by("id")
+    )
+    assigned_at = timezone.now()
+    source_aliases = sorted({item.author for item in items if item.author})
+    updated_documents = 0
+
+    for item in items:
+        details = dict(item.details or {})
+        details.setdefault("source_author", item.author)
+        if item.status == KnowledgeImportItem.STATUS_IMPORTED and item.document_id:
+            document = KnowledgeDocument.objects.select_for_update().get(pk=item.document_id)
+            expected_updated_at = details.get("document_updated_at")
+            if (
+                document.current_revision_id != item.revision_id
+                or not expected_updated_at
+                or document.updated_at.isoformat() != expected_updated_at
+            ):
+                raise KnowledgeImportError(
+                    f"《{item.title or item.relative_path}》在导入后已有修改，已停止人物归并。"
+                )
+            document.author = person_name
+            document.save(update_fields=["author", "updated_at"])
+            index_document(document)
+            details["document_updated_at"] = document.updated_at.isoformat()
+            updated_documents += 1
+
+        details["person_assignment"] = {
+            "name": person_name,
+            "assigned_at": assigned_at.isoformat(),
+        }
+        item.author = person_name
+        item.details = details
+        item.save(update_fields=["author", "details", "updated_at"])
+
+    result = dict(batch.result or {})
+    result["person_assignment"] = {
+        "name": person_name,
+        "source_aliases": source_aliases,
+        "document_count": updated_documents,
+        "assigned_at": assigned_at.isoformat(),
+    }
+    batch.person_name = person_name
+    batch.result = result
+    batch.save(update_fields=["person_name", "result", "updated_at"])
+    return {
+        "person_name": person_name,
+        "source_aliases": source_aliases,
+        "item_count": len(items),
+        "document_count": updated_documents,
+    }
+
+
 def _revision_file_records(revision):
     records = []
     if revision.raw_file:
@@ -1089,6 +1161,19 @@ def _matching_sample_assets(root, html_path):
     return candidates
 
 
+def _resolved_person_name(source, person_name):
+    person_name = str(person_name or "").strip()[:300]
+    if person_name:
+        return person_name
+    return (
+        source.import_batches.exclude(person_name="")
+        .order_by("-created_at")
+        .values_list("person_name", flat=True)
+        .first()
+        or ""
+    )
+
+
 def stage_html_directory_batch(
     *,
     root,
@@ -1097,6 +1182,7 @@ def stage_html_directory_batch(
     member,
     source_name,
     source_key,
+    person_name="",
     visibility=KnowledgeVisibility.FAMILY,
     category="公众号归档",
 ):
@@ -1129,6 +1215,7 @@ def stage_html_directory_batch(
             "status": KnowledgeSource.STATUS_ACTIVE,
         },
     )
+    person_name = _resolved_person_name(source, person_name)
     spool = tempfile.SpooledTemporaryFile(max_size=20 * 1024 * 1024, mode="w+b")
     with zipfile.ZipFile(spool, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         added = set()
@@ -1153,6 +1240,7 @@ def stage_html_directory_batch(
         source_sha256=digest.hexdigest(),
         package_file="",
         visibility=visibility,
+        person_name=person_name,
         category=category,
     )
     batch.package_file.save(
@@ -1163,7 +1251,9 @@ def stage_html_directory_batch(
     return batch
 
 
-def create_uploaded_import_batch(*, member, source_name, category, visibility, uploaded_file):
+def create_uploaded_import_batch(
+    *, member, source_name, category, visibility, uploaded_file, person_name=""
+):
     filename = Path(getattr(uploaded_file, "name", "knowledge-import.zip")).name
     suffix = Path(filename).suffix.lower()
     if suffix not in {".zip", ".html"}:
@@ -1188,6 +1278,7 @@ def create_uploaded_import_batch(*, member, source_name, category, visibility, u
             "allow_cloud_ai": False,
         },
     )
+    person_name = _resolved_person_name(source, person_name)
     batch = KnowledgeImportBatch.objects.create(
         family=member.family,
         source=source,
@@ -1197,6 +1288,7 @@ def create_uploaded_import_batch(*, member, source_name, category, visibility, u
         source_sha256=digest.hexdigest(),
         package_file="",
         visibility=visibility,
+        person_name=person_name,
         category=category,
     )
     batch.package_file.save(filename, uploaded_file, save=True)

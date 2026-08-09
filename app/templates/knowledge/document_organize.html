@@ -1,17 +1,18 @@
 {% extends "knowledge_hub/base.html" %}
 
-{% block title %}人工整理 · {{ document.title }}{% endblock %}
+{% block title %}整理为精选知识 · {{ document.title }}{% endblock %}
 
 {% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:document_detail' document.pk %}">{{ document.title|truncatechars:20 }}</a><span aria-hidden="true">›</span><span>人工整理</span>{% endblock %}
 
 {% block hub_content %}
 <section class="headline">
-  <h1>人工整理</h1>
-  <p>{{ document.title }}</p>
+  <h1>整理为精选知识</h1>
+  <p>{{ document.title }} · 完成摘要、分类或标签后，确认进入精选知识。</p>
 </section>
 <section class="panel form-panel">
   <form method="post" class="stacked-form">
     {% csrf_token %}
+    {% for error in form.non_field_errors %}<span class="field-error">{{ error }}</span>{% endfor %}
     {% for field in form %}
       <label>
         <span>{{ field.label }}</span>
@@ -21,7 +22,7 @@
       </label>
     {% endfor %}
     <div class="form-actions">
-      <button class="button primary" type="submit">保存正式整理结果</button>
+      <button class="button primary" type="submit">确认进入精选知识</button>
       <a class="button" href="{% url 'knowledge:document_detail' document.pk %}">取消</a>
     </div>
   </form>
