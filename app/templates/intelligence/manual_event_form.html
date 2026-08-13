@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260813-3">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head">
+  <div><span class="intel-eyebrow">MANUAL INTAKE · M1.5</span><h1>{{ title }}</h1><p>人工提供五项独立特征，系统按 people-v1 规则计算重要性、置信度和展示分层。</p></div>
+</section>
+<form method="post" class="intel-form-shell intel-manual-form">
+  {% csrf_token %}
+  {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+  <fieldset>
+    <legend><span>01</span> 事件事实</legend>
+    <div class="intel-form-grid">
+      {% for field in form %}
+        {% if field.name == "subject" or field.name == "event_type" or field.name == "title" or field.name == "occurred_at" or field.name == "occurred_precision" or field.name == "summary" %}
+          <div class="intel-form-field {% if field.name == 'title' or field.name == 'summary' %}intel-form-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend><span>02</span> 评分特征与复核</legend>
+    <p class="intel-fieldset-note">不要直接填写最终分数。请分别判断相关性、影响、新颖性、投资参考价值和时效性，代码会稳定计算结果。</p>
+    <div class="intel-form-grid">
+      {% for field in form %}
+        {% if field.name == "why_it_matters" or field.name == "relevance_score" or field.name == "impact_score" or field.name == "novelty_score" or field.name == "actionability_score" or field.name == "timeliness_score" or field.name == "change_type" or field.name == "review_status" %}
+          <div class="intel-form-field {% if field.name == 'why_it_matters' %}intel-form-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend><span>03</span> 原始来源与证据</legend>
+    <p class="intel-fieldset-note">必须保留原文链接。短摘录仅用于核查，不要复制整篇文章。</p>
+    <div class="intel-form-grid">
+      {% for field in form %}
+        {% if field.name == "source_name" or field.name == "source_tier" or field.name == "source_group" or field.name == "source_title" or field.name == "source_url" or field.name == "source_author" or field.name == "evidence_type" or field.name == "evidence_excerpt" %}
+          <div class="intel-form-field {% if field.name == 'source_title' or field.name == 'source_url' or field.name == 'evidence_excerpt' %}intel-form-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}</div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </fieldset>
+  <div class="intel-form-actions"><button class="button intel-primary" type="submit">保存并进入信息流</button><a class="button ghost" href="{% url 'intelligence:index' %}">取消</a></div>
+</form>
+{% endblock %}

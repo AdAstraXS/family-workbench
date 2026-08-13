@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ subject.display_name }}动态{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260813-3">{% endblock %}
+
+{% block content %}
+<section class="intel-subject-profile">
+  <div class="intel-avatar xlarge">{{ subject.display_name|slice:":1" }}</div>
+  <div class="intel-subject-profile-main"><span class="intel-eyebrow">{{ subject.get_subject_type_display }} · {{ subject.get_category_display }}</span><h1>{{ subject.display_name }}</h1><small>{{ subject.canonical_name }}</small><p>{{ subject.profile_summary|default:"尚未填写简介。" }}</p>{% if subject.aliases %}<div class="intel-subject-chips">{% for alias in subject.aliases %}<span>{{ alias }}</span>{% endfor %}</div>{% endif %}</div>
+  <div class="intel-profile-actions"><form method="post" action="{% url 'intelligence:subject_toggle_follow' subject.slug %}">{% csrf_token %}<button class="button {% if not follow.is_active %}intel-primary{% else %}ghost{% endif %}" type="submit">{% if follow.is_active %}取消关注{% else %}关注主题{% endif %}</button></form>{% if can_admin %}<a class="button ghost" href="{% url 'intelligence:subject_edit' subject.slug %}">编辑资料</a><a class="button ghost" href="{% url 'intelligence:source_create' %}?subject={{ subject.pk }}">关联信源</a>{% endif %}</div>
+</section>
+
+<section class="intel-dashboard-grid intel-subject-body">
+  <div class="intel-section">
+    <div class="intel-section-head"><div><span>TIMELINE</span><h2>动态时间线</h2></div><small>{{ events|length }} 条</small></div>
+    <div class="intel-timeline">{% for event in events %}<article><time>{{ event.occurred_at|date:"Y-m-d H:i" }}</time><div><span class="intel-type intel-type-{{ event.event_type }}">{{ event.get_event_type_display }}</span><h3><a href="{% url 'intelligence:event_detail' event.pk %}">{{ event.title }}</a></h3><p>{{ event.summary|truncatechars:180 }}</p></div></article>{% empty %}<div class="intel-empty"><strong>还没有动态</strong><p>管理员可从原始链接人工录入第一条事件。</p></div>{% endfor %}</div>
+  </div>
+  <aside>
+    <section class="intel-section"><div class="intel-section-head"><div><span>SOURCES</span><h2>关联信源</h2></div></div><div class="intel-source-list">{% for source in subject.sources.all %}<div><span class="intel-tier tier-{{ source.source_tier|lower }}">{{ source.source_tier }}级</span><span><strong>{{ source.name }}</strong><small>{{ source.get_source_type_display }} · {{ source.get_source_group_display }}</small></span>{% if can_admin %}<a href="{% url 'intelligence:source_edit' source.pk %}">编辑</a>{% endif %}</div>{% empty %}<p class="intel-muted">尚未关联信源。</p>{% endfor %}</div></section>
+    <section class="intel-section"><div class="intel-section-head"><div><span>RELATIONS</span><h2>关联对象</h2></div></div><div class="intel-relation-list">{% for relation in outgoing_relations %}<a href="{% url 'intelligence:subject_detail' relation.to_subject.slug %}">{{ relation.get_relation_type_display }} → {{ relation.to_subject.display_name }}</a>{% endfor %}{% for relation in incoming_relations %}<a href="{% url 'intelligence:subject_detail' relation.from_subject.slug %}">{{ relation.from_subject.display_name }} → {{ relation.get_relation_type_display }}</a>{% endfor %}{% if not outgoing_relations and not incoming_relations %}<p class="intel-muted">尚未建立关系。</p>{% endif %}</div></section>
+  </aside>
+</section>
+{% endblock %}

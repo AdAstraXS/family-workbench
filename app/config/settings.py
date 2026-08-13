@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "notes",
     "macro",
     "ai_analysis",
+    "intelligence",
     "dashboard",
 ]
 

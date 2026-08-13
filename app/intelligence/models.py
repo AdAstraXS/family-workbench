@@ -1,0 +1,874 @@
+import uuid
+from datetime import timedelta
+
+from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
+from django.db import models
+from django.db.models import Q
+from django.utils import timezone
+from django.utils.text import slugify
+
+from family_core.models import Family, FamilyMember, TimestampedModel
+
+
+class IntelligenceSubject(TimestampedModel):
+    TYPE_PERSON = "person"
+    TYPE_ORGANIZATION = "organization"
+    TYPE_INDUSTRY = "industry"
+    TYPE_TECHNOLOGY = "technology"
+    TYPE_POLICY = "policy"
+    TYPE_SECURITY = "security"
+    TYPE_TOPIC = "topic"
+    TYPE_CHOICES = [
+        (TYPE_PERSON, "人物"),
+        (TYPE_ORGANIZATION, "机构"),
+        (TYPE_INDUSTRY, "行业"),
+        (TYPE_TECHNOLOGY, "技术"),
+        (TYPE_POLICY, "政策"),
+        (TYPE_SECURITY, "证券"),
+        (TYPE_TOPIC, "通用主题"),
+    ]
+
+    CATEGORY_TECH_LEADER = "tech_leader"
+    CATEGORY_INVESTOR = "investor"
+    CATEGORY_POLICY_LEADER = "policy_leader"
+    CATEGORY_ORGANIZATION = "organization"
+    CATEGORY_INDUSTRY = "industry"
+    CATEGORY_TECHNOLOGY = "technology"
+    CATEGORY_POLICY = "policy"
+    CATEGORY_SECURITY = "security"
+    CATEGORY_OTHER = "other"
+    CATEGORY_CHOICES = [
+        (CATEGORY_TECH_LEADER, "科技领袖"),
+        (CATEGORY_INVESTOR, "投资人"),
+        (CATEGORY_POLICY_LEADER, "政策人物"),
+        (CATEGORY_ORGANIZATION, "机构"),
+        (CATEGORY_INDUSTRY, "行业主题"),
+        (CATEGORY_TECHNOLOGY, "技术主题"),
+        (CATEGORY_POLICY, "政策主题"),
+        (CATEGORY_SECURITY, "证券主题"),
+        (CATEGORY_OTHER, "其他"),
+    ]
+
+    subject_type = models.CharField("对象类型", max_length=20, choices=TYPE_CHOICES)
+    canonical_name = models.CharField("规范名称", max_length=200, unique=True)
+    display_name = models.CharField("显示名称", max_length=200)
+    slug = models.SlugField("稳定标识", max_length=220, unique=True, blank=True)
+    aliases = models.JSONField("别名", default=list, blank=True)
+    category = models.CharField("类别", max_length=30, choices=CATEGORY_CHOICES)
+    profile_summary = models.TextField("简介", blank=True)
+    avatar_url = models.URLField("头像链接", max_length=1000, blank=True)
+    importance_level = models.PositiveSmallIntegerField(
+        "重要性等级",
+        default=3,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+    )
+    is_active = models.BooleanField("启用", default=True)
+    extra_data = models.JSONField("扩展字段", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "情报关注主题"
+        verbose_name_plural = "情报关注主题"
+        ordering = ["-importance_level", "display_name", "pk"]
+        indexes = [
+            models.Index(fields=["subject_type", "category", "is_active"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.canonical_name) or f"subject-{uuid.uuid4().hex[:12]}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.display_name
+
+
+class SubjectRelation(TimestampedModel):
+    TYPE_LEADERSHIP = "leadership"
+    TYPE_FOUNDER = "founder"
+    TYPE_INVESTOR = "investor"
+    TYPE_AFFILIATION = "affiliation"
+    TYPE_OTHER = "other"
+    TYPE_CHOICES = [
+        (TYPE_LEADERSHIP, "任职"),
+        (TYPE_FOUNDER, "创办"),
+        (TYPE_INVESTOR, "投资"),
+        (TYPE_AFFILIATION, "关联"),
+        (TYPE_OTHER, "其他"),
+    ]
+
+    from_subject = models.ForeignKey(
+        IntelligenceSubject,
+        verbose_name="起始对象",
+        on_delete=models.CASCADE,
+        related_name="outgoing_relations",
+    )
+    to_subject = models.ForeignKey(
+        IntelligenceSubject,
+        verbose_name="目标对象",
+        on_delete=models.CASCADE,
+        related_name="incoming_relations",
+    )
+    relation_type = models.CharField("关系类型", max_length=30, choices=TYPE_CHOICES)
+    valid_from = models.DateField("开始日期", null=True, blank=True)
+    valid_to = models.DateField("结束日期", null=True, blank=True)
+    evidence_note = models.TextField("依据说明", blank=True)
+
+    class Meta:
+        verbose_name = "关注对象关系"
+        verbose_name_plural = "关注对象关系"
+        constraints = [
+            models.CheckConstraint(
+                condition=~Q(from_subject=models.F("to_subject")),
+                name="intelligence_relation_subjects_differ",
+            ),
+            models.UniqueConstraint(
+                fields=["from_subject", "to_subject", "relation_type"],
+                name="unique_intelligence_subject_relation",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.from_subject} - {self.get_relation_type_display()} - {self.to_subject}"
+
+
+class IntelligenceSource(TimestampedModel):
+    TYPE_OFFICIAL_SITE = "official_site"
+    TYPE_RSS = "rss"
+    TYPE_X = "x"
+    TYPE_YOUTUBE = "youtube"
+    TYPE_SEC = "sec"
+    TYPE_MEDIA = "media"
+    TYPE_MANUAL = "manual"
+    TYPE_CHOICES = [
+        (TYPE_OFFICIAL_SITE, "官方网站"),
+        (TYPE_RSS, "RSS / Atom"),
+        (TYPE_X, "X"),
+        (TYPE_YOUTUBE, "YouTube"),
+        (TYPE_SEC, "SEC EDGAR"),
+        (TYPE_MEDIA, "媒体"),
+        (TYPE_MANUAL, "人工录入"),
+    ]
+
+    GROUP_OFFICIAL = "official"
+    GROUP_EXPERT = "expert"
+    GROUP_INSTITUTION = "institution"
+    GROUP_MEDIA = "media"
+    GROUP_SOCIAL = "social"
+    GROUP_REGULATORY = "regulatory"
+    GROUP_OTHER = "other"
+    GROUP_CHOICES = [
+        (GROUP_OFFICIAL, "官方网站与官方账号"),
+        (GROUP_EXPERT, "人物博客与访谈"),
+        (GROUP_INSTITUTION, "公司与研究机构"),
+        (GROUP_MEDIA, "可信媒体"),
+        (GROUP_SOCIAL, "社交与视频平台"),
+        (GROUP_REGULATORY, "监管与正式披露"),
+        (GROUP_OTHER, "其他"),
+    ]
+
+    ADAPTER_MANUAL = "manual"
+    ADAPTER_RSS = "rss"
+    ADAPTER_YOUTUBE = "youtube"
+    ADAPTER_SEC = "sec"
+    ADAPTER_X = "x"
+    ADAPTER_WEB = "web"
+    ADAPTER_CHOICES = [
+        (ADAPTER_MANUAL, "人工录入"),
+        (ADAPTER_RSS, "RSS / Atom"),
+        (ADAPTER_YOUTUBE, "YouTube 官方频道（仅元数据）"),
+        (ADAPTER_SEC, "SEC EDGAR（待后续阶段）"),
+        (ADAPTER_X, "X API（待凭证确认）"),
+        (ADAPTER_WEB, "公开网页（待后续阶段）"),
+    ]
+
+    TIER_A = "A"
+    TIER_B = "B"
+    TIER_C = "C"
+    TIER_D = "D"
+    TIER_CHOICES = [
+        (TIER_A, "A - 官方一手"),
+        (TIER_B, "B - 直接采访/演讲"),
+        (TIER_C, "C - 可信二手报道"),
+        (TIER_D, "D - 发现线索"),
+    ]
+
+    subject = models.ForeignKey(
+        IntelligenceSubject,
+        verbose_name="主要关联主题",
+        on_delete=models.SET_NULL,
+        related_name="primary_sources",
+        null=True,
+        blank=True,
+    )
+    topics = models.ManyToManyField(
+        IntelligenceSubject,
+        verbose_name="关联主题",
+        related_name="sources",
+        blank=True,
+    )
+    source_type = models.CharField("来源类型", max_length=30, choices=TYPE_CHOICES)
+    source_group = models.CharField("信源类别", max_length=30, choices=GROUP_CHOICES, default=GROUP_OTHER)
+    adapter_key = models.SlugField("适配器代码", max_length=50, choices=ADAPTER_CHOICES, default=ADAPTER_MANUAL)
+    name = models.CharField("来源名称", max_length=200)
+    url = models.URLField("来源入口", max_length=1000, blank=True)
+    external_id = models.CharField("平台外部 ID", max_length=300, blank=True)
+    source_tier = models.CharField("来源等级", max_length=1, choices=TIER_CHOICES, default=TIER_C)
+    transport_weight = models.PositiveSmallIntegerField(
+        "载体权重",
+        default=100,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="同一可信度下用于区分官网、官方社交账号等载体的信噪比。",
+    )
+    poll_interval_minutes = models.PositiveIntegerField("建议采集间隔（分钟）", default=60)
+    cursor = models.JSONField("增量游标", default=dict, blank=True)
+    last_attempt_at = models.DateTimeField("最近尝试时间", null=True, blank=True)
+    last_success_at = models.DateTimeField("最近成功时间", null=True, blank=True)
+    consecutive_failures = models.PositiveIntegerField("连续失败次数", default=0)
+    last_error_summary = models.CharField("最近错误摘要", max_length=500, blank=True)
+    is_active = models.BooleanField("启用", default=True)
+    extra_data = models.JSONField("扩展字段", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "情报信息源"
+        verbose_name_plural = "情报信息源"
+        ordering = ["source_tier", "source_group", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["subject", "name"],
+                name="unique_intelligence_source_name_per_subject",
+            ),
+            models.UniqueConstraint(
+                fields=["adapter_key", "url"],
+                condition=~Q(url="") & ~Q(adapter_key="manual"),
+                name="unique_automatic_intelligence_source_url",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["source_type", "source_tier", "is_active"]),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def health_status(self):
+        if not self.is_active:
+            return "disabled"
+        if self.consecutive_failures >= 3:
+            return "error"
+        if self.consecutive_failures:
+            return "warning"
+        return "healthy"
+
+    @property
+    def health_status_label(self):
+        return {
+            "disabled": "已停用",
+            "error": "异常",
+            "warning": "需注意",
+            "healthy": "正常",
+        }[self.health_status]
+
+    @property
+    def is_automatic(self):
+        return self.adapter_key in {self.ADAPTER_RSS, self.ADAPTER_YOUTUBE}
+
+    @property
+    def is_due(self):
+        if not self.is_active or self.adapter_key == self.ADAPTER_MANUAL:
+            return False
+        reference_at = self.last_attempt_at if self.consecutive_failures else self.last_success_at
+        if reference_at is None:
+            return True
+        return reference_at <= timezone.now() - timedelta(minutes=self.poll_interval_minutes)
+
+
+class SourceItem(TimestampedModel):
+    DEPTH_TITLE = "title"
+    DEPTH_DESCRIPTION = "description"
+    DEPTH_OFFICIAL_ARTICLE = "official_article"
+    DEPTH_TRANSCRIPT = "transcript"
+    DEPTH_MANUAL = "manual"
+    DEPTH_CHOICES = [
+        (DEPTH_TITLE, "仅标题"),
+        (DEPTH_DESCRIPTION, "标题与简介"),
+        (DEPTH_OFFICIAL_ARTICLE, "官方文章正文"),
+        (DEPTH_TRANSCRIPT, "完整字幕/文字稿"),
+        (DEPTH_MANUAL, "人工核查"),
+    ]
+
+    STATUS_PENDING = "pending"
+    STATUS_NORMALIZED = "normalized"
+    STATUS_CLASSIFIED = "classified"
+    STATUS_SCORED = "scored"
+    STATUS_CLUSTERED = "clustered"
+    STATUS_ANALYZED = "analyzed"
+    STATUS_PUBLISHED = "published"
+    STATUS_NOISE = "noise"
+    STATUS_FAILED = "failed"
+    STATUS_IGNORED = "ignored"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "待处理"),
+        (STATUS_NORMALIZED, "已标准化"),
+        (STATUS_CLASSIFIED, "已分类"),
+        (STATUS_SCORED, "已评分"),
+        (STATUS_CLUSTERED, "已聚类"),
+        (STATUS_ANALYZED, "已分析"),
+        (STATUS_PUBLISHED, "已发布"),
+        (STATUS_NOISE, "噪音箱"),
+        (STATUS_FAILED, "处理失败"),
+        (STATUS_IGNORED, "已忽略"),
+    ]
+
+    source = models.ForeignKey(
+        IntelligenceSource,
+        verbose_name="信息源",
+        on_delete=models.PROTECT,
+        related_name="items",
+    )
+    external_id = models.CharField("平台条目 ID", max_length=300, blank=True)
+    canonical_url = models.URLField("原文链接", max_length=1000, blank=True)
+    title = models.CharField("原始标题", max_length=500)
+    author_name = models.CharField("发布者", max_length=200, blank=True)
+    published_at = models.DateTimeField("发布时间", null=True, blank=True)
+    fetched_at = models.DateTimeField("采集时间", default=timezone.now)
+    language = models.CharField("原文语言", max_length=20, blank=True)
+    excerpt = models.TextField("短摘录", blank=True)
+    content_hash = models.CharField("内容指纹", max_length=64, blank=True, db_index=True)
+    raw_metadata = models.JSONField("来源元数据", default=dict, blank=True)
+    content_depth = models.CharField(
+        "内容深度",
+        max_length=30,
+        choices=DEPTH_CHOICES,
+        default=DEPTH_TITLE,
+    )
+    matched_subjects = models.ManyToManyField(
+        IntelligenceSubject,
+        verbose_name="命中主题",
+        related_name="matched_source_items",
+        blank=True,
+    )
+    classification_labels = models.JSONField("分类标签", default=list, blank=True)
+    relevance_score = models.PositiveSmallIntegerField(
+        "相关性分数",
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    processing_reason = models.CharField("处理说明", max_length=500, blank=True)
+    processed_at = models.DateTimeField("处理完成时间", null=True, blank=True)
+    processing_status = models.CharField(
+        "处理状态",
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="创建人",
+        on_delete=models.SET_NULL,
+        related_name="created_intelligence_source_items",
+        null=True,
+        blank=True,
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="更新人",
+        on_delete=models.SET_NULL,
+        related_name="updated_intelligence_source_items",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "情报来源条目"
+        verbose_name_plural = "情报来源条目"
+        ordering = ["-published_at", "-fetched_at", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "external_id"],
+                condition=~Q(external_id=""),
+                name="unique_intelligence_source_external_item",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["source", "published_at"]),
+            models.Index(fields=["processing_status", "fetched_at"]),
+        ]
+
+    def __str__(self):
+        return self.title
+
+
+class IntelligenceEvent(TimestampedModel):
+    CHANNEL_PEOPLE = "people"
+
+    TYPE_STATEMENT = "statement"
+    TYPE_INTERVIEW = "interview"
+    TYPE_INVESTMENT = "investment"
+    TYPE_BUSINESS = "business"
+    TYPE_ORGANIZATION = "organization"
+    TYPE_POLICY = "policy"
+    TYPE_OTHER = "other"
+    TYPE_CHOICES = [
+        (TYPE_STATEMENT, "发言与观点"),
+        (TYPE_INTERVIEW, "采访与演讲"),
+        (TYPE_INVESTMENT, "投资与持仓披露"),
+        (TYPE_BUSINESS, "产品、经营与资本配置"),
+        (TYPE_ORGANIZATION, "任职、组织与人物关系"),
+        (TYPE_POLICY, "政策与公共事务"),
+        (TYPE_OTHER, "其他重要动态"),
+    ]
+
+    PRECISION_EXACT = "exact"
+    PRECISION_DATE = "date"
+    PRECISION_ESTIMATED = "estimated"
+    PRECISION_CHOICES = [
+        (PRECISION_EXACT, "精确时间"),
+        (PRECISION_DATE, "仅日期"),
+        (PRECISION_ESTIMATED, "估计时间"),
+    ]
+
+    CHANGE_NEW = "new"
+    CHANGE_CONTINUED = "continued"
+    CHANGE_STRENGTHENED = "strengthened"
+    CHANGE_WEAKENED = "weakened"
+    CHANGE_REVERSED = "reversed"
+    CHANGE_UNKNOWN = "unknown"
+    CHANGE_CHOICES = [
+        (CHANGE_NEW, "新动向"),
+        (CHANGE_CONTINUED, "延续"),
+        (CHANGE_STRENGTHENED, "增强"),
+        (CHANGE_WEAKENED, "弱化"),
+        (CHANGE_REVERSED, "转向"),
+        (CHANGE_UNKNOWN, "无法判断"),
+    ]
+
+    REVIEW_PUBLISHED = "published"
+    REVIEW_PENDING = "pending"
+    REVIEW_REVIEWED = "reviewed"
+    REVIEW_IGNORED = "ignored"
+    REVIEW_CHOICES = [
+        (REVIEW_PUBLISHED, "已发布"),
+        (REVIEW_PENDING, "待复核"),
+        (REVIEW_REVIEWED, "已复核"),
+        (REVIEW_IGNORED, "已忽略"),
+    ]
+
+    SELECTION_SELECTED = "selected"
+    SELECTION_FEED = "feed"
+    SELECTION_REVIEW = "review"
+    SELECTION_NOISE = "noise"
+    SELECTION_CHOICES = [
+        (SELECTION_SELECTED, "今日精选"),
+        (SELECTION_FEED, "全部动态"),
+        (SELECTION_REVIEW, "待复核"),
+        (SELECTION_NOISE, "噪音箱"),
+    ]
+
+    SCORE_ORIGIN_MANUAL = "manual"
+    SCORE_ORIGIN_RULES = "rules"
+    SCORE_ORIGIN_AI = "ai"
+    SCORE_ORIGIN_CHOICES = [
+        (SCORE_ORIGIN_MANUAL, "人工特征 + 代码评分"),
+        (SCORE_ORIGIN_RULES, "规则特征 + 代码评分"),
+        (SCORE_ORIGIN_AI, "AI 特征 + 代码评分"),
+    ]
+
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="intelligence_events",
+    )
+    channel = models.CharField("频道", max_length=30, default=CHANNEL_PEOPLE)
+    event_type = models.CharField("事件类型", max_length=30, choices=TYPE_CHOICES)
+    title = models.CharField("事件标题", max_length=500)
+    occurred_at = models.DateTimeField("事件时间")
+    occurred_precision = models.CharField(
+        "时间精度",
+        max_length=20,
+        choices=PRECISION_CHOICES,
+        default=PRECISION_EXACT,
+    )
+    summary = models.TextField("事实摘要")
+    why_it_matters = models.TextField("为什么重要", blank=True)
+    relevance_score = models.PositiveSmallIntegerField(
+        "相关性",
+        default=50,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    impact_score = models.PositiveSmallIntegerField(
+        "影响程度",
+        default=50,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    novelty_score = models.PositiveSmallIntegerField(
+        "新颖性",
+        default=50,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    actionability_score = models.PositiveSmallIntegerField(
+        "投资参考价值",
+        default=50,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    timeliness_score = models.PositiveSmallIntegerField(
+        "时效性",
+        default=50,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    importance_score = models.PositiveSmallIntegerField(
+        "重要性分数",
+        default=50,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    confidence_score = models.PositiveSmallIntegerField(
+        "置信度",
+        default=50,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    change_type = models.CharField(
+        "变化信号",
+        max_length=20,
+        choices=CHANGE_CHOICES,
+        default=CHANGE_UNKNOWN,
+    )
+    review_status = models.CharField(
+        "复核状态",
+        max_length=20,
+        choices=REVIEW_CHOICES,
+        default=REVIEW_PUBLISHED,
+    )
+    selection_status = models.CharField(
+        "展示分层",
+        max_length=20,
+        choices=SELECTION_CHOICES,
+        default=SELECTION_FEED,
+    )
+    scoring_policy_version = models.CharField("评分策略版本", max_length=50, default="people-v1")
+    scoring_breakdown = models.JSONField("评分明细", default=dict, blank=True)
+    score_origin = models.CharField(
+        "评分来源",
+        max_length=20,
+        choices=SCORE_ORIGIN_CHOICES,
+        default=SCORE_ORIGIN_MANUAL,
+    )
+    cluster_key = models.CharField("事件簇标识", max_length=100, blank=True, db_index=True)
+    primary_source_item = models.ForeignKey(
+        SourceItem,
+        verbose_name="主来源条目",
+        on_delete=models.SET_NULL,
+        related_name="primary_for_events",
+        null=True,
+        blank=True,
+    )
+    first_seen_at = models.DateTimeField("首次发现时间", default=timezone.now)
+    last_seen_at = models.DateTimeField("最近发现时间", default=timezone.now)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="创建人",
+        on_delete=models.SET_NULL,
+        related_name="created_intelligence_events",
+        null=True,
+        blank=True,
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="更新人",
+        on_delete=models.SET_NULL,
+        related_name="updated_intelligence_events",
+        null=True,
+        blank=True,
+    )
+    subjects = models.ManyToManyField(
+        IntelligenceSubject,
+        through="EventSubject",
+        related_name="intelligence_events",
+    )
+
+    class Meta:
+        verbose_name = "情报事件"
+        verbose_name_plural = "情报事件"
+        ordering = ["-occurred_at", "-importance_score", "-pk"]
+        indexes = [
+            models.Index(fields=["family", "channel", "review_status", "occurred_at"]),
+            models.Index(fields=["family", "selection_status", "occurred_at"]),
+            models.Index(fields=["event_type", "importance_score"]),
+        ]
+
+    def __str__(self):
+        return self.title
+
+
+class EventSubject(models.Model):
+    ROLE_SPEAKER = "speaker"
+    ROLE_SUBJECT = "subject"
+    ROLE_INVESTOR = "investor"
+    ROLE_EXECUTIVE = "executive"
+    ROLE_MENTIONED = "mentioned"
+    ROLE_AFFECTED_ORGANIZATION = "affected_organization"
+    ROLE_CHOICES = [
+        (ROLE_SPEAKER, "发言者"),
+        (ROLE_SUBJECT, "事件主体"),
+        (ROLE_INVESTOR, "投资者"),
+        (ROLE_EXECUTIVE, "经营者"),
+        (ROLE_MENTIONED, "被提及"),
+        (ROLE_AFFECTED_ORGANIZATION, "受影响机构"),
+    ]
+
+    event = models.ForeignKey(
+        IntelligenceEvent,
+        verbose_name="情报事件",
+        on_delete=models.CASCADE,
+        related_name="subject_links",
+    )
+    subject = models.ForeignKey(
+        IntelligenceSubject,
+        verbose_name="关注对象",
+        on_delete=models.PROTECT,
+        related_name="event_links",
+    )
+    role = models.CharField("事件角色", max_length=30, choices=ROLE_CHOICES, default=ROLE_SUBJECT)
+    confidence_score = models.PositiveSmallIntegerField(
+        "关联置信度",
+        default=100,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    is_primary = models.BooleanField("主要对象", default=False)
+
+    class Meta:
+        verbose_name = "事件关注对象"
+        verbose_name_plural = "事件关注对象"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "subject", "role"],
+                name="unique_intelligence_event_subject_role",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.event} - {self.subject}"
+
+
+class EventEvidence(TimestampedModel):
+    TYPE_FACT = "fact"
+    TYPE_OPINION = "opinion"
+    TYPE_CONTEXT = "context"
+    TYPE_CHOICES = [
+        (TYPE_FACT, "事实证据"),
+        (TYPE_OPINION, "观点证据"),
+        (TYPE_CONTEXT, "背景材料"),
+    ]
+
+    event = models.ForeignKey(
+        IntelligenceEvent,
+        verbose_name="情报事件",
+        on_delete=models.CASCADE,
+        related_name="evidence_links",
+    )
+    source_item = models.ForeignKey(
+        SourceItem,
+        verbose_name="来源条目",
+        on_delete=models.PROTECT,
+        related_name="event_evidence_links",
+    )
+    evidence_type = models.CharField("证据类型", max_length=20, choices=TYPE_CHOICES, default=TYPE_FACT)
+    excerpt = models.TextField("证据摘录", blank=True)
+    claim_ref = models.CharField("支持的陈述 ID", max_length=100, blank=True)
+    source_quality_score = models.PositiveSmallIntegerField(
+        "来源质量分",
+        default=50,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    is_primary = models.BooleanField("主要证据", default=False)
+
+    class Meta:
+        verbose_name = "事件证据"
+        verbose_name_plural = "事件证据"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "source_item"],
+                name="unique_intelligence_event_source_item",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.event} - {self.source_item}"
+
+
+class SubjectFollow(TimestampedModel):
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="intelligence_subject_follows",
+    )
+    subject = models.ForeignKey(
+        IntelligenceSubject,
+        verbose_name="关注对象",
+        on_delete=models.CASCADE,
+        related_name="family_follows",
+    )
+    added_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="添加人",
+        on_delete=models.SET_NULL,
+        related_name="added_intelligence_subject_follows",
+        null=True,
+        blank=True,
+    )
+    priority = models.PositiveSmallIntegerField(
+        "关注优先级",
+        default=3,
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+    )
+    is_muted = models.BooleanField("静音", default=False)
+    is_active = models.BooleanField("正在关注", default=True)
+
+    class Meta:
+        verbose_name = "家庭关注对象"
+        verbose_name_plural = "家庭关注对象"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["family", "subject"],
+                name="unique_family_intelligence_subject_follow",
+            ),
+        ]
+        indexes = [models.Index(fields=["family", "is_active", "is_muted"])]
+
+    def __str__(self):
+        return f"{self.family} - {self.subject}"
+
+
+class EventUserState(TimestampedModel):
+    member = models.ForeignKey(
+        FamilyMember,
+        verbose_name="家庭成员",
+        on_delete=models.CASCADE,
+        related_name="intelligence_event_states",
+    )
+    event = models.ForeignKey(
+        IntelligenceEvent,
+        verbose_name="情报事件",
+        on_delete=models.CASCADE,
+        related_name="user_states",
+    )
+    read_at = models.DateTimeField("已读时间", null=True, blank=True)
+    bookmarked_at = models.DateTimeField("收藏时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "事件用户状态"
+        verbose_name_plural = "事件用户状态"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["member", "event"],
+                name="unique_member_intelligence_event_state",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.member} - {self.event}"
+
+
+class CollectionRun(models.Model):
+    KIND_COLLECTION = "collection"
+    KIND_PROCESSING = "processing"
+    KIND_DIGEST = "digest"
+    KIND_MANUAL = "manual"
+    KIND_CHOICES = [
+        (KIND_COLLECTION, "来源采集"),
+        (KIND_PROCESSING, "条目处理"),
+        (KIND_DIGEST, "简报生成"),
+        (KIND_MANUAL, "人工录入"),
+    ]
+
+    STATUS_RUNNING = "running"
+    STATUS_SUCCESS = "success"
+    STATUS_PARTIAL = "partial"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_RUNNING, "执行中"),
+        (STATUS_SUCCESS, "成功"),
+        (STATUS_PARTIAL, "部分成功"),
+        (STATUS_FAILED, "失败"),
+    ]
+
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="intelligence_collection_runs",
+        null=True,
+        blank=True,
+    )
+    run_kind = models.CharField("运行类型", max_length=20, choices=KIND_CHOICES)
+    status = models.CharField("状态", max_length=20, choices=STATUS_CHOICES, default=STATUS_RUNNING)
+    started_at = models.DateTimeField("开始时间", default=timezone.now)
+    finished_at = models.DateTimeField("结束时间", null=True, blank=True)
+    parameters = models.JSONField("运行参数", default=dict, blank=True)
+    discovered_count = models.PositiveIntegerField("发现数量", default=0)
+    created_count = models.PositiveIntegerField("新增数量", default=0)
+    updated_count = models.PositiveIntegerField("更新数量", default=0)
+    ignored_count = models.PositiveIntegerField("忽略数量", default=0)
+    normalized_count = models.PositiveIntegerField("标准化数量", default=0)
+    classified_count = models.PositiveIntegerField("分类数量", default=0)
+    noise_count = models.PositiveIntegerField("噪音数量", default=0)
+    clustered_count = models.PositiveIntegerField("聚类数量", default=0)
+    selected_count = models.PositiveIntegerField("精选数量", default=0)
+    review_count = models.PositiveIntegerField("待复核数量", default=0)
+    failed_count = models.PositiveIntegerField("失败数量", default=0)
+    error_summary = models.TextField("错误摘要", blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="发起人",
+        on_delete=models.SET_NULL,
+        related_name="intelligence_collection_runs",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "情报运行记录"
+        verbose_name_plural = "情报运行记录"
+        ordering = ["-started_at", "-pk"]
+        indexes = [models.Index(fields=["family", "run_kind", "status", "started_at"])]
+
+    def __str__(self):
+        return f"{self.get_run_kind_display()} - {self.started_at:%Y-%m-%d %H:%M}"
+
+
+class CollectionRunItem(models.Model):
+    run = models.ForeignKey(
+        CollectionRun,
+        verbose_name="运行记录",
+        on_delete=models.CASCADE,
+        related_name="source_results",
+    )
+    source = models.ForeignKey(
+        IntelligenceSource,
+        verbose_name="信息源",
+        on_delete=models.SET_NULL,
+        related_name="run_results",
+        null=True,
+        blank=True,
+    )
+    status = models.CharField("状态", max_length=20, choices=CollectionRun.STATUS_CHOICES)
+    discovered_count = models.PositiveIntegerField("发现数量", default=0)
+    created_count = models.PositiveIntegerField("新增数量", default=0)
+    updated_count = models.PositiveIntegerField("更新数量", default=0)
+    ignored_count = models.PositiveIntegerField("重复/未变化数量", default=0)
+    noise_count = models.PositiveIntegerField("噪音数量", default=0)
+    clustered_count = models.PositiveIntegerField("候选事件数量", default=0)
+    failed_count = models.PositiveIntegerField("失败数量", default=0)
+    cursor_before = models.JSONField("采集前游标", default=dict, blank=True)
+    cursor_after = models.JSONField("采集后游标", default=dict, blank=True)
+    error_summary = models.TextField("错误摘要", blank=True)
+
+    class Meta:
+        verbose_name = "情报来源运行明细"
+        verbose_name_plural = "情报来源运行明细"
+        ordering = ["pk"]
+
+    def __str__(self):
+        return f"{self.run} - {self.source or '全局'}"

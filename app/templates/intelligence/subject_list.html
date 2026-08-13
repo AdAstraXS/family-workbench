@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}关注主题{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260813-3">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head"><div><span class="intel-eyebrow">TOPICS</span><h1>关注主题</h1><p>人物、机构、行业、技术、政策和证券共用主题时间线；一个信源可同时关联多个主题。</p></div>{% if can_admin %}<a class="button intel-primary" href="{% url 'intelligence:subject_create' %}">＋ 新增主题</a>{% endif %}</section>
+{% include "intelligence/_tabs.html" %}
+<form method="get" class="intel-filter-bar intel-filter-compact"><input type="search" name="q" value="{{ query }}" placeholder="搜索中英文名"><select name="category"><option value="">全部类别</option>{% for value, label in categories %}<option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><button type="submit">筛选</button><a class="button ghost" href="{% url 'intelligence:subject_list' %}">清除</a></form>
+<section class="intel-subject-grid">
+  {% for subject in subjects %}
+    <article class="intel-subject-card">
+      <div class="intel-avatar large">{{ subject.display_name|slice:":1" }}</div>
+      <span class="intel-subject-category">{{ subject.get_category_display }}</span>
+      <h2><a href="{% url 'intelligence:subject_detail' subject.slug %}">{{ subject.display_name }}</a></h2>
+      <small>{{ subject.canonical_name }}</small>
+      <p>{{ subject.profile_summary|default:"尚未填写简介。"|truncatechars:120 }}</p>
+      <div class="intel-subject-stats"><span>{{ subject.source_count }} 个来源</span><span>{{ subject.event_count }} 条动态</span><span>重要性 {{ subject.importance_level }}/5</span></div>
+      <footer><a href="{% url 'intelligence:subject_detail' subject.slug %}">查看时间线</a><form method="post" action="{% url 'intelligence:subject_toggle_follow' subject.slug %}">{% csrf_token %}<input type="hidden" name="next" value="{% url 'intelligence:subject_list' %}"><button class="button ghost" type="submit">{% if subject.family_follow.is_active %}取消关注{% else %}关注{% endif %}</button></form></footer>
+    </article>
+  {% empty %}<div class="intel-empty intel-span-all"><strong>尚无关注主题</strong><p>管理员可以先建立人物、机构、行业或技术主题。</p></div>{% endfor %}
+</section>
+{% endblock %}

@@ -1,0 +1,25 @@
+<article class="intel-event-card{% if not event.member_state.read_at %} is-unread{% endif %}">
+  <div class="intel-event-card-meta">
+    <span class="intel-selection intel-selection-{{ event.selection_status }}">{{ event.get_selection_status_display }}</span>
+    <span class="intel-type intel-type-{{ event.event_type }}">{{ event.get_event_type_display }}</span>
+    <span>{{ event.occurred_at|date:"m-d H:i" }}</span>
+    <span>重要性 {{ event.importance_score }}</span>
+    <span>置信度 {{ event.confidence_score }}</span>
+  </div>
+  <h3><a href="{% url 'intelligence:event_detail' event.pk %}">{{ event.title }}</a></h3>
+  <p>{{ event.summary|truncatechars:180 }}</p>
+  <div class="intel-subject-chips">
+    {% for subject in event.subjects.all %}
+      <a href="{% url 'intelligence:subject_detail' subject.slug %}">{{ subject.display_name }}</a>
+    {% endfor %}
+  </div>
+  <footer>
+    <span class="intel-change intel-change-{{ event.change_type }}">{{ event.get_change_type_display }}</span>
+    {% if event.primary_source_item %}
+      <span>{{ event.primary_source_item.source.name }} · {{ event.primary_source_item.source.source_tier }}级</span>
+    {% else %}
+      <span>暂无主来源</span>
+    {% endif %}
+    <a href="{% url 'intelligence:event_detail' event.pk %}">查看证据 →</a>
+  </footer>
+</article>

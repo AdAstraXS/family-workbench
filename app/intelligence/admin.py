@@ -1,0 +1,107 @@
+from django.contrib import admin
+
+from .models import (
+    CollectionRun,
+    CollectionRunItem,
+    EventEvidence,
+    EventSubject,
+    EventUserState,
+    IntelligenceEvent,
+    IntelligenceSource,
+    IntelligenceSubject,
+    SourceItem,
+    SubjectFollow,
+    SubjectRelation,
+)
+
+
+class SubjectRelationInline(admin.TabularInline):
+    model = SubjectRelation
+    fk_name = "from_subject"
+    extra = 0
+
+
+@admin.register(IntelligenceSubject)
+class IntelligenceSubjectAdmin(admin.ModelAdmin):
+    list_display = ("display_name", "canonical_name", "subject_type", "category", "importance_level", "is_active")
+    list_filter = ("subject_type", "category", "importance_level", "is_active")
+    search_fields = ("display_name", "canonical_name")
+    prepopulated_fields = {"slug": ("canonical_name",)}
+    inlines = (SubjectRelationInline,)
+
+
+@admin.register(SubjectRelation)
+class SubjectRelationAdmin(admin.ModelAdmin):
+    list_display = ("from_subject", "relation_type", "to_subject", "valid_from", "valid_to")
+    list_filter = ("relation_type",)
+    search_fields = ("from_subject__display_name", "to_subject__display_name")
+
+
+@admin.register(IntelligenceSource)
+class IntelligenceSourceAdmin(admin.ModelAdmin):
+    list_display = ("name", "source_type", "source_group", "source_tier", "adapter_key", "last_success_at", "is_active")
+    list_filter = ("source_type", "source_group", "source_tier", "adapter_key", "is_active")
+    search_fields = ("name", "topics__display_name", "url", "external_id")
+    filter_horizontal = ("topics",)
+
+
+@admin.register(SourceItem)
+class SourceItemAdmin(admin.ModelAdmin):
+    list_display = ("title", "source", "published_at", "content_depth", "relevance_score", "processing_status", "created_by")
+    list_filter = ("processing_status", "content_depth", "source__source_type", "source__source_tier")
+    search_fields = ("title", "author_name", "canonical_url", "excerpt")
+    readonly_fields = ("content_hash", "fetched_at", "created_at", "updated_at")
+
+
+class EventSubjectInline(admin.TabularInline):
+    model = EventSubject
+    extra = 0
+
+
+class EventEvidenceInline(admin.TabularInline):
+    model = EventEvidence
+    extra = 0
+
+
+@admin.register(IntelligenceEvent)
+class IntelligenceEventAdmin(admin.ModelAdmin):
+    list_display = ("title", "event_type", "occurred_at", "importance_score", "confidence_score", "selection_status", "review_status")
+    list_filter = ("event_type", "change_type", "selection_status", "review_status", "occurred_at")
+    search_fields = ("title", "summary", "why_it_matters")
+    readonly_fields = ("scoring_policy_version", "scoring_breakdown", "cluster_key", "first_seen_at", "last_seen_at", "created_at", "updated_at")
+    inlines = (EventSubjectInline, EventEvidenceInline)
+
+
+@admin.register(SubjectFollow)
+class SubjectFollowAdmin(admin.ModelAdmin):
+    list_display = ("family", "subject", "priority", "is_muted", "is_active", "added_by")
+    list_filter = ("family", "priority", "is_muted", "is_active")
+
+
+@admin.register(EventUserState)
+class EventUserStateAdmin(admin.ModelAdmin):
+    list_display = ("member", "event", "read_at", "bookmarked_at")
+    list_filter = ("member", "read_at", "bookmarked_at")
+
+
+class CollectionRunItemInline(admin.TabularInline):
+    model = CollectionRunItem
+    extra = 0
+    readonly_fields = (
+        "source", "status", "discovered_count", "created_count", "updated_count",
+        "ignored_count", "noise_count", "clustered_count", "failed_count",
+        "cursor_before", "cursor_after", "error_summary",
+    )
+
+
+@admin.register(CollectionRun)
+class CollectionRunAdmin(admin.ModelAdmin):
+    list_display = ("run_kind", "family", "status", "started_at", "finished_at", "created_count", "failed_count")
+    list_filter = ("run_kind", "status", "started_at")
+    readonly_fields = (
+        "family", "run_kind", "status", "started_at", "finished_at", "parameters",
+        "discovered_count", "created_count", "updated_count", "ignored_count",
+        "normalized_count", "classified_count", "noise_count", "clustered_count",
+        "selected_count", "review_count", "failed_count", "error_summary", "created_by",
+    )
+    inlines = (CollectionRunItemInline,)

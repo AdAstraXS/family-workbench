@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}情报运行状态{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260813-4">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head">
+  <div>
+    <span class="intel-eyebrow">OPERATIONS</span>
+    <h1>运行状态</h1>
+    <p>M2 已具备 RSS / Atom 与 YouTube 官方频道元数据适配器。页面只在管理员点击按钮后发起采集，普通浏览不会访问外部网站。</p>
+  </div>
+  <div class="intel-head-actions">
+    <form method="post" action="{% url 'intelligence:collect_sources_now' %}">
+      {% csrf_token %}
+      <button class="button intel-primary" type="submit" {% if not due_source_count %}disabled{% endif %}>采集到期信源</button>
+    </form>
+    <a class="button ghost" href="{% url 'intelligence:source_create' %}">新增信源</a>
+    <a class="button ghost" href="{% url 'intelligence:event_create' %}">人工录入</a>
+  </div>
+</section>
+
+{% include "intelligence/_tabs.html" %}
+
+<section class="intel-metrics intel-metrics-four">
+  <article><span>已配置信源</span><strong>{{ sources|length }}</strong><small>{{ active_automatic_source_count }} 个自动入口已启用 · {{ disabled_automatic_source_count }} 个停用</small></article>
+  <article><span>到期待采集</span><strong>{{ due_source_count }}</strong><small>按各信源采集间隔计算</small></article>
+  <article><span>待复核事件</span><strong>{{ pending_items }}</strong><small>自动候选不会直接发布</small></article>
+  <article><span>最近原始条目</span><strong>{{ recent_items|length }}</strong><small>最多展示 30 条</small></article>
+</section>
+
+<section class="intel-notice">
+  <strong>M2 内容边界</strong>
+  <span>YouTube 只保留视频标题、简介、发布时间与原链接，不下载视频或音频、不读取字幕。当前整理与筛选由确定性规则完成，尚未调用文本 AI。</span>
+</section>
+
+<section class="intel-section">
+  <div class="intel-section-head"><div><span>SOURCES</span><h2>信源健康与采集</h2></div></div>
+  <div class="intel-table-wrap">
+    <table class="intel-table intel-operations-table">
+      <thead><tr><th>信源</th><th>适配器</th><th>健康状态</th><th>最近采集</th><th>结果</th><th>操作</th></tr></thead>
+      <tbody>
+        {% for source in sources %}
+        <tr>
+          <td>{{ source.name }}<small>{{ source.get_source_type_display }} · {{ source.get_source_group_display }}</small></td>
+          <td>{{ source.get_adapter_key_display }}</td>
+          <td><span class="intel-status {{ source.health_status }}">{{ source.health_status_label }}</span><small>连续失败 {{ source.consecutive_failures }} 次</small></td>
+          <td>{% if source.last_success_at %}{{ source.last_success_at|date:"Y-m-d H:i:s" }}{% else %}尚未成功{% endif %}<small>{% if not source.is_active %}已停用{% elif source.is_due %}已到期{% elif source.is_automatic %}等待下个周期{% else %}人工入口{% endif %}</small></td>
+          <td>{% if source.last_error_summary %}<span class="intel-error-text">{{ source.last_error_summary }}</span>{% else %}—{% endif %}</td>
+          <td>
+            <div class="intel-inline-actions">
+              {% if source.is_automatic and source.is_active %}
+              <form method="post" action="{% url 'intelligence:collect_sources_now' %}">
+                {% csrf_token %}<input type="hidden" name="source_id" value="{{ source.pk }}"><input type="hidden" name="force" value="1">
+                <button class="button ghost" type="submit">立即采集</button>
+              </form>
+              {% endif %}
+              <a href="{% url 'intelligence:source_edit' source.pk %}">编辑</a>
+            </div>
+          </td>
+        </tr>
+        {% empty %}<tr><td colspan="6">尚未配置信源。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="intel-section">
+  <div class="intel-section-head"><div><span>RECENT ITEMS</span><h2>最近采集条目</h2><p class="intel-muted">来源条目始终保留；低相关内容进入噪音箱，不生成候选事件。</p></div></div>
+  <div class="intel-table-wrap">
+    <table class="intel-table">
+      <thead><tr><th>发布时间</th><th>来源与标题</th><th>内容深度</th><th>相关性</th><th>处理结果</th></tr></thead>
+      <tbody>
+        {% for item in recent_items %}
+        <tr>
+          <td>{{ item.published_at|default:item.fetched_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ item.source.name }}<small>{% if item.canonical_url %}<a href="{{ item.canonical_url }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>{% else %}{{ item.title }}{% endif %}</small></td>
+          <td>{{ item.get_content_depth_display }}</td>
+          <td>{{ item.relevance_score }}</td>
+          <td><span class="intel-status {% if item.processing_status == 'noise' %}warning{% elif item.processing_status == 'failed' %}error{% else %}ok{% endif %}">{{ item.get_processing_status_display }}</span><small>{{ item.processing_reason }}</small></td>
+        </tr>
+        {% empty %}<tr><td colspan="5">尚无自动采集条目。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="intel-section">
+  <div class="intel-section-head"><div><span>AUDIT RUNS</span><h2>最近运行记录</h2><p class="intel-muted">每次运行及每个信源都有独立计数和错误摘要，单个信源失败不会阻断其他信源。</p></div></div>
+  <div class="intel-table-wrap">
+    <table class="intel-table">
+      <thead><tr><th>开始时间</th><th>状态</th><th>发现 / 新增 / 重复</th><th>噪音 / 候选 / 失败</th><th>执行人</th><th>明细</th></tr></thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td>{{ run.started_at|date:"Y-m-d H:i:s" }}<small>{{ run.get_run_kind_display }}</small></td>
+          <td><span class="intel-status {{ run.status }}">{{ run.get_status_display }}</span></td>
+          <td>{{ run.discovered_count }} / {{ run.created_count }} / {{ run.ignored_count }}<small>更新 {{ run.updated_count }}</small></td>
+          <td>{{ run.noise_count }} / {{ run.clustered_count }} / {{ run.failed_count }}<small>待复核 {{ run.review_count }}</small></td>
+          <td>{{ run.created_by|default:"系统任务" }}</td>
+          <td>
+            <details class="intel-run-details"><summary>查看</summary>
+              {% if run.error_summary %}<p class="intel-error-text">{{ run.error_summary|linebreaksbr }}</p>{% endif %}
+              {% for result in run.source_results.all %}
+                <p><strong>{{ result.source|default:"已删除信源" }}</strong>：{{ result.get_status_display }}，发现 {{ result.discovered_count }}，新增 {{ result.created_count }}，重复 {{ result.ignored_count }}，候选 {{ result.clustered_count }}，失败 {{ result.failed_count }}{% if result.error_summary %}<br><span class="intel-error-text">{{ result.error_summary }}</span>{% endif %}</p>
+              {% empty %}<p>本次没有到期的自动信源。</p>{% endfor %}
+            </details>
+          </td>
+        </tr>
+        {% empty %}<tr><td colspan="6">尚无运行记录。</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

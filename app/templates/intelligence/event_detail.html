@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ event.title }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260813-3">{% endblock %}
+
+{% block content %}
+<article class="intel-event-detail">
+  <header>
+    <div class="intel-event-card-meta">
+      <span class="intel-selection intel-selection-{{ event.selection_status }}">{{ event.get_selection_status_display }}</span>
+      <span class="intel-type intel-type-{{ event.event_type }}">{{ event.get_event_type_display }}</span>
+      <span>{{ event.occurred_at|date:"Y-m-d H:i" }} · {{ event.get_occurred_precision_display }}</span>
+      <span>{{ event.get_review_status_display }}</span>
+    </div>
+    <h1>{{ event.title }}</h1>
+    <div class="intel-subject-chips">{% for subject in event.subjects.all %}<a href="{% url 'intelligence:subject_detail' subject.slug %}">{{ subject.display_name }}</a>{% endfor %}</div>
+    <div class="intel-score-row">
+      <span>重要性 <strong>{{ event.importance_score }}</strong></span>
+      <span>置信度 <strong>{{ event.confidence_score }}</strong></span>
+      <span>变化 <strong>{{ event.get_change_type_display }}</strong></span>
+    </div>
+  </header>
+
+  <section class="intel-detail-block"><span>事实摘要</span><div>{{ event.summary|linebreaks }}</div></section>
+  <section class="intel-detail-block"><span>为什么重要</span><div>{% if event.why_it_matters %}{{ event.why_it_matters|linebreaks }}{% else %}<p class="intel-muted">尚未填写影响说明。</p>{% endif %}</div></section>
+
+  <section class="intel-score-explanation">
+    <div class="intel-section-head"><div><span>SCORING</span><h2>为什么进入这一层</h2></div><small>{{ event.scoring_policy_version }} · {{ event.get_score_origin_display }}</small></div>
+    <div class="intel-score-features">
+      <span>相关性 <strong>{{ event.relevance_score }}</strong></span>
+      <span>影响 <strong>{{ event.impact_score }}</strong></span>
+      <span>新颖性 <strong>{{ event.novelty_score }}</strong></span>
+      <span>投资参考 <strong>{{ event.actionability_score }}</strong></span>
+      <span>时效性 <strong>{{ event.timeliness_score }}</strong></span>
+    </div>
+    <p class="intel-muted">最终重要性和置信度由代码策略计算；来源质量只影响置信度，不会把无关内容推入精选。</p>
+  </section>
+
+  <section class="intel-evidence-section">
+    <div class="intel-section-head"><div><span>EVIDENCE</span><h2>原始证据</h2></div><small>{{ event.evidence_links.count }} 个来源</small></div>
+    {% for evidence in event.evidence_links.all %}
+      <article class="intel-evidence-card">
+        <div><span class="intel-tier tier-{{ evidence.source_item.source.source_tier|lower }}">{{ evidence.source_item.source.source_tier }}级</span><strong>{{ evidence.source_item.title }}</strong></div>
+        <p>{{ evidence.excerpt|default:evidence.source_item.excerpt|default:"未保存摘录，请通过原文链接核查。" }}</p>
+        <footer><span>{{ evidence.source_item.source.name }} · {{ evidence.get_evidence_type_display }}</span>{% if evidence.source_item.canonical_url %}<a href="{{ evidence.source_item.canonical_url }}" target="_blank" rel="noopener noreferrer">打开原文 ↗</a>{% endif %}</footer>
+      </article>
+    {% empty %}<div class="intel-empty"><strong>暂无证据</strong><p>该事件不应作为正式结论使用。</p></div>{% endfor %}
+  </section>
+
+  <footer class="intel-detail-actions">
+    <a class="button ghost" href="{% url 'intelligence:event_list' %}">返回全部动态</a>
+    <form method="post" action="{% url 'intelligence:event_mark_read' event.pk %}">{% csrf_token %}<button class="button ghost" type="submit">{% if member_state.read_at %}已读{% else %}标记已读{% endif %}</button></form>
+    <form method="post" action="{% url 'intelligence:event_toggle_bookmark' event.pk %}">{% csrf_token %}<button class="button ghost" type="submit">{% if member_state.bookmarked_at %}取消收藏{% else %}收藏{% endif %}</button></form>
+    {% if can_admin %}
+      <a class="button" href="{% url 'intelligence:event_edit' event.pk %}">编辑事件</a>
+      {% if event.review_status != "ignored" %}<form class="intel-push-right" method="post" action="{% url 'intelligence:event_ignore' event.pk %}" onsubmit="return confirm('确定把这条事件移出普通信息流吗？原始证据仍会保留。');">{% csrf_token %}<button class="button intel-danger" type="submit">标记忽略</button></form>{% endif %}
+    {% endif %}
+  </footer>
+</article>
+{% endblock %}

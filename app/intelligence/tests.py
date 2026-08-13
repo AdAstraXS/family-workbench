@@ -1,0 +1,715 @@
+from datetime import timedelta
+from io import StringIO
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.core.management.base import CommandError
+from django.core.management import call_command
+from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
+
+from family_core.models import Family, FamilyMember
+
+from .forms import IntelligenceSourceForm, IntelligenceSubjectForm
+from .adapters import AdapterResult, CollectedItem, FeedParseError, parse_rss_or_atom, parse_youtube_atom
+from .collection import collect_intelligence_sources
+from .http_client import FetchResponse, SafeHttpError, validate_public_http_url
+from .management.commands.seed_intelligence_sources import SOURCE_DEFINITIONS
+from .management.commands.seed_key_people import SUBJECTS
+from .models import (
+    CollectionRun,
+    EventEvidence,
+    EventSubject,
+    EventUserState,
+    IntelligenceEvent,
+    IntelligenceSource,
+    IntelligenceSubject,
+    SourceItem,
+    SubjectFollow,
+)
+from .scoring import calculate_event_scores
+
+
+class IntelligenceTestBase(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.family = Family.objects.create(name="情报测试家庭")
+        self.admin_user = User.objects.create_user(username="intel-admin", password="test-password")
+        self.admin_member = FamilyMember.objects.create(
+            family=self.family,
+            user=self.admin_user,
+            display_name="情报管理员",
+            role=FamilyMember.ROLE_ADMIN,
+        )
+        self.member_user = User.objects.create_user(username="intel-member", password="test-password")
+        self.member = FamilyMember.objects.create(
+            family=self.family,
+            user=self.member_user,
+            display_name="家庭成员",
+            role=FamilyMember.ROLE_MEMBER,
+        )
+        self.viewer_user = User.objects.create_user(username="intel-viewer", password="test-password")
+        self.viewer = FamilyMember.objects.create(
+            family=self.family,
+            user=self.viewer_user,
+            display_name="只读成员",
+            role=FamilyMember.ROLE_VIEWER,
+        )
+        self.subject = IntelligenceSubject.objects.create(
+            subject_type=IntelligenceSubject.TYPE_PERSON,
+            canonical_name="Test Person",
+            display_name="测试人物",
+            category=IntelligenceSubject.CATEGORY_TECH_LEADER,
+            aliases=["测试人物"],
+        )
+        self.source = IntelligenceSource.objects.create(
+            subject=self.subject,
+            source_type=IntelligenceSource.TYPE_MANUAL,
+            adapter_key="manual",
+            name="测试原始来源",
+            source_tier=IntelligenceSource.TIER_A,
+            source_group=IntelligenceSource.GROUP_OFFICIAL,
+        )
+        self.source.topics.add(self.subject)
+
+    def make_event(
+        self,
+        *,
+        family=None,
+        status=IntelligenceEvent.REVIEW_PUBLISHED,
+        selection=IntelligenceEvent.SELECTION_SELECTED,
+        title="测试动态",
+    ):
+        family = family or self.family
+        item = SourceItem.objects.create(
+            source=self.source,
+            title=f"{title}原文",
+            canonical_url="https://example.com/source",
+            processing_status=SourceItem.STATUS_CLUSTERED,
+        )
+        event = IntelligenceEvent.objects.create(
+            family=family,
+            event_type=IntelligenceEvent.TYPE_STATEMENT,
+            title=title,
+            occurred_at=timezone.now() - timedelta(hours=1),
+            summary="这是一个可核查的事实摘要。",
+            why_it_matters="用于验证情报信息流。",
+            importance_score=80,
+            confidence_score=90,
+            review_status=status,
+            selection_status=selection,
+            primary_source_item=item,
+            created_by=self.admin_user,
+            updated_by=self.admin_user,
+        )
+        EventSubject.objects.create(
+            event=event,
+            subject=self.subject,
+            role=EventSubject.ROLE_SUBJECT,
+            is_primary=True,
+            confidence_score=100,
+        )
+        EventEvidence.objects.create(
+            event=event,
+            source_item=item,
+            evidence_type=EventEvidence.TYPE_FACT,
+            source_quality_score=95,
+            is_primary=True,
+        )
+        return event
+
+    def manual_event_payload(self):
+        occurred_at = timezone.localtime().replace(second=0, microsecond=0)
+        return {
+            "subject": self.subject.pk,
+            "event_type": IntelligenceEvent.TYPE_INTERVIEW,
+            "title": "测试人物发布重要访谈",
+            "occurred_at": occurred_at.strftime("%Y-%m-%dT%H:%M"),
+            "occurred_precision": IntelligenceEvent.PRECISION_EXACT,
+            "summary": "测试人物在公开访谈中确认了新的业务方向。",
+            "why_it_matters": "这可能改变相关行业的资本开支预期。",
+            "relevance_score": 85,
+            "impact_score": 85,
+            "novelty_score": 70,
+            "actionability_score": 70,
+            "timeliness_score": 85,
+            "change_type": IntelligenceEvent.CHANGE_NEW,
+            "review_status": IntelligenceEvent.REVIEW_PUBLISHED,
+            "source_name": "测试访谈",
+            "source_tier": IntelligenceSource.TIER_B,
+            "source_group": IntelligenceSource.GROUP_EXPERT,
+            "source_title": "测试人物完整访谈",
+            "source_url": "https://example.com/interview/1",
+            "source_author": "测试媒体",
+            "evidence_type": EventEvidence.TYPE_FACT,
+            "evidence_excerpt": "确认新的业务方向。",
+        }
+
+
+class IntelligenceModelsAndCommandsTests(IntelligenceTestBase):
+    def test_subject_slug_is_created_once_and_remains_stable(self):
+        original_slug = self.subject.slug
+        self.subject.display_name = "修改后的显示名"
+        self.subject.save()
+        self.subject.refresh_from_db()
+
+        self.assertEqual(original_slug, "test-person")
+        self.assertEqual(self.subject.slug, original_slug)
+
+    def test_source_form_allows_registering_but_not_running_future_adapter(self):
+        form = IntelligenceSourceForm(
+            data={
+                "subject": self.subject.pk,
+                "topics": [self.subject.pk],
+                "source_type": IntelligenceSource.TYPE_RSS,
+                "source_group": IntelligenceSource.GROUP_OFFICIAL,
+                "adapter_key": "rss",
+                "name": "尚未启用的 RSS",
+                "url": "https://example.com/feed.xml",
+                "external_id": "",
+                "source_tier": IntelligenceSource.TIER_A,
+                "transport_weight": 100,
+                "poll_interval_minutes": 60,
+                "is_active": True,
+            }
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        source = form.save()
+        self.assertEqual(source.adapter_key, IntelligenceSource.ADAPTER_RSS)
+        self.assertTrue(source.is_due)
+
+    def test_source_form_requires_at_least_one_topic(self):
+        form = IntelligenceSourceForm(
+            data={
+                "subject": "",
+                "topics": [],
+                "source_type": IntelligenceSource.TYPE_RSS,
+                "source_group": IntelligenceSource.GROUP_OFFICIAL,
+                "adapter_key": IntelligenceSource.ADAPTER_RSS,
+                "name": "未关联主题的 RSS",
+                "url": "https://example.com/unmapped.xml",
+                "external_id": "",
+                "source_tier": IntelligenceSource.TIER_A,
+                "transport_weight": 100,
+                "poll_interval_minutes": 60,
+                "is_active": True,
+            }
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("topics", form.errors)
+
+    def test_subject_form_accepts_plain_text_aliases(self):
+        form = IntelligenceSubjectForm(
+            data={
+                "subject_type": IntelligenceSubject.TYPE_PERSON,
+                "canonical_name": "Plain Alias Person",
+                "display_name": "普通别名人物",
+                "category": IntelligenceSubject.CATEGORY_INVESTOR,
+                "aliases": "Plain Person\n普通人物，Plain Person",
+                "profile_summary": "",
+                "avatar_url": "",
+                "importance_level": 3,
+                "is_active": True,
+            }
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        subject = form.save()
+        self.assertEqual(subject.aliases, ["Plain Person", "普通人物"])
+
+    def test_source_can_map_to_multiple_topics(self):
+        technology = IntelligenceSubject.objects.create(
+            subject_type=IntelligenceSubject.TYPE_TECHNOLOGY,
+            canonical_name="AI Infrastructure Test",
+            display_name="AI 基础设施测试",
+            category=IntelligenceSubject.CATEGORY_TECHNOLOGY,
+        )
+        self.source.topics.add(technology)
+
+        self.assertEqual(self.source.topics.count(), 2)
+        self.assertIn(self.source, technology.sources.all())
+
+    def test_scoring_policy_separates_importance_and_confidence(self):
+        result = calculate_event_scores(
+            relevance=10,
+            impact=10,
+            novelty=10,
+            actionability=10,
+            timeliness=30,
+            source_tier=IntelligenceSource.TIER_A,
+            has_url=True,
+            has_excerpt=True,
+            extraction_confidence=100,
+        )
+
+        self.assertLess(result.importance_score, 25)
+        self.assertGreaterEqual(result.confidence_score, 75)
+        self.assertEqual(result.selection_status, IntelligenceEvent.SELECTION_NOISE)
+
+    def test_scoring_policy_selects_high_value_event(self):
+        result = calculate_event_scores(
+            relevance=100,
+            impact=85,
+            novelty=85,
+            actionability=85,
+            timeliness=85,
+            source_tier=IntelligenceSource.TIER_B,
+            has_url=True,
+            has_excerpt=True,
+            extraction_confidence=100,
+        )
+
+        self.assertGreaterEqual(result.importance_score, 75)
+        self.assertGreaterEqual(result.confidence_score, 60)
+        self.assertEqual(result.selection_status, IntelligenceEvent.SELECTION_SELECTED)
+
+    def test_seed_command_dry_run_rolls_back(self):
+        call_command("seed_key_people", "--dry-run", stdout=StringIO())
+
+        self.assertEqual(IntelligenceSubject.objects.count(), 1)
+
+    def test_seed_command_is_idempotent_and_can_follow_for_one_family(self):
+        output = StringIO()
+        call_command("seed_key_people", "--follow-all", stdout=output)
+        call_command("seed_key_people", "--follow-all", stdout=output)
+
+        self.assertEqual(IntelligenceSubject.objects.count(), len(SUBJECTS) + 1)
+        self.assertEqual(
+            SubjectFollow.objects.filter(family=self.family).count(),
+            len(SUBJECTS),
+        )
+
+
+class IntelligenceViewsTests(IntelligenceTestBase):
+    def test_admin_manual_create_builds_traceable_event_chain(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(reverse("intelligence:event_create"), self.manual_event_payload())
+
+        event = IntelligenceEvent.objects.get(title="测试人物发布重要访谈")
+        self.assertRedirects(response, reverse("intelligence:event_detail", kwargs={"pk": event.pk}))
+        self.assertEqual(event.family, self.family)
+        self.assertEqual(event.created_by, self.admin_user)
+        self.assertEqual(event.primary_source_item.created_by, self.admin_user)
+        self.assertTrue(event.evidence_links.filter(source_item=event.primary_source_item, is_primary=True).exists())
+        self.assertTrue(event.subject_links.filter(subject=self.subject, is_primary=True).exists())
+        self.assertTrue(event.scoring_breakdown)
+        self.assertEqual(event.scoring_policy_version, "people-v1")
+        self.assertEqual(event.selection_status, IntelligenceEvent.SELECTION_SELECTED)
+        self.assertIn(self.subject, event.primary_source_item.source.topics.all())
+        self.assertEqual(CollectionRun.objects.filter(family=self.family, run_kind=CollectionRun.KIND_MANUAL).count(), 1)
+
+    def test_duplicate_manual_submission_reuses_event_and_source_item(self):
+        self.client.force_login(self.admin_user)
+        payload = self.manual_event_payload()
+
+        self.client.post(reverse("intelligence:event_create"), payload)
+        self.client.post(reverse("intelligence:event_create"), payload)
+
+        self.assertEqual(IntelligenceEvent.objects.filter(title=payload["title"]).count(), 1)
+        self.assertEqual(SourceItem.objects.filter(title=payload["source_title"]).count(), 1)
+        self.assertEqual(CollectionRun.objects.filter(run_kind=CollectionRun.KIND_MANUAL).count(), 2)
+        self.assertEqual(CollectionRun.objects.filter(updated_count=1).count(), 1)
+
+    def test_member_cannot_admin_but_can_follow_bookmark_and_read(self):
+        event = self.make_event()
+        self.client.force_login(self.member_user)
+
+        self.assertEqual(self.client.get(reverse("intelligence:event_create")).status_code, 403)
+        self.assertEqual(self.client.get(reverse("intelligence:subject_create")).status_code, 403)
+        follow_response = self.client.post(reverse("intelligence:subject_toggle_follow", kwargs={"slug": self.subject.slug}))
+        bookmark_response = self.client.post(reverse("intelligence:event_toggle_bookmark", kwargs={"pk": event.pk}))
+        read_response = self.client.post(reverse("intelligence:event_mark_read", kwargs={"pk": event.pk}))
+
+        self.assertEqual(follow_response.status_code, 302)
+        self.assertEqual(bookmark_response.status_code, 302)
+        self.assertEqual(read_response.status_code, 302)
+        state = EventUserState.objects.get(member=self.member, event=event)
+        self.assertIsNotNone(state.bookmarked_at)
+        self.assertIsNotNone(state.read_at)
+        self.assertTrue(SubjectFollow.objects.get(family=self.family, subject=self.subject).is_active)
+
+    def test_viewer_can_read_but_middleware_blocks_all_posts(self):
+        event = self.make_event()
+        SubjectFollow.objects.create(family=self.family, subject=self.subject)
+        self.client.force_login(self.viewer_user)
+
+        self.assertEqual(self.client.get(reverse("intelligence:index")).status_code, 200)
+        response = self.client.post(reverse("intelligence:event_mark_read", kwargs={"pk": event.pk}))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(EventUserState.objects.filter(member=self.viewer, event=event).exists())
+
+    def test_get_pages_do_not_create_user_state(self):
+        event = self.make_event()
+        SubjectFollow.objects.create(family=self.family, subject=self.subject)
+        self.client.force_login(self.member_user)
+
+        self.assertEqual(self.client.get(reverse("intelligence:index")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("intelligence:event_detail", kwargs={"pk": event.pk})).status_code, 200)
+        self.assertFalse(EventUserState.objects.exists())
+
+    def test_other_family_event_is_not_accessible(self):
+        other_family = Family.objects.create(name="其他家庭")
+        other_event = self.make_event(family=other_family, title="其他家庭私有动态")
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(reverse("intelligence:event_detail", kwargs={"pk": other_event.pk}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_ignored_event_is_hidden_from_normal_stream(self):
+        visible = self.make_event(title="正式动态")
+        ignored = self.make_event(
+            status=IntelligenceEvent.REVIEW_IGNORED,
+            selection=IntelligenceEvent.SELECTION_NOISE,
+            title="已忽略动态",
+        )
+        self.client.force_login(self.member_user)
+
+        response = self.client.get(reverse("intelligence:event_list"))
+
+        self.assertContains(response, visible.title)
+        self.assertNotContains(response, ignored.title)
+
+    def test_source_map_is_readable_but_pipeline_is_admin_only(self):
+        self.client.force_login(self.member_user)
+
+        source_response = self.client.get(reverse("intelligence:source_list"))
+        pipeline_response = self.client.get(reverse("intelligence:pipeline"))
+
+        self.assertEqual(source_response.status_code, 200)
+        self.assertContains(source_response, self.source.name)
+        self.assertContains(source_response, "RSS 与 YouTube 元数据采集已可用")
+        self.assertEqual(pipeline_response.status_code, 403)
+
+        self.client.force_login(self.admin_user)
+        admin_pipeline_response = self.client.get(reverse("intelligence:pipeline"))
+        self.assertEqual(admin_pipeline_response.status_code, 200)
+        self.assertContains(admin_pipeline_response, "people-v1")
+
+    def test_noise_event_is_only_visible_to_admin_noise_filter(self):
+        noise = self.make_event(
+            selection=IntelligenceEvent.SELECTION_NOISE,
+            title="与投资科技无关的日常内容",
+        )
+        self.client.force_login(self.member_user)
+        self.assertNotContains(self.client.get(reverse("intelligence:event_list")), noise.title)
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(
+            reverse("intelligence:event_list"),
+            {"selection": IntelligenceEvent.SELECTION_NOISE},
+        )
+        self.assertContains(response, noise.title)
+
+    def test_next_url_redirects_do_not_append_detail_arguments(self):
+        event = self.make_event()
+        self.client.force_login(self.member_user)
+        next_url = reverse("intelligence:event_list")
+
+        response = self.client.post(
+            reverse("intelligence:event_mark_read", kwargs={"pk": event.pk}),
+            {"next": next_url},
+        )
+
+        self.assertRedirects(response, next_url)
+
+    def test_external_next_url_is_rejected(self):
+        event = self.make_event()
+        self.client.force_login(self.member_user)
+
+        response = self.client.post(
+            reverse("intelligence:event_mark_read", kwargs={"pk": event.pk}),
+            {"next": "https://malicious.example/redirect"},
+        )
+
+        self.assertRedirects(response, reverse("intelligence:event_detail", kwargs={"pk": event.pk}))
+
+
+RSS_FIXTURE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Official Test Feed</title>
+  <item><guid>launch-1</guid><title>Test Person launches an AI model</title>
+    <link>https://example.com/news/launch-1?utm_source=test</link>
+    <description><![CDATA[The official release explains the new model and business launch.]]></description>
+    <pubDate>Thu, 13 Aug 2026 01:00:00 GMT</pubDate><author>Official Team</author></item>
+</channel></rss>"""
+
+NOISE_RSS_FIXTURE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Official Test Feed</title>
+  <item><guid>lifestyle-1</guid><title>A quiet afternoon by the lake</title>
+    <link>https://example.com/posts/lifestyle-1</link>
+    <description>Some personal photos from the weekend.</description>
+    <pubDate>Thu, 13 Aug 2026 02:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
+YOUTUBE_FIXTURE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/">
+  <title>Official Channel</title><yt:channelId>UC1234567890123456789012</yt:channelId>
+  <entry><id>yt:video:video-1</id><yt:videoId>video-1</yt:videoId><title>AI keynote</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=video-1" />
+    <author><name>Official Channel</name></author><published>2026-08-13T01:00:00+00:00</published>
+    <media:group><media:description>Highlights from the official AI keynote.</media:description></media:group>
+  </entry>
+</feed>"""
+
+
+class M2AdapterAndSafetyTests(IntelligenceTestBase):
+    def test_rss_parser_extracts_metadata_without_full_content(self):
+        items = parse_rss_or_atom(RSS_FIXTURE, base_url="https://example.com/feed.xml")
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].external_id, "launch-1")
+        self.assertEqual(items[0].content_depth, SourceItem.DEPTH_DESCRIPTION)
+        self.assertIn("official release", items[0].excerpt)
+
+    def test_rdf_parser_reads_root_level_items(self):
+        rdf = b"""<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><channel><title>RDF Feed</title></channel><item><title>RDF item</title><link>https://example.com/rdf/1</link></item></rdf:RDF>"""
+
+        items = parse_rss_or_atom(rdf, base_url="https://example.com/feed.rdf")
+
+        self.assertEqual([item.title for item in items], ["RDF item"])
+
+    def test_youtube_parser_only_marks_metadata_and_never_transcript(self):
+        items = parse_youtube_atom(
+            YOUTUBE_FIXTURE,
+            expected_channel_id="UC1234567890123456789012",
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].content_depth, SourceItem.DEPTH_DESCRIPTION)
+        self.assertEqual(items[0].raw_metadata["transcript_status"], "not_requested")
+
+    def test_parser_rejects_xml_entity_declarations(self):
+        unsafe_xml = b'<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><rss />'
+
+        with self.assertRaises(FeedParseError):
+            parse_rss_or_atom(unsafe_xml, base_url="https://example.com/feed.xml")
+
+    def test_public_url_validation_blocks_private_literal_addresses(self):
+        with self.assertRaises(SafeHttpError) as context:
+            validate_public_http_url("http://127.0.0.1/private-feed")
+
+        self.assertEqual(context.exception.code, "private_host")
+        self.assertEqual(validate_public_http_url("https://8.8.8.8/feed"), "https://8.8.8.8/feed")
+
+    @patch("intelligence.http_client.socket.getaddrinfo")
+    def test_proxy_fake_ip_requires_explicit_opt_in_and_never_allows_literal_url(self, getaddrinfo):
+        getaddrinfo.return_value = [(2, 1, 6, "", ("198.18.1.154", 443))]
+
+        with self.assertRaises(SafeHttpError):
+            validate_public_http_url("https://openai.com/news/rss.xml")
+        with patch.dict("os.environ", {"INTELLIGENCE_ALLOW_PROXY_FAKE_IP": "true"}):
+            self.assertEqual(
+                validate_public_http_url("https://openai.com/news/rss.xml"),
+                "https://openai.com/news/rss.xml",
+            )
+            with self.assertRaises(SafeHttpError):
+                validate_public_http_url("https://198.18.1.154/news/rss.xml")
+
+    def test_source_form_rejects_private_feed_and_invalid_youtube_channel(self):
+        private_form = IntelligenceSourceForm(data={
+            "subject": self.subject.pk, "topics": [self.subject.pk],
+            "source_type": IntelligenceSource.TYPE_RSS,
+            "source_group": IntelligenceSource.GROUP_OFFICIAL,
+            "adapter_key": IntelligenceSource.ADAPTER_RSS,
+            "name": "Private RSS", "url": "http://127.0.0.1/feed.xml", "external_id": "",
+            "source_tier": IntelligenceSource.TIER_A, "transport_weight": 100,
+            "poll_interval_minutes": 60, "is_active": True,
+        })
+        youtube_form = IntelligenceSourceForm(data={
+            "subject": self.subject.pk, "topics": [self.subject.pk],
+            "source_type": IntelligenceSource.TYPE_YOUTUBE,
+            "source_group": IntelligenceSource.GROUP_SOCIAL,
+            "adapter_key": IntelligenceSource.ADAPTER_YOUTUBE,
+            "name": "Invalid YouTube", "url": "https://www.youtube.com/@invalid", "external_id": "@invalid",
+            "source_tier": IntelligenceSource.TIER_A, "transport_weight": 100,
+            "poll_interval_minutes": 60, "is_active": True,
+        })
+
+        self.assertFalse(private_form.is_valid())
+        self.assertIn("url", private_form.errors)
+        self.assertFalse(youtube_form.is_valid())
+        self.assertIn("external_id", youtube_form.errors)
+
+
+class M2CollectionTests(IntelligenceTestBase):
+    def make_rss_source(self, *, name="Official RSS", url="https://example.com/feed.xml"):
+        source = IntelligenceSource.objects.create(
+            subject=self.subject,
+            source_type=IntelligenceSource.TYPE_RSS,
+            adapter_key=IntelligenceSource.ADAPTER_RSS,
+            name=name,
+            url=url,
+            source_tier=IntelligenceSource.TIER_A,
+            source_group=IntelligenceSource.GROUP_OFFICIAL,
+        )
+        source.topics.add(self.subject)
+        return source
+
+    @staticmethod
+    def fetch_response(body):
+        return FetchResponse(
+            status=200,
+            url="https://example.com/feed.xml",
+            body=body,
+            etag='"fixture-etag"',
+            last_modified="Thu, 13 Aug 2026 01:05:00 GMT",
+        )
+
+    @patch("intelligence.adapters.fetch_with_retries")
+    def test_collection_is_idempotent_across_three_runs(self, fetch):
+        source = self.make_rss_source()
+        SubjectFollow.objects.create(family=self.family, subject=self.subject)
+        fetch.return_value = self.fetch_response(RSS_FIXTURE)
+
+        runs = [
+            collect_intelligence_sources(source_ids=[source.pk], due_only=False, family=self.family)
+            for _ in range(3)
+        ]
+
+        self.assertEqual(SourceItem.objects.filter(source=source).count(), 1)
+        self.assertEqual(IntelligenceEvent.objects.filter(family=self.family).count(), 1)
+        self.assertEqual(runs[0].created_count, 1)
+        self.assertEqual([run.ignored_count for run in runs[1:]], [1, 1])
+        event = IntelligenceEvent.objects.get(family=self.family)
+        self.assertEqual(event.review_status, IntelligenceEvent.REVIEW_PENDING)
+        self.assertEqual(event.selection_status, IntelligenceEvent.SELECTION_REVIEW)
+        self.assertIn("尚未核查完整正文或视频内容", event.summary)
+
+    @patch("intelligence.adapters.fetch_with_retries")
+    def test_low_relevance_item_is_retained_as_noise_without_event(self, fetch):
+        source = self.make_rss_source()
+        SubjectFollow.objects.create(family=self.family, subject=self.subject)
+        fetch.return_value = self.fetch_response(NOISE_RSS_FIXTURE)
+
+        run = collect_intelligence_sources(source_ids=[source.pk], due_only=False, family=self.family)
+
+        item = SourceItem.objects.get(source=source)
+        self.assertEqual(item.processing_status, SourceItem.STATUS_NOISE)
+        self.assertLess(item.relevance_score, 30)
+        self.assertEqual(IntelligenceEvent.objects.count(), 0)
+        self.assertEqual(run.noise_count, 1)
+        self.assertEqual(run.clustered_count, 0)
+
+    def test_one_source_failure_does_not_discard_other_source(self):
+        healthy = self.make_rss_source(name="Healthy RSS", url="https://example.com/healthy.xml")
+        failing = self.make_rss_source(name="Failing RSS", url="https://example.com/failing.xml")
+        SubjectFollow.objects.create(family=self.family, subject=self.subject)
+
+        class SelectiveAdapter:
+            def collect(inner_self, source, *, max_items=50):
+                if source.pk == failing.pk:
+                    raise SafeHttpError("temporary", "信源暂时不可用。", retryable=True)
+                items = parse_rss_or_atom(RSS_FIXTURE, base_url=source.url, max_items=max_items)
+                return AdapterResult(items=items, cursor_updates={"fixture": True})
+
+        with patch("intelligence.collection.get_adapter", return_value=SelectiveAdapter()):
+            run = collect_intelligence_sources(
+                source_ids=[healthy.pk, failing.pk], due_only=False, family=self.family
+            )
+
+        self.assertEqual(run.status, CollectionRun.STATUS_PARTIAL)
+        self.assertEqual(SourceItem.objects.filter(source=healthy).count(), 1)
+        self.assertEqual(run.source_results.count(), 2)
+        self.assertEqual(run.failed_count, 1)
+        failing.refresh_from_db()
+        self.assertEqual(failing.consecutive_failures, 1)
+
+    def test_seed_sources_is_idempotent_and_does_not_collect(self):
+        call_command("seed_key_people", stdout=StringIO())
+        with patch("intelligence.adapters.fetch_with_retries") as fetch:
+            call_command("seed_intelligence_sources", stdout=StringIO())
+            call_command("seed_intelligence_sources", stdout=StringIO())
+
+        self.assertFalse(fetch.called)
+        self.assertEqual(
+            IntelligenceSource.objects.filter(adapter_key__in={"rss", "youtube"}).count(),
+            len(SOURCE_DEFINITIONS),
+        )
+        self.assertEqual(
+            IntelligenceSource.objects.filter(adapter_key="rss", is_active=True).count(),
+            3,
+        )
+        self.assertFalse(
+            IntelligenceSource.objects.filter(adapter_key="youtube", is_active=True).exists()
+        )
+
+    def test_collection_command_returns_nonzero_after_partial_failure(self):
+        healthy = self.make_rss_source(name="Healthy command RSS", url="https://example.com/cmd-ok.xml")
+        failing = self.make_rss_source(name="Failing command RSS", url="https://example.com/cmd-fail.xml")
+
+        class SelectiveAdapter:
+            def collect(inner_self, source, *, max_items=50):
+                if source.pk == failing.pk:
+                    raise SafeHttpError("temporary", "信源暂时不可用。")
+                return AdapterResult(
+                    items=parse_rss_or_atom(RSS_FIXTURE, base_url=source.url, max_items=max_items),
+                    cursor_updates={},
+                )
+
+        with patch("intelligence.collection.get_adapter", return_value=SelectiveAdapter()):
+            with self.assertRaises(CommandError):
+                call_command(
+                    "collect_intelligence_sources", "--force",
+                    "--source-id", str(healthy.pk), "--source-id", str(failing.pk),
+                    stdout=StringIO(), stderr=StringIO(),
+                )
+
+        self.assertEqual(CollectionRun.objects.latest("pk").status, CollectionRun.STATUS_PARTIAL)
+
+
+class M2OperationsViewTests(IntelligenceTestBase):
+    def make_rss_source(self):
+        source = IntelligenceSource.objects.create(
+            subject=self.subject,
+            source_type=IntelligenceSource.TYPE_RSS,
+            adapter_key=IntelligenceSource.ADAPTER_RSS,
+            name="Operations RSS",
+            url="https://example.com/operations.xml",
+            source_tier=IntelligenceSource.TIER_A,
+            source_group=IntelligenceSource.GROUP_OFFICIAL,
+        )
+        source.topics.add(self.subject)
+        return source
+
+    @staticmethod
+    def fetch_response(body):
+        return FetchResponse(status=200, url="https://example.com/operations.xml", body=body)
+
+    @patch("intelligence.adapters.fetch_with_retries")
+    def test_operations_get_never_fetches_external_sources(self, fetch):
+        self.make_rss_source()
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(reverse("intelligence:operations"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(fetch.called)
+        self.assertContains(response, "普通浏览不会访问外部网站")
+
+    @patch("intelligence.adapters.fetch_with_retries")
+    def test_admin_can_explicitly_trigger_collection_post(self, fetch):
+        source = self.make_rss_source()
+        SubjectFollow.objects.create(family=self.family, subject=self.subject)
+        fetch.return_value = self.fetch_response(RSS_FIXTURE)
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("intelligence:collect_sources_now"),
+            {"source_id": source.pk, "force": "1"},
+        )
+
+        self.assertRedirects(response, reverse("intelligence:operations"))
+        self.assertTrue(fetch.called)
+        self.assertEqual(CollectionRun.objects.filter(run_kind=CollectionRun.KIND_COLLECTION).count(), 1)
+
+    def test_non_admin_cannot_trigger_collection(self):
+        self.client.force_login(self.member_user)
+
+        response = self.client.post(reverse("intelligence:collect_sources_now"))
+
+        self.assertEqual(response.status_code, 403)
