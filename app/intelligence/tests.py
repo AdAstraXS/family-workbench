@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 from io import StringIO
 import json
 import tempfile
@@ -1157,6 +1158,15 @@ class M3EventAnalysisTests(IntelligenceTestBase):
             extra_data={
                 "api_key_env_var": "INTELLIGENCE_TEST_API_KEY",
                 "allow_intelligence_analysis": True,
+                "intelligence_data_scope": "public_metadata_only",
+                "intelligence_policy_version": "public-metadata-v1",
+                "intelligence_policy_reviewed_on": "2026-08-16",
+                "intelligence_max_input_characters": 20000,
+                "intelligence_max_output_tokens": 1800,
+                "intelligence_input_usd_per_million": "0.14",
+                "intelligence_output_usd_per_million": "0.28",
+                "intelligence_max_estimated_usd": "0.01",
+                "intelligence_disable_thinking": True,
             },
         )
 
@@ -1189,7 +1199,11 @@ class M3EventAnalysisTests(IntelligenceTestBase):
         content = result if result is not None else self.analysis_result(reference)
         return {
             "choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}],
-            "usage": {"total_tokens": 321},
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 221,
+                "total_tokens": 321,
+            },
         }
 
     def test_schema_rejects_unknown_evidence_reference_and_invalid_scores(self):
@@ -1268,6 +1282,7 @@ class M3EventAnalysisTests(IntelligenceTestBase):
         self.assertFalse(analysis.is_current)
         self.assertTrue(forced.is_current)
         self.assertEqual(analysis.tokens_used, 321)
+        self.assertEqual(analysis.cost_estimate, Decimal("0.000076"))
         self.assertEqual(analysis.result_json["summary_evidence_refs"], [f"source-item-{event.primary_source_item_id}"])
         self.assertEqual(analysis.result_json["code_scoring"]["policy_version"], "people-v1")
         self.assertEqual(event.score_origin, IntelligenceEvent.SCORE_ORIGIN_AI)
@@ -1280,6 +1295,47 @@ class M3EventAnalysisTests(IntelligenceTestBase):
         self.assertEqual(EventAnalysis.objects.filter(event=event, is_current=True).count(), 1)
         self.assertEqual(AiAnalysisRequest.objects.filter(module="intelligence").count(), 2)
         self.assertEqual(AiAnalysisResult.objects.count(), 2)
+        request_payload = json.loads(urlopen.call_args_list[0].args[0].data.decode("utf-8"))
+        self.assertEqual(request_payload["max_tokens"], 1800)
+        self.assertEqual(request_payload["thinking"], {"type": "disabled"})
+        self.assertLessEqual(
+            Decimal(analysis.analysis_request.scope["maximum_cost_estimate_usd"]),
+            Decimal("0.01"),
+        )
+
+    @patch("intelligence.ai_enrichment.validate_public_http_url")
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_analysis_refuses_unconfirmed_public_scope_or_excessive_cost(self, urlopen, validate_url):
+        event = self.make_event(status=IntelligenceEvent.REVIEW_PENDING, selection=IntelligenceEvent.SELECTION_REVIEW)
+        provider = self.make_provider()
+        validate_url.return_value = "https://api.example.com/v1/chat/completions"
+        provider.extra_data.pop("intelligence_data_scope")
+        provider.save(update_fields=["extra_data", "updated_at"])
+
+        with patch.dict("os.environ", {"INTELLIGENCE_TEST_API_KEY": "test-key"}):
+            self.assertFalse(provider_is_configured(provider))
+            with self.assertRaisesMessage(IntelligenceAiError, "公开标题和短摘录"):
+                analyze_event(
+                    event,
+                    member=self.admin_member,
+                    user=self.admin_user,
+                    provider_id=provider.pk,
+                )
+
+            provider.extra_data["intelligence_data_scope"] = "public_metadata_only"
+            provider.extra_data["intelligence_max_estimated_usd"] = "0.000001"
+            provider.save(update_fields=["extra_data", "updated_at"])
+            with self.assertRaisesMessage(IntelligenceAiError, "超过单次上限"):
+                analyze_event(
+                    event,
+                    member=self.admin_member,
+                    user=self.admin_user,
+                    provider_id=provider.pk,
+                )
+
+        self.assertFalse(urlopen.called)
+        self.assertFalse(EventAnalysis.objects.exists())
+        self.assertFalse(AiAnalysisRequest.objects.exists())
 
     @patch("intelligence.ai_enrichment.validate_public_http_url")
     @patch("intelligence.ai_enrichment.urllib.request.urlopen")
@@ -1368,6 +1424,7 @@ class M3EventAnalysisTests(IntelligenceTestBase):
         detail = self.client.get(reverse("intelligence:event_detail", args=[event.pk]))
         self.assertContains(detail, "测试人物宣布新的企业级产品计划")
         self.assertContains(detail, "AI 结构化整理")
+        self.assertContains(detail, "费用估算 $0.000076")
         self.assertContains(detail, f'href="#source-item-{event.primary_source_item_id}"')
         self.client.force_login(self.member_user)
         forbidden = self.client.post(

@@ -5,6 +5,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+from decimal import Decimal, InvalidOperation, ROUND_UP
 
 from django.db import transaction
 from django.utils import timezone
@@ -24,6 +25,11 @@ MAX_EXCERPT_CHARACTERS = 2000
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 TEXT_PROVIDER_TYPES = ("openai", "openai_compatible")
 DISALLOWED_PROVIDER_USAGES = {"ipo_image_recognition", "vision", "image"}
+INTELLIGENCE_DATA_SCOPE = "public_metadata_only"
+INTELLIGENCE_POLICY_VERSION = "public-metadata-v1"
+MAX_CONFIGURED_INPUT_CHARACTERS = 20000
+MIN_OUTPUT_TOKENS = 256
+MAX_OUTPUT_TOKENS = 4096
 
 
 class IntelligenceAiError(RuntimeError):
@@ -47,12 +53,123 @@ def text_ai_providers():
 
 
 def provider_is_configured(provider):
+    try:
+        _provider_policy(provider)
+        _api_key(provider)
+    except IntelligenceAiError:
+        return False
+    return True
+
+
+def _bounded_integer(extra_data, key, *, minimum, maximum, label):
+    value = extra_data.get(key)
+    if isinstance(value, bool):
+        raise IntelligenceAiError(f"{label}配置不正确。")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise IntelligenceAiError(f"{label}尚未配置。") from exc
+    if not minimum <= parsed <= maximum:
+        raise IntelligenceAiError(f"{label}必须在 {minimum} 到 {maximum} 之间。")
+    return parsed
+
+
+def _positive_decimal(extra_data, key, *, label):
+    try:
+        value = Decimal(str(extra_data.get(key, "")))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise IntelligenceAiError(f"{label}尚未配置。") from exc
+    if not value.is_finite() or value <= 0:
+        raise IntelligenceAiError(f"{label}必须大于 0。")
+    return value
+
+
+def _provider_policy(provider):
     extra_data = provider.extra_data or {}
-    env_name = extra_data.get("api_key_env_var", "").strip()
-    return bool(
-        extra_data.get("allow_intelligence_analysis") is True
-        and env_name
-        and os.getenv(env_name)
+    if extra_data.get("allow_intelligence_analysis") is not True:
+        raise IntelligenceAiError(
+            "该文本模型尚未明确授权用于 AI 情报，请先确认数据留存和费用边界。"
+        )
+    if extra_data.get("intelligence_data_scope") != INTELLIGENCE_DATA_SCOPE:
+        raise IntelligenceAiError("该文本模型尚未确认只接收公开标题和短摘录。")
+    if extra_data.get("intelligence_policy_version") != INTELLIGENCE_POLICY_VERSION:
+        raise IntelligenceAiError("该文本模型的数据与费用策略尚未按当前版本确认。")
+    policy = {
+        "data_scope": INTELLIGENCE_DATA_SCOPE,
+        "policy_version": INTELLIGENCE_POLICY_VERSION,
+        "max_input_characters": _bounded_integer(
+            extra_data,
+            "intelligence_max_input_characters",
+            minimum=1000,
+            maximum=MAX_CONFIGURED_INPUT_CHARACTERS,
+            label="AI 情报单次输入字符上限",
+        ),
+        "max_output_tokens": _bounded_integer(
+            extra_data,
+            "intelligence_max_output_tokens",
+            minimum=MIN_OUTPUT_TOKENS,
+            maximum=MAX_OUTPUT_TOKENS,
+            label="AI 情报单次输出 Token 上限",
+        ),
+        "input_usd_per_million": _positive_decimal(
+            extra_data,
+            "intelligence_input_usd_per_million",
+            label="AI 情报输入单价",
+        ),
+        "output_usd_per_million": _positive_decimal(
+            extra_data,
+            "intelligence_output_usd_per_million",
+            label="AI 情报输出单价",
+        ),
+        "max_estimated_usd": _positive_decimal(
+            extra_data,
+            "intelligence_max_estimated_usd",
+            label="AI 情报单次费用上限",
+        ),
+        "disable_thinking": extra_data.get("intelligence_disable_thinking") is True,
+        "reviewed_on": str(extra_data.get("intelligence_policy_reviewed_on") or "").strip(),
+    }
+    if not policy["reviewed_on"]:
+        raise IntelligenceAiError("AI 情报数据与费用策略缺少复核日期。")
+    return policy
+
+
+def _estimated_cost(*, input_tokens, output_tokens, policy):
+    cost = (
+        Decimal(input_tokens) * policy["input_usd_per_million"]
+        + Decimal(output_tokens) * policy["output_usd_per_million"]
+    ) / Decimal(1000000)
+    return cost.quantize(Decimal("0.000001"), rounding=ROUND_UP)
+
+
+def _enforce_request_limits(*, system_prompt, user_prompt, input_snapshot, policy):
+    input_characters = len(system_prompt) + len(user_prompt)
+    if input_characters > policy["max_input_characters"]:
+        raise IntelligenceAiError(
+            f"本次 AI 输入为 {input_characters} 字符，超过已确认的 "
+            f"{policy['max_input_characters']} 字符上限。"
+        )
+    # Unicode 文本按每字符最多两个 Token 做保守预估，避免调用前低估费用。
+    estimated_input_tokens = input_characters * 2
+    maximum_cost = _estimated_cost(
+        input_tokens=estimated_input_tokens,
+        output_tokens=policy["max_output_tokens"],
+        policy=policy,
+    )
+    if maximum_cost > policy["max_estimated_usd"]:
+        raise IntelligenceAiError(
+            f"本次请求最坏费用估算为 ${maximum_cost}，超过单次上限 "
+            f"${policy['max_estimated_usd']}。"
+        )
+    input_snapshot.update(
+        {
+            "request_input_characters": input_characters,
+            "max_output_tokens": policy["max_output_tokens"],
+            "maximum_cost_estimate_usd": str(maximum_cost),
+            "data_scope": policy["data_scope"],
+            "policy_version": policy["policy_version"],
+            "policy_reviewed_on": policy["reviewed_on"],
+        }
     )
 
 
@@ -342,9 +459,16 @@ def analyze_event(event, *, member, user, provider_id=None, force=False):
     if current and not force:
         return current, False
 
+    policy = _provider_policy(provider)
     api_key = _api_key(provider)
     chat_url = _chat_url(provider)
     system_prompt, user_prompt = _prompts(input_payload)
+    _enforce_request_limits(
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        input_snapshot=input_snapshot,
+        policy=policy,
+    )
     analysis_request = AiAnalysisRequest.objects.create(
         family=event.family,
         member=member,
@@ -357,6 +481,10 @@ def analyze_event(event, *, member, user, provider_id=None, force=False):
             "input_fingerprint": fingerprint,
             "prompt_version": PROMPT_VERSION,
             "schema_version": SCHEMA_VERSION,
+            "data_scope": policy["data_scope"],
+            "policy_version": policy["policy_version"],
+            "max_output_tokens": policy["max_output_tokens"],
+            "maximum_cost_estimate_usd": input_snapshot["maximum_cost_estimate_usd"],
         },
         prompt=system_prompt,
         sanitized_input=input_snapshot,
@@ -375,12 +503,15 @@ def analyze_event(event, *, member, user, provider_id=None, force=False):
     request_payload = {
         "model": provider.model_name,
         "temperature": 0,
+        "max_tokens": policy["max_output_tokens"],
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
     }
+    if policy["disable_thinking"]:
+        request_payload["thinking"] = {"type": "disabled"}
     request = urllib.request.Request(
         chat_url,
         data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
@@ -431,6 +562,22 @@ def analyze_event(event, *, member, user, provider_id=None, force=False):
         and raw_tokens_used >= 0
         else None
     )
+    prompt_tokens = usage.get("prompt_tokens")
+    completion_tokens = usage.get("completion_tokens")
+    cost_estimate = None
+    if (
+        isinstance(prompt_tokens, int)
+        and not isinstance(prompt_tokens, bool)
+        and prompt_tokens >= 0
+        and isinstance(completion_tokens, int)
+        and not isinstance(completion_tokens, bool)
+        and completion_tokens >= 0
+    ):
+        cost_estimate = _estimated_cost(
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
+            policy=policy,
+        )
     features = result["features"]
     with transaction.atomic():
         locked_event = IntelligenceEvent.objects.select_for_update().get(pk=event.pk)
@@ -477,6 +624,7 @@ def analyze_event(event, *, member, user, provider_id=None, force=False):
         analysis.result_json = result
         analysis.error_message = ""
         analysis.tokens_used = tokens_used
+        analysis.cost_estimate = cost_estimate
         analysis.is_current = True
         analysis.save(
             update_fields=[
@@ -484,6 +632,7 @@ def analyze_event(event, *, member, user, provider_id=None, force=False):
                 "result_json",
                 "error_message",
                 "tokens_used",
+                "cost_estimate",
                 "is_current",
                 "updated_at",
             ]
@@ -496,6 +645,7 @@ def analyze_event(event, *, member, user, provider_id=None, force=False):
             result_text=result["summary"],
             result_json=result,
             tokens_used=tokens_used,
+            cost_estimate=cost_estimate,
         )
         SourceItem.objects.filter(
             event_evidence_links__event=locked_event,

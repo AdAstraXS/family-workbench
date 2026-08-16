@@ -25,7 +25,7 @@
   {% if current_analysis %}
   <section class="intel-notice">
     <strong>AI 结构化整理</strong>
-    <span>依据 {{ current_analysis.input_snapshot.evidence_refs|length }} 个已保存来源生成；这是可核查的派生结果，不是人物原话或人工确认结论。{{ current_analysis.provider.name }} · {{ current_analysis.model_name }} · {{ current_analysis.prompt_version }}</span>
+    <span>依据 {{ current_analysis.input_snapshot.evidence_refs|length }} 个已保存来源生成；这是可核查的派生结果，不是人物原话或人工确认结论。{{ current_analysis.provider.name }} · {{ current_analysis.model_name }} · {{ current_analysis.prompt_version }}{% if current_analysis.tokens_used %} · {{ current_analysis.tokens_used }} tokens{% endif %}{% if current_analysis.cost_estimate %} · 费用估算 ${{ current_analysis.cost_estimate }}{% endif %}</span>
   </section>
   <section class="intel-detail-block"><span>AI 事实摘要</span><div>{{ current_analysis.result_json.summary|linebreaks }}<small class="intel-muted">证据：{% for ref in current_analysis.result_json.summary_evidence_refs %}<a href="#{{ ref }}">{{ ref }}</a>{% if not forloop.last %}、{% endif %}{% endfor %}</small></div></section>
   <section class="intel-detail-block"><span>AI 判断为什么重要</span><div>{{ current_analysis.result_json.why_it_matters|linebreaks }}</div></section>
@@ -107,7 +107,7 @@
     {% for analysis in analysis_history %}
     <article class="intel-evidence-card">
       <div><span class="intel-status {% if analysis.status == 'success' %}ok{% elif analysis.status == 'failed' %}error{% else %}warning{% endif %}">{{ analysis.get_status_display }}</span><strong>{{ analysis.model_name|default:"未调用模型" }}</strong>{% if analysis.is_current %}<span>当前采用</span>{% endif %}</div>
-      <p>{{ analysis.created_at|date:"Y-m-d H:i:s" }} · {{ analysis.prompt_version }} · {{ analysis.schema_version }}{% if analysis.tokens_used %} · {{ analysis.tokens_used }} tokens{% endif %}</p>
+      <p>{{ analysis.created_at|date:"Y-m-d H:i:s" }} · {{ analysis.prompt_version }} · {{ analysis.schema_version }}{% if analysis.tokens_used %} · {{ analysis.tokens_used }} tokens{% endif %}{% if analysis.cost_estimate %} · 费用估算 ${{ analysis.cost_estimate }}{% endif %}</p>
       {% if analysis.error_message %}<p class="intel-error-text">{{ analysis.error_message }}</p>{% endif %}
     </article>
     {% endfor %}
