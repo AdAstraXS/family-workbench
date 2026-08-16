@@ -753,9 +753,9 @@ def pipeline(request):
         SourceItem.STATUS_NOISE,
     }
     stage_cards = [
-        {"number": 1, "name": "抓取并保留来源记录", "count": source_items.count(), "state": "collect", "note": "RSS 与 YouTube 官方频道元数据已启用；不下载视频或音频。"},
+        {"number": 1, "name": "抓取并保留来源记录", "count": source_items.count(), "state": "collect", "note": "RSS 公开订阅元数据已启用；YouTube 适配器已登记但默认停用，不下载视频或音频。"},
         {"number": 2, "name": "标准化与确定性去重", "count": source_items.filter(processing_status__in=processed_statuses).count(), "state": "code", "note": "平台 ID、链接和内容指纹；不调用 AI。"},
-        {"number": 3, "name": "规则分类与相关性门控", "count": source_items.filter(processed_at__isnull=False).count(), "state": "code", "note": "M2 使用确定性关键词与主题匹配；文本模型尚未接入。"},
+        {"number": 3, "name": "规则分类与相关性门控", "count": source_items.filter(processed_at__isnull=False).count(), "state": "code", "note": "官方源使用主题匹配，媒体源要求标题直提关注对象；文本模型尚未接入。"},
         {"number": 4, "name": "代码评分与事件聚合", "count": family_events.exclude(scoring_breakdown={}).count(), "state": "code", "note": f"策略 {POLICY_VERSION}，相同输入得到稳定结果。"},
         {"number": 5, "name": "分层展示", "count": family_events.filter(selection_status=IntelligenceEvent.SELECTION_SELECTED).count(), "state": "decision", "note": "精选、全部动态、待复核和噪音箱。"},
     ]

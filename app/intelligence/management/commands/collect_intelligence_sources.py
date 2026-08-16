@@ -5,7 +5,7 @@ from intelligence.models import CollectionRun
 
 
 class Command(BaseCommand):
-    help = "采集到期的 RSS 与 YouTube 官方频道元数据，并生成待复核候选事件。"
+    help = "采集到期的 RSS 与 YouTube 公开元数据，并生成待复核候选事件。"
 
     def add_arguments(self, parser):
         parser.add_argument(

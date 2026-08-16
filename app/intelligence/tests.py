@@ -38,6 +38,7 @@ from .models import (
     SubjectFollow,
     SubjectKnowledgeIdentity,
 )
+from .processing import MEDIA_DISCOVERY_POLICY
 from .scoring import calculate_event_scores
 
 
@@ -738,6 +739,22 @@ NOISE_RSS_FIXTURE = b"""<?xml version="1.0" encoding="UTF-8"?>
     <pubDate>Thu, 13 Aug 2026 02:00:00 GMT</pubDate></item>
 </channel></rss>"""
 
+MEDIA_EXCERPT_ONLY_FIXTURE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Media Test Feed</title>
+  <item><guid>media-excerpt-1</guid><title>A new enterprise computing plan</title>
+    <link>https://example.com/media/excerpt-1</link>
+    <description>OpenAI and Test Person are mentioned as background to the wider AI market.</description>
+    <pubDate>Thu, 13 Aug 2026 03:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
+MEDIA_TITLE_MATCH_FIXTURE = b"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Media Test Feed</title>
+  <item><guid>media-title-1</guid><title>Test Person discusses long-term strategy</title>
+    <link>https://example.com/media/title-1</link>
+    <description>A reported interview about product and business priorities.</description>
+    <pubDate>Thu, 13 Aug 2026 04:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
 YOUTUBE_FIXTURE = b"""<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns:media="http://search.yahoo.com/mrss/">
   <title>Official Channel</title><yt:channelId>UC1234567890123456789012</yt:channelId>
@@ -842,6 +859,20 @@ class M2CollectionTests(IntelligenceTestBase):
         source.topics.add(self.subject)
         return source
 
+    def make_media_source(self, *, url="https://example.com/media.xml"):
+        source = IntelligenceSource.objects.create(
+            subject=None,
+            source_type=IntelligenceSource.TYPE_RSS,
+            adapter_key=IntelligenceSource.ADAPTER_RSS,
+            name="Media discovery RSS",
+            url=url,
+            source_tier=IntelligenceSource.TIER_C,
+            source_group=IntelligenceSource.GROUP_MEDIA,
+            extra_data={"discovery_policy": MEDIA_DISCOVERY_POLICY},
+        )
+        source.topics.add(self.subject)
+        return source
+
     @staticmethod
     def fetch_response(body):
         return FetchResponse(
@@ -887,6 +918,37 @@ class M2CollectionTests(IntelligenceTestBase):
         self.assertEqual(run.noise_count, 1)
         self.assertEqual(run.clustered_count, 0)
 
+    @patch("intelligence.adapters.fetch_with_retries")
+    def test_media_excerpt_only_mention_is_retained_without_event(self, fetch):
+        source = self.make_media_source()
+        SubjectFollow.objects.create(family=self.family, subject=self.subject)
+        fetch.return_value = self.fetch_response(MEDIA_EXCERPT_ONLY_FIXTURE)
+
+        run = collect_intelligence_sources(source_ids=[source.pk], due_only=False, family=self.family)
+
+        item = SourceItem.objects.get(source=source)
+        self.assertEqual(item.processing_status, SourceItem.STATUS_NOISE)
+        self.assertEqual(list(item.matched_subjects.all()), [])
+        self.assertIn("媒体发现源标题未直接出现关注对象", item.processing_reason)
+        self.assertEqual(IntelligenceEvent.objects.count(), 0)
+        self.assertEqual(run.noise_count, 1)
+
+    @patch("intelligence.adapters.fetch_with_retries")
+    def test_media_title_mention_creates_media_candidate(self, fetch):
+        source = self.make_media_source()
+        SubjectFollow.objects.create(family=self.family, subject=self.subject)
+        fetch.return_value = self.fetch_response(MEDIA_TITLE_MATCH_FIXTURE)
+
+        run = collect_intelligence_sources(source_ids=[source.pk], due_only=False, family=self.family)
+
+        item = SourceItem.objects.get(source=source)
+        event = IntelligenceEvent.objects.get(family=self.family)
+        self.assertEqual(item.processing_status, SourceItem.STATUS_CLUSTERED)
+        self.assertEqual(list(item.matched_subjects.all()), [self.subject])
+        self.assertIn("自动采集到媒体信源条目", event.summary)
+        self.assertNotIn("官方信源条目", event.summary)
+        self.assertEqual(run.clustered_count, 1)
+
     def test_one_source_failure_does_not_discard_other_source(self):
         healthy = self.make_rss_source(name="Healthy RSS", url="https://example.com/healthy.xml")
         failing = self.make_rss_source(name="Failing RSS", url="https://example.com/failing.xml")
@@ -924,10 +986,21 @@ class M2CollectionTests(IntelligenceTestBase):
         )
         self.assertEqual(
             IntelligenceSource.objects.filter(adapter_key="rss", is_active=True).count(),
-            3,
+            sum(
+                definition["enabled_by_default"]
+                for definition in SOURCE_DEFINITIONS
+                if definition["adapter_key"] == IntelligenceSource.ADAPTER_RSS
+            ),
         )
         self.assertFalse(
             IntelligenceSource.objects.filter(adapter_key="youtube", is_active=True).exists()
+        )
+        media_sources = IntelligenceSource.objects.filter(source_group=IntelligenceSource.GROUP_MEDIA)
+        self.assertEqual(media_sources.count(), 5)
+        self.assertFalse(media_sources.exclude(subject=None).exists())
+        self.assertFalse(media_sources.exclude(source_tier=IntelligenceSource.TIER_C).exists())
+        self.assertFalse(
+            media_sources.exclude(extra_data__discovery_policy=MEDIA_DISCOVERY_POLICY).exists()
         )
 
     def test_collection_command_returns_nonzero_after_partial_failure(self):

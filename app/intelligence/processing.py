@@ -19,6 +19,7 @@ from .scoring import POLICY_VERSION, SOURCE_QUALITY_SCORES, calculate_event_scor
 
 RELEVANCE_THRESHOLD = 30
 CLUSTER_SIMILARITY_THRESHOLD = 0.68
+MEDIA_DISCOVERY_POLICY = "named-subject-v1"
 
 KEYWORD_GROUPS = {
     "ai": (
@@ -90,12 +91,15 @@ def classify_source_item(item):
     source = item.source
     topics = list(source.topics.filter(is_active=True))
     matched = []
+    title_matched = []
     explicit_title_matches = 0
     explicit_excerpt_matches = 0
     for topic in topics:
         terms = _subject_terms(topic)
         title_hit = any(term in title for term in terms)
         excerpt_hit = any(term in excerpt for term in terms)
+        if title_hit:
+            title_matched.append(topic)
         if title_hit or excerpt_hit or topic.pk == source.subject_id:
             matched.append(topic)
         explicit_title_matches += int(title_hit)
@@ -118,7 +122,13 @@ def classify_source_item(item):
     if item.content_depth == SourceItem.DEPTH_TITLE:
         relevance -= 5
     relevance = max(0, min(100, relevance))
-    return matched, relevance, labels
+    gate_reason = ""
+    if source.extra_data.get("discovery_policy") == MEDIA_DISCOVERY_POLICY:
+        matched = title_matched
+        if not matched:
+            relevance = min(relevance, RELEVANCE_THRESHOLD - 1)
+            gate_reason = "媒体发现源标题未直接出现关注对象"
+    return matched, relevance, labels, gate_reason
 
 
 def _cluster_tokens(title):
@@ -244,7 +254,13 @@ def _upsert_candidate_event(family, item, matched_topics, relevance, labels):
     created = event is None
     if created:
         excerpt = item.excerpt[:600].strip()
-        summary = f"自动采集到官方信源条目《{item.title}》。"
+        if item.source.source_group == item.source.GROUP_MEDIA:
+            source_label = "媒体信源"
+        elif item.source.source_group == item.source.GROUP_OFFICIAL:
+            source_label = "官方信源"
+        else:
+            source_label = "外部信源"
+        summary = f"自动采集到{source_label}条目《{item.title}》。"
         if excerpt:
             summary += f"来源简介：{excerpt}"
         summary += " 当前尚未核查完整正文或视频内容。"
@@ -306,14 +322,18 @@ def _upsert_candidate_event(family, item, matched_topics, relevance, labels):
 
 
 def process_source_item(item):
-    matched_topics, relevance, labels = classify_source_item(item)
+    matched_topics, relevance, labels, gate_reason = classify_source_item(item)
     item.matched_subjects.set(matched_topics)
     item.classification_labels = labels
     item.relevance_score = relevance
     item.processed_at = timezone.now()
     if relevance < RELEVANCE_THRESHOLD:
         item.processing_status = SourceItem.STATUS_NOISE
-        item.processing_reason = f"规则相关性 {relevance}，低于 {RELEVANCE_THRESHOLD}；保留原始条目但不生成事件。"
+        reason_prefix = f"{gate_reason}；" if gate_reason else ""
+        item.processing_reason = (
+            f"{reason_prefix}规则相关性 {relevance}，低于 {RELEVANCE_THRESHOLD}；"
+            "保留原始条目但不生成事件。"
+        )
         item.save(update_fields=[
             "classification_labels", "relevance_score", "processed_at",
             "processing_status", "processing_reason", "updated_at",
