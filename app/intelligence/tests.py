@@ -449,6 +449,39 @@ class IntelligenceViewsTests(IntelligenceTestBase):
         )
         self.assertContains(response, noise.title)
 
+    def test_pending_review_event_hides_actions_that_require_a_public_event(self):
+        event = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="尚未复核的自动采集事件",
+        )
+        self.client.force_login(self.admin_user)
+
+        detail = self.client.get(
+            reverse("intelligence:event_detail", kwargs={"pk": event.pk})
+        )
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "编辑事件")
+        self.assertNotContains(detail, "标记已读")
+        self.assertNotContains(detail, "收藏")
+        self.assertNotContains(detail, "保存为知识")
+        self.assertEqual(
+            self.client.post(
+                reverse("intelligence:event_mark_read", kwargs={"pk": event.pk})
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.post(
+                reverse("intelligence:event_archive", kwargs={"pk": event.pk}),
+                {"mode": EventKnowledgeArchive.MODE_ARCHIVE},
+            ).status_code,
+            404,
+        )
+        self.assertFalse(EventUserState.objects.filter(event=event).exists())
+        self.assertFalse(EventKnowledgeArchive.objects.filter(event=event).exists())
+
     def test_next_url_redirects_do_not_append_detail_arguments(self):
         event = self.make_event()
         self.client.force_login(self.member_user)

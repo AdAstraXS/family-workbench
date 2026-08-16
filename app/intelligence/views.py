@@ -215,6 +215,14 @@ def event_detail(request, pk):
         _family_events(member, include_nonpublic=_is_family_admin(request)),
         pk=pk,
     )
+    is_public_event = (
+        event.review_status in VISIBLE_EVENT_STATUSES
+        and event.selection_status in PUBLIC_SELECTION_STATUSES
+    )
+    can_interact = (
+        member.role != FamilyMember.ROLE_VIEWER
+        and is_public_event
+    )
     state = EventUserState.objects.filter(member=member, event=event).first()
     archive_link = (
         EventKnowledgeArchive.objects.filter(event=event)
@@ -228,9 +236,11 @@ def event_detail(request, pk):
             "event": event,
             "member_state": state,
             "archive_link": archive_link,
-            "can_archive": member.role != FamilyMember.ROLE_VIEWER,
+            "can_interact": can_interact,
+            "can_archive": can_interact,
             "can_upgrade_archive": bool(
-                archive_link
+                can_interact
+                and archive_link
                 and (
                     archive_link.document.owner_id == member.pk
                     or _is_family_admin(request)

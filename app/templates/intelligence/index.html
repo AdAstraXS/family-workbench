@@ -37,7 +37,7 @@
   {% else %}
     <div class="intel-empty">
       <strong>过去 24 小时暂无达到阈值的精选事件</strong>
-      <p>普通相关信息仍可在“全部动态”查看。自动采集和文本 AI 尚未启用，当前由人工提供特征、代码完成评分。</p>
+      <p>普通相关信息仍可在“全部动态”查看。RSS 自动采集已启用，文本 AI 尚未接入；当前由规则提取特征、代码完成评分。</p>
       {% if can_admin %}<a class="button intel-primary" href="{% url 'intelligence:event_create' %}">录入第一条动态</a>{% endif %}
     </div>
   {% endif %}
