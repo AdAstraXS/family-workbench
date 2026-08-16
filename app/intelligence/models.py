@@ -569,6 +569,14 @@ class IntelligenceEvent(TimestampedModel):
         null=True,
         blank=True,
     )
+    merged_into = models.ForeignKey(
+        "self",
+        verbose_name="已合并到事件",
+        on_delete=models.PROTECT,
+        related_name="merged_duplicates",
+        null=True,
+        blank=True,
+    )
     first_seen_at = models.DateTimeField("首次发现时间", default=timezone.now)
     last_seen_at = models.DateTimeField("最近发现时间", default=timezone.now)
     created_by = models.ForeignKey(
@@ -800,6 +808,184 @@ class EventAnalysis(TimestampedModel):
 
     def __str__(self):
         return f"{self.event} - {self.model_name or 'AI'} - {self.get_status_display()}"
+
+
+class EventMergeSuggestion(TimestampedModel):
+    STATUS_PENDING = "pending"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_REJECTED = "rejected"
+    STATUS_STALE = "stale"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "等待复核"),
+        (STATUS_ACCEPTED, "已接受"),
+        (STATUS_REJECTED, "已拒绝"),
+        (STATUS_STALE, "已失效"),
+    ]
+
+    BAND_BATCH = "batch"
+    BAND_REVIEW = "review"
+    BAND_CHOICES = [
+        (BAND_BATCH, "建议批量聚合"),
+        (BAND_REVIEW, "需要单项确认"),
+    ]
+
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="intelligence_merge_suggestions",
+    )
+    left_event = models.ForeignKey(
+        IntelligenceEvent,
+        verbose_name="较小 ID 事件",
+        on_delete=models.PROTECT,
+        related_name="left_merge_suggestions",
+    )
+    right_event = models.ForeignKey(
+        IntelligenceEvent,
+        verbose_name="较大 ID 事件",
+        on_delete=models.PROTECT,
+        related_name="right_merge_suggestions",
+    )
+    recommended_event = models.ForeignKey(
+        IntelligenceEvent,
+        verbose_name="建议保留事件",
+        on_delete=models.PROTECT,
+        related_name="recommended_merge_suggestions",
+    )
+    recommended_primary_source = models.ForeignKey(
+        SourceItem,
+        verbose_name="建议主来源",
+        on_delete=models.PROTECT,
+        related_name="recommended_event_merge_suggestions",
+        null=True,
+        blank=True,
+    )
+    score = models.PositiveSmallIntegerField(
+        "同事件置信分",
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    decision_band = models.CharField(
+        "处理分层",
+        max_length=20,
+        choices=BAND_CHOICES,
+        default=BAND_REVIEW,
+    )
+    policy_version = models.CharField("建议策略版本", max_length=100)
+    reason = models.JSONField("建议依据", default=dict, blank=True)
+    auto_merge_eligible = models.BooleanField("达到未来自动聚合门槛", default=False)
+    requires_individual_review = models.BooleanField("必须单项确认", default=True)
+    status = models.CharField(
+        "建议状态",
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="复核人",
+        on_delete=models.SET_NULL,
+        related_name="reviewed_intelligence_merge_suggestions",
+        null=True,
+        blank=True,
+    )
+    reviewed_at = models.DateTimeField("复核时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "同一事件建议"
+        verbose_name_plural = "同一事件建议"
+        ordering = ["-score", "created_at", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["left_event", "right_event", "policy_version"],
+                name="unique_intelligence_merge_suggestion_pair_policy",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["family", "status", "decision_band", "score"]),
+        ]
+
+    def __str__(self):
+        return f"{self.left_event} ↔ {self.right_event} ({self.score})"
+
+
+class EventMergeRecord(TimestampedModel):
+    STATUS_ACTIVE = "active"
+    STATUS_REVERTED = "reverted"
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, "已合并"),
+        (STATUS_REVERTED, "已拆分"),
+    ]
+
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="intelligence_event_merges",
+    )
+    canonical_event = models.ForeignKey(
+        IntelligenceEvent,
+        verbose_name="保留事件",
+        on_delete=models.PROTECT,
+        related_name="canonical_merge_records",
+    )
+    duplicate_event = models.ForeignKey(
+        IntelligenceEvent,
+        verbose_name="并入事件",
+        on_delete=models.PROTECT,
+        related_name="duplicate_merge_records",
+    )
+    suggestion = models.OneToOneField(
+        EventMergeSuggestion,
+        verbose_name="采用建议",
+        on_delete=models.SET_NULL,
+        related_name="merge_record",
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(
+        "合并状态",
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_ACTIVE,
+    )
+    snapshot = models.JSONField("可逆操作快照", default=dict, blank=True)
+    merged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="合并人",
+        on_delete=models.SET_NULL,
+        related_name="merged_intelligence_events",
+        null=True,
+        blank=True,
+    )
+    merged_at = models.DateTimeField("合并时间", default=timezone.now)
+    reverted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="拆分人",
+        on_delete=models.SET_NULL,
+        related_name="reverted_intelligence_event_merges",
+        null=True,
+        blank=True,
+    )
+    reverted_at = models.DateTimeField("拆分时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "事件合并记录"
+        verbose_name_plural = "事件合并记录"
+        ordering = ["-merged_at", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["duplicate_event"],
+                condition=Q(status="active"),
+                name="unique_active_intelligence_merge_duplicate",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["family", "status", "merged_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.duplicate_event} → {self.canonical_event}"
 
 
 class SubjectFollow(TimestampedModel):

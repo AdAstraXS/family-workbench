@@ -199,12 +199,17 @@ def _candidate_features(relevance, labels, published_at):
 
 def _find_existing_event(family, item, matched_topics, occurred_at):
     exact_key = _cluster_key(item.title, occurred_at)
-    exact = IntelligenceEvent.objects.filter(family=family, cluster_key=exact_key).first()
+    exact = IntelligenceEvent.objects.filter(
+        family=family,
+        cluster_key=exact_key,
+        merged_into__isnull=True,
+    ).first()
     if exact:
         return exact, exact_key
     candidates = (
         IntelligenceEvent.objects.filter(
             family=family,
+            merged_into__isnull=True,
             occurred_at__gte=occurred_at - timedelta(days=2),
             occurred_at__lte=occurred_at + timedelta(days=2),
             subjects__in=matched_topics,
@@ -320,6 +325,9 @@ def _upsert_candidate_event(family, item, matched_topics, relevance, labels):
         extraction_confidence=extraction_confidence,
         source_count=source_count,
     )
+    from .event_merging import refresh_merge_suggestions_for_event
+
+    refresh_merge_suggestions_for_event(event)
     return event, created
 
 

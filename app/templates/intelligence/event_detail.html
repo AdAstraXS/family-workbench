@@ -6,6 +6,12 @@
 
 {% block content %}
 <article class="intel-event-detail">
+  {% if event.merged_into_id %}
+  <section class="intel-notice intel-notice-danger">
+    <strong>这条事件已并入另一条</strong>
+    <span>原始事件、来源、AI 分析和成员状态均未删除。日常信息流只显示<a href="{% url 'intelligence:event_detail' event.merged_into_id %}">保留事件</a>。</span>
+  </section>
+  {% endif %}
   <header>
     <div class="intel-event-card-meta">
       <span class="intel-selection intel-selection-{{ event.selection_status }}">{{ event.get_selection_status_display }}</span>
@@ -70,6 +76,38 @@
     {% empty %}<div class="intel-empty"><strong>暂无证据</strong><p>该事件不应作为正式结论使用。</p></div>{% endfor %}
   </section>
 
+  {% if can_admin and merge_suggestions %}
+  <section class="intel-evidence-section">
+    <div class="intel-section-head"><div><span>MERGE REVIEW</span><h2>可能属于同一事件</h2></div><a href="{% url 'intelligence:merge_review' %}">查看全部</a></div>
+    {% for suggestion in merge_suggestions %}
+    <article class="intel-evidence-card">
+      <div><span class="intel-status {% if suggestion.decision_band == 'batch' %}ok{% else %}warning{% endif %}">{{ suggestion.score }} 分</span><strong>{% if suggestion.left_event_id == event.pk %}{{ suggestion.right_event.title }}{% else %}{{ suggestion.left_event.title }}{% endif %}</strong></div>
+      <p>{{ suggestion.get_decision_band_display }} · 建议保留 #{{ suggestion.recommended_event_id }}{% if suggestion.recommended_primary_source %} · 主来源 {{ suggestion.recommended_primary_source.source.name }}{% endif %}</p>
+      <footer class="intel-inline-actions">
+        <a class="button ghost" href="{% url 'intelligence:merge_suggestion_confirm' suggestion.pk %}">对照确认</a>
+        <form method="post" action="{% url 'intelligence:merge_suggestion_reject' suggestion.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.path }}"><button class="button ghost" type="submit">不是同一事件</button></form>
+      </footer>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  {% if can_admin and active_merges %}
+  <section class="intel-evidence-section">
+    <div class="intel-section-head"><div><span>MERGE HISTORY</span><h2>已并入的原始事件</h2></div><small>可以拆分恢复</small></div>
+    {% for record in active_merges %}
+    <article class="intel-evidence-card">
+      <div><strong>#{{ record.duplicate_event_id }} {{ record.duplicate_event.title }}</strong></div>
+      <p>{{ record.merged_at|date:"Y-m-d H:i" }}{% if record.merged_by %} · {{ record.merged_by.get_username }}{% endif %}；原始事件和证据仍保留。</p>
+      <footer class="intel-inline-actions">
+        <a class="button ghost" href="{% url 'intelligence:event_detail' record.duplicate_event_id %}">查看原事件</a>
+        <form method="post" action="{% url 'intelligence:merge_record_split' record.pk %}" onsubmit="return confirm('确定拆分吗？两条事件会重新分别出现在信息流中。');">{% csrf_token %}<button class="button ghost" type="submit">拆分恢复</button></form>
+      </footer>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   <footer class="intel-detail-actions">
     <a class="button ghost" href="{% url 'intelligence:event_list' %}">返回全部动态</a>
     {% if can_interact %}
@@ -83,7 +121,7 @@
       <form method="post" action="{% url 'intelligence:event_archive' event.pk %}">{% csrf_token %}<input type="hidden" name="mode" value="archive"><button class="button intel-primary" type="submit">保存为知识</button></form>
       <form method="post" action="{% url 'intelligence:event_archive' event.pk %}">{% csrf_token %}<input type="hidden" name="mode" value="organize"><button class="button ghost" type="submit">保存并加入待整理</button></form>
     {% endif %}
-    {% if can_admin %}
+    {% if can_admin and not event.merged_into_id %}
       {% if configured_text_ai_count %}
       <form method="post" action="{% url 'intelligence:event_analyze' event.pk %}" onsubmit="return confirm('将向所选云端文本模型发送标题和已保存的公开短摘录，是否继续？');">
         {% csrf_token %}

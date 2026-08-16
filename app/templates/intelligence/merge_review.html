@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}重复事件复核{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260816-1">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head">
+  <div><span class="intel-eyebrow">EVENT AGGREGATION</span><h1>重复事件复核</h1><p>系统只提出跨来源候选；确认后保留一张事件卡并汇总证据，原事件与历史不会删除。</p></div>
+  <form method="post" action="{% url 'intelligence:merge_suggestion_refresh' %}">{% csrf_token %}<button class="button ghost" type="submit">重新计算建议</button></form>
+</section>
+
+{% include "intelligence/_tabs.html" %}
+
+<section class="intel-notice">
+  <strong>{{ policy_version }}</strong>
+  <span>当前 {{ pending_count }} 组待处理、{{ active_merge_count }} 组已聚合。精确重复仍由采集流水线直接判重；语义自动聚合{% if auto_merge_enabled %}已启用{% else %}保持关闭{% endif %}，AI 不直接改写事件。</span>
+</section>
+
+<section class="intel-section">
+  <div class="intel-section-head"><div><span>BATCH REVIEW</span><h2>高置信度批量建议</h2><p>这些建议没有收藏、知识归档或人工状态冲突。请勾选后一次确认，也可以逐条对照。</p></div><strong>{{ batch_suggestions|length }}</strong></div>
+  {% if batch_suggestions %}
+  <form method="post" action="{% url 'intelligence:merge_suggestion_batch_accept' %}" onsubmit="return confirm('确定聚合选中的高置信度建议吗？操作后仍可逐条拆分。');">
+    {% csrf_token %}
+    <div class="intel-merge-list">
+      {% for suggestion in batch_suggestions %}
+      <article class="intel-merge-card">
+        <label class="intel-merge-select"><input type="checkbox" name="suggestion_ids" value="{{ suggestion.pk }}" checked><span>{{ suggestion.score }} 分</span></label>
+        <div class="intel-merge-pair">
+          <div><small>#{{ suggestion.left_event_id }} · {{ suggestion.left_event.occurred_at|date:"Y-m-d H:i" }}</small><strong>{{ suggestion.left_event.title }}</strong><span>{{ suggestion.left_event.primary_source_item.source.name|default:"未指定主来源" }}</span></div>
+          <b>↔</b>
+          <div><small>#{{ suggestion.right_event_id }} · {{ suggestion.right_event.occurred_at|date:"Y-m-d H:i" }}</small><strong>{{ suggestion.right_event.title }}</strong><span>{{ suggestion.right_event.primary_source_item.source.name|default:"未指定主来源" }}</span></div>
+        </div>
+        <div class="intel-merge-reason">标题 {{ suggestion.reason.title_similarity|floatformat:2 }} · 摘要 {{ suggestion.reason.summary_similarity|floatformat:2 }} · 相差 {{ suggestion.reason.time_delta_hours }} 小时{% if suggestion.reason.shared_numbers %} · 共同数字 {{ suggestion.reason.shared_numbers|join:", " }}{% endif %}</div>
+        <footer><span>建议保留 #{{ suggestion.recommended_event_id }}{% if suggestion.recommended_primary_source %}；主来源 {{ suggestion.recommended_primary_source.source.name }}{% endif %}</span><a href="{% url 'intelligence:merge_suggestion_confirm' suggestion.pk %}">对照确认</a></footer>
+      </article>
+      {% endfor %}
+    </div>
+    <div class="intel-form-actions"><button class="button intel-primary" type="submit">聚合已勾选项</button></div>
+  </form>
+  {% else %}
+  <div class="intel-empty"><strong>暂无可批量处理项</strong><p>这是正常状态；系统不会为了填满列表而放宽标准。</p></div>
+  {% endif %}
+</section>
+
+<section class="intel-section">
+  <div class="intel-section-head"><div><span>INDIVIDUAL REVIEW</span><h2>需要单项确认</h2><p>相似度处于灰区，或已有收藏、归档、发布状态等需要保留的上下文。</p></div><strong>{{ review_suggestions|length }}</strong></div>
+  <div class="intel-merge-list">
+    {% for suggestion in review_suggestions %}
+    <article class="intel-merge-card">
+      <div class="intel-merge-score"><span class="intel-status warning">{{ suggestion.score }} 分</span><strong>{{ suggestion.get_decision_band_display }}</strong></div>
+      <div class="intel-merge-pair">
+        <div><small>#{{ suggestion.left_event_id }} · {{ suggestion.left_event.occurred_at|date:"Y-m-d H:i" }}</small><strong>{{ suggestion.left_event.title }}</strong><span>{{ suggestion.left_event.primary_source_item.source.name|default:"未指定主来源" }}</span></div>
+        <b>↔</b>
+        <div><small>#{{ suggestion.right_event_id }} · {{ suggestion.right_event.occurred_at|date:"Y-m-d H:i" }}</small><strong>{{ suggestion.right_event.title }}</strong><span>{{ suggestion.right_event.primary_source_item.source.name|default:"未指定主来源" }}</span></div>
+      </div>
+      {% if suggestion.reason.protected_reasons %}<p class="intel-merge-warning">{% for reason in suggestion.reason.protected_reasons %}{{ reason }}{% if not forloop.last %}；{% endif %}{% endfor %}</p>{% endif %}
+      <footer class="intel-inline-actions"><a class="button ghost" href="{% url 'intelligence:merge_suggestion_confirm' suggestion.pk %}">逐项对照</a><form method="post" action="{% url 'intelligence:merge_suggestion_reject' suggestion.pk %}">{% csrf_token %}<button class="button ghost" type="submit">不是同一事件</button></form></footer>
+    </article>
+    {% empty %}<div class="intel-empty"><strong>暂无单项复核</strong><p>低于建议阈值的事件不会制造提醒。</p></div>{% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -1,9 +1,8 @@
 # 关键人物动态模块：设计文档索引
 
-状态：M1、M1.5 已完成；M2 已完成本地实现与固定样本测试，尚未部署 NAS
-基线：`origin/master` @ `38d9002`
-开发分支：`codex/key-person-intelligence`
-更新时间：2026-08-13
+状态：M1–M2、M3.1–M3.3 已完成本地实现，尚未部署 NAS
+开发分支：`codex/integrate-key-person-intelligence`
+更新时间：2026-08-16
 
 本目录保存“关键人物动态”模块的需求与技术设计。专业的软件工程交付物可概括为：
 
@@ -21,6 +20,9 @@
 5. [参考文章观点映射](./article-reference-mapping.md)
 6. [轻量情报流水线与评分策略](./lightweight-pipeline.md)
 7. [M2 自动采集设计与运维](./m2-collection-design.md)
+8. [M3.1 事件结构化分析设计与验收](./m3-event-analysis-design.md)
+9. [M3.2 真实文本分析边界与样本验收](./m3-2-real-analysis-validation.md)
+10. [M3.3 跨来源事件聚合与人工复核](./m3-3-event-aggregation.md)
 
 ## 当前设计结论
 

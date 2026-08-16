@@ -6,6 +6,8 @@ from .models import (
     EventAnalysis,
     EventEvidence,
     EventKnowledgeArchive,
+    EventMergeRecord,
+    EventMergeSuggestion,
     EventSubject,
     EventUserState,
     IntelligenceEvent,
@@ -88,6 +90,37 @@ class EventAnalysisAdmin(admin.ModelAdmin):
         "schema_version", "input_fingerprint", "input_snapshot", "result_json",
         "status", "error_message", "tokens_used", "cost_estimate", "is_current",
         "created_by", "created_at", "updated_at",
+    )
+
+
+@admin.register(EventMergeSuggestion)
+class EventMergeSuggestionAdmin(admin.ModelAdmin):
+    list_display = (
+        "left_event", "right_event", "score", "decision_band", "status",
+        "policy_version", "reviewed_by", "reviewed_at",
+    )
+    list_filter = ("family", "status", "decision_band", "policy_version")
+    search_fields = ("left_event__title", "right_event__title")
+    readonly_fields = (
+        "family", "left_event", "right_event", "recommended_event",
+        "recommended_primary_source", "score", "decision_band", "policy_version",
+        "reason", "auto_merge_eligible", "requires_individual_review",
+        "status", "reviewed_by", "reviewed_at", "created_at", "updated_at",
+    )
+
+
+@admin.register(EventMergeRecord)
+class EventMergeRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "duplicate_event", "canonical_event", "status", "merged_by", "merged_at",
+        "reverted_by", "reverted_at",
+    )
+    list_filter = ("family", "status", "merged_at")
+    search_fields = ("canonical_event__title", "duplicate_event__title")
+    readonly_fields = (
+        "family", "canonical_event", "duplicate_event", "suggestion", "status",
+        "snapshot", "merged_by", "merged_at", "reverted_by", "reverted_at",
+        "created_at", "updated_at",
     )
 
 

@@ -18,6 +18,7 @@ from knowledge.models import KnowledgeDocument
 from knowledge.permissions import accessible_search_entries
 
 from .forms import (
+    EventMergeConfirmForm,
     IntelligenceEventForm,
     IntelligenceSourceForm,
     IntelligenceSubjectForm,
@@ -27,6 +28,8 @@ from .models import (
     CollectionRun,
     EventAnalysis,
     EventKnowledgeArchive,
+    EventMergeRecord,
+    EventMergeSuggestion,
     EventUserState,
     IntelligenceEvent,
     IntelligenceSource,
@@ -40,6 +43,15 @@ from .ai_enrichment import (
     analyze_event,
     provider_is_configured,
     text_ai_providers,
+)
+from .event_merging import (
+    AUTO_MERGE_ENABLED,
+    EventMergeError,
+    MERGE_POLICY_VERSION,
+    merge_events,
+    refresh_family_merge_suggestions,
+    reject_merge_suggestion,
+    split_merged_event,
 )
 from .services import (
     IntelligenceArchiveError,
@@ -89,6 +101,7 @@ def _family_events(member, *, include_nonpublic=False):
     queryset = IntelligenceEvent.objects.filter(
         family=member.family,
         channel=IntelligenceEvent.CHANNEL_PEOPLE,
+        merged_into__isnull=True,
     )
     if not include_nonpublic:
         queryset = queryset.filter(
@@ -164,6 +177,7 @@ def index(request):
             "unread_count": events.exclude(user_states__member=member, user_states__read_at__isnull=False).distinct().count(),
             "pending_count": IntelligenceEvent.objects.filter(
                 family=member.family,
+                merged_into__isnull=True,
                 selection_status=IntelligenceEvent.SELECTION_REVIEW,
             ).count(),
             "can_admin": _is_family_admin(request),
@@ -229,10 +243,33 @@ def event_list(request):
 @login_required
 def event_detail(request, pk):
     member = _current_member(request)
-    event = get_object_or_404(
-        _family_events(member, include_nonpublic=_is_family_admin(request)),
-        pk=pk,
-    )
+    can_admin = _is_family_admin(request)
+    if can_admin:
+        event_queryset = IntelligenceEvent.objects.filter(family=member.family).select_related(
+            "primary_source_item__source",
+            "merged_into",
+        ).prefetch_related(
+            "subjects",
+            "evidence_links__source_item__source",
+            Prefetch(
+                "analyses",
+                queryset=EventAnalysis.objects.filter(
+                    is_current=True,
+                    status=EventAnalysis.STATUS_SUCCESS,
+                ).select_related("provider"),
+                to_attr="_current_ai_analyses",
+            ),
+        )
+    else:
+        event = get_object_or_404(
+            IntelligenceEvent.objects.select_related("merged_into"),
+            family=member.family,
+            pk=pk,
+        )
+        if event.merged_into_id:
+            return redirect("intelligence:event_detail", pk=event.merged_into_id)
+        event_queryset = _family_events(member)
+    event = get_object_or_404(event_queryset, pk=pk)
     is_public_event = (
         event.review_status in VISIBLE_EVENT_STATUSES
         and event.selection_status in PUBLIC_SELECTION_STATUSES
@@ -240,6 +277,7 @@ def event_detail(request, pk):
     can_interact = (
         member.role != FamilyMember.ROLE_VIEWER
         and is_public_event
+        and not event.merged_into_id
     )
     state = EventUserState.objects.filter(member=member, event=event).first()
     archive_link = (
@@ -253,7 +291,28 @@ def event_detail(request, pk):
     providers = [
         {"provider": provider, "configured": provider_is_configured(provider)}
         for provider in text_ai_providers()
-    ] if _is_family_admin(request) else []
+    ] if can_admin else []
+    merge_suggestions = []
+    active_merges = []
+    if can_admin:
+        merge_suggestions = list(
+            EventMergeSuggestion.objects.filter(
+                Q(left_event=event) | Q(right_event=event),
+                family=member.family,
+                status=EventMergeSuggestion.STATUS_PENDING,
+            ).select_related(
+                "left_event",
+                "right_event",
+                "recommended_event",
+                "recommended_primary_source__source",
+            )[:8]
+        )
+        active_merges = list(
+            EventMergeRecord.objects.filter(
+                canonical_event=event,
+                status=EventMergeRecord.STATUS_ACTIVE,
+            ).select_related("duplicate_event", "merged_by")
+        )
     return render(
         request,
         "intelligence/event_detail.html",
@@ -268,14 +327,16 @@ def event_detail(request, pk):
                 and archive_link
                 and (
                     archive_link.document.owner_id == member.pk
-                    or _is_family_admin(request)
+                    or can_admin
                 )
             ),
-            "can_admin": _is_family_admin(request),
+            "can_admin": can_admin,
             "current_analysis": event.current_ai_analysis,
             "analysis_history": analysis_history,
             "text_ai_providers": providers,
             "configured_text_ai_count": sum(item["configured"] for item in providers),
+            "merge_suggestions": merge_suggestions,
+            "active_merges": active_merges,
         },
     )
 
@@ -310,6 +371,209 @@ def event_analyze(request, pk):
         else:
             messages.info(request, "来源和模型版本没有变化，已复用现有 AI 分析，未重复调用。")
     return redirect("intelligence:event_detail", pk=event.pk)
+
+
+@login_required
+def merge_review(request):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    suggestions = list(
+        EventMergeSuggestion.objects.filter(
+            family=member.family,
+            status=EventMergeSuggestion.STATUS_PENDING,
+        ).select_related(
+            "left_event__primary_source_item__source",
+            "right_event__primary_source_item__source",
+            "recommended_event",
+            "recommended_primary_source__source",
+        ).prefetch_related(
+            "left_event__subjects",
+            "right_event__subjects",
+        )
+    )
+    batch_suggestions = [item for item in suggestions if item.decision_band == item.BAND_BATCH]
+    review_suggestions = [item for item in suggestions if item.decision_band == item.BAND_REVIEW]
+    return render(
+        request,
+        "intelligence/merge_review.html",
+        {
+            "batch_suggestions": batch_suggestions,
+            "review_suggestions": review_suggestions,
+            "pending_count": len(suggestions),
+            "active_merge_count": EventMergeRecord.objects.filter(
+                family=member.family,
+                status=EventMergeRecord.STATUS_ACTIVE,
+            ).count(),
+            "policy_version": MERGE_POLICY_VERSION,
+            "auto_merge_enabled": AUTO_MERGE_ENABLED,
+            "can_admin": True,
+        },
+    )
+
+
+@login_required
+@require_POST
+def merge_suggestion_refresh(request):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    suggestions = refresh_family_merge_suggestions(member.family)
+    messages.success(request, f"已重新计算同一事件建议，当前有 {suggestions.count()} 组候选。")
+    return redirect("intelligence:merge_review")
+
+
+@login_required
+def merge_suggestion_confirm(request, pk):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    suggestion = get_object_or_404(
+        EventMergeSuggestion.objects.select_related(
+            "left_event__primary_source_item__source",
+            "right_event__primary_source_item__source",
+            "recommended_event",
+            "recommended_primary_source__source",
+        ).prefetch_related(
+            "left_event__subjects",
+            "right_event__subjects",
+            "left_event__evidence_links__source_item__source",
+            "right_event__evidence_links__source_item__source",
+        ),
+        family=member.family,
+        status=EventMergeSuggestion.STATUS_PENDING,
+        pk=pk,
+    )
+    if request.method == "POST":
+        form = EventMergeConfirmForm(request.POST, suggestion=suggestion)
+        if form.is_valid():
+            canonical = form.cleaned_data["canonical_event"]
+            duplicate = (
+                suggestion.right_event
+                if canonical.pk == suggestion.left_event_id
+                else suggestion.left_event
+            )
+            try:
+                merge_events(
+                    canonical_event=canonical,
+                    duplicate_event=duplicate,
+                    primary_source_item=form.cleaned_data["primary_source_item"],
+                    user=request.user,
+                    suggestion=suggestion,
+                )
+            except EventMergeError as exc:
+                form.add_error(None, str(exc))
+            else:
+                messages.success(
+                    request,
+                    "两条事件已聚合；全部原始来源和历史版本均已保留，可在事件详情中拆分。",
+                )
+                return redirect("intelligence:event_detail", pk=canonical.pk)
+    else:
+        form = EventMergeConfirmForm(suggestion=suggestion)
+    return render(
+        request,
+        "intelligence/merge_confirm.html",
+        {
+            "suggestion": suggestion,
+            "compared_events": [suggestion.left_event, suggestion.right_event],
+            "form": form,
+            "can_admin": True,
+        },
+    )
+
+
+@login_required
+@require_POST
+def merge_suggestion_batch_accept(request):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    selected_ids = [value for value in request.POST.getlist("suggestion_ids") if value.isdigit()][:50]
+    suggestions = list(
+        EventMergeSuggestion.objects.filter(
+            family=member.family,
+            status=EventMergeSuggestion.STATUS_PENDING,
+            decision_band=EventMergeSuggestion.BAND_BATCH,
+            requires_individual_review=False,
+            pk__in=selected_ids,
+        ).select_related(
+            "left_event",
+            "right_event",
+            "recommended_event",
+            "recommended_primary_source",
+        )
+    )
+    merged_count = 0
+    errors = []
+    for suggestion in suggestions:
+        canonical = suggestion.recommended_event
+        duplicate = (
+            suggestion.right_event
+            if canonical.pk == suggestion.left_event_id
+            else suggestion.left_event
+        )
+        try:
+            merge_events(
+                canonical_event=canonical,
+                duplicate_event=duplicate,
+                primary_source_item=suggestion.recommended_primary_source,
+                user=request.user,
+                suggestion=suggestion,
+            )
+        except EventMergeError as exc:
+            errors.append(f"建议 #{suggestion.pk}：{exc}")
+        else:
+            merged_count += 1
+    if merged_count:
+        messages.success(request, f"已批量聚合 {merged_count} 组高置信度事件。")
+    if errors:
+        messages.warning(request, "；".join(errors[:5]))
+    if not merged_count and not errors:
+        messages.info(request, "没有选择仍可批量处理的建议。")
+    return redirect("intelligence:merge_review")
+
+
+@login_required
+@require_POST
+def merge_suggestion_reject(request, pk):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    suggestion = get_object_or_404(
+        EventMergeSuggestion,
+        family=member.family,
+        pk=pk,
+    )
+    try:
+        reject_merge_suggestion(suggestion=suggestion, user=request.user)
+    except EventMergeError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "已标记为不同事件；当前策略版本不会再次提示这一对。")
+    return _redirect_next_or(request, "intelligence:merge_review")
+
+
+@login_required
+@require_POST
+def merge_record_split(request, pk):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    record = get_object_or_404(
+        EventMergeRecord,
+        family=member.family,
+        status=EventMergeRecord.STATUS_ACTIVE,
+        pk=pk,
+    )
+    canonical_id = record.canonical_event_id
+    try:
+        split_merged_event(merge_record=record, user=request.user)
+    except EventMergeError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "事件已拆分；两条事件及各自原始证据重新独立显示。")
+    return redirect("intelligence:event_detail", pk=canonical_id)
 
 
 @login_required

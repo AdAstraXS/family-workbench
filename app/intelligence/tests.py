@@ -42,6 +42,8 @@ from .models import (
     EventAnalysis,
     EventEvidence,
     EventKnowledgeArchive,
+    EventMergeRecord,
+    EventMergeSuggestion,
     EventSubject,
     EventUserState,
     IntelligenceEvent,
@@ -53,6 +55,14 @@ from .models import (
 )
 from .processing import MEDIA_DISCOVERY_POLICY, process_source_item
 from .scoring import calculate_event_scores
+from .event_merging import (
+    EventMergeError,
+    evaluate_event_pair,
+    merge_events,
+    refresh_family_merge_suggestions,
+    reject_merge_suggestion,
+    split_merged_event,
+)
 
 
 class IntelligenceTestBase(TestCase):
@@ -1484,3 +1494,213 @@ class M3EventAnalysisTests(IntelligenceTestBase):
         )
         self.assertEqual(forbidden.status_code, 403)
         self.assertEqual(urlopen.call_count, 1)
+
+
+class M3EventMergeTests(IntelligenceTestBase):
+    def make_cross_source_pair(self, *, protected=False):
+        title = "OpenAI announces GPT 6 with 1 million token context"
+        left = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title=title,
+        )
+        media_source = IntelligenceSource.objects.create(
+            subject=self.subject,
+            source_type=IntelligenceSource.TYPE_MEDIA,
+            adapter_key=IntelligenceSource.ADAPTER_RSS,
+            name="测试财经媒体",
+            url="https://media.example.com/feed",
+            source_tier=IntelligenceSource.TIER_C,
+            source_group=IntelligenceSource.GROUP_MEDIA,
+        )
+        media_source.topics.add(self.subject)
+        right = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title=title,
+        )
+        right.primary_source_item.source = media_source
+        right.primary_source_item.canonical_url = "https://media.example.com/gpt-6"
+        right.primary_source_item.save(update_fields=["source", "canonical_url", "updated_at"])
+        right.occurred_at = left.occurred_at + timedelta(hours=2)
+        right.first_seen_at = left.first_seen_at + timedelta(minutes=10)
+        right.last_seen_at = left.last_seen_at + timedelta(minutes=10)
+        right.save(update_fields=["occurred_at", "first_seen_at", "last_seen_at", "updated_at"])
+        if protected:
+            EventUserState.objects.create(
+                member=self.member,
+                event=right,
+                bookmarked_at=timezone.now(),
+            )
+        return left, right
+
+    def test_pair_policy_supports_batch_but_protected_events_require_individual_review(self):
+        left, right = self.make_cross_source_pair()
+
+        evaluation = evaluate_event_pair(left, right)
+
+        self.assertGreaterEqual(evaluation["score"], 90)
+        self.assertEqual(evaluation["decision_band"], EventMergeSuggestion.BAND_BATCH)
+        self.assertFalse(evaluation["requires_individual_review"])
+        self.assertTrue(evaluation["auto_merge_eligible"])
+        self.assertEqual(evaluation["recommended_primary_source"], left.primary_source_item)
+
+        EventUserState.objects.create(
+            member=self.member,
+            event=right,
+            bookmarked_at=timezone.now(),
+        )
+        protected = evaluate_event_pair(left, right)
+        self.assertEqual(protected["decision_band"], EventMergeSuggestion.BAND_REVIEW)
+        self.assertTrue(protected["requires_individual_review"])
+        self.assertIn("收藏", " ".join(protected["reason"]["protected_reasons"]))
+
+    def test_refresh_is_idempotent_and_does_not_reopen_rejected_pair(self):
+        self.make_cross_source_pair()
+
+        first = refresh_family_merge_suggestions(self.family)
+        suggestion = first.get()
+        second = refresh_family_merge_suggestions(self.family)
+        self.assertEqual(second.get().pk, suggestion.pk)
+
+        reject_merge_suggestion(suggestion=suggestion, user=self.admin_user)
+        pending = refresh_family_merge_suggestions(self.family)
+        suggestion.refresh_from_db()
+
+        self.assertFalse(pending.exists())
+        self.assertEqual(suggestion.status, EventMergeSuggestion.STATUS_REJECTED)
+        self.assertEqual(EventMergeSuggestion.objects.count(), 1)
+
+    def test_merge_and_split_preserve_events_evidence_analysis_and_member_state(self):
+        left, right = self.make_cross_source_pair()
+        analysis = EventAnalysis.objects.create(
+            event=left,
+            model_name="test-model",
+            prompt_version="test-v1",
+            schema_version="test-v1",
+            input_fingerprint="c" * 64,
+            result_json={"summary": "测试分析"},
+            status=EventAnalysis.STATUS_SUCCESS,
+            is_current=True,
+        )
+        EventUserState.objects.create(
+            member=self.member,
+            event=right,
+            read_at=timezone.now(),
+            bookmarked_at=timezone.now(),
+        )
+        suggestion = refresh_family_merge_suggestions(self.family).get()
+        original_source_id = left.primary_source_item_id
+
+        record = merge_events(
+            canonical_event=left,
+            duplicate_event=right,
+            primary_source_item=suggestion.recommended_primary_source,
+            user=self.admin_user,
+            suggestion=suggestion,
+        )
+
+        left.refresh_from_db()
+        right.refresh_from_db()
+        analysis.refresh_from_db()
+        suggestion.refresh_from_db()
+        self.assertEqual(right.merged_into_id, left.pk)
+        self.assertEqual(left.evidence_links.count(), 2)
+        self.assertEqual(left.primary_source_item_id, original_source_id)
+        self.assertFalse(analysis.is_current)
+        self.assertTrue(EventAnalysis.objects.filter(pk=analysis.pk).exists())
+        self.assertTrue(IntelligenceEvent.objects.filter(pk=right.pk).exists())
+        self.assertEqual(suggestion.status, EventMergeSuggestion.STATUS_ACCEPTED)
+        copied_state = EventUserState.objects.get(member=self.member, event=left)
+        self.assertIsNotNone(copied_state.read_at)
+        self.assertIsNotNone(copied_state.bookmarked_at)
+
+        split_merged_event(merge_record=record, user=self.admin_user)
+
+        left.refresh_from_db()
+        right.refresh_from_db()
+        record.refresh_from_db()
+        suggestion.refresh_from_db()
+        self.assertIsNone(right.merged_into_id)
+        self.assertEqual(left.evidence_links.count(), 1)
+        self.assertEqual(right.evidence_links.count(), 1)
+        self.assertEqual(left.primary_source_item_id, original_source_id)
+        self.assertEqual(record.status, EventMergeRecord.STATUS_REVERTED)
+        self.assertEqual(suggestion.status, EventMergeSuggestion.STATUS_REJECTED)
+        self.assertTrue(EventAnalysis.objects.filter(pk=analysis.pk).exists())
+
+    def test_batch_endpoint_is_admin_only_and_merge_is_reversible_from_detail(self):
+        left, right = self.make_cross_source_pair()
+        suggestion = refresh_family_merge_suggestions(self.family).get()
+        self.client.force_login(self.member_user)
+
+        forbidden = self.client.post(
+            reverse("intelligence:merge_suggestion_batch_accept"),
+            {"suggestion_ids": [suggestion.pk]},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertIsNone(IntelligenceEvent.objects.get(pk=right.pk).merged_into_id)
+
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            reverse("intelligence:merge_suggestion_batch_accept"),
+            {"suggestion_ids": [suggestion.pk]},
+        )
+        self.assertRedirects(response, reverse("intelligence:merge_review"))
+        right.refresh_from_db()
+        self.assertEqual(right.merged_into_id, left.pk)
+        detail = self.client.get(reverse("intelligence:event_detail", args=[left.pk]))
+        self.assertContains(detail, "已并入的原始事件")
+        record = EventMergeRecord.objects.get(duplicate_event=right, status=EventMergeRecord.STATUS_ACTIVE)
+        split = self.client.post(reverse("intelligence:merge_record_split", args=[record.pk]))
+        self.assertRedirects(split, reverse("intelligence:event_detail", args=[left.pk]))
+        right.refresh_from_db()
+        self.assertIsNone(right.merged_into_id)
+
+    def test_review_get_is_read_only_and_ordinary_member_redirects_merged_event(self):
+        left, right = self.make_cross_source_pair()
+        self.client.force_login(self.admin_user)
+        before = EventMergeSuggestion.objects.count()
+
+        response = self.client.get(reverse("intelligence:merge_review"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(EventMergeSuggestion.objects.count(), before)
+        self.assertContains(response, "重新计算建议")
+
+        suggestion = refresh_family_merge_suggestions(self.family).get()
+        populated_review = self.client.get(reverse("intelligence:merge_review"))
+        self.assertContains(populated_review, "聚合已勾选项")
+        confirm_page = self.client.get(
+            reverse("intelligence:merge_suggestion_confirm", args=[suggestion.pk])
+        )
+        self.assertEqual(confirm_page.status_code, 200)
+        self.assertContains(confirm_page, "确认聚合方式")
+        self.assertContains(confirm_page, left.title)
+        merge_events(
+            canonical_event=left,
+            duplicate_event=right,
+            primary_source_item=suggestion.recommended_primary_source,
+            user=self.admin_user,
+            suggestion=suggestion,
+        )
+        left.review_status = IntelligenceEvent.REVIEW_PUBLISHED
+        left.selection_status = IntelligenceEvent.SELECTION_FEED
+        left.save(update_fields=["review_status", "selection_status", "updated_at"])
+        self.client.force_login(self.member_user)
+        redirected = self.client.get(reverse("intelligence:event_detail", args=[right.pk]))
+        self.assertRedirects(redirected, reverse("intelligence:event_detail", args=[left.pk]))
+
+    def test_merge_rejects_cross_family_events(self):
+        left, right = self.make_cross_source_pair()
+        other_family = Family.objects.create(name="其他家庭")
+        right.family = other_family
+        right.save(update_fields=["family", "updated_at"])
+
+        with self.assertRaisesMessage(EventMergeError, "不能合并其他家庭"):
+            merge_events(
+                canonical_event=left,
+                duplicate_event=right,
+                primary_source_item=left.primary_source_item,
+                user=self.admin_user,
+            )

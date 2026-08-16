@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}对照重复事件{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260816-1">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head">
+  <div><span class="intel-eyebrow">MERGE CONFIRMATION</span><h1>对照重复事件</h1><p>{{ suggestion.score }} 分 · {{ suggestion.get_decision_band_display }}。请根据原始来源判断，不把 AI 摘要当成事实依据。</p></div>
+  <a class="button ghost" href="{% url 'intelligence:merge_review' %}">返回重复复核</a>
+</section>
+
+{% include "intelligence/_tabs.html" %}
+
+{% if suggestion.reason.protected_reasons %}<section class="intel-notice intel-notice-danger"><strong>必须逐项确认</strong><span>{% for reason in suggestion.reason.protected_reasons %}{{ reason }}{% if not forloop.last %}；{% endif %}{% endfor %}</span></section>{% endif %}
+
+<section class="intel-merge-compare">
+  {% for event in compared_events %}
+  <article>
+    <header><small>#{{ event.pk }} · {{ event.occurred_at|date:"Y-m-d H:i" }}</small><h2>{{ event.title }}</h2><div class="intel-subject-chips">{% for subject in event.subjects.all %}<span>{{ subject.display_name }}</span>{% endfor %}</div></header>
+    <p>{{ event.summary }}</p>
+    <div class="intel-merge-evidence">
+      {% for evidence in event.evidence_links.all %}
+      <div><span class="intel-tier tier-{{ evidence.source_item.source.source_tier|lower }}">{{ evidence.source_item.source.source_tier }}级</span><strong>{{ evidence.source_item.source.name }}</strong><a href="{{ evidence.source_item.canonical_url }}" target="_blank" rel="noopener noreferrer">核对原文 ↗</a><small>{{ evidence.source_item.title }}</small></div>
+      {% endfor %}
+    </div>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="intel-form-shell">
+  <h2>确认聚合方式</h2>
+  <p class="intel-muted">聚合后保留事件承载标题与摘要，两边全部来源汇入证据区；被并入事件仅从日常列表隐藏，可随时拆分。</p>
+  <form method="post" onsubmit="return confirm('确认把两条事件聚合吗？原始记录会保留，并可从保留事件详情拆分。');">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    <div class="intel-form-grid">
+      {% for field in form %}<div class="intel-form-field">{{ field.label_tag }}{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</div>{% endfor %}
+    </div>
+    <div class="intel-form-actions"><button class="button intel-primary" type="submit">确认聚合并保留证据</button><a class="button ghost" href="{% url 'intelligence:merge_review' %}">取消</a></div>
+  </form>
+</section>
+{% endblock %}

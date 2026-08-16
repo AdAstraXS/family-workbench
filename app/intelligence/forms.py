@@ -5,9 +5,11 @@ from urllib.parse import parse_qs, urlsplit
 from django import forms
 
 from .models import (
+    EventMergeSuggestion,
     IntelligenceEvent,
     IntelligenceSource,
     IntelligenceSubject,
+    SourceItem,
     SubjectKnowledgeIdentity,
     normalize_knowledge_author_name,
 )
@@ -328,3 +330,51 @@ class IntelligenceEventForm(StyledFormMixin, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["occurred_at"].input_formats = ["%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M:%S"]
+
+
+class EventMergeConfirmForm(StyledFormMixin, forms.Form):
+    canonical_event = forms.ModelChoiceField(
+        label="保留哪一条事件",
+        queryset=IntelligenceEvent.objects.none(),
+        help_text="保留事件的标题、摘要和当前人工状态继续作为事件卡主体；另一条只隐藏，不会删除。",
+    )
+    primary_source_item = forms.ModelChoiceField(
+        label="采用哪个主来源",
+        queryset=SourceItem.objects.none(),
+        help_text="系统优先推荐官方、监管、直接来源以及内容更完整的条目；其他来源仍作为证据保留。",
+    )
+
+    def __init__(self, *args, suggestion, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not isinstance(suggestion, EventMergeSuggestion):
+            raise TypeError("suggestion must be EventMergeSuggestion")
+        self.suggestion = suggestion
+        event_ids = [suggestion.left_event_id, suggestion.right_event_id]
+        self.fields["canonical_event"].queryset = IntelligenceEvent.objects.filter(
+            family=suggestion.family,
+            pk__in=event_ids,
+            merged_into__isnull=True,
+        ).order_by("pk")
+        source_ids = suggestion.left_event.evidence_links.values_list(
+            "source_item_id", flat=True
+        ).union(
+            suggestion.right_event.evidence_links.values_list("source_item_id", flat=True)
+        )
+        self.fields["primary_source_item"].queryset = SourceItem.objects.filter(
+            pk__in=source_ids
+        ).select_related("source").order_by(
+            "source__source_tier",
+            "source__source_group",
+            "pk",
+        )
+        self.fields["canonical_event"].initial = suggestion.recommended_event_id
+        self.fields["primary_source_item"].initial = suggestion.recommended_primary_source_id
+
+    def clean(self):
+        cleaned_data = super().clean()
+        canonical = cleaned_data.get("canonical_event")
+        if canonical:
+            pair_ids = {self.suggestion.left_event_id, self.suggestion.right_event_id}
+            if canonical.pk not in pair_ids:
+                self.add_error("canonical_event", "保留事件必须来自当前建议。")
+        return cleaned_data
