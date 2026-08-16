@@ -3,6 +3,8 @@ from decimal import Decimal
 from io import StringIO
 import json
 import tempfile
+import urllib.error
+import urllib.request
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -26,6 +28,8 @@ from .adapters import AdapterResult, CollectedItem, FeedParseError, parse_rss_or
 from .collection import collect_intelligence_sources
 from .ai_enrichment import (
     IntelligenceAiError,
+    _chat_url,
+    _read_ai_response,
     analyze_event,
     parse_analysis_result,
     provider_is_configured,
@@ -1219,6 +1223,53 @@ class M3EventAnalysisTests(IntelligenceTestBase):
         result["features"]["novelty"] = 101
         with self.assertRaisesMessage(IntelligenceAiError, "超出 0 到 100"):
             parse_analysis_result(result, allowed_refs={reference})
+
+    @patch("intelligence.ai_enrichment.validate_public_http_url")
+    def test_ai_url_validation_uses_sanitized_error_message(self, validate_url):
+        provider = self.make_provider()
+        validate_url.side_effect = SafeHttpError(
+            "private_host",
+            "信源域名解析到了本机或内网地址。",
+        )
+
+        with self.assertRaisesMessage(IntelligenceAiError, "信源域名解析到了本机或内网地址"):
+            _chat_url(provider)
+
+    @patch("intelligence.ai_enrichment._read_ai_https_via_ipv4")
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_ai_fake_ip_fallback_requires_opt_in_and_uses_public_doh_address(
+        self,
+        urlopen,
+        read_via_ipv4,
+    ):
+        request = urllib.request.Request("https://api.example.com/chat/completions")
+        urlopen.side_effect = urllib.error.URLError("direct route unavailable")
+        with patch.dict("os.environ", {"INTELLIGENCE_ALLOW_PROXY_FAKE_IP": "false"}):
+            with self.assertRaises(urllib.error.URLError):
+                _read_ai_response(request, timeout=10)
+
+        urlopen.side_effect = [
+            urllib.error.URLError("direct route unavailable"),
+            FakeAiResponse(
+                {
+                    "Status": 0,
+                    "Answer": [
+                        {
+                            "name": "api.example.com.",
+                            "type": 1,
+                            "TTL": 60,
+                            "data": "93.184.216.34",
+                        }
+                    ],
+                }
+            ),
+        ]
+        read_via_ipv4.return_value = b'{"choices": []}'
+        with patch.dict("os.environ", {"INTELLIGENCE_ALLOW_PROXY_FAKE_IP": "true"}):
+            response_body = _read_ai_response(request, timeout=10)
+
+        self.assertEqual(response_body, b'{"choices": []}')
+        read_via_ipv4.assert_called_once_with(request, "93.184.216.34", 10)
 
     @patch("intelligence.ai_enrichment.urllib.request.urlopen")
     def test_existing_text_key_is_not_reused_without_intelligence_authorization(self, urlopen):

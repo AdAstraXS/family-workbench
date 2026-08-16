@@ -1,7 +1,12 @@
 import hashlib
+import http.client
+import io
+import ipaddress
 import json
 import logging
 import os
+import socket
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,7 +23,7 @@ from .scoring import rescore_event
 
 
 logger = logging.getLogger(__name__)
-PROMPT_VERSION = "intelligence-event-v1"
+PROMPT_VERSION = "intelligence-event-v2"
 SCHEMA_VERSION = "intelligence-event-analysis-v1"
 MAX_EVIDENCE_ITEMS = 8
 MAX_EXCERPT_CHARACTERS = 2000
@@ -30,6 +35,7 @@ INTELLIGENCE_POLICY_VERSION = "public-metadata-v1"
 MAX_CONFIGURED_INPUT_CHARACTERS = 20000
 MIN_OUTPUT_TOKENS = 256
 MAX_OUTPUT_TOKENS = 4096
+DNS_OVER_HTTPS_URL = "https://doh.pub/dns-query"
 
 
 class IntelligenceAiError(RuntimeError):
@@ -216,7 +222,101 @@ def _chat_url(provider):
     try:
         return validate_public_http_url(url)
     except SafeHttpError as exc:
-        raise IntelligenceAiError(f"AI API 地址不安全或不可用：{exc.user_message}") from exc
+        raise IntelligenceAiError(f"AI API 地址不安全或不可用：{exc.safe_message}") from exc
+
+
+def _proxy_fake_ip_fallback_enabled():
+    return os.getenv("INTELLIGENCE_ALLOW_PROXY_FAKE_IP", "false").strip().casefold() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _resolve_public_ipv4_with_doh(hostname):
+    query = urllib.parse.urlencode({"name": hostname, "type": "A"})
+    request = urllib.request.Request(
+        f"{DNS_OVER_HTTPS_URL}?{query}",
+        headers={
+            "Accept": "application/dns-json",
+            "User-Agent": "FamilyWorkbenchIntelligence/1.0",
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=8) as response:
+        payload = json.loads(response.read(64 * 1024).decode("utf-8"))
+    for answer in payload.get("Answer", []):
+        if answer.get("type") != 1:
+            continue
+        try:
+            address = ipaddress.ip_address(str(answer.get("data", "")).strip())
+        except ValueError:
+            continue
+        if address.version == 4 and address.is_global:
+            return str(address)
+    raise OSError(f"DoH 未返回 {hostname} 的公开 IPv4 地址")
+
+
+def _read_ai_https_via_ipv4(request, ipv4_address, timeout):
+    parsed = urllib.parse.urlsplit(request.full_url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise OSError("AI IPv4 回退只允许 HTTPS 地址")
+    address = ipaddress.ip_address(ipv4_address)
+    if address.version != 4 or not address.is_global:
+        raise OSError("AI IPv4 回退拒绝本机或内网地址")
+
+    port = parsed.port or 443
+    connection = http.client.HTTPSConnection(parsed.hostname, port, timeout=timeout)
+    raw_socket = socket.create_connection((str(address), port), timeout=timeout)
+    connection.sock = ssl.create_default_context().wrap_socket(
+        raw_socket,
+        server_hostname=parsed.hostname,
+    )
+    path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
+    headers = dict(request.header_items())
+    headers.setdefault("Host", parsed.netloc)
+    try:
+        connection.request(
+            request.get_method(),
+            path,
+            body=request.data,
+            headers=headers,
+        )
+        response = connection.getresponse()
+        response_body = response.read(MAX_RESPONSE_BYTES + 1)
+        if response.status >= 400:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                response.status,
+                response.reason,
+                response.headers,
+                io.BytesIO(response_body),
+            )
+        return response_body
+    finally:
+        connection.close()
+
+
+def _read_ai_response(request, timeout):
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.read(MAX_RESPONSE_BYTES + 1)
+    except urllib.error.HTTPError:
+        raise
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        if not _proxy_fake_ip_fallback_enabled():
+            raise
+        hostname = urllib.parse.urlsplit(request.full_url).hostname
+        if not hostname:
+            raise
+        logger.warning(
+            "Direct AI request to %s failed, retrying through public DoH IPv4 resolution: %s",
+            hostname,
+            exc,
+        )
+        ipv4_address = _resolve_public_ipv4_with_doh(hostname)
+        return _read_ai_https_via_ipv4(request, ipv4_address, timeout)
 
 
 def _event_input(event):
@@ -277,6 +377,14 @@ def _prompts(payload):
         "只能依据输入 evidence，不能使用模型记忆补充当前职位、数字、身份或事件细节。"
         "只返回一个 JSON 对象，不要返回 Markdown。summary 和 why_it_matters 使用简体中文。"
         "事实、观点和数字都必须引用输入中存在的 evidence ref；无法确认的内容放入 uncertainties。"
+        "事实只能是来源明确支持的动作或可观察状态；公司宣传、速度或效果主张、前瞻计划、"
+        "因果影响、价值判断和媒体推测必须注明是谁的主张，并放入 opinions 或以归因方式表达。"
+        "summary 也必须保留这种归因，不能把标题或媒体观点改写成已经独立证实的事实。"
+        "只有标题而缺少口径的数字，必须在 uncertainties 说明期间、范围、承诺程度或衡量方法不足。"
+        "event_type 按新闻所描述的底层事件分类：收入、产品、融资和资本配置优先归 business，"
+        "任职或离职归 organization；只有内容核心是人物立场或观点且没有更具体事件时才归 statement。"
+        "change_type 只有证据明确支持首次发生、延续、增强、弱化或转向时才能选择对应值，"
+        "单条新闻无法与历史比较时选择 unknown。"
         "不要给出买卖建议，也不要输出最终重要性、置信度或精选决定。"
         "JSON 字段必须为：summary、summary_evidence_refs、why_it_matters、facts、opinions、"
         "numbers、uncertainties、event_type、change_type、features。"
@@ -523,8 +631,7 @@ def analyze_event(event, *, member, user, provider_id=None, force=False):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            response_body = response.read(MAX_RESPONSE_BYTES + 1)
+        response_body = _read_ai_response(request, timeout=60)
         if len(response_body) > MAX_RESPONSE_BYTES:
             raise IntelligenceAiError("AI 返回内容超过大小限制。")
         response_payload = json.loads(response_body.decode("utf-8"))
