@@ -1,0 +1,7 @@
+<nav class="intel-tabs" aria-label="情报功能导航">
+  <a class="{% if request.resolver_match.url_name == 'index' %}active{% endif %}" href="{% url 'intelligence:index' %}">今日精选</a>
+  <a class="{% if request.resolver_match.url_name == 'event_list' %}active{% endif %}" href="{% url 'intelligence:event_list' %}">全部动态</a>
+  <a class="{% if request.resolver_match.url_name == 'source_list' %}active{% endif %}" href="{% url 'intelligence:source_list' %}">信源管理</a>
+  <a class="{% if request.resolver_match.url_name == 'subject_list' %}active{% endif %}" href="{% url 'intelligence:subject_list' %}">关注主题</a>
+  {% if can_admin %}<a class="{% if request.resolver_match.url_name == 'pipeline' or request.resolver_match.url_name == 'operations' %}active{% endif %}" href="{% url 'intelligence:pipeline' %}">流水线</a>{% endif %}
+</nav>

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260813-3">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head">
+  <div><span class="intel-eyebrow">INTELLIGENCE ADMIN</span><h1>{{ title }}</h1><p>保存后会立即进入家庭共享的情报工作区。</p></div>
+</section>
+<section class="intel-form-shell">
+  <form method="post" class="intel-form">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+    <div class="intel-form-grid">
+      {% for field in form %}
+        <div class="intel-form-field {% if field.field.widget.input_type == 'textarea' %}intel-form-wide{% endif %}">
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+          {% for error in field.errors %}<div class="field-error">{{ error }}</div>{% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+    <div class="intel-form-actions">
+      <button class="button intel-primary" type="submit">保存</button>
+      <a class="button ghost" href="{{ cancel_url|default:page_parent_url|default:'/' }}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

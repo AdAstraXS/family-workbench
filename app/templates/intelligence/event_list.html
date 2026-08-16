@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}全部关键人物动态{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260813-3">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head">
+  <div><span class="intel-eyebrow">EVENT STREAM</span><h1>全部动态</h1><p>查看已聚合事件，并按主题、类型和展示分层筛选。</p></div>
+  {% if can_admin %}<a class="button intel-primary" href="{% url 'intelligence:event_create' %}">＋ 人工录入</a>{% endif %}
+</section>
+
+{% include "intelligence/_tabs.html" %}
+
+<form method="get" class="intel-filter-bar">
+  <input type="search" name="q" value="{{ query }}" placeholder="搜索标题、摘要或重要性说明">
+  <select name="subject"><option value="">全部主题</option>{% for subject in subjects %}<option value="{{ subject.pk }}" {% if selected_subject == subject.pk|stringformat:"s" %}selected{% endif %}>{{ subject.display_name }}</option>{% endfor %}</select>
+  <select name="type"><option value="">全部类型</option>{% for value, label in event_types %}<option value="{{ value }}" {% if selected_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  <select name="selection"><option value="">精选 + 全部动态</option>{% for value, label in selection_statuses %}{% if can_admin or value == 'selected' or value == 'feed' %}<option value="{{ value }}" {% if selected_selection == value %}selected{% endif %}>{{ label }}</option>{% endif %}{% endfor %}</select>
+  <button type="submit">筛选</button>
+  <a class="button ghost" href="{% url 'intelligence:event_list' %}">清除</a>
+</form>
+
+<section class="intel-event-grid">
+  {% for event in page_obj %}{% include "intelligence/_event_card.html" %}{% empty %}<div class="intel-empty intel-span-all"><strong>没有匹配的动态</strong><p>可以调整筛选条件，或由管理员人工录入一条带证据的事件。</p></div>{% endfor %}
+</section>
+
+{% if page_obj.has_other_pages %}
+<nav class="intel-pagination">
+  {% if page_obj.has_previous %}<a class="button ghost" href="?page={{ page_obj.previous_page_number }}&q={{ query|urlencode }}&subject={{ selected_subject }}&type={{ selected_type }}&selection={{ selected_selection }}">上一页</a>{% endif %}
+  <span>第 {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} 页</span>
+  {% if page_obj.has_next %}<a class="button ghost" href="?page={{ page_obj.next_page_number }}&q={{ query|urlencode }}&subject={{ selected_subject }}&type={{ selected_type }}&selection={{ selected_selection }}">下一页</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

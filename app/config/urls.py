@@ -17,6 +17,7 @@ urlpatterns = [
     path("notes/", include("notes.urls")),
     path("macro/", include("macro.urls")),
     path("ai/", include("ai_analysis.urls")),
+    path("intelligence/", include("intelligence.urls")),
 ]
 
 if settings.DEBUG:

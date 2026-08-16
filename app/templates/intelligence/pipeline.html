@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}轻量情报流水线{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260813-3">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head">
+  <div><span class="intel-eyebrow">PIPELINE</span><h1>轻量情报流水线</h1><p>少量重点人物采用五段式处理：保留原文、确定性去重、一次结构化整理、代码评分聚合、分层展示。</p></div>
+  <a class="button ghost" href="{% url 'intelligence:operations' %}">查看运行记录</a>
+</section>
+
+{% include "intelligence/_tabs.html" %}
+
+{% if automatic_collection_enabled %}
+<section class="intel-notice"><strong>M2 自动采集能力已启用</strong><span>RSS 已启用；YouTube 元数据适配器已实现，但首批入口因官方 Atom 当前返回 404 而默认停用。视频正文、字幕和文本 AI 尚未接入，页面数字只来自真实运行记录。</span></section>
+{% endif %}
+
+<section class="intel-pipeline-layout">
+  <div class="intel-pipeline-steps">
+    {% for stage in stage_cards %}
+    <article class="pipeline-stage pipeline-{{ stage.state }}">
+      <span>{{ stage.number }}</span>
+      <div><h2>{{ stage.name }}</h2><p>{{ stage.note }}</p></div>
+      <strong>{{ stage.count }}</strong>
+    </article>
+    {% if not forloop.last %}<div class="pipeline-arrow">↓</div>{% endif %}
+    {% endfor %}
+  </div>
+  <aside class="intel-pipeline-policy">
+    <span class="intel-eyebrow">SCORING POLICY</span>
+    <h2>{{ policy_version }}</h2>
+    <p>AI 或人工只提供独立特征，代码负责最终分数和阈值。</p>
+    <h3>重要性</h3>
+    <code>相关性 25% + 影响 25% + 新颖性 20% + 投资参考 15% + 时效性 15%</code>
+    <h3>置信度</h3>
+    <code>来源质量 40% + 证据完整 30% + 交叉验证 20% + 提取确定度 10%</code>
+    <div class="intel-selection-counts">
+      {% for item in selection_counts %}<div><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>{% endfor %}
+      <div><span>处理失败</span><strong>{{ failed_count }}</strong></div>
+    </div>
+    <p class="intel-muted">精选阈值：重要性 ≥ 75 且置信度 ≥ 60。相关性低于 30 或重要性低于 25 进入噪音箱。</p>
+  </aside>
+</section>
+{% endblock %}

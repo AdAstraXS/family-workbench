@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}信源管理{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260813-3">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head intel-source-hero">
+  <div><span class="intel-eyebrow">SOURCE MAP</span><h1>信源管理</h1><p>{{ active_count }} 个活跃信源，按可信等级、信源类别和关联主题组织。</p></div>
+  {% if can_admin %}<a class="button intel-primary" href="{% url 'intelligence:source_create' %}">＋ 新增信源</a>{% endif %}
+</section>
+
+{% include "intelligence/_tabs.html" %}
+
+<section class="intel-metrics intel-metrics-four">
+  <article><span>活跃信源</span><strong>{{ active_count }}</strong><small>{{ automatic_count }} 个自动入口 · {{ manual_count }} 个人工入口</small></article>
+  <article><span>异常</span><strong>{{ abnormal_count }}</strong><small>连续失败至少 3 次</small></article>
+  <article><span>到期待抓取</span><strong>{{ due_count }}</strong><small>RSS 与 YouTube 元数据</small></article>
+  <article><span>已停用</span><strong>{{ hidden_count }}</strong><small>保留配置但不参与处理</small></article>
+</section>
+
+{% if automatic_collection_enabled %}
+<section class="intel-notice">
+  <strong>RSS 与 YouTube 元数据采集已可用</strong>
+  <span>YouTube 不下载视频或音频；首批 YouTube 入口已登记但因官方 Atom 当前返回 404 而默认停用。正式定时运行仍需在 NAS 的 DSM 任务中配置，SEC、X 和文本 AI 尚未启用。</span>
+</section>
+{% endif %}
+
+<form method="get" class="intel-filter-bar intel-filter-compact">
+  <input type="search" name="q" value="{{ query }}" placeholder="搜索信源或关联主题">
+  <button type="submit">筛选</button>
+  <a class="button ghost" href="{% url 'intelligence:source_list' %}">清除</a>
+</form>
+
+{% if platform_counts %}
+<div class="intel-platform-strip">{% for platform in platform_counts %}<span>{{ platform.label }} <strong>{{ platform.count }}</strong></span>{% endfor %}</div>
+{% endif %}
+
+<section class="intel-source-map">
+  <div class="intel-section-head"><div><span>TRUST MAP</span><h2>信源地图</h2><p>等级描述“可相信到什么程度”，类别描述“它是什么入口”。</p></div></div>
+  {% for section in tier_sections %}
+    {% if section.count %}
+    <article class="intel-tier-section tier-section-{{ section.tier|lower }}">
+      <header><div><h3>T{{ forloop.counter }} · {{ section.label }}</h3><p>{{ section.description }}</p></div><strong>{{ section.count }}</strong></header>
+      <div class="intel-source-groups">
+        {% for group in section.groups %}
+        <section>
+          <h4>{{ group.label }} <span>{{ group.sources|length }}</span></h4>
+          <div class="intel-source-pills">
+            {% for source in group.sources %}
+              {% if can_admin %}<a href="{% url 'intelligence:source_edit' source.pk %}" class="intel-source-pill health-{{ source.health_status }}">{% else %}<span class="intel-source-pill health-{{ source.health_status }}">{% endif %}
+                <i></i><span><strong>{{ source.name }}</strong><small>{{ source.get_source_type_display }}{% if source.topics.all %} · {% for topic in source.topics.all %}{{ topic.display_name }}{% if not forloop.last %} / {% endif %}{% endfor %}{% endif %}</small></span>
+              {% if can_admin %}</a>{% else %}</span>{% endif %}
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+    </article>
+    {% endif %}
+  {% empty %}<div class="intel-empty"><strong>尚无信源</strong><p>可以先登记官网、RSS、人物博客或人工来源；登记不会自动触发抓取。</p></div>{% endfor %}
+  {% if not sources %}<div class="intel-empty"><strong>尚无信源</strong><p>可以先登记官网、RSS、人物博客或人工来源；登记不会自动触发抓取。</p></div>{% endif %}
+</section>
+{% endblock %}
