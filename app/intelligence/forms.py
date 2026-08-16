@@ -4,7 +4,13 @@ from urllib.parse import parse_qs, urlsplit
 
 from django import forms
 
-from .models import IntelligenceEvent, IntelligenceSource, IntelligenceSubject
+from .models import (
+    IntelligenceEvent,
+    IntelligenceSource,
+    IntelligenceSubject,
+    SubjectKnowledgeIdentity,
+    normalize_knowledge_author_name,
+)
 
 
 SCORE_CHOICES = (
@@ -31,6 +37,12 @@ class IntelligenceSubjectForm(StyledFormMixin, forms.ModelForm):
         widget=forms.Textarea(attrs={"rows": 3, "placeholder": "Elon Musk\n马斯克"}),
         help_text="每行填写一个中英文名、旧名称或常用简称。",
     )
+    knowledge_author_names = forms.CharField(
+        label="知识中心历史作者名称",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3, "placeholder": "金渐成\n金不换"}),
+        help_text="每行一个。用于把知识中心已有作者明确连接到这个关注对象，不进行模糊匹配。",
+    )
 
     class Meta:
         model = IntelligenceSubject
@@ -54,9 +66,17 @@ class IntelligenceSubjectForm(StyledFormMixin, forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
+        self.family = kwargs.pop("family", None)
         super().__init__(*args, **kwargs)
         if not self.is_bound and self.instance and self.instance.pk:
             self.initial["aliases"] = "\n".join(self.instance.aliases or [])
+            if self.family is not None:
+                self.initial["knowledge_author_names"] = "\n".join(
+                    self.instance.knowledge_identities.filter(
+                        family=self.family,
+                        is_active=True,
+                    ).values_list("author_name", flat=True)
+                )
 
     def clean_aliases(self):
         values = re.split(r"[\n,，、]+", self.cleaned_data["aliases"])
@@ -69,6 +89,75 @@ class IntelligenceSubjectForm(StyledFormMixin, forms.ModelForm):
                 aliases.append(alias)
                 seen.add(key)
         return aliases
+
+    def clean_knowledge_author_names(self):
+        values = re.split(r"[\n,，、]+", self.cleaned_data["knowledge_author_names"])
+        names = []
+        seen = set()
+        for value in values:
+            name = " ".join(value.strip().split())
+            normalized = normalize_knowledge_author_name(name)
+            if name and normalized not in seen:
+                names.append(name)
+                seen.add(normalized)
+        if self.family is None or not seen:
+            return names
+        conflicts = SubjectKnowledgeIdentity.objects.filter(
+            family=self.family,
+            normalized_author_name__in=seen,
+        )
+        if self.instance and self.instance.pk:
+            conflicts = conflicts.exclude(subject=self.instance)
+        conflict = conflicts.select_related("subject").first()
+        if conflict:
+            raise forms.ValidationError(
+                f"“{conflict.author_name}”已连接到{conflict.subject.display_name}，请先核对人物身份。"
+            )
+        return names
+
+    def save_knowledge_identities(self, *, subject, user):
+        if self.family is None:
+            return
+        selected = {
+            normalize_knowledge_author_name(name): name
+            for name in self.cleaned_data.get("knowledge_author_names", [])
+        }
+        existing = {
+            identity.normalized_author_name: identity
+            for identity in SubjectKnowledgeIdentity.objects.filter(
+                family=self.family,
+                subject=subject,
+            )
+        }
+        for normalized, name in selected.items():
+            identity = existing.get(normalized)
+            if identity is None:
+                SubjectKnowledgeIdentity.objects.create(
+                    family=self.family,
+                    subject=subject,
+                    author_name=name,
+                    normalized_author_name=normalized,
+                    created_by=user,
+                    updated_by=user,
+                )
+            else:
+                identity.author_name = name
+                identity.is_active = True
+                identity.updated_by = user
+                identity.save(
+                    update_fields=[
+                        "author_name",
+                        "normalized_author_name",
+                        "is_active",
+                        "updated_by",
+                        "updated_at",
+                    ]
+                )
+        for normalized, identity in existing.items():
+            if normalized not in selected and identity.is_active:
+                identity.is_active = False
+                identity.updated_by = user
+                identity.save(update_fields=["is_active", "updated_by", "updated_at"])
 
 
 class IntelligenceSourceForm(StyledFormMixin, forms.ModelForm):

@@ -5,8 +5,8 @@
 
 {% block hub_content %}
 <section class="knowledge-page-heading">
-  <div><span class="eyebrow">Subscription & timeline</span><h1>关注人物{% include "knowledge/_help_tip.html" with text="历史公众号和 Markdown 文章按作者归入人物档案；未来每日资讯仍先留在人物信息流，由成员主动归档。" %}</h1></div>
-  <span class="status-pill">人物连接器待接入</span>
+  <div><span class="eyebrow">Historical knowledge</span><h1>关注人物{% include "knowledge/_help_tip.html" with text="这里汇总人物的历史文章和主动保存的情报快照；最新动态、AI 摘要、已读和收藏仍在 AI 情报中完成。" %}</h1></div>
+  <span class="status-pill">历史知识档案</span>
 </section>
 
 <section class="knowledge-people-layout">
@@ -14,7 +14,7 @@
     <header><span class="eyebrow">Directory</span><h2>人物与作者</h2></header>
     <nav aria-label="已有作者">
       {% for item in authors %}
-        <a href="?person={{ item.author_name|urlencode }}"{% if selected_person == item.author_name %} class="active"{% endif %}><span>{{ item.author_name }}</span><strong>{{ item.total }}</strong></a>
+        <a href="?person={{ item.author_name|urlencode }}"{% if item.author_name in selected_author_names %} class="active"{% endif %}><span>{{ item.author_name }}</span><strong>{{ item.total }}</strong></a>
       {% empty %}<div class="knowledge-gentle-empty"><span>同步或导入含作者信息的资料后，这里会出现待治理的作者。</span></div>{% endfor %}
     </nav>
   </aside>
@@ -23,10 +23,11 @@
     {% if selected_person %}
       <header class="knowledge-person-heading">
         <div><span class="eyebrow">Author found in knowledge</span><h2>{{ selected_person }}{% include "knowledge/_help_tip.html" with text="这里汇总该作者已经归档的历史产出；身份和来源等级尚未核验，不能默认视为本人直接发言。" %}</h2></div>
-        <span class="status-pill warning">身份待核验</span>
+        {% if selected_subject %}<a class="button" href="{% url 'intelligence:subject_detail' selected_subject.slug %}">查看最新动态</a>{% else %}<span class="status-pill warning">身份待核验</span>{% endif %}
       </header>
+      {% if selected_subject and selected_author_names %}<p class="knowledge-person-identity-note">已连接历史作者：{{ selected_author_names|join:"、" }}</p>{% elif selected_subject %}<p class="notice warning">这个关注对象尚未连接知识中心的历史作者名称；家庭管理员可在 AI 情报中编辑人物资料完成关联。</p>{% endif %}
       <nav class="knowledge-person-filters" aria-label="人物动态类型">
-        <span class="active">全部</span><span>本人发帖 · 待接入</span><span>采访 · 待接入</span><span>演讲 · 待接入</span><span>机构动态 · 待接入</span><span>媒体报道 · 待接入</span>
+        <span class="active">全部历史知识</span><span>最新动态与资讯请在 AI 情报查看</span>
       </nav>
       <div class="knowledge-person-timeline">
         {% for entry in timeline %}
@@ -34,13 +35,13 @@
             <time>{% if entry.content_time %}{{ entry.content_time|date:"Y-m-d" }}{% else %}日期未知{% endif %}</time>
             <div><span class="status-pill">{% if entry.knowledge_status == "pending" %}待整理{% elif entry.item_kind == "investment_note" or entry.document.library_tier == "knowledge" %}精选知识{% else %}已归档{% endif %}</span><h3><a href="{{ entry.target_url }}">{{ entry.title }}</a></h3><p>{{ entry.hit_snippet|truncatechars:180 }}</p><small>{{ entry.source_name }} · 所属成员 {{ entry.owner.display_name }}</small></div>
           </article>
-        {% empty %}<div class="knowledge-gentle-empty"><span>没有与该作者精确匹配的可见知识。</span></div>{% endfor %}
+        {% empty %}<div class="knowledge-gentle-empty"><span>没有与该人物身份映射精确匹配的可见知识。</span></div>{% endfor %}
       </div>
     {% else %}
       <div class="knowledge-person-empty">
         <span class="knowledge-hub-brand-mark" aria-hidden="true">人</span>
         <h2>选择作者查看已有内容</h2>
-        {% include "knowledge/_help_tip.html" with text="正式模块将在人物身份、官方来源、来源等级和事件聚合完成后开放。只有成员主动选择的长文或重要观点才归档，并可继续加入待整理。" %}
+        {% include "knowledge/_help_tip.html" with text="历史导入资料按作者显示；AI 情报中主动保存的长文、观点或事件也会进入对应人物档案。" %}
       </div>
     {% endif %}
   </article>
@@ -61,8 +62,8 @@
 </section>
 
 <aside class="knowledge-planning-note">
-  <strong>未来每日资讯的归档流程</strong>
-  {% include "knowledge/_help_tip.html" with text="每日抓取内容默认只留在人物信息流；接入后提供“归档”和“归档并加入待整理”两个明确动作，不自动进入家庭知识底座。" %}
+  <strong>每日资讯的归档流程</strong>
+  {% include "knowledge/_help_tip.html" with text="每日抓取内容默认只留在 AI 情报信息流；成员主动点击“保存为知识”或“保存并加入待整理”后，才会在这里形成可追溯的知识快照。" %}
 </aside>
 
 <section class="knowledge-source-identity-guide">

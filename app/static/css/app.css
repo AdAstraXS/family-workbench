@@ -7546,6 +7546,12 @@ textarea {
   line-height: 1.65;
 }
 
+.knowledge-person-identity-note {
+  margin: 12px 0 0;
+  color: #667772;
+  font-size: 12px;
+}
+
 .knowledge-person-filters {
   display: flex;
   flex-wrap: wrap;

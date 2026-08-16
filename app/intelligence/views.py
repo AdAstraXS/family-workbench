@@ -7,12 +7,15 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from family_core.audit import stamp_actor
 from family_core.models import FamilyMember
+from knowledge.models import KnowledgeDocument
+from knowledge.permissions import accessible_search_entries
 
 from .forms import (
     IntelligenceEventForm,
@@ -22,14 +25,21 @@ from .forms import (
 )
 from .models import (
     CollectionRun,
+    EventKnowledgeArchive,
     EventUserState,
     IntelligenceEvent,
     IntelligenceSource,
     IntelligenceSubject,
     SourceItem,
     SubjectFollow,
+    SubjectKnowledgeIdentity,
 )
-from .services import create_manual_event
+from .services import (
+    IntelligenceArchiveError,
+    IntelligenceArchivePermissionError,
+    archive_event_to_knowledge,
+    create_manual_event,
+)
 from .scoring import POLICY_VERSION, rescore_event
 from .collection import SUPPORTED_ADAPTERS, collect_intelligence_sources
 
@@ -206,15 +216,61 @@ def event_detail(request, pk):
         pk=pk,
     )
     state = EventUserState.objects.filter(member=member, event=event).first()
+    archive_link = (
+        EventKnowledgeArchive.objects.filter(event=event)
+        .select_related("document", "document__owner")
+        .first()
+    )
     return render(
         request,
         "intelligence/event_detail.html",
         {
             "event": event,
             "member_state": state,
+            "archive_link": archive_link,
+            "can_archive": member.role != FamilyMember.ROLE_VIEWER,
+            "can_upgrade_archive": bool(
+                archive_link
+                and (
+                    archive_link.document.owner_id == member.pk
+                    or _is_family_admin(request)
+                )
+            ),
             "can_admin": _is_family_admin(request),
         },
     )
+
+
+@login_required
+@require_POST
+def event_archive(request, pk):
+    member = _current_member(request)
+    event = get_object_or_404(_family_events(member), pk=pk)
+    mode = request.POST.get("mode", EventKnowledgeArchive.MODE_ARCHIVE)
+    if mode not in dict(EventKnowledgeArchive.MODE_CHOICES):
+        messages.error(request, "归档方式不正确，请刷新页面后重试。")
+        return redirect("intelligence:event_detail", pk=event.pk)
+    try:
+        link, created, upgraded = archive_event_to_knowledge(
+            event=event,
+            member=member,
+            user=request.user,
+            add_to_pending=mode == EventKnowledgeArchive.MODE_ORGANIZE,
+        )
+    except IntelligenceArchivePermissionError as exc:
+        return HttpResponseForbidden(str(exc))
+    except IntelligenceArchiveError as exc:
+        messages.error(request, str(exc))
+        return redirect("intelligence:event_detail", pk=event.pk)
+    if created and mode == EventKnowledgeArchive.MODE_ORGANIZE:
+        messages.success(request, "已保存到知识中心，并加入待整理。")
+    elif created:
+        messages.success(request, "已保存到知识中心的归档资料。")
+    elif upgraded:
+        messages.success(request, "已将归档资料加入待整理；原始情报快照没有改写。")
+    else:
+        messages.info(request, "这条情报已经保存到知识中心，没有重复创建。")
+    return redirect("intelligence:event_detail", pk=event.pk)
 
 
 @login_required
@@ -376,6 +432,22 @@ def subject_detail(request, slug):
     follow = SubjectFollow.objects.filter(family=member.family, subject=subject).first()
     outgoing_relations = list(subject.outgoing_relations.all())
     incoming_relations = list(subject.incoming_relations.all())
+    knowledge_author_names = list(
+        SubjectKnowledgeIdentity.objects.filter(
+            family=member.family,
+            subject=subject,
+            is_active=True,
+        ).values_list("author_name", flat=True)
+    )
+    knowledge_count = 0
+    if knowledge_author_names:
+        knowledge_count = accessible_search_entries(member).filter(
+            author_name__in=knowledge_author_names,
+            knowledge_status__in=[
+                KnowledgeDocument.KNOWLEDGE_INCLUDED,
+                KnowledgeDocument.KNOWLEDGE_PENDING,
+            ],
+        ).count()
     return render(
         request,
         "intelligence/subject_detail.html",
@@ -385,6 +457,10 @@ def subject_detail(request, slug):
             "follow": follow,
             "outgoing_relations": outgoing_relations,
             "incoming_relations": incoming_relations,
+            "knowledge_author_names": knowledge_author_names,
+            "knowledge_count": knowledge_count,
+            "knowledge_people_url": reverse("knowledge:people")
+            + f"?subject={subject.slug}",
             "can_admin": _is_family_admin(request),
         },
     )
@@ -392,32 +468,40 @@ def subject_detail(request, slug):
 
 @login_required
 def subject_create(request):
+    member = _current_member(request)
     if not _is_family_admin(request):
         return _admin_required_response()
     if request.method == "POST":
-        form = IntelligenceSubjectForm(request.POST)
+        form = IntelligenceSubjectForm(request.POST, family=member.family)
         if form.is_valid():
             subject = form.save()
+            form.save_knowledge_identities(subject=subject, user=request.user)
             messages.success(request, "关注主题已创建。")
             return redirect("intelligence:subject_detail", slug=subject.slug)
     else:
-        form = IntelligenceSubjectForm()
+        form = IntelligenceSubjectForm(family=member.family)
     return render(request, "intelligence/model_form.html", {"form": form, "title": "新增关注主题"})
 
 
 @login_required
 def subject_edit(request, slug):
+    member = _current_member(request)
     if not _is_family_admin(request):
         return _admin_required_response()
     subject = get_object_or_404(IntelligenceSubject, slug=slug)
     if request.method == "POST":
-        form = IntelligenceSubjectForm(request.POST, instance=subject)
+        form = IntelligenceSubjectForm(
+            request.POST,
+            instance=subject,
+            family=member.family,
+        )
         if form.is_valid():
-            form.save()
+            subject = form.save()
+            form.save_knowledge_identities(subject=subject, user=request.user)
             messages.success(request, "关注主题已更新。")
             return redirect("intelligence:subject_detail", slug=subject.slug)
     else:
-        form = IntelligenceSubjectForm(instance=subject)
+        form = IntelligenceSubjectForm(instance=subject, family=member.family)
     return render(
         request,
         "intelligence/model_form.html",

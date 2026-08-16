@@ -1,5 +1,7 @@
 from datetime import timedelta
 from io import StringIO
+import json
+import tempfile
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -10,6 +12,12 @@ from django.urls import reverse
 from django.utils import timezone
 
 from family_core.models import Family, FamilyMember
+from knowledge.models import (
+    KnowledgeDocument,
+    KnowledgeRevision,
+    KnowledgeSearchEntry,
+    KnowledgeSource,
+)
 
 from .forms import IntelligenceSourceForm, IntelligenceSubjectForm
 from .adapters import AdapterResult, CollectedItem, FeedParseError, parse_rss_or_atom, parse_youtube_atom
@@ -20,6 +28,7 @@ from .management.commands.seed_key_people import SUBJECTS
 from .models import (
     CollectionRun,
     EventEvidence,
+    EventKnowledgeArchive,
     EventSubject,
     EventUserState,
     IntelligenceEvent,
@@ -27,6 +36,7 @@ from .models import (
     IntelligenceSubject,
     SourceItem,
     SubjectFollow,
+    SubjectKnowledgeIdentity,
 )
 from .scoring import calculate_event_scores
 
@@ -219,6 +229,39 @@ class IntelligenceModelsAndCommandsTests(IntelligenceTestBase):
         self.assertTrue(form.is_valid(), form.errors)
         subject = form.save()
         self.assertEqual(subject.aliases, ["Plain Person", "普通人物"])
+
+    def test_subject_form_saves_explicit_knowledge_author_identities(self):
+        form = IntelligenceSubjectForm(
+            data={
+                "subject_type": self.subject.subject_type,
+                "canonical_name": self.subject.canonical_name,
+                "display_name": self.subject.display_name,
+                "category": self.subject.category,
+                "aliases": "测试人物",
+                "knowledge_author_names": "历史署名\n旧署名，历史署名",
+                "profile_summary": "",
+                "avatar_url": "",
+                "importance_level": 3,
+                "is_active": True,
+            },
+            instance=self.subject,
+            family=self.family,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        subject = form.save()
+        form.save_knowledge_identities(subject=subject, user=self.admin_user)
+
+        self.assertEqual(
+            list(
+                SubjectKnowledgeIdentity.objects.filter(
+                    family=self.family,
+                    subject=self.subject,
+                    is_active=True,
+                ).values_list("author_name", flat=True)
+            ),
+            ["历史署名", "旧署名"],
+        )
 
     def test_source_can_map_to_multiple_topics(self):
         technology = IntelligenceSubject.objects.create(
@@ -428,6 +471,222 @@ class IntelligenceViewsTests(IntelligenceTestBase):
         )
 
         self.assertRedirects(response, reverse("intelligence:event_detail", kwargs={"pk": event.pk}))
+
+
+class IntelligenceKnowledgeBridgeTests(IntelligenceTestBase):
+    def setUp(self):
+        super().setUp()
+        self.temp_directory = tempfile.TemporaryDirectory()
+        self.storage = KnowledgeRevision._meta.get_field("raw_file").storage
+        self.original_location = self.storage._location
+        self.storage._location = self.temp_directory.name
+        self.storage.__dict__.pop("base_location", None)
+        self.storage.__dict__.pop("location", None)
+
+    def tearDown(self):
+        self.storage._location = self.original_location
+        self.storage.__dict__.pop("base_location", None)
+        self.storage.__dict__.pop("location", None)
+        self.temp_directory.cleanup()
+        super().tearDown()
+
+    def test_member_archives_event_as_traceable_knowledge_snapshot(self):
+        event = self.make_event(title="值得长期保存的动态")
+        self.client.force_login(self.member_user)
+
+        response = self.client.post(
+            reverse("intelligence:event_archive", kwargs={"pk": event.pk}),
+            {"mode": EventKnowledgeArchive.MODE_ARCHIVE},
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("intelligence:event_detail", kwargs={"pk": event.pk}),
+        )
+        link = EventKnowledgeArchive.objects.select_related(
+            "document__current_revision", "document__source"
+        ).get(event=event)
+        document = link.document
+        self.assertEqual(link.archived_by, self.member)
+        self.assertEqual(link.archive_mode, EventKnowledgeArchive.MODE_ARCHIVE)
+        self.assertEqual(document.owner, self.member)
+        self.assertEqual(document.source.kind, KnowledgeSource.KIND_INTELLIGENCE)
+        self.assertEqual(document.knowledge_status, KnowledgeDocument.KNOWLEDGE_INCLUDED)
+        self.assertEqual(document.current_revision.converter_version, "intelligence-event-v1")
+        self.assertIn("后续情报编辑不会静默改写", document.current_revision.plain_text)
+        self.assertTrue(KnowledgeSearchEntry.objects.filter(document=document).exists())
+        self.assertTrue(
+            SubjectKnowledgeIdentity.objects.filter(
+                family=self.family,
+                subject=self.subject,
+                author_name=self.subject.display_name,
+                is_active=True,
+            ).exists()
+        )
+        with document.current_revision.raw_file.open("rb") as raw_file:
+            snapshot = json.load(raw_file)
+        self.assertEqual(snapshot["event"]["id"], event.pk)
+        self.assertEqual(snapshot["event"]["summary"], event.summary)
+        self.assertEqual(snapshot["evidence"][0]["canonical_url"], "https://example.com/source")
+
+        detail = self.client.get(
+            reverse("intelligence:event_detail", kwargs={"pk": event.pk})
+        )
+        knowledge_detail = self.client.get(
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk})
+        )
+        self.assertContains(detail, "查看已保存知识")
+        self.assertContains(knowledge_detail, "返回原始情报")
+
+    def test_repeated_archive_is_idempotent_and_can_upgrade_to_pending(self):
+        event = self.make_event(title="幂等归档动态")
+        self.client.force_login(self.member_user)
+        archive_url = reverse("intelligence:event_archive", kwargs={"pk": event.pk})
+
+        self.client.post(archive_url, {"mode": EventKnowledgeArchive.MODE_ARCHIVE})
+        first_link = EventKnowledgeArchive.objects.get(event=event)
+        first_revision_id = first_link.document.current_revision_id
+        self.client.post(archive_url, {"mode": EventKnowledgeArchive.MODE_ARCHIVE})
+        response = self.client.post(
+            archive_url,
+            {"mode": EventKnowledgeArchive.MODE_ORGANIZE},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(EventKnowledgeArchive.objects.filter(event=event).count(), 1)
+        self.assertEqual(
+            KnowledgeDocument.objects.filter(
+                source__kind=KnowledgeSource.KIND_INTELLIGENCE,
+                external_id=f"intelligence-event:{event.pk}",
+            ).count(),
+            1,
+        )
+        self.assertEqual(KnowledgeRevision.objects.filter(document=first_link.document).count(), 1)
+        first_link.refresh_from_db()
+        first_link.document.refresh_from_db()
+        self.assertEqual(first_link.document.current_revision_id, first_revision_id)
+        self.assertEqual(first_link.archive_mode, EventKnowledgeArchive.MODE_ORGANIZE)
+        self.assertEqual(
+            first_link.document.knowledge_status,
+            KnowledgeDocument.KNOWLEDGE_PENDING,
+        )
+        self.assertEqual(
+            first_link.document.curation_status,
+            KnowledgeDocument.CURATION_INBOX,
+        )
+
+        self.client.post(
+            reverse(
+                "knowledge:document_cancel_organizing",
+                kwargs={"pk": first_link.document.pk},
+            )
+        )
+        self.client.post(
+            archive_url,
+            {"mode": EventKnowledgeArchive.MODE_ORGANIZE},
+        )
+        first_link.document.refresh_from_db()
+        self.assertEqual(
+            first_link.document.knowledge_status,
+            KnowledgeDocument.KNOWLEDGE_PENDING,
+        )
+        self.assertEqual(KnowledgeRevision.objects.filter(document=first_link.document).count(), 1)
+
+    def test_event_without_evidence_cannot_be_archived(self):
+        event = self.make_event(title="缺少证据的动态")
+        event.evidence_links.all().delete()
+        self.client.force_login(self.member_user)
+
+        response = self.client.post(
+            reverse("intelligence:event_archive", kwargs={"pk": event.pk}),
+            {"mode": EventKnowledgeArchive.MODE_ARCHIVE},
+            follow=True,
+        )
+
+        self.assertContains(response, "还没有可核查的来源证据")
+        self.assertFalse(EventKnowledgeArchive.objects.filter(event=event).exists())
+        self.assertFalse(
+            KnowledgeDocument.objects.filter(
+                source__kind=KnowledgeSource.KIND_INTELLIGENCE,
+                external_id=f"intelligence-event:{event.pk}",
+            ).exists()
+        )
+
+    def test_read_only_member_cannot_archive_event(self):
+        event = self.make_event(title="只读成员不可归档")
+        self.client.force_login(self.viewer_user)
+
+        detail = self.client.get(
+            reverse("intelligence:event_detail", kwargs={"pk": event.pk})
+        )
+        response = self.client.post(
+            reverse("intelligence:event_archive", kwargs={"pk": event.pk}),
+            {"mode": EventKnowledgeArchive.MODE_ARCHIVE},
+        )
+
+        self.assertNotContains(detail, "保存为知识")
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(EventKnowledgeArchive.objects.filter(event=event).exists())
+
+    def test_archive_snapshot_is_not_rewritten_after_event_edit(self):
+        event = self.make_event(title="保留旧证据的动态")
+        self.client.force_login(self.member_user)
+        archive_url = reverse("intelligence:event_archive", kwargs={"pk": event.pk})
+        self.client.post(archive_url, {"mode": EventKnowledgeArchive.MODE_ARCHIVE})
+        link = EventKnowledgeArchive.objects.select_related(
+            "document__current_revision"
+        ).get(event=event)
+        original_revision_id = link.document.current_revision_id
+        original_text = link.document.current_revision.plain_text
+
+        event.summary = "这是归档后才修改的情报摘要。"
+        event.save(update_fields=["summary", "updated_at"])
+        self.client.post(archive_url, {"mode": EventKnowledgeArchive.MODE_ARCHIVE})
+
+        link.document.refresh_from_db()
+        self.assertEqual(link.document.current_revision_id, original_revision_id)
+        self.assertEqual(link.document.current_revision.plain_text, original_text)
+        self.assertNotIn("归档后才修改", link.document.current_revision.plain_text)
+
+    def test_non_owner_cannot_move_shared_archive_into_pending(self):
+        event = self.make_event(title="归档所有者权限")
+        archive_url = reverse("intelligence:event_archive", kwargs={"pk": event.pk})
+        self.client.force_login(self.admin_user)
+        self.client.post(archive_url, {"mode": EventKnowledgeArchive.MODE_ARCHIVE})
+
+        self.client.force_login(self.member_user)
+        response = self.client.post(
+            archive_url,
+            {"mode": EventKnowledgeArchive.MODE_ORGANIZE},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        link = EventKnowledgeArchive.objects.select_related("document").get(event=event)
+        self.assertEqual(link.archive_mode, EventKnowledgeArchive.MODE_ARCHIVE)
+        self.assertEqual(
+            link.document.knowledge_status,
+            KnowledgeDocument.KNOWLEDGE_INCLUDED,
+        )
+
+    def test_subject_and_knowledge_people_pages_cross_link_through_identity(self):
+        event = self.make_event(title="人物跨模块链接")
+        self.client.force_login(self.member_user)
+        self.client.post(
+            reverse("intelligence:event_archive", kwargs={"pk": event.pk}),
+            {"mode": EventKnowledgeArchive.MODE_ARCHIVE},
+        )
+
+        subject_page = self.client.get(
+            reverse("intelligence:subject_detail", kwargs={"slug": self.subject.slug})
+        )
+        knowledge_page = self.client.get(
+            reverse("knowledge:people"),
+            {"subject": self.subject.slug},
+        )
+
+        self.assertContains(subject_page, "历史知识（1）")
+        self.assertContains(knowledge_page, "查看最新动态")
+        self.assertContains(knowledge_page, event.title)
 
 
 RSS_FIXTURE = b"""<?xml version="1.0" encoding="UTF-8"?>

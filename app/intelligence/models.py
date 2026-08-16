@@ -1,3 +1,4 @@
+import unicodedata
 import uuid
 from datetime import timedelta
 
@@ -9,6 +10,12 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from family_core.models import Family, FamilyMember, TimestampedModel
+
+
+def normalize_knowledge_author_name(value):
+    return " ".join(
+        unicodedata.normalize("NFKC", str(value or "")).strip().split()
+    ).casefold()
 
 
 class IntelligenceSubject(TimestampedModel):
@@ -741,6 +748,60 @@ class SubjectFollow(TimestampedModel):
         return f"{self.family} - {self.subject}"
 
 
+class SubjectKnowledgeIdentity(TimestampedModel):
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="intelligence_knowledge_identities",
+    )
+    subject = models.ForeignKey(
+        IntelligenceSubject,
+        verbose_name="关注对象",
+        on_delete=models.CASCADE,
+        related_name="knowledge_identities",
+    )
+    author_name = models.CharField("知识库作者名称", max_length=300)
+    normalized_author_name = models.CharField("规范作者名称", max_length=300)
+    is_active = models.BooleanField("是否启用", default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="创建人",
+        on_delete=models.SET_NULL,
+        related_name="created_intelligence_knowledge_identities",
+        null=True,
+        blank=True,
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="更新人",
+        on_delete=models.SET_NULL,
+        related_name="updated_intelligence_knowledge_identities",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "人物知识身份映射"
+        verbose_name_plural = "人物知识身份映射"
+        ordering = ["author_name", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["family", "normalized_author_name"],
+                name="unique_intelligence_knowledge_author_per_family",
+            )
+        ]
+        indexes = [models.Index(fields=["family", "subject", "is_active"])]
+
+    def save(self, *args, **kwargs):
+        self.author_name = " ".join(str(self.author_name or "").strip().split())
+        self.normalized_author_name = normalize_knowledge_author_name(self.author_name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.subject} ↔ {self.author_name}"
+
+
 class EventUserState(TimestampedModel):
     member = models.ForeignKey(
         FamilyMember,
@@ -769,6 +830,58 @@ class EventUserState(TimestampedModel):
 
     def __str__(self):
         return f"{self.member} - {self.event}"
+
+
+class EventKnowledgeArchive(TimestampedModel):
+    MODE_ARCHIVE = "archive"
+    MODE_ORGANIZE = "organize"
+    MODE_CHOICES = [
+        (MODE_ARCHIVE, "归档"),
+        (MODE_ORGANIZE, "归档并加入待整理"),
+    ]
+
+    event = models.OneToOneField(
+        IntelligenceEvent,
+        verbose_name="情报事件",
+        on_delete=models.PROTECT,
+        related_name="knowledge_archive",
+    )
+    document = models.OneToOneField(
+        "knowledge.KnowledgeDocument",
+        verbose_name="知识文档",
+        on_delete=models.PROTECT,
+        related_name="intelligence_archive",
+    )
+    archive_mode = models.CharField(
+        "归档方式",
+        max_length=20,
+        choices=MODE_CHOICES,
+        default=MODE_ARCHIVE,
+    )
+    archived_by = models.ForeignKey(
+        FamilyMember,
+        verbose_name="首次归档成员",
+        on_delete=models.SET_NULL,
+        related_name="intelligence_knowledge_archives",
+        null=True,
+        blank=True,
+    )
+    last_updated_by = models.ForeignKey(
+        FamilyMember,
+        verbose_name="最近调整成员",
+        on_delete=models.SET_NULL,
+        related_name="updated_intelligence_knowledge_archives",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "情报知识归档"
+        verbose_name_plural = "情报知识归档"
+        ordering = ["-created_at", "-pk"]
+
+    def __str__(self):
+        return f"{self.event} → {self.document}"
 
 
 class CollectionRun(models.Model):

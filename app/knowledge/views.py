@@ -17,6 +17,11 @@ from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
 from family_core.models import FamilyMember
+from intelligence.models import (
+    IntelligenceSubject,
+    SubjectKnowledgeIdentity,
+    normalize_knowledge_author_name,
+)
 
 from .ai import KnowledgeAiError, knowledge_ai_provider
 from .forms import (
@@ -320,6 +325,7 @@ def _build_source_directory(entries):
             source_kind__in=[
                 KnowledgeSource.KIND_HTML_IMPORT,
                 KnowledgeSource.KIND_MARKDOWN_IMPORT,
+                KnowledgeSource.KIND_INTELLIGENCE,
             ],
         )
         .order_by()
@@ -356,6 +362,7 @@ def _build_source_directory(entries):
                 KnowledgeSource.KIND_ONENOTE,
                 KnowledgeSource.KIND_HTML_IMPORT,
                 KnowledgeSource.KIND_MARKDOWN_IMPORT,
+                KnowledgeSource.KIND_INTELLIGENCE,
             ]
         )
         .order_by()
@@ -559,6 +566,7 @@ def _library_response(
             source_kind__in=[
                 KnowledgeSource.KIND_HTML_IMPORT,
                 KnowledgeSource.KIND_MARKDOWN_IMPORT,
+                KnowledgeSource.KIND_INTELLIGENCE,
             ]
         )
     elif source_group == "other":
@@ -568,6 +576,7 @@ def _library_response(
                 KnowledgeSource.KIND_INTERNAL_NOTES,
                 KnowledgeSource.KIND_HTML_IMPORT,
                 KnowledgeSource.KIND_MARKDOWN_IMPORT,
+                KnowledgeSource.KIND_INTELLIGENCE,
             ]
         )
     if source_author:
@@ -1017,9 +1026,45 @@ def people(request):
         .order_by("-total", "author_name")[:40]
     )
     selected_person = request.GET.get("person", "").strip()
+    selected_subject = None
+    selected_author_names = []
+    subject_slug = request.GET.get("subject", "").strip()
+    if subject_slug:
+        selected_subject = IntelligenceSubject.objects.filter(slug=subject_slug).first()
+        if selected_subject is not None:
+            selected_author_names = list(
+                SubjectKnowledgeIdentity.objects.filter(
+                    family=member.family,
+                    subject=selected_subject,
+                    is_active=True,
+                ).values_list("author_name", flat=True)
+            )
+            selected_person = selected_subject.display_name
+    elif selected_person:
+        identity = (
+            SubjectKnowledgeIdentity.objects.filter(
+                family=member.family,
+                normalized_author_name=normalize_knowledge_author_name(selected_person),
+                is_active=True,
+            )
+            .select_related("subject")
+            .first()
+        )
+        if identity is not None:
+            selected_subject = identity.subject
+            selected_author_names = list(
+                SubjectKnowledgeIdentity.objects.filter(
+                    family=member.family,
+                    subject=selected_subject,
+                    is_active=True,
+                ).values_list("author_name", flat=True)
+            )
+            selected_person = selected_subject.display_name
+        else:
+            selected_author_names = [selected_person]
     timeline = entries.none()
-    if selected_person:
-        timeline = entries.filter(author_name=selected_person)[:50]
+    if selected_author_names:
+        timeline = entries.filter(author_name__in=selected_author_names)[:50]
     timeline = _decorate_entries(list(timeline))
     historical_people = list(
         entries.filter(
@@ -1040,6 +1085,8 @@ def people(request):
         {
             "authors": authors,
             "selected_person": selected_person,
+            "selected_subject": selected_subject,
+            "selected_author_names": selected_author_names,
             "timeline": timeline,
             "historical_people": historical_people,
         },

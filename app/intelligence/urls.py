@@ -14,6 +14,7 @@ urlpatterns = [
     path("people/events/<int:pk>/ignore/", views.event_ignore, name="event_ignore"),
     path("people/events/<int:pk>/bookmark/", views.event_toggle_bookmark, name="event_toggle_bookmark"),
     path("people/events/<int:pk>/read/", views.event_mark_read, name="event_mark_read"),
+    path("people/events/<int:pk>/archive/", views.event_archive, name="event_archive"),
     path("people/subjects/", views.subject_list, name="subject_list"),
     path("people/subjects/new/", views.subject_create, name="subject_create"),
     path("people/subjects/<slug:slug>/", views.subject_detail, name="subject_detail"),

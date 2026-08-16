@@ -52,6 +52,13 @@
     <a class="button ghost" href="{% url 'intelligence:event_list' %}">返回全部动态</a>
     <form method="post" action="{% url 'intelligence:event_mark_read' event.pk %}">{% csrf_token %}<button class="button ghost" type="submit">{% if member_state.read_at %}已读{% else %}标记已读{% endif %}</button></form>
     <form method="post" action="{% url 'intelligence:event_toggle_bookmark' event.pk %}">{% csrf_token %}<button class="button ghost" type="submit">{% if member_state.bookmarked_at %}取消收藏{% else %}收藏{% endif %}</button></form>
+    {% if archive_link %}
+      <a class="button intel-primary" href="{% url 'knowledge:document_detail' archive_link.document.pk %}">{% if archive_link.document.library_tier == 'knowledge' %}已保存 · 精选知识{% elif archive_link.document.knowledge_status == 'pending' %}已保存 · 待整理{% else %}查看已保存知识{% endif %}</a>
+      {% if archive_link.document.library_tier != 'knowledge' and archive_link.document.knowledge_status != 'pending' and can_upgrade_archive %}<form method="post" action="{% url 'intelligence:event_archive' event.pk %}">{% csrf_token %}<input type="hidden" name="mode" value="organize"><button class="button ghost" type="submit">加入待整理</button></form>{% endif %}
+    {% elif can_archive %}
+      <form method="post" action="{% url 'intelligence:event_archive' event.pk %}">{% csrf_token %}<input type="hidden" name="mode" value="archive"><button class="button intel-primary" type="submit">保存为知识</button></form>
+      <form method="post" action="{% url 'intelligence:event_archive' event.pk %}">{% csrf_token %}<input type="hidden" name="mode" value="organize"><button class="button ghost" type="submit">保存并加入待整理</button></form>
+    {% endif %}
     {% if can_admin %}
       <a class="button" href="{% url 'intelligence:event_edit' event.pk %}">编辑事件</a>
       {% if event.review_status != "ignored" %}<form class="intel-push-right" method="post" action="{% url 'intelligence:event_ignore' event.pk %}" onsubmit="return confirm('确定把这条事件移出普通信息流吗？原始证据仍会保留。');">{% csrf_token %}<button class="button intel-danger" type="submit">标记忽略</button></form>{% endif %}

@@ -15,6 +15,7 @@
       </div>
       <h1>{{ document.title }}</h1>
       <div class="knowledge-document-actions">
+        {% if document.hierarchy.intelligence_event_id %}<a class="button primary" href="{% url 'intelligence:event_detail' document.hierarchy.intelligence_event_id %}">返回原始情报</a>{% endif %}
         {% if document.source_url %}<a class="button" href="{{ document.source_url }}" rel="noopener noreferrer" target="_blank">打开原文链接</a>{% endif %}
         {% if revision %}<a class="button" href="{% url 'knowledge:revision_raw_download' revision.pk %}">下载原始版本</a>{% endif %}
         {% if can_organize %}
@@ -120,6 +121,7 @@
         <div><dt>来源</dt><dd>{{ document.source.name }}</dd></div>
         {% if document.section_name %}<div><dt>原始位置</dt><dd>{{ document.source.name }}{% if document.hierarchy.section_group %} / {{ document.hierarchy.section_group }}{% endif %} / {{ document.section_name }}</dd></div>{% endif %}
         {% if document.source_url %}<div><dt>原文链接</dt><dd><a href="{{ document.source_url }}" rel="noopener noreferrer" target="_blank">打开来源页面</a></dd></div>{% endif %}
+        {% if document.hierarchy.intelligence_event_id %}<div><dt>情报记录</dt><dd><a href="{% url 'intelligence:event_detail' document.hierarchy.intelligence_event_id %}">查看事件、评分与证据链</a></dd></div>{% endif %}
       </dl>
       <details class="knowledge-system-details">
         <summary>查看保存与同步信息</summary>

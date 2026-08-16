@@ -4,6 +4,7 @@ from .models import (
     CollectionRun,
     CollectionRunItem,
     EventEvidence,
+    EventKnowledgeArchive,
     EventSubject,
     EventUserState,
     IntelligenceEvent,
@@ -11,6 +12,7 @@ from .models import (
     IntelligenceSubject,
     SourceItem,
     SubjectFollow,
+    SubjectKnowledgeIdentity,
     SubjectRelation,
 )
 
@@ -78,10 +80,34 @@ class SubjectFollowAdmin(admin.ModelAdmin):
     list_filter = ("family", "priority", "is_muted", "is_active")
 
 
+@admin.register(SubjectKnowledgeIdentity)
+class SubjectKnowledgeIdentityAdmin(admin.ModelAdmin):
+    list_display = ("author_name", "subject", "family", "is_active", "updated_at")
+    list_filter = ("family", "is_active")
+    search_fields = ("author_name", "normalized_author_name", "subject__display_name")
+    readonly_fields = ("normalized_author_name", "created_at", "updated_at")
+
+
 @admin.register(EventUserState)
 class EventUserStateAdmin(admin.ModelAdmin):
     list_display = ("member", "event", "read_at", "bookmarked_at")
     list_filter = ("member", "read_at", "bookmarked_at")
+
+
+@admin.register(EventKnowledgeArchive)
+class EventKnowledgeArchiveAdmin(admin.ModelAdmin):
+    list_display = ("event", "document", "archive_mode", "archived_by", "created_at")
+    list_filter = ("archive_mode", "event__family")
+    search_fields = ("event__title", "document__title")
+    readonly_fields = (
+        "event",
+        "document",
+        "archive_mode",
+        "archived_by",
+        "last_updated_by",
+        "created_at",
+        "updated_at",
+    )
 
 
 class CollectionRunItemInline(admin.TabularInline):

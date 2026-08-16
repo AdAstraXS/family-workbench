@@ -8,7 +8,7 @@
       <span aria-hidden="true">知</span><strong>资料库</strong>
     </a>
     <a href="{% url 'knowledge:people' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "people" %} class="active"{% endif %}>
-      <span aria-hidden="true">人</span><strong>关注人物</strong><small>待接入</small>
+      <span aria-hidden="true">人</span><strong>关注人物</strong><small>历史知识</small>
     </a>
     <a href="{% url 'reading:index' %}"{% if request.resolver_match.app_name == "reading" %} class="active"{% endif %}>
       <span aria-hidden="true">读</span><strong>在线书库</strong><small>规划中</small>
