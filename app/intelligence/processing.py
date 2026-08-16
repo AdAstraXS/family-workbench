@@ -297,7 +297,7 @@ def _upsert_candidate_event(family, item, matched_topics, relevance, labels):
             role=EventSubject.ROLE_SUBJECT,
             defaults={"confidence_score": 80, "is_primary": index == 0},
         )
-    EventEvidence.objects.get_or_create(
+    _evidence, evidence_created = EventEvidence.objects.get_or_create(
         event=event,
         source_item=item,
         defaults={
@@ -307,6 +307,8 @@ def _upsert_candidate_event(family, item, matched_topics, relevance, labels):
             "is_primary": created,
         },
     )
+    if evidence_created and not created:
+        event.analyses.filter(is_current=True).update(is_current=False)
     source_count = event.evidence_links.values("source_item__source_id").distinct().count()
     tiers = list(event.evidence_links.values_list("source_item__source__source_tier", flat=True))
     best_tier = min(tiers or [item.source.source_tier])

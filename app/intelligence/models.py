@@ -406,7 +406,6 @@ class SourceItem(TimestampedModel):
     def __str__(self):
         return self.title
 
-
 class IntelligenceEvent(TimestampedModel):
     CHANNEL_PEOPLE = "people"
 
@@ -607,6 +606,23 @@ class IntelligenceEvent(TimestampedModel):
     def __str__(self):
         return self.title
 
+    @property
+    def current_ai_analysis(self):
+        prefetched = getattr(self, "_current_ai_analyses", None)
+        if prefetched is not None:
+            return prefetched[0] if prefetched else None
+        return self.analyses.filter(
+            is_current=True,
+            status=EventAnalysis.STATUS_SUCCESS,
+        ).first()
+
+    @property
+    def display_summary(self):
+        analysis = self.current_ai_analysis
+        if analysis and self.review_status == self.REVIEW_PENDING:
+            return analysis.result_json.get("summary") or self.summary
+        return self.summary
+
 
 class EventSubject(models.Model):
     ROLE_SPEAKER = "speaker"
@@ -702,6 +718,88 @@ class EventEvidence(TimestampedModel):
 
     def __str__(self):
         return f"{self.event} - {self.source_item}"
+
+
+class EventAnalysis(TimestampedModel):
+    STATUS_PENDING = "pending"
+    STATUS_SUCCESS = "success"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "处理中"),
+        (STATUS_SUCCESS, "成功"),
+        (STATUS_FAILED, "失败"),
+    ]
+
+    event = models.ForeignKey(
+        IntelligenceEvent,
+        verbose_name="情报事件",
+        on_delete=models.CASCADE,
+        related_name="analyses",
+    )
+    provider = models.ForeignKey(
+        "ai_analysis.AiProvider",
+        verbose_name="AI 服务商",
+        on_delete=models.SET_NULL,
+        related_name="intelligence_event_analyses",
+        null=True,
+        blank=True,
+    )
+    analysis_request = models.OneToOneField(
+        "ai_analysis.AiAnalysisRequest",
+        verbose_name="AI 请求审计",
+        on_delete=models.SET_NULL,
+        related_name="intelligence_event_analysis",
+        null=True,
+        blank=True,
+    )
+    model_name = models.CharField("实际模型", max_length=200, blank=True)
+    prompt_version = models.CharField("提示词版本", max_length=100)
+    schema_version = models.CharField("结构版本", max_length=100)
+    input_fingerprint = models.CharField("输入指纹", max_length=64, db_index=True)
+    input_snapshot = models.JSONField("输入审计快照", default=dict, blank=True)
+    result_json = models.JSONField("结构化结果", default=dict, blank=True)
+    status = models.CharField(
+        "状态",
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    error_message = models.TextField("错误摘要", blank=True)
+    tokens_used = models.PositiveIntegerField("Token 用量", null=True, blank=True)
+    cost_estimate = models.DecimalField(
+        "费用估算",
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+    )
+    is_current = models.BooleanField("当前采用版本", default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="发起人",
+        on_delete=models.SET_NULL,
+        related_name="created_intelligence_event_analyses",
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "情报事件 AI 分析"
+        verbose_name_plural = "情报事件 AI 分析"
+        ordering = ["-created_at", "-pk"]
+        indexes = [
+            models.Index(fields=["event", "status", "created_at"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event"],
+                condition=Q(is_current=True),
+                name="unique_current_intelligence_event_analysis",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.event} - {self.model_name or 'AI'} - {self.get_status_display()}"
 
 
 class SubjectFollow(TimestampedModel):

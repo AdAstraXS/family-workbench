@@ -7,7 +7,7 @@
     <span>置信度 {{ event.confidence_score }}</span>
   </div>
   <h3><a href="{% url 'intelligence:event_detail' event.pk %}">{{ event.title }}</a></h3>
-  <p>{{ event.summary|truncatechars:180 }}</p>
+  <p>{{ event.display_summary|truncatechars:180 }}</p>
   <div class="intel-subject-chips">
     {% for subject in event.subjects.all %}
       <a href="{% url 'intelligence:subject_detail' subject.slug %}">{{ subject.display_name }}</a>

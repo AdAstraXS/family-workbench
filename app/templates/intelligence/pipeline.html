@@ -13,7 +13,7 @@
 {% include "intelligence/_tabs.html" %}
 
 {% if automatic_collection_enabled %}
-<section class="intel-notice"><strong>M2 自动采集能力已启用</strong><span>RSS 已启用；YouTube 元数据适配器已实现，但首批入口因官方 Atom 当前返回 404 而默认停用。视频正文、字幕和文本 AI 尚未接入，页面数字只来自真实运行记录。</span></section>
+<section class="intel-notice"><strong>M2 自动采集与 M3 分析基础已启用</strong><span>RSS 已启用；YouTube 元数据适配器已实现但默认停用。M3 已支持对候选事件执行版本化结构化分析，当前 {{ text_ai_provider_count }} 个文本模型登记、{{ configured_text_ai_count }} 个具备 Key；只发送标题与已保存短摘录。</span></section>
 {% endif %}
 
 <section class="intel-pipeline-layout">
@@ -38,6 +38,8 @@
     <div class="intel-selection-counts">
       {% for item in selection_counts %}<div><span>{{ item.label }}</span><strong>{{ item.count }}</strong></div>{% endfor %}
       <div><span>处理失败</span><strong>{{ failed_count }}</strong></div>
+      <div><span>当前 AI 分析</span><strong>{{ current_analysis_count }}</strong></div>
+      <div><span>AI 分析失败</span><strong>{{ failed_analysis_count }}</strong></div>
     </div>
     <p class="intel-muted">精选阈值：重要性 ≥ 75 且置信度 ≥ 60。相关性低于 30 或重要性低于 25 进入噪音箱。</p>
   </aside>

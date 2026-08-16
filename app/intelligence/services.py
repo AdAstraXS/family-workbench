@@ -49,10 +49,29 @@ class IntelligenceArchiveError(RuntimeError):
     pass
 
 
-def _plain_event_snapshot(event, subjects, evidences):
-    lines = [event.title, "", "事实摘要", event.summary]
-    if event.why_it_matters:
-        lines.extend(["", "为什么重要", event.why_it_matters])
+def _plain_event_snapshot(event, subjects, evidences, analysis=None):
+    if analysis:
+        result = analysis.result_json
+        lines = [
+            event.title,
+            "",
+            "AI 事实摘要",
+            result.get("summary", ""),
+            "",
+            "AI 判断为什么重要",
+            result.get("why_it_matters", ""),
+            "",
+            "AI 分析说明",
+            f"{analysis.model_name} · {analysis.prompt_version} · {analysis.schema_version}；"
+            "内容是归档时的可追溯派生结果，不是人物原话。",
+            "",
+            "原始候选说明",
+            event.summary,
+        ]
+    else:
+        lines = [event.title, "", "事实摘要", event.summary]
+        if event.why_it_matters:
+            lines.extend(["", "为什么重要", event.why_it_matters])
     if subjects:
         lines.extend(
             [
@@ -86,14 +105,30 @@ def _plain_event_snapshot(event, subjects, evidences):
     return "\n".join(lines).strip()
 
 
-def _event_snapshot_html(event, subjects, evidences):
+def _event_snapshot_html(event, subjects, evidences, analysis=None):
     def paragraph(value):
         escaped = escape(value or "")
         return f"<p>{escaped.replace(chr(10), '<br>')}</p>"
 
-    chunks = ["<h2>事实摘要</h2>", paragraph(event.summary)]
-    if event.why_it_matters:
-        chunks.extend(["<h2>为什么重要</h2>", paragraph(event.why_it_matters)])
+    if analysis:
+        result = analysis.result_json
+        chunks = [
+            "<h2>AI 事实摘要</h2>",
+            paragraph(result.get("summary", "")),
+            "<h2>AI 判断为什么重要</h2>",
+            paragraph(result.get("why_it_matters", "")),
+            "<h2>AI 分析说明</h2>",
+            paragraph(
+                f"{analysis.model_name} · {analysis.prompt_version} · {analysis.schema_version}；"
+                "内容是归档时的可追溯派生结果，不是人物原话。"
+            ),
+            "<h2>原始候选说明</h2>",
+            paragraph(event.summary),
+        ]
+    else:
+        chunks = ["<h2>事实摘要</h2>", paragraph(event.summary)]
+        if event.why_it_matters:
+            chunks.extend(["<h2>为什么重要</h2>", paragraph(event.why_it_matters)])
     if subjects:
         chunks.extend(
             [
@@ -136,7 +171,7 @@ def _event_snapshot_html(event, subjects, evidences):
     return "".join(chunks)
 
 
-def _event_snapshot_payload(event, subjects, evidences):
+def _event_snapshot_payload(event, subjects, evidences, analysis=None):
     return {
         "schema": "family-workbench-intelligence-archive-v1",
         "archived_at": timezone.now().isoformat(),
@@ -154,6 +189,20 @@ def _event_snapshot_payload(event, subjects, evidences):
             "importance_score": event.importance_score,
             "confidence_score": event.confidence_score,
         },
+        "ai_analysis": (
+            {
+                "id": analysis.pk,
+                "provider": analysis.provider.name if analysis.provider else "",
+                "model_name": analysis.model_name,
+                "prompt_version": analysis.prompt_version,
+                "schema_version": analysis.schema_version,
+                "input_fingerprint": analysis.input_fingerprint,
+                "created_at": analysis.created_at.isoformat(),
+                "result": analysis.result_json,
+            }
+            if analysis
+            else None
+        ),
         "subjects": [
             {
                 "id": link.subject_id,
@@ -291,6 +340,7 @@ def archive_event_to_knowledge(*, event, member, user, add_to_pending=False):
                     "-is_primary", "pk"
                 )
             )
+            analysis = event.current_ai_analysis
             if not evidences:
                 raise IntelligenceArchiveError(
                     "这条情报还没有可核查的来源证据，暂时不能保存为知识。"
@@ -360,9 +410,9 @@ def archive_event_to_knowledge(*, event, member, user, add_to_pending=False):
                 content_created_at=event.occurred_at,
                 content_modified_at=event.occurred_at,
             )
-            plain_text = _plain_event_snapshot(event, subjects, evidences)
-            normalized_html = _event_snapshot_html(event, subjects, evidences)
-            payload = _event_snapshot_payload(event, subjects, evidences)
+            plain_text = _plain_event_snapshot(event, subjects, evidences, analysis)
+            normalized_html = _event_snapshot_html(event, subjects, evidences, analysis)
+            payload = _event_snapshot_payload(event, subjects, evidences, analysis)
             raw_bytes = json.dumps(
                 payload,
                 ensure_ascii=False,
@@ -377,7 +427,9 @@ def archive_event_to_knowledge(*, event, member, user, add_to_pending=False):
                 raw_file="",
                 normalized_html=normalized_html,
                 plain_text=plain_text,
-                converter_version="intelligence-event-v1",
+                converter_version=(
+                    "intelligence-event-v2-ai" if analysis else "intelligence-event-v1"
+                ),
                 source_modified_at=event.updated_at,
             )
             revision.raw_file.save(

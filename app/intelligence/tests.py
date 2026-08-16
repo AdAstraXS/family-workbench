@@ -12,6 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from family_core.models import Family, FamilyMember
+from ai_analysis.models import AiAnalysisRequest, AiAnalysisResult, AiProvider
 from knowledge.models import (
     KnowledgeDocument,
     KnowledgeRevision,
@@ -22,11 +23,18 @@ from knowledge.models import (
 from .forms import IntelligenceSourceForm, IntelligenceSubjectForm
 from .adapters import AdapterResult, CollectedItem, FeedParseError, parse_rss_or_atom, parse_youtube_atom
 from .collection import collect_intelligence_sources
+from .ai_enrichment import (
+    IntelligenceAiError,
+    analyze_event,
+    parse_analysis_result,
+    provider_is_configured,
+)
 from .http_client import FetchResponse, SafeHttpError, validate_public_http_url
 from .management.commands.seed_intelligence_sources import SOURCE_DEFINITIONS
 from .management.commands.seed_key_people import SUBJECTS
 from .models import (
     CollectionRun,
+    EventAnalysis,
     EventEvidence,
     EventKnowledgeArchive,
     EventSubject,
@@ -38,7 +46,7 @@ from .models import (
     SubjectFollow,
     SubjectKnowledgeIdentity,
 )
-from .processing import MEDIA_DISCOVERY_POLICY
+from .processing import MEDIA_DISCOVERY_POLICY, process_source_item
 from .scoring import calculate_event_scores
 
 
@@ -626,6 +634,50 @@ class IntelligenceKnowledgeBridgeTests(IntelligenceTestBase):
         )
         self.assertEqual(KnowledgeRevision.objects.filter(document=first_link.document).count(), 1)
 
+    def test_archive_freezes_current_ai_analysis_with_evidence_metadata(self):
+        event = self.make_event(title="带 AI 分析的动态")
+        provider = AiProvider.objects.create(
+            name="归档测试模型",
+            provider_type="openai_compatible",
+            model_name="archive-test-model",
+        )
+        reference = f"source-item-{event.primary_source_item_id}"
+        analysis = EventAnalysis.objects.create(
+            event=event,
+            provider=provider,
+            model_name=provider.model_name,
+            prompt_version="intelligence-event-v1",
+            schema_version="intelligence-event-analysis-v1",
+            input_fingerprint="a" * 64,
+            input_snapshot={"evidence_refs": [reference]},
+            result_json={
+                "summary": "这是归档时采用的 AI 摘要。",
+                "summary_evidence_refs": [reference],
+                "why_it_matters": "这是带来源约束的影响说明。",
+            },
+            status=EventAnalysis.STATUS_SUCCESS,
+            is_current=True,
+            created_by=self.admin_user,
+        )
+        self.client.force_login(self.member_user)
+
+        self.client.post(
+            reverse("intelligence:event_archive", kwargs={"pk": event.pk}),
+            {"mode": EventKnowledgeArchive.MODE_ARCHIVE},
+        )
+
+        link = EventKnowledgeArchive.objects.select_related(
+            "document__current_revision"
+        ).get(event=event)
+        revision = link.document.current_revision
+        self.assertEqual(revision.converter_version, "intelligence-event-v2-ai")
+        self.assertIn("这是归档时采用的 AI 摘要", revision.plain_text)
+        self.assertIn("不是人物原话", revision.plain_text)
+        with revision.raw_file.open("rb") as raw_file:
+            snapshot = json.load(raw_file)
+        self.assertEqual(snapshot["ai_analysis"]["id"], analysis.pk)
+        self.assertEqual(snapshot["ai_analysis"]["result"]["summary_evidence_refs"], [reference])
+
     def test_event_without_evidence_cannot_be_archived(self):
         event = self.make_event(title="缺少证据的动态")
         event.evidence_links.all().delete()
@@ -1078,3 +1130,249 @@ class M2OperationsViewTests(IntelligenceTestBase):
         response = self.client.post(reverse("intelligence:collect_sources_now"))
 
         self.assertEqual(response.status_code, 403)
+
+
+class FakeAiResponse:
+    def __init__(self, payload):
+        self.body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def read(self, _limit):
+        return self.body
+
+
+class M3EventAnalysisTests(IntelligenceTestBase):
+    def make_provider(self):
+        return AiProvider.objects.create(
+            name="情报测试文本模型",
+            provider_type="openai_compatible",
+            base_url="https://api.example.com/v1",
+            model_name="test-text-model",
+            is_active=True,
+            extra_data={
+                "api_key_env_var": "INTELLIGENCE_TEST_API_KEY",
+                "allow_intelligence_analysis": True,
+            },
+        )
+
+    @staticmethod
+    def analysis_result(reference):
+        return {
+            "summary": "测试人物宣布新的企业级产品计划。",
+            "summary_evidence_refs": [reference],
+            "why_it_matters": "该计划可能影响企业软件竞争格局，但仍需观察实际采用情况。",
+            "facts": [
+                {"text": "来源标题显示测试人物公布了新计划。", "evidence_refs": [reference]},
+            ],
+            "opinions": [],
+            "numbers": [],
+            "uncertainties": ["公开短摘录没有提供完整发布时间表。"],
+            "event_type": IntelligenceEvent.TYPE_BUSINESS,
+            "change_type": IntelligenceEvent.CHANGE_NEW,
+            "features": {
+                "subject_relevance": 92,
+                "substantiveness": 78,
+                "novelty": 74,
+                "potential_impact": 81,
+                "investment_relevance": 63,
+                "evidence_clarity": 86,
+            },
+        }
+
+    def ai_payload(self, event, *, result=None):
+        reference = f"source-item-{event.primary_source_item_id}"
+        content = result if result is not None else self.analysis_result(reference)
+        return {
+            "choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}],
+            "usage": {"total_tokens": 321},
+        }
+
+    def test_schema_rejects_unknown_evidence_reference_and_invalid_scores(self):
+        event = self.make_event(status=IntelligenceEvent.REVIEW_PENDING, selection=IntelligenceEvent.SELECTION_REVIEW)
+        reference = f"source-item-{event.primary_source_item_id}"
+        result = self.analysis_result(reference)
+        result["facts"][0]["evidence_refs"] = ["source-item-999999"]
+
+        with self.assertRaisesMessage(IntelligenceAiError, "不存在的来源"):
+            parse_analysis_result(result, allowed_refs={reference})
+
+        result = self.analysis_result(reference)
+        result["features"]["novelty"] = 101
+        with self.assertRaisesMessage(IntelligenceAiError, "超出 0 到 100"):
+            parse_analysis_result(result, allowed_refs={reference})
+
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_existing_text_key_is_not_reused_without_intelligence_authorization(self, urlopen):
+        event = self.make_event(status=IntelligenceEvent.REVIEW_PENDING, selection=IntelligenceEvent.SELECTION_REVIEW)
+        provider = self.make_provider()
+        provider.extra_data.pop("allow_intelligence_analysis")
+        provider.save(update_fields=["extra_data", "updated_at"])
+
+        with patch.dict("os.environ", {"INTELLIGENCE_TEST_API_KEY": "test-key"}):
+            self.assertFalse(provider_is_configured(provider))
+            with self.assertRaisesMessage(IntelligenceAiError, "尚未明确授权"):
+                analyze_event(
+                    event,
+                    member=self.admin_member,
+                    user=self.admin_user,
+                    provider_id=provider.pk,
+                )
+
+        self.assertFalse(urlopen.called)
+        self.assertFalse(EventAnalysis.objects.exists())
+
+    @patch("intelligence.ai_enrichment.validate_public_http_url")
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_successful_analysis_is_versioned_rescored_and_idempotent(self, urlopen, validate_url):
+        event = self.make_event(status=IntelligenceEvent.REVIEW_PENDING, selection=IntelligenceEvent.SELECTION_REVIEW)
+        provider = self.make_provider()
+        validate_url.return_value = "https://api.example.com/v1/chat/completions"
+        urlopen.return_value = FakeAiResponse(self.ai_payload(event))
+
+        with patch.dict("os.environ", {"INTELLIGENCE_TEST_API_KEY": "test-key"}):
+            analysis, created = analyze_event(
+                event,
+                member=self.admin_member,
+                user=self.admin_user,
+                provider_id=provider.pk,
+            )
+            reused, reused_created = analyze_event(
+                event,
+                member=self.admin_member,
+                user=self.admin_user,
+                provider_id=provider.pk,
+            )
+            forced, forced_created = analyze_event(
+                event,
+                member=self.admin_member,
+                user=self.admin_user,
+                provider_id=provider.pk,
+                force=True,
+            )
+
+        event.refresh_from_db()
+        analysis.refresh_from_db()
+        event.primary_source_item.refresh_from_db()
+        self.assertTrue(created)
+        self.assertFalse(reused_created)
+        self.assertTrue(forced_created)
+        self.assertEqual(reused.pk, analysis.pk)
+        self.assertNotEqual(forced.pk, analysis.pk)
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(analysis.status, EventAnalysis.STATUS_SUCCESS)
+        self.assertFalse(analysis.is_current)
+        self.assertTrue(forced.is_current)
+        self.assertEqual(analysis.tokens_used, 321)
+        self.assertEqual(analysis.result_json["summary_evidence_refs"], [f"source-item-{event.primary_source_item_id}"])
+        self.assertEqual(analysis.result_json["code_scoring"]["policy_version"], "people-v1")
+        self.assertEqual(event.score_origin, IntelligenceEvent.SCORE_ORIGIN_AI)
+        self.assertEqual(event.relevance_score, 92)
+        self.assertEqual(event.event_type, IntelligenceEvent.TYPE_BUSINESS)
+        self.assertEqual(event.summary, "这是一个可核查的事实摘要。")
+        self.assertEqual(event.display_summary, "测试人物宣布新的企业级产品计划。")
+        self.assertEqual(event.primary_source_item.processing_status, SourceItem.STATUS_ANALYZED)
+        self.assertEqual(EventAnalysis.objects.filter(event=event).count(), 2)
+        self.assertEqual(EventAnalysis.objects.filter(event=event, is_current=True).count(), 1)
+        self.assertEqual(AiAnalysisRequest.objects.filter(module="intelligence").count(), 2)
+        self.assertEqual(AiAnalysisResult.objects.count(), 2)
+
+    @patch("intelligence.ai_enrichment.validate_public_http_url")
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_invalid_ai_reference_records_failure_without_mutating_event(self, urlopen, validate_url):
+        event = self.make_event(status=IntelligenceEvent.REVIEW_PENDING, selection=IntelligenceEvent.SELECTION_REVIEW)
+        provider = self.make_provider()
+        result = self.analysis_result(f"source-item-{event.primary_source_item_id}")
+        result["summary_evidence_refs"] = ["source-item-invented"]
+        validate_url.return_value = "https://api.example.com/v1/chat/completions"
+        urlopen.return_value = FakeAiResponse(self.ai_payload(event, result=result))
+
+        with patch.dict("os.environ", {"INTELLIGENCE_TEST_API_KEY": "test-key"}):
+            with self.assertRaisesMessage(IntelligenceAiError, "不存在的来源"):
+                analyze_event(
+                    event,
+                    member=self.admin_member,
+                    user=self.admin_user,
+                    provider_id=provider.pk,
+                )
+
+        event.refresh_from_db()
+        analysis = EventAnalysis.objects.get(event=event)
+        self.assertEqual(analysis.status, EventAnalysis.STATUS_FAILED)
+        self.assertFalse(analysis.is_current)
+        self.assertEqual(event.score_origin, IntelligenceEvent.SCORE_ORIGIN_MANUAL)
+        self.assertEqual(event.summary, "这是一个可核查的事实摘要。")
+        self.assertEqual(AiAnalysisRequest.objects.get(pk=analysis.analysis_request_id).status, AiAnalysisRequest.STATUS_FAILED)
+        self.assertFalse(AiAnalysisResult.objects.exists())
+
+    def test_new_evidence_invalidates_current_analysis_without_deleting_history(self):
+        title = "Test Person launches an AI product"
+        event = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title=title,
+        )
+        analysis = EventAnalysis.objects.create(
+            event=event,
+            model_name="old-model",
+            prompt_version="intelligence-event-v1",
+            schema_version="intelligence-event-analysis-v1",
+            input_fingerprint="b" * 64,
+            result_json={"summary": "旧分析"},
+            status=EventAnalysis.STATUS_SUCCESS,
+            is_current=True,
+        )
+        SubjectFollow.objects.create(family=self.family, subject=self.subject)
+        new_item = SourceItem.objects.create(
+            source=self.source,
+            external_id="second-source-item",
+            title=title,
+            canonical_url="https://example.com/second-source",
+            excerpt="A second source confirms the AI product launch.",
+            published_at=event.occurred_at,
+            content_depth=SourceItem.DEPTH_DESCRIPTION,
+        )
+
+        result = process_source_item(new_item)
+
+        analysis.refresh_from_db()
+        self.assertFalse(result.is_noise)
+        self.assertFalse(analysis.is_current)
+        self.assertTrue(EventAnalysis.objects.filter(pk=analysis.pk).exists())
+        self.assertTrue(event.evidence_links.filter(source_item=new_item).exists())
+
+    @patch("intelligence.ai_enrichment.validate_public_http_url")
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_admin_post_can_analyze_but_get_and_member_cannot_call_ai(self, urlopen, validate_url):
+        event = self.make_event(status=IntelligenceEvent.REVIEW_PENDING, selection=IntelligenceEvent.SELECTION_REVIEW)
+        provider = self.make_provider()
+        validate_url.return_value = "https://api.example.com/v1/chat/completions"
+        urlopen.return_value = FakeAiResponse(self.ai_payload(event))
+        self.client.force_login(self.admin_user)
+
+        with patch.dict("os.environ", {"INTELLIGENCE_TEST_API_KEY": "test-key"}):
+            get_response = self.client.get(reverse("intelligence:event_detail", args=[event.pk]))
+            self.assertEqual(get_response.status_code, 200)
+            self.assertFalse(urlopen.called)
+            post_response = self.client.post(
+                reverse("intelligence:event_analyze", args=[event.pk]),
+                {"provider_id": provider.pk},
+            )
+
+        self.assertRedirects(post_response, reverse("intelligence:event_detail", args=[event.pk]))
+        self.assertEqual(urlopen.call_count, 1)
+        detail = self.client.get(reverse("intelligence:event_detail", args=[event.pk]))
+        self.assertContains(detail, "测试人物宣布新的企业级产品计划")
+        self.assertContains(detail, "AI 结构化整理")
+        self.assertContains(detail, f'href="#source-item-{event.primary_source_item_id}"')
+        self.client.force_login(self.member_user)
+        forbidden = self.client.post(
+            reverse("intelligence:event_analyze", args=[event.pk]),
+            {"provider_id": provider.pk},
+        )
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(urlopen.call_count, 1)

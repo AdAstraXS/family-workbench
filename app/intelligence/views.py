@@ -4,7 +4,7 @@ from collections import defaultdict
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -25,6 +25,7 @@ from .forms import (
 )
 from .models import (
     CollectionRun,
+    EventAnalysis,
     EventKnowledgeArchive,
     EventUserState,
     IntelligenceEvent,
@@ -33,6 +34,12 @@ from .models import (
     SourceItem,
     SubjectFollow,
     SubjectKnowledgeIdentity,
+)
+from .ai_enrichment import (
+    IntelligenceAiError,
+    analyze_event,
+    provider_is_configured,
+    text_ai_providers,
 )
 from .services import (
     IntelligenceArchiveError,
@@ -90,7 +97,18 @@ def _family_events(member, *, include_nonpublic=False):
         )
     return queryset.select_related(
         "primary_source_item__source",
-    ).prefetch_related("subjects", "evidence_links__source_item__source")
+    ).prefetch_related(
+        "subjects",
+        "evidence_links__source_item__source",
+        Prefetch(
+            "analyses",
+            queryset=EventAnalysis.objects.filter(
+                is_current=True,
+                status=EventAnalysis.STATUS_SUCCESS,
+            ).select_related("provider"),
+            to_attr="_current_ai_analyses",
+        ),
+    )
 
 
 def _attach_user_states(events, member):
@@ -229,6 +247,13 @@ def event_detail(request, pk):
         .select_related("document", "document__owner")
         .first()
     )
+    analysis_history = list(
+        event.analyses.select_related("provider", "created_by").order_by("-created_at", "-pk")[:5]
+    )
+    providers = [
+        {"provider": provider, "configured": provider_is_configured(provider)}
+        for provider in text_ai_providers()
+    ] if _is_family_admin(request) else []
     return render(
         request,
         "intelligence/event_detail.html",
@@ -247,8 +272,44 @@ def event_detail(request, pk):
                 )
             ),
             "can_admin": _is_family_admin(request),
+            "current_analysis": event.current_ai_analysis,
+            "analysis_history": analysis_history,
+            "text_ai_providers": providers,
+            "configured_text_ai_count": sum(item["configured"] for item in providers),
         },
     )
+
+
+@login_required
+@require_POST
+def event_analyze(request, pk):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    event = get_object_or_404(IntelligenceEvent, family=member.family, pk=pk)
+    provider_id = request.POST.get("provider_id", "").strip()
+    if provider_id and not provider_id.isdigit():
+        messages.error(request, "AI 服务商参数不正确，请刷新页面后重试。")
+        return redirect("intelligence:event_detail", pk=event.pk)
+    try:
+        analysis, created = analyze_event(
+            event,
+            member=member,
+            user=request.user,
+            provider_id=int(provider_id) if provider_id else None,
+            force=request.POST.get("force") == "1",
+        )
+    except IntelligenceAiError as exc:
+        messages.error(request, str(exc))
+    else:
+        if created:
+            messages.success(
+                request,
+                "AI 结构化分析已完成；摘要和特征已绑定来源，最终分层由代码重新计算。",
+            )
+        else:
+            messages.info(request, "来源和模型版本没有变化，已复用现有 AI 分析，未重复调用。")
+    return redirect("intelligence:event_detail", pk=event.pk)
 
 
 @login_required
@@ -332,8 +393,9 @@ def event_edit(request, pk):
             updated_event = form.save(commit=False)
             stamp_actor(updated_event, request.user)
             updated_event.save()
+            updated_event.analyses.filter(is_current=True).update(is_current=False)
             rescore_event(updated_event)
-            messages.success(request, "情报事件已更新。")
+            messages.success(request, "情报事件已更新；如曾有 AI 分析，旧版本已保留但不再作为当前结果。")
             return redirect("intelligence:event_detail", pk=event.pk)
     else:
         form = IntelligenceEventForm(instance=event)
@@ -743,6 +805,13 @@ def pipeline(request):
         return _admin_required_response()
     family_events = IntelligenceEvent.objects.filter(family=member.family)
     source_items = SourceItem.objects.all()
+    current_analyses = EventAnalysis.objects.filter(
+        event__family=member.family,
+        status=EventAnalysis.STATUS_SUCCESS,
+        is_current=True,
+    )
+    providers = text_ai_providers()
+    configured_provider_count = sum(provider_is_configured(provider) for provider in providers)
     processed_statuses = {
         SourceItem.STATUS_NORMALIZED,
         SourceItem.STATUS_CLASSIFIED,
@@ -755,7 +824,7 @@ def pipeline(request):
     stage_cards = [
         {"number": 1, "name": "抓取并保留来源记录", "count": source_items.count(), "state": "collect", "note": "RSS 公开订阅元数据已启用；YouTube 适配器已登记但默认停用，不下载视频或音频。"},
         {"number": 2, "name": "标准化与确定性去重", "count": source_items.filter(processing_status__in=processed_statuses).count(), "state": "code", "note": "平台 ID、链接和内容指纹；不调用 AI。"},
-        {"number": 3, "name": "规则分类与相关性门控", "count": source_items.filter(processed_at__isnull=False).count(), "state": "code", "note": "官方源使用主题匹配，媒体源要求标题直提关注对象；文本模型尚未接入。"},
+        {"number": 3, "name": "规则门控与结构化整理", "count": source_items.filter(processed_at__isnull=False).count(), "state": "code", "note": "确定性门控先过滤噪音；M3 对管理员明确选择的候选执行一次版本化 AI 分析。"},
         {"number": 4, "name": "代码评分与事件聚合", "count": family_events.exclude(scoring_breakdown={}).count(), "state": "code", "note": f"策略 {POLICY_VERSION}，相同输入得到稳定结果。"},
         {"number": 5, "name": "分层展示", "count": family_events.filter(selection_status=IntelligenceEvent.SELECTION_SELECTED).count(), "state": "decision", "note": "精选、全部动态、待复核和噪音箱。"},
     ]
@@ -776,6 +845,13 @@ def pipeline(request):
             "recent_runs": CollectionRun.objects.filter(Q(family=member.family) | Q(family__isnull=True))[:20],
             "policy_version": POLICY_VERSION,
             "automatic_collection_enabled": True,
+            "current_analysis_count": current_analyses.count(),
+            "failed_analysis_count": EventAnalysis.objects.filter(
+                event__family=member.family,
+                status=EventAnalysis.STATUS_FAILED,
+            ).count(),
+            "text_ai_provider_count": len(providers),
+            "configured_text_ai_count": configured_provider_count,
             "can_admin": True,
         },
     )

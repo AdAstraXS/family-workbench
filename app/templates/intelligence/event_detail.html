@@ -22,8 +22,30 @@
     </div>
   </header>
 
+  {% if current_analysis %}
+  <section class="intel-notice">
+    <strong>AI 结构化整理</strong>
+    <span>依据 {{ current_analysis.input_snapshot.evidence_refs|length }} 个已保存来源生成；这是可核查的派生结果，不是人物原话或人工确认结论。{{ current_analysis.provider.name }} · {{ current_analysis.model_name }} · {{ current_analysis.prompt_version }}</span>
+  </section>
+  <section class="intel-detail-block"><span>AI 事实摘要</span><div>{{ current_analysis.result_json.summary|linebreaks }}<small class="intel-muted">证据：{% for ref in current_analysis.result_json.summary_evidence_refs %}<a href="#{{ ref }}">{{ ref }}</a>{% if not forloop.last %}、{% endif %}{% endfor %}</small></div></section>
+  <section class="intel-detail-block"><span>AI 判断为什么重要</span><div>{{ current_analysis.result_json.why_it_matters|linebreaks }}</div></section>
+  {% if current_analysis.result_json.facts %}
+  <section class="intel-detail-block"><span>可核查事实</span><div><ul>{% for claim in current_analysis.result_json.facts %}<li>{{ claim.text }} <small class="intel-muted">{% for ref in claim.evidence_refs %}<a href="#{{ ref }}">{{ ref }}</a>{% if not forloop.last %}、{% endif %}{% endfor %}</small></li>{% endfor %}</ul></div></section>
+  {% endif %}
+  {% if current_analysis.result_json.opinions %}
+  <section class="intel-detail-block"><span>观点</span><div><ul>{% for claim in current_analysis.result_json.opinions %}<li><strong>{{ claim.speaker }}</strong>：{{ claim.text }} <small class="intel-muted">{% for ref in claim.evidence_refs %}<a href="#{{ ref }}">{{ ref }}</a>{% if not forloop.last %}、{% endif %}{% endfor %}</small></li>{% endfor %}</ul></div></section>
+  {% endif %}
+  {% if current_analysis.result_json.numbers %}
+  <section class="intel-detail-block"><span>关键数字</span><div><ul>{% for number in current_analysis.result_json.numbers %}<li><strong>{{ number.value }} {{ number.unit }}</strong> · {{ number.context }} <small class="intel-muted">{% for ref in number.evidence_refs %}<a href="#{{ ref }}">{{ ref }}</a>{% if not forloop.last %}、{% endif %}{% endfor %}</small></li>{% endfor %}</ul></div></section>
+  {% endif %}
+  {% if current_analysis.result_json.uncertainties %}
+  <section class="intel-detail-block"><span>尚不确定</span><div><ul>{% for uncertainty in current_analysis.result_json.uncertainties %}<li>{{ uncertainty }}</li>{% endfor %}</ul></div></section>
+  {% endif %}
+  <section class="intel-detail-block"><span>原始候选说明</span><div>{{ event.summary|linebreaks }}{% if event.why_it_matters %}{{ event.why_it_matters|linebreaks }}{% endif %}</div></section>
+  {% else %}
   <section class="intel-detail-block"><span>事实摘要</span><div>{{ event.summary|linebreaks }}</div></section>
   <section class="intel-detail-block"><span>为什么重要</span><div>{% if event.why_it_matters %}{{ event.why_it_matters|linebreaks }}{% else %}<p class="intel-muted">尚未填写影响说明。</p>{% endif %}</div></section>
+  {% endif %}
 
   <section class="intel-score-explanation">
     <div class="intel-section-head"><div><span>SCORING</span><h2>为什么进入这一层</h2></div><small>{{ event.scoring_policy_version }} · {{ event.get_score_origin_display }}</small></div>
@@ -40,7 +62,7 @@
   <section class="intel-evidence-section">
     <div class="intel-section-head"><div><span>EVIDENCE</span><h2>原始证据</h2></div><small>{{ event.evidence_links.count }} 个来源</small></div>
     {% for evidence in event.evidence_links.all %}
-      <article class="intel-evidence-card">
+      <article class="intel-evidence-card" id="source-item-{{ evidence.source_item_id }}">
         <div><span class="intel-tier tier-{{ evidence.source_item.source.source_tier|lower }}">{{ evidence.source_item.source.source_tier }}级</span><strong>{{ evidence.source_item.title }}</strong></div>
         <p>{{ evidence.excerpt|default:evidence.source_item.excerpt|default:"未保存摘录，请通过原文链接核查。" }}</p>
         <footer><span>{{ evidence.source_item.source.name }} · {{ evidence.get_evidence_type_display }}</span>{% if evidence.source_item.canonical_url %}<a href="{{ evidence.source_item.canonical_url }}" target="_blank" rel="noopener noreferrer">打开原文 ↗</a>{% endif %}</footer>
@@ -62,9 +84,34 @@
       <form method="post" action="{% url 'intelligence:event_archive' event.pk %}">{% csrf_token %}<input type="hidden" name="mode" value="organize"><button class="button ghost" type="submit">保存并加入待整理</button></form>
     {% endif %}
     {% if can_admin %}
+      {% if configured_text_ai_count %}
+      <form method="post" action="{% url 'intelligence:event_analyze' event.pk %}" onsubmit="return confirm('将向所选云端文本模型发送标题和已保存的公开短摘录，是否继续？');">
+        {% csrf_token %}
+        <select name="provider_id" aria-label="文本 AI 服务商">
+          {% for item in text_ai_providers %}{% if item.configured %}<option value="{{ item.provider.pk }}">{{ item.provider.name }} · {{ item.provider.model_name }}</option>{% endif %}{% endfor %}
+        </select>
+        {% if current_analysis %}<input type="hidden" name="force" value="1">{% endif %}
+        <button class="button ghost" type="submit">{% if current_analysis %}重新生成 AI 分析{% else %}生成 AI 分析{% endif %}</button>
+      </form>
+      {% else %}
+      <span class="intel-muted">文本 AI 尚未配置 Key，当前不能发送分析请求。</span>
+      {% endif %}
       <a class="button" href="{% url 'intelligence:event_edit' event.pk %}">编辑事件</a>
       {% if event.review_status != "ignored" %}<form class="intel-push-right" method="post" action="{% url 'intelligence:event_ignore' event.pk %}" onsubmit="return confirm('确定把这条事件移出普通信息流吗？原始证据仍会保留。');">{% csrf_token %}<button class="button intel-danger" type="submit">标记忽略</button></form>{% endif %}
     {% endif %}
   </footer>
+
+  {% if can_admin and analysis_history %}
+  <section class="intel-evidence-section">
+    <div class="intel-section-head"><div><span>AI AUDIT</span><h2>最近分析版本</h2></div><small>重跑不会覆盖历史</small></div>
+    {% for analysis in analysis_history %}
+    <article class="intel-evidence-card">
+      <div><span class="intel-status {% if analysis.status == 'success' %}ok{% elif analysis.status == 'failed' %}error{% else %}warning{% endif %}">{{ analysis.get_status_display }}</span><strong>{{ analysis.model_name|default:"未调用模型" }}</strong>{% if analysis.is_current %}<span>当前采用</span>{% endif %}</div>
+      <p>{{ analysis.created_at|date:"Y-m-d H:i:s" }} · {{ analysis.prompt_version }} · {{ analysis.schema_version }}{% if analysis.tokens_used %} · {{ analysis.tokens_used }} tokens{% endif %}</p>
+      {% if analysis.error_message %}<p class="intel-error-text">{{ analysis.error_message }}</p>{% endif %}
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
 </article>
 {% endblock %}

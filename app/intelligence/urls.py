@@ -10,6 +10,7 @@ urlpatterns = [
     path("people/events/", views.event_list, name="event_list"),
     path("people/events/new/", views.manual_event_create, name="event_create"),
     path("people/events/<int:pk>/", views.event_detail, name="event_detail"),
+    path("people/events/<int:pk>/analyze/", views.event_analyze, name="event_analyze"),
     path("people/events/<int:pk>/edit/", views.event_edit, name="event_edit"),
     path("people/events/<int:pk>/ignore/", views.event_ignore, name="event_ignore"),
     path("people/events/<int:pk>/bookmark/", views.event_toggle_bookmark, name="event_toggle_bookmark"),

@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     CollectionRun,
     CollectionRunItem,
+    EventAnalysis,
     EventEvidence,
     EventKnowledgeArchive,
     EventSubject,
@@ -72,6 +73,22 @@ class IntelligenceEventAdmin(admin.ModelAdmin):
     search_fields = ("title", "summary", "why_it_matters")
     readonly_fields = ("scoring_policy_version", "scoring_breakdown", "cluster_key", "first_seen_at", "last_seen_at", "created_at", "updated_at")
     inlines = (EventSubjectInline, EventEvidenceInline)
+
+
+@admin.register(EventAnalysis)
+class EventAnalysisAdmin(admin.ModelAdmin):
+    list_display = (
+        "event", "status", "provider", "model_name", "prompt_version",
+        "is_current", "tokens_used", "created_at",
+    )
+    list_filter = ("status", "is_current", "provider", "prompt_version", "created_at")
+    search_fields = ("event__title", "model_name", "error_message")
+    readonly_fields = (
+        "event", "provider", "analysis_request", "model_name", "prompt_version",
+        "schema_version", "input_fingerprint", "input_snapshot", "result_json",
+        "status", "error_message", "tokens_used", "cost_estimate", "is_current",
+        "created_by", "created_at", "updated_at",
+    )
 
 
 @admin.register(SubjectFollow)
