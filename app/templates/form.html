@@ -7,6 +7,7 @@
   <div class="section-head">
     <h1>{{ title }}</h1>
   </div>
+  {% if form_intro %}<p class="form-intro">{{ form_intro }}</p>{% endif %}
   <form method="post" class="data-form">
     {% csrf_token %}
     {% if form.non_field_errors %}

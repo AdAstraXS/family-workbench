@@ -1,0 +1,71 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}确认 AI 整理 · 待整理 · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:inbox' %}">待整理</a><span aria-hidden="true">›</span><span>确认 AI 整理</span>{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-page-heading">
+  <div>
+    <span class="eyebrow">AI organization</span>
+    <h1>确认 AI 整理范围（{{ document_count }} 篇）{% if is_reorganization %}{% include "knowledge/_help_tip.html" with text="将为这篇精选知识生成一轮新的摘要、分类和标签建议。当前精选结果保持不变，只有你核对确认后才会更新。" %}{% else %}{% include "knowledge/_help_tip.html" with text="AI 只生成摘要、分类和标签建议；结果仍留在待整理，只有你核对确认后才会进入精选知识。" %}{% endif %}</h1>
+  </div>
+  {% if return_document_id %}<a class="button" href="{% url 'knowledge:document_detail' return_document_id %}">返回文章</a>{% else %}<a class="button" href="{% url 'knowledge:inbox' %}">返回待整理</a>{% endif %}
+</section>
+
+<div class="knowledge-ai-confirm-layout">
+  <main class="knowledge-ai-confirm-main">
+    {% for group in groups %}
+      <section class="panel knowledge-ai-consent-card">
+        <header>
+          <div><span class="eyebrow">{{ group.source.get_kind_display }}</span><h2>{{ group.source.name }}</h2></div>
+          <span class="status-pill{% if group.source.allow_cloud_ai %} source{% else %} warning{% endif %}">{% if group.source.allow_cloud_ai %}来源已授权{% else %}本次需要授权{% endif %}</span>
+        </header>
+        <dl class="knowledge-metadata">
+          <div><dt>发送范围</dt><dd>{{ group.documents|length }} 篇正文，约 {{ group.character_count }} 个字符</dd></div>
+          <div><dt>AI 服务</dt><dd>{{ group.provider.name }} · {{ group.provider.model_name }}</dd></div>
+          <div><dt>服务商留存</dt><dd>{{ group.retention_policy }}</dd></div>
+          <div><dt>费用限制</dt><dd>{{ group.cost_limit }}；系统会记录实际 Token 用量</dd></div>
+        </dl>
+        <details>
+          <summary>查看本来源选中的文章</summary>
+          <ul class="knowledge-ai-selected-list">
+            {% for document in group.documents %}<li>{{ document.title }}</li>{% endfor %}
+          </ul>
+        </details>
+      </section>
+    {% endfor %}
+  </main>
+
+  <aside class="panel knowledge-ai-consent-panel">
+    <h2>正文发送授权</h2>
+    {% include "knowledge/_help_tip.html" with text="整理需要把所选文章的标题、来源和正文发送到 NAS 之外的云端 AI。原始文件和原文不会被修改。" %}
+    <form method="post" action="{% url 'knowledge:document_ai_organize' %}" class="stacked-form">
+      {% csrf_token %}
+      {% for document in documents %}<input type="hidden" name="document_ids" value="{{ document.pk }}">{% endfor %}
+      {% if return_document_id %}<input type="hidden" name="return_document_id" value="{{ return_document_id }}">{% endif %}
+      <input type="hidden" name="mode" value="{{ mode }}">
+      <input type="hidden" name="confirm" value="yes">
+      {% if unauthorized_groups %}
+        <label class="knowledge-ai-consent-option">
+          <input type="radio" name="authorization" value="once" checked>
+            <span><strong>仅允许本次选中的文章{% include "knowledge/_help_tip.html" with text="任务结束后不保留来源级授权，推荐用于首次试用。" %}</strong></span>
+        </label>
+        {% if can_authorize_all_sources %}
+          <label class="knowledge-ai-consent-option">
+            <input type="radio" name="authorization" value="source">
+            <span><strong>今后允许这些来源使用云端 AI{% include "knowledge/_help_tip.html" with text="以后仍需在待整理中主动选择文章，不会自动批量处理。" %}</strong></span>
+          </label>
+        {% endif %}
+      {% else %}
+        <input type="hidden" name="authorization" value="existing">
+        <div class="notice">所选来源已经由所有者授权；本次仍只处理上面列出的文章。</div>
+      {% endif %}
+      <label class="checkbox-label knowledge-ai-acknowledge">
+        <input type="checkbox" name="acknowledge" value="yes" required>
+        <span>我确认将上述范围发送给列出的云端 AI 服务，并在结果生成后人工核对。</span>
+      </label>
+      <button class="button primary" type="submit">确认并创建 AI 整理任务</button>
+    </form>
+  </aside>
+</div>
+{% endblock %}

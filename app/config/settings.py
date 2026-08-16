@@ -48,6 +48,9 @@ INSTALLED_APPS = [
     "ledger",
     "ipo",
     "notes",
+    "knowledge",
+    "reading",
+    "trading_journal",
     "macro",
     "ai_analysis",
     "intelligence",
@@ -115,6 +118,28 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+KNOWLEDGE_FILE_ROOT = Path(
+    os.getenv("KNOWLEDGE_FILE_ROOT", str(BASE_DIR / "knowledge_files"))
+)
+KNOWLEDGE_MICROSOFT_CLIENT_ID = os.getenv("KNOWLEDGE_MICROSOFT_CLIENT_ID", "")
+KNOWLEDGE_MICROSOFT_CLIENT_SECRET = os.getenv(
+    "KNOWLEDGE_MICROSOFT_CLIENT_SECRET",
+    "",
+)
+KNOWLEDGE_MICROSOFT_TENANT = os.getenv("KNOWLEDGE_MICROSOFT_TENANT", "common")
+KNOWLEDGE_MICROSOFT_REDIRECT_URI = os.getenv(
+    "KNOWLEDGE_MICROSOFT_REDIRECT_URI",
+    "",
+)
+KNOWLEDGE_MICROSOFT_SCOPES = ["Notes.Read", "User.Read"]
+KNOWLEDGE_TOKEN_ENCRYPTION_KEY = os.getenv(
+    "KNOWLEDGE_TOKEN_ENCRYPTION_KEY",
+    "",
+)
+KNOWLEDGE_MAX_RESOURCE_BYTES = int(
+    os.getenv("KNOWLEDGE_MAX_RESOURCE_BYTES", str(25 * 1024 * 1024))
+)
 
 FUTU_OPEND_HOST = os.getenv("FUTU_OPEND_HOST", "host.docker.internal")
 FUTU_OPEND_PORT = int(os.getenv("FUTU_OPEND_PORT", "11111"))

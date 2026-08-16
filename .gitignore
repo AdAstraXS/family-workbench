@@ -1,6 +1,7 @@
 .env
 postgres/
 media/
+knowledge_files/
 staticfiles/
 app/tmp/
 app/db.sqlite3

@@ -107,7 +107,7 @@
   <div class="section-head"><div><h2>持仓明细</h2><p>持仓按交易原币展示，盈亏同时显示家庭本位币。</p></div></div>
   <div class="account-table-wrap">
     <table class="account-prototype-table holdings-prototype-table dashboard-holdings-table">
-      <thead><tr><th>证券代码</th><th>证券名称</th><th>成员</th><th>券商账户</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>浮动盈亏</th><th>累计已实现盈亏</th></tr></thead>
+      <thead><tr><th>证券代码</th><th>证券名称</th><th>成员</th><th>券商账户</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>浮动盈亏</th><th>累计已实现盈亏</th><th>操作</th></tr></thead>
       <tbody>
         {% for item in positions %}
           <tr>
@@ -115,8 +115,15 @@
             <td>{{ item.quantity|floatformat:"-4" }}</td><td>{{ item.display_price|currency2:item.original_currency }}</td><td>{{ item.market_value_live|currency0:item.original_currency }}</td><td>{{ item.display_cost|currency2:item.original_currency }}</td>
             <td class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}"><span class="money-stack">{{ item.unrealized_live|signed_currency0:item.original_currency }}<small>本位币 {{ item.unrealized_base|signed_currency0:item.account.family.base_currency }}</small></span></td>
             <td class="{% if item.realized_for_year > 0 %}positive{% elif item.realized_for_year < 0 %}negative{% endif %}"><span class="money-stack">{{ item.realized_for_year|signed_currency0:item.original_currency }}<small>本位币 {{ item.realized_base|signed_currency0:item.account.family.base_currency }}</small></span></td>
+            <td><span class="row-actions holding-actions">
+              <a class="holding-action holding-action-secondary" href="{% url 'portfolio:manual_security_price' item.security.pk %}">更新价格</a>
+              <a class="holding-action holding-action-primary" href="{% url 'portfolio:transaction_create' %}?account={{ item.account.pk }}&security={{ item.security.pk }}&action=sell">{% if item.is_option %}平仓{% else %}卖出{% endif %}</a>
+              {% if item.is_option and item.option_expired %}<a class="holding-action holding-action-warning" href="{% url 'portfolio:option_position_action' item.pk 'expire' %}">到期作废</a>{% endif %}
+              {% if item.is_long_option and item.option_expired %}<a class="holding-action holding-action-accent" href="{% url 'portfolio:option_position_action' item.pk 'exercise' %}">到期行权</a>{% endif %}
+              {% if item.is_short_option and item.option_expired %}<a class="holding-action holding-action-accent" href="{% url 'portfolio:option_position_action' item.pk 'assignment' %}">到期指派</a>{% endif %}
+            </span></td>
           </tr>
-        {% empty %}<tr><td colspan="10">该统计年份暂无持仓记录。</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="11">该统计年份暂无持仓记录。</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>

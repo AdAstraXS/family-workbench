@@ -63,14 +63,21 @@
         </label>
       </form>
     </div>
-    <div class="account-table-wrap"><table class="account-prototype-table account-positions-table"><thead><tr><th>市场</th><th>标的</th><th>资产类别</th><th>数量</th><th>最新价</th><th>行情状态</th><th>市值</th><th>成本</th><th>持仓盈亏</th><th>累计已实现盈亏</th><th>仓位</th></tr></thead>
+    <div class="account-table-wrap"><table class="account-prototype-table account-positions-table"><thead><tr><th>市场</th><th>标的</th><th>资产类别</th><th>数量</th><th>最新价</th><th>行情状态</th><th>市值</th><th>成本</th><th>持仓盈亏</th><th>累计已实现盈亏</th><th>仓位</th><th>操作</th></tr></thead>
       <tbody>{% for item in positions %}<tr>
         <td><span class="market-badge market-{{ item.security.market|lower }}">{{ item.security.market }}</span></td><td>{{ item.security.name }}</td><td>{{ item.security.asset_category|default:item.security.asset_type }}</td><td>{{ item.quantity|floatformat:"-4" }}</td>
         <td>{{ item.display_price|currency2:item.original_currency }}</td><td><span class="pricing-status pricing-{{ item.pricing_status_display }}">{{ item.pricing_status_label }}</span><small class="price-meta">{{ item.price_source_label }}{% if item.price_as_of %} · {{ item.price_as_of|date:"m-d H:i" }}{% endif %}</small></td><td>{{ item.market_value_live|currency0:item.original_currency }}</td><td>{{ item.display_cost|currency2:item.original_currency }}</td>
         <td class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}"><span class="money-stack">{{ item.unrealized_live|signed_currency0:item.original_currency }}<small>本位币 {{ item.unrealized_base|signed_currency0:account.family.base_currency }}</small></span></td>
         <td class="{% if item.realized_for_year > 0 %}positive{% elif item.realized_for_year < 0 %}negative{% endif %}"><span class="money-stack">{{ item.realized_for_year|signed_currency0:item.original_currency }}<small>本位币 {{ item.realized_base|signed_currency0:account.family.base_currency }}</small></span></td>
         <td>{{ item.position_ratio|floatformat:2 }}%</td>
-      </tr>{% empty %}<tr><td colspan="11">暂无持仓。</td></tr>{% endfor %}</tbody>
+        <td><span class="row-actions holding-actions">
+          <a class="holding-action holding-action-secondary" href="{% url 'portfolio:manual_security_price' item.security.pk %}">更新价格</a>
+          <a class="holding-action holding-action-primary" href="{% url 'portfolio:transaction_create' %}?account={{ item.account.pk }}&security={{ item.security.pk }}&action=sell">{% if item.is_option %}平仓{% else %}卖出{% endif %}</a>
+          {% if item.is_option and item.option_expired %}<a class="holding-action holding-action-warning" href="{% url 'portfolio:option_position_action' item.pk 'expire' %}">到期作废</a>{% endif %}
+          {% if item.is_long_option and item.option_expired %}<a class="holding-action holding-action-accent" href="{% url 'portfolio:option_position_action' item.pk 'exercise' %}">到期行权</a>{% endif %}
+          {% if item.is_short_option and item.option_expired %}<a class="holding-action holding-action-accent" href="{% url 'portfolio:option_position_action' item.pk 'assignment' %}">到期指派</a>{% endif %}
+        </span></td>
+      </tr>{% empty %}<tr><td colspan="12">暂无持仓。</td></tr>{% endfor %}</tbody>
     </table></div>
   {% elif active_tab == "individual-profit" %}
     <div class="section-head"><h2>个股盈亏</h2></div>

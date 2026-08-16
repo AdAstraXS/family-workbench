@@ -1,0 +1,82 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}导入批次 #{{ batch.pk }} · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:imports' %}">资料导入</a><span aria-hidden="true">›</span><span>批次 #{{ batch.pk }}</span>{% endblock %}
+
+{% block hub_content %}
+<section class="headline knowledge-headline">
+  <div>
+    <span class="eyebrow">导入批次 #{{ batch.pk }}</span>
+    <h1>{{ batch.source.name }}</h1>
+    <p>{{ batch.source_filename }} · {{ batch.get_import_format_display }} · {{ batch.get_visibility_display }}</p>
+  </div>
+  <span class="status-pill status-{{ batch.status }}">{{ batch.get_status_display }}</span>
+</section>
+
+<section class="metrics knowledge-metrics">
+  <div class="metric"><span>文件</span><strong>{{ batch.total_count }}</strong></div>
+  <div class="metric"><span>新增</span><strong>{{ batch.new_count }}</strong></div>
+  <div class="metric"><span>更新</span><strong>{{ batch.update_count }}</strong></div>
+  <div class="metric"><span>未变</span><strong>{{ batch.skipped_count }}</strong></div>
+  <div class="metric"><span>强重复</span><strong>{{ batch.duplicate_count }}</strong></div>
+  <div class="metric"><span>错误</span><strong>{{ batch.error_count }}</strong></div>
+  <div class="metric"><span>图片</span><strong>{{ batch.asset_count }}</strong></div>
+</section>
+
+<section class="panel">
+  <dl class="knowledge-metadata">
+    <div><dt>发起成员</dt><dd>{{ batch.requested_by|default:"已停用成员" }}</dd></div>
+    <div><dt>归属人物</dt><dd>{{ batch.person_name|default:"按每篇原始署名" }}</dd></div>
+    <div><dt>默认分类</dt><dd>{{ batch.category|default:"未设置" }}</dd></div>
+    <div><dt>上传包 SHA-256</dt><dd><code>{{ batch.source_sha256 }}</code></dd></div>
+    <div><dt>预计保存空间</dt><dd>{{ batch.estimated_bytes|filesizeformat }}</dd></div>
+    <div><dt>预览完成</dt><dd>{{ batch.previewed_at|date:"Y-m-d H:i:s"|default:"尚未完成" }}</dd></div>
+    <div><dt>导入完成</dt><dd>{{ batch.completed_at|date:"Y-m-d H:i:s"|default:"-" }}</dd></div>
+  </dl>
+  {% if batch.error_message %}<div class="notice warning">{{ batch.error_message }}</div>{% endif %}
+  {% if latest_job %}<p><a class="button" href="{% url 'knowledge:job_detail' latest_job.pk %}">查看最近任务 #{{ latest_job.pk }}</a></p>{% endif %}
+  {% if can_manage %}
+    <div class="knowledge-document-actions">
+      {% if can_retry_import %}
+        <form method="post" action="{% url 'knowledge:import_batch_confirm' batch.pk %}">
+          {% csrf_token %}
+          {% if batch.error_count %}<label class="checkbox-label"><input type="checkbox" name="accept_valid_items"><span>我已查看错误，只导入有效项目</span></label>{% endif %}
+          <button class="button primary" type="submit">{% if batch.status == "partial" %}重试失败项目{% else %}确认导入这个批次{% endif %}</button>
+        </form>
+      {% endif %}
+      {% if batch.status == "completed" or batch.status == "partial" %}
+        <form method="post" action="{% url 'knowledge:import_batch_rollback' batch.pk %}">
+          {% csrf_token %}<button class="button danger-outline" type="submit">安全回滚这个批次</button>
+        </form>
+      {% endif %}
+    </div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>逐篇检查结果</h2>
+  {% if items_redacted %}<div class="notice warning">该批次属于其他成员的私密资料；这里只显示汇总。</div>{% endif %}
+  <table>
+    <thead><tr><th>文章</th><th>发布日期</th><th>结论</th><th>图片</th><th>警告或错误</th></tr></thead>
+    <tbody>
+      {% for item in items %}
+        <tr>
+          <td>
+            {% if item.document_id and item.status == "imported" %}<a href="{% url 'knowledge:document_detail' item.document_id %}">{{ item.title }}</a>{% else %}<strong>{{ item.title|default:item.relative_path }}</strong>{% endif %}
+            <small>{{ item.relative_path }}</small>
+          </td>
+          <td>{{ item.published_at|date:"Y-m-d H:i"|default:"未知" }}</td>
+          <td>{{ item.get_action_display }} · {{ item.get_status_display }}</td>
+          <td>{{ item.asset_count }}（{{ item.asset_bytes|filesizeformat }}）</td>
+          <td>
+            {% if item.error_message %}<span class="notice warning">{{ item.error_message }}</span>{% endif %}
+            {% for warning in item.warnings %}<small>{{ warning }}</small>{% empty %}{% if not item.error_message %}-{% endif %}{% endfor %}
+          </td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5">格式检查尚未产生逐篇结果。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

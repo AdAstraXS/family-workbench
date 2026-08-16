@@ -68,12 +68,19 @@ def default_quote_config(security):
     if (security.extra_data or {}).get("futu_code"):
         automatic = True
     provider = PriceSourceChoices.FUTU if automatic else PriceSourceChoices.MANUAL
+    max_age_hours = (
+        168
+        if security.asset_type == Security.TYPE_OPTION
+        else 96
+        if automatic
+        else 720
+    )
     return SecurityQuoteConfig(
         security=security,
         provider=provider,
         provider_symbol=provider_symbol if automatic else "",
         price_type="last" if automatic else "manual",
-        max_age_hours=96 if automatic else 720,
+        max_age_hours=max_age_hours,
     )
 
 

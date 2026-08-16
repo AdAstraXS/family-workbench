@@ -137,6 +137,24 @@ def detail(request, pk):
 
 
 @login_required
+@require_POST
+def confirm_knowledge(request, pk):
+    member = _current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    if not _can_write(member):
+        return HttpResponseForbidden("当前家庭成员是只读角色，不能确认精选知识。")
+    note = _editable_note_or_404(member, pk)
+    if not note.include_in_knowledge:
+        messages.error(request, "请先勾选“加入家庭知识库”。")
+        return redirect("notes:detail", pk=note.pk)
+    note.knowledge_state = InvestmentNote.KNOWLEDGE_CURATED
+    note.save(update_fields=["knowledge_state", "updated_at"])
+    messages.success(request, "这条随手记已完成确认，进入精选知识。")
+    return redirect("notes:detail", pk=note.pk)
+
+
+@login_required
 def create(request):
     member = _current_member(request)
     if member is None:

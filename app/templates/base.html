@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site_household_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260723-1">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260809-help-tip-v11">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="app-{{ request.resolver_match.app_name|default:'site' }}">
@@ -16,6 +16,7 @@
       <a href="{% url 'ledger:overview' %}">家庭账本</a>
       <a href="{% url 'ipo:index' %}">港股打新</a>
       <a href="{% url 'notes:index' %}">投资笔记</a>
+      <a href="{% url 'knowledge:index' %}">知识中心</a>
       <a href="{% url 'intelligence:index' %}">AI 情报</a>
       <a href="{% url 'macro:index' %}">宏观数据</a>
       <a href="{% url 'ai_analysis:index' %}">AI 分析</a>
@@ -32,7 +33,7 @@
     {% endif %}
   </header>
   <main class="page">
-    {% if user.is_authenticated and page_parent_url %}
+    {% if user.is_authenticated and page_parent_url and request.resolver_match.app_name != "knowledge" and request.resolver_match.app_name != "reading" and request.resolver_match.app_name != "trading_journal" %}
       <nav class="page-context-nav" aria-label="页面快捷导航">
         <a class="button page-nav-back" href="{{ page_parent_url }}">返回上一级</a>
         {% if request.resolver_match.app_name == "ledger" and request.resolver_match.url_name != "overview" %}
@@ -43,6 +44,8 @@
           <a class="button page-nav-module" href="{% url 'notes:index' %}">投资笔记首页</a>
         {% elif request.resolver_match.app_name == "intelligence" and request.resolver_match.url_name != "index" %}
           <a class="button page-nav-module" href="{% url 'intelligence:index' %}">AI 情报首页</a>
+        {% elif request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name != "index" %}
+          <a class="button page-nav-module" href="{% url 'knowledge:index' %}">知识中心首页</a>
         {% endif %}
         {% if request.resolver_match.app_name != "dashboard" %}
           <a class="button page-nav-home" href="{% url 'dashboard:home' %}">工作台首页</a>

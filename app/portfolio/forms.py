@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django import forms
@@ -25,6 +25,7 @@ from .models import (
     SecurityMarket,
     SecurityQuoteConfig,
     TradeTypeChoices,
+    WatchlistGroup,
     WatchlistItem,
 )
 
@@ -111,6 +112,16 @@ def clean_market_exchange(form, cleaned):
         return None
     cleaned["exchange"] = exchange.code
     return exchange
+
+
+ASSET_TYPES_BY_CATEGORY = {
+    "equity": {Security.TYPE_STOCK},
+    "fixed_income": {Security.TYPE_BOND},
+    "fund": {Security.TYPE_ETF, Security.TYPE_FUND},
+    "derivatives": {Security.TYPE_OPTION},
+    "commodities": {Security.TYPE_OTHER},
+    "alternatives": {Security.TYPE_OTHER},
+}
 
 
 def validate_security_market_selection(form, cleaned, exchange):
@@ -214,9 +225,117 @@ class SecurityForm(BaseModelForm):
         return security
 
 
+def build_option_contract_symbol(underlying, expiration_date, option_type, strike_price):
+    root = "".join(
+        character
+        for character in underlying.symbol.strip().upper()
+        if character.isalnum()
+    )
+    strike_code = int(
+        (Decimal(str(strike_price)) * Decimal("1000")).quantize(Decimal("1"))
+    )
+    option_code = "C" if option_type == OptionContract.CALL else "P"
+    return f"{root}{expiration_date:%y%m%d}{option_code}{strike_code:08d}"
+
+
+def save_option_contract(
+    *,
+    member,
+    underlying,
+    option_type,
+    strike_price,
+    expiration_date,
+    multiplier,
+    contract_symbol="",
+    security=None,
+):
+    from .market_data import ensure_quote_config
+
+    contract_symbol = (contract_symbol or build_option_contract_symbol(
+        underlying,
+        expiration_date,
+        option_type,
+        strike_price,
+    )).strip().upper()
+    if security is None:
+        existing = (
+            OptionContract.objects.select_related("security")
+            .filter(
+                underlying=underlying,
+                option_type=option_type,
+                strike_price=strike_price,
+                expiration_date=expiration_date,
+            )
+            .first()
+        )
+        if existing:
+            security = existing.security
+    duplicate_symbol = Security.objects.filter(
+        symbol=contract_symbol,
+        market=underlying.market,
+    )
+    if security:
+        duplicate_symbol = duplicate_symbol.exclude(pk=security.pk)
+    if duplicate_symbol.exists():
+        raise forms.ValidationError("该市场已存在相同的期权合约代码。")
+
+    security = security or Security()
+    security.asset_category = Security.default_asset_category(
+        member.family, Security.TYPE_OPTION
+    )
+    security.symbol = contract_symbol
+    security.name = (
+        f"{underlying.name} {expiration_date} "
+        f"{dict(OptionContract.OPTION_TYPE_CHOICES)[option_type]} {strike_price}"
+    )
+    security.market = underlying.market
+    security.exchange = underlying.exchange
+    security.asset_type = Security.TYPE_OPTION
+    security.currency = underlying.currency
+    security.data_source = "manual"
+    security.save()
+    OptionContract.objects.update_or_create(
+        security=security,
+        defaults={
+            "underlying": underlying,
+            "option_type": option_type,
+            "strike_price": strike_price,
+            "expiration_date": expiration_date,
+            "multiplier": multiplier,
+        },
+    )
+    WatchlistItem.objects.update_or_create(
+        family=member.family,
+        security=security,
+        defaults={"member": member, "is_active": True},
+    )
+    config = ensure_quote_config(security)
+    config.provider = PriceSourceChoices.MANUAL
+    config.provider_symbol = ""
+    config.price_type = "manual"
+    config.max_age_hours = 168
+    config.enabled = True
+    config.save(
+        update_fields=[
+            "provider",
+            "provider_symbol",
+            "price_type",
+            "max_age_hours",
+            "enabled",
+            "updated_at",
+        ]
+    )
+    return security
+
+
 class OptionContractForm(forms.Form):
     underlying = forms.ModelChoiceField(label="正股标的", queryset=Security.objects.none())
-    contract_symbol = forms.CharField(label="完整合约代码", max_length=30)
+    contract_symbol = forms.CharField(
+        label="完整合约代码",
+        max_length=30,
+        required=False,
+        help_text="可以留空，系统会按正股、到期日、期权类型和行权价自动生成。",
+    )
     option_type = forms.ChoiceField(label="期权类型", choices=OptionContract.OPTION_TYPE_CHOICES)
     strike_price = forms.DecimalField(label="行权价", max_digits=20, decimal_places=6)
     expiration_date = forms.DateField(
@@ -227,7 +346,20 @@ class OptionContractForm(forms.Form):
     market = forms.ChoiceField(label="市场")
     currency = forms.ChoiceField(label="交易币种")
 
-    def __init__(self, *args, family=None, **kwargs):
+    def __init__(self, *args, family=None, instance=None, **kwargs):
+        self.instance = instance
+        if instance and not args and "initial" not in kwargs:
+            contract = instance.option_contract
+            kwargs["initial"] = {
+                "underlying": contract.underlying,
+                "contract_symbol": instance.symbol,
+                "option_type": contract.option_type,
+                "strike_price": contract.strike_price,
+                "expiration_date": contract.expiration_date,
+                "multiplier": contract.multiplier,
+                "market": instance.market,
+                "currency": instance.currency,
+            }
         super().__init__(*args, **kwargs)
         self.family = family
         for field in self.fields.values():
@@ -244,8 +376,13 @@ class OptionContractForm(forms.Form):
 
     def clean_contract_symbol(self):
         symbol = self.cleaned_data["contract_symbol"].strip().upper()
+        if not symbol:
+            return symbol
         market = (self.data.get("market") or "US").strip().upper()
-        if Security.objects.filter(symbol=symbol, market=market).exists():
+        duplicate = Security.objects.filter(symbol=symbol, market=market)
+        if self.instance:
+            duplicate = duplicate.exclude(pk=self.instance.pk)
+        if duplicate.exists():
             raise forms.ValidationError("该市场已存在相同代码；期权必须使用完整且唯一的合约代码。")
         return symbol
 
@@ -257,43 +394,93 @@ class OptionContractForm(forms.Form):
             self.add_error("currency", "期权币种应与正股标的一致。")
         if underlying and cleaned.get("market") != underlying.market:
             self.add_error("market", "期权市场必须与正股标的一致。")
+        if underlying and all(
+            cleaned.get(field) is not None
+            for field in ("option_type", "strike_price", "expiration_date")
+        ):
+            duplicate = OptionContract.objects.filter(
+                underlying=underlying,
+                option_type=cleaned["option_type"],
+                strike_price=cleaned["strike_price"],
+                expiration_date=cleaned["expiration_date"],
+            )
+            if self.instance:
+                duplicate = duplicate.exclude(security=self.instance)
+            if duplicate.exists():
+                self.add_error(None, "相同条款的期权合约已经存在。")
         return cleaned
 
     def save(self, member):
-        from .market_data import ensure_quote_config
-
-        underlying = self.cleaned_data["underlying"]
-        security = Security.objects.create(
-            asset_category=Security.default_asset_category(
-                member.family, Security.TYPE_OPTION
-            ),
-            symbol=self.cleaned_data["contract_symbol"],
-            name=(
-                f"{underlying.name} {self.cleaned_data['expiration_date']} "
-                f"{dict(OptionContract.OPTION_TYPE_CHOICES)[self.cleaned_data['option_type']]} "
-                f"{self.cleaned_data['strike_price']}"
-            ),
-            market=self.cleaned_data["market"].strip().upper(),
-            exchange=underlying.exchange,
-            asset_type=Security.TYPE_OPTION,
-            currency=self.cleaned_data["currency"],
-            data_source="manual",
-        )
-        OptionContract.objects.create(
-            security=security,
-            underlying=underlying,
+        return save_option_contract(
+            member=member,
+            underlying=self.cleaned_data["underlying"],
             option_type=self.cleaned_data["option_type"],
             strike_price=self.cleaned_data["strike_price"],
             expiration_date=self.cleaned_data["expiration_date"],
             multiplier=self.cleaned_data["multiplier"],
+            contract_symbol=self.cleaned_data["contract_symbol"],
+            security=self.instance,
         )
-        WatchlistItem.objects.update_or_create(
-            family=member.family,
-            security=security,
-            defaults={"member": member, "is_active": True},
-        )
-        ensure_quote_config(security)
-        return security
+
+
+class WatchlistGroupForm(forms.ModelForm):
+    class Meta:
+        model = WatchlistGroup
+        fields = ["name"]
+
+
+class OptionPositionActionForm(forms.Form):
+    action_date = forms.DateField(
+        label="处理日期",
+        widget=forms.DateInput(
+            attrs={"type": "date", "class": "form-control"},
+            format="%Y-%m-%d",
+        ),
+    )
+    quantity = forms.DecimalField(
+        label="合约张数",
+        max_digits=24,
+        decimal_places=6,
+        min_value=Decimal("0.000001"),
+    )
+    fee = forms.DecimalField(
+        label="相关费用",
+        max_digits=20,
+        decimal_places=4,
+        min_value=Decimal("0"),
+        initial=0,
+    )
+    remark = forms.CharField(label="备注", required=False, max_length=500)
+
+    def __init__(self, *args, position=None, action="expire", **kwargs):
+        self.position = position
+        self.action = action
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+        apply_decimal_widgets(self)
+
+    def clean(self):
+        cleaned = super().clean()
+        if not self.position:
+            return cleaned
+        quantity = cleaned.get("quantity")
+        if quantity and quantity > abs(self.position.quantity):
+            self.add_error("quantity", "处理张数不能超过当前持仓张数。")
+        action_date = cleaned.get("action_date")
+        contract = self.position.security.option_contract
+        if action_date and action_date > timezone.localdate():
+            self.add_error("action_date", "处理日期不能晚于今天。")
+        if self.action == "expire" and action_date and action_date < contract.expiration_date:
+            self.add_error("action_date", "到期作废日期不能早于合约到期日。")
+        if self.action in {"exercise", "assignment"}:
+            if action_date and action_date > contract.expiration_date:
+                self.add_error("action_date", "到期处理日期不能晚于合约到期日。")
+        if self.action == "exercise" and self.position.quantity <= 0:
+            raise forms.ValidationError("空头期权不能行权，请使用“到期指派”。")
+        if self.action == "assignment" and self.position.quantity >= 0:
+            raise forms.ValidationError("多头期权不能被指派，请使用“到期行权”。")
+        return cleaned
 
 
 class SecurityQuoteConfigForm(BaseModelForm):
@@ -367,6 +554,101 @@ class ManualSecurityPriceForm(forms.Form):
         if price_as_of > timezone.now() + timedelta(minutes=5):
             raise forms.ValidationError("价格时点不能晚于当前时间。")
         return price_as_of
+
+
+def save_bond_security(
+    *,
+    member,
+    symbol,
+    name,
+    market,
+    exchange,
+    currency,
+    isin,
+    issuer,
+    bond_type,
+    face_value,
+    coupon_rate,
+    coupon_frequency,
+    maturity_date,
+    redemption_price,
+    quote_basis,
+    clean_price,
+    accrued_interest,
+    valuation_date,
+    asset_category=None,
+    security=None,
+):
+    from .market_data import ensure_quote_config, record_security_price
+
+    security = security or Security()
+    security.asset_category = (
+        asset_category
+        if asset_category and asset_category.code == "fixed_income"
+        else Security.default_asset_category(member.family, Security.TYPE_BOND)
+    )
+    security.symbol = symbol.strip().upper()
+    security.name = name.strip()
+    security.market = market.strip().upper()
+    security.exchange = exchange.strip().upper()
+    security.asset_type = Security.TYPE_BOND
+    security.currency = currency
+    security.data_source = "manual"
+    security.save()
+    BondDetail.objects.update_or_create(
+        security=security,
+        defaults={
+            "isin": isin,
+            "issuer": issuer,
+            "bond_type": bond_type,
+            "face_value": face_value,
+            "coupon_rate": coupon_rate,
+            "coupon_frequency": coupon_frequency,
+            "maturity_date": maturity_date,
+            "redemption_price": redemption_price,
+            "quote_basis": quote_basis,
+            "accrued_interest": accrued_interest,
+            "valuation_date": valuation_date,
+        },
+    )
+    config = ensure_quote_config(security)
+    config.provider = PriceSourceChoices.MANUAL
+    config.provider_symbol = ""
+    config.price_type = "manual"
+    config.max_age_hours = 720
+    config.save(
+        update_fields=[
+            "provider",
+            "provider_symbol",
+            "price_type",
+            "max_age_hours",
+            "updated_at",
+        ]
+    )
+    price_as_of = (
+        timezone.make_aware(datetime.combine(valuation_date, time(16, 0)))
+        if valuation_date
+        else timezone.now()
+    )
+    record_security_price(
+        security,
+        clean_price,
+        source=PriceSourceChoices.MANUAL,
+        price_as_of=price_as_of,
+        price_type="manual",
+        quote_data={
+            "raw_data": {
+                "manual_bond_valuation": True,
+                "accrued_interest": str(accrued_interest),
+            }
+        },
+    )
+    WatchlistItem.objects.update_or_create(
+        family=member.family,
+        security=security,
+        defaults={"member": member, "is_active": True},
+    )
+    return security
 
 
 class BondForm(forms.Form):
@@ -455,74 +737,27 @@ class BondForm(forms.Form):
         return cleaned
 
     def save(self, member):
-        from datetime import datetime, time
-
-        from django.utils import timezone
-
-        from .market_data import ensure_quote_config, record_security_price
-
-        security = self.instance or Security()
-        security.asset_category = Security.default_asset_category(
-            member.family, Security.TYPE_BOND
+        return save_bond_security(
+            member=member,
+            security=self.instance,
+            symbol=self.cleaned_data["symbol"],
+            name=self.cleaned_data["name"],
+            market=self.cleaned_data["market"],
+            exchange=self.cleaned_data.get("exchange", ""),
+            currency=self.cleaned_data["currency"],
+            isin=self.cleaned_data["isin"],
+            issuer=self.cleaned_data["issuer"],
+            bond_type=self.cleaned_data["bond_type"],
+            face_value=self.cleaned_data["face_value"],
+            coupon_rate=self.cleaned_data["coupon_rate"],
+            coupon_frequency=self.cleaned_data["coupon_frequency"],
+            maturity_date=self.cleaned_data["maturity_date"],
+            redemption_price=self.cleaned_data["redemption_price"],
+            quote_basis=self.cleaned_data["quote_basis"],
+            clean_price=self.cleaned_data["clean_price"],
+            accrued_interest=self.cleaned_data["accrued_interest"],
+            valuation_date=self.cleaned_data.get("valuation_date"),
         )
-        security.symbol = self.cleaned_data["symbol"].strip().upper()
-        security.name = self.cleaned_data["name"].strip()
-        security.market = self.cleaned_data["market"].strip().upper()
-        security.exchange = self.cleaned_data.get("exchange", "").strip().upper()
-        security.asset_type = Security.TYPE_BOND
-        security.currency = self.cleaned_data["currency"]
-        security.data_source = "manual"
-        security.save()
-        BondDetail.objects.update_or_create(
-            security=security,
-            defaults={
-                field: self.cleaned_data[field]
-                for field in (
-                    "isin", "issuer", "bond_type", "face_value", "coupon_rate",
-                    "coupon_frequency", "maturity_date", "redemption_price",
-                    "quote_basis", "accrued_interest", "valuation_date",
-                )
-            },
-        )
-        config = ensure_quote_config(security)
-        config.provider = PriceSourceChoices.MANUAL
-        config.provider_symbol = ""
-        config.price_type = "manual"
-        config.max_age_hours = 720
-        config.save(
-            update_fields=[
-                "provider",
-                "provider_symbol",
-                "price_type",
-                "max_age_hours",
-                "updated_at",
-            ]
-        )
-        valuation_date = self.cleaned_data.get("valuation_date")
-        price_as_of = (
-            timezone.make_aware(datetime.combine(valuation_date, time(16, 0)))
-            if valuation_date
-            else timezone.now()
-        )
-        record_security_price(
-            security,
-            self.cleaned_data["clean_price"],
-            source=PriceSourceChoices.MANUAL,
-            price_as_of=price_as_of,
-            price_type="manual",
-            quote_data={
-                "raw_data": {
-                    "manual_bond_valuation": True,
-                    "accrued_interest": str(self.cleaned_data["accrued_interest"]),
-                }
-            },
-        )
-        WatchlistItem.objects.update_or_create(
-            family=member.family,
-            security=security,
-            defaults={"member": member, "is_active": True},
-        )
-        return security
 
 
 class InvestmentPositionForm(BaseModelForm):
@@ -552,6 +787,94 @@ class InvestmentTransactionForm(BaseModelForm):
     bank_account = forms.ModelChoiceField(
         label="证券账户",
         queryset=BankAccount.objects.none(),
+    )
+    asset_type = forms.ChoiceField(
+        label="金融品种",
+        choices=[("", "请先选择资产类别")] + list(Security.ASSET_TYPE_CHOICES),
+        required=False,
+    )
+    create_option_contract = forms.BooleanField(
+        label="同时新建期权合约",
+        required=False,
+        help_text="新合约无需先离开交易页面单独建立。",
+    )
+    option_underlying = forms.ModelChoiceField(
+        label="期权正股",
+        queryset=Security.objects.none(),
+        required=False,
+    )
+    option_contract_symbol = forms.CharField(
+        label="期权合约代码",
+        required=False,
+        max_length=30,
+        help_text="可以留空，由系统自动生成标准代码。",
+    )
+    option_type = forms.ChoiceField(
+        label="期权类型",
+        choices=[("", "---------")] + list(OptionContract.OPTION_TYPE_CHOICES),
+        required=False,
+    )
+    option_strike_price = forms.DecimalField(
+        label="行权价",
+        max_digits=20,
+        decimal_places=6,
+        required=False,
+    )
+    option_expiration_date = forms.DateField(
+        label="到期日",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date", "class": "form-control"}),
+    )
+    option_multiplier = forms.IntegerField(
+        label="合约乘数",
+        min_value=1,
+        initial=100,
+        required=False,
+    )
+    create_bond = forms.BooleanField(
+        label="同时新增债券",
+        required=False,
+        help_text="新增债券和本次交易会一起保存，任一步失败都不会写入。",
+    )
+    bond_symbol = forms.CharField(label="债券代码", max_length=30, required=False)
+    bond_name = forms.CharField(label="债券名称", max_length=200, required=False)
+    bond_market = forms.ChoiceField(label="债券市场", required=False)
+    bond_exchange = forms.ChoiceField(label="债券交易所", required=False)
+    bond_isin = forms.CharField(label="ISIN", max_length=20, required=False)
+    bond_issuer = forms.CharField(label="发行人", max_length=200, required=False)
+    bond_type = forms.ChoiceField(
+        label="债券类型",
+        choices=[("", "---------")] + list(BondDetail.BOND_TYPE_CHOICES),
+        required=False,
+    )
+    bond_face_value = forms.DecimalField(
+        label="单张面值", max_digits=20, decimal_places=4, initial=100, required=False
+    )
+    bond_coupon_rate = forms.DecimalField(
+        label="票面利率（%）", max_digits=10, decimal_places=6, initial=0, required=False
+    )
+    bond_coupon_frequency = forms.IntegerField(
+        label="每年付息次数", min_value=1, initial=2, required=False
+    )
+    bond_maturity_date = forms.DateField(
+        label="债券到期日",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date", "class": "form-control"}),
+    )
+    bond_redemption_price = forms.DecimalField(
+        label="到期兑付价格", max_digits=20, decimal_places=6, initial=100, required=False
+    )
+    bond_quote_basis = forms.ChoiceField(
+        label="报价方式",
+        choices=[("", "---------")] + list(BondDetail.QUOTE_BASIS_CHOICES),
+        required=False,
+    )
+    bond_accrued_interest = forms.DecimalField(
+        label="每报价单位应计利息",
+        max_digits=20,
+        decimal_places=6,
+        initial=0,
+        required=False,
     )
     date_fields = ("trade_date",)
 
@@ -586,7 +909,30 @@ class InvestmentTransactionForm(BaseModelForm):
                 "member",
                 "bank_account",
                 "asset_category",
+                "asset_type",
                 "security",
+                "create_option_contract",
+                "option_underlying",
+                "option_contract_symbol",
+                "option_type",
+                "option_strike_price",
+                "option_expiration_date",
+                "option_multiplier",
+                "create_bond",
+                "bond_symbol",
+                "bond_name",
+                "bond_market",
+                "bond_exchange",
+                "bond_isin",
+                "bond_issuer",
+                "bond_type",
+                "bond_face_value",
+                "bond_coupon_rate",
+                "bond_coupon_frequency",
+                "bond_maturity_date",
+                "bond_redemption_price",
+                "bond_quote_basis",
+                "bond_accrued_interest",
                 "trade_date",
                 "trade_type_option",
                 "position_effect",
@@ -606,6 +952,7 @@ class InvestmentTransactionForm(BaseModelForm):
             ]
         )
         self.fields["security"].label = "交易标的"
+        self.fields["security"].help_text = "已有标的直接选择；新期权或新债券可在当前页面同时建立。"
         self.fields["trade_type_option"].label = "交易类型"
         self.fields["position_effect"].label = "开平仓（期权）"
         self.fields["position_effect"].required = False
@@ -621,6 +968,11 @@ class InvestmentTransactionForm(BaseModelForm):
             ]
         )
         self.fields["amount"].help_text = "买入/卖出按数量 × 价格自动计算；股息、利息和费用请直接填写金额。"
+        self.fields["bond_market"].choices = security_market_choices(
+            excluded_codes={"CN_B"},
+        )
+        self.fields["bond_market"].initial = "US"
+        self.fields["bond_exchange"].choices = security_exchange_choices()
 
         login_member = (
             FamilyMember.objects.filter(user=user, is_active=True)
@@ -677,6 +1029,16 @@ class InvestmentTransactionForm(BaseModelForm):
             Q(family_id=family_id) | Q(family=None),
             is_active=True,
         ).order_by("display_order", "name")
+        selected_asset_type = (
+            self.data.get("asset_type")
+            or self.initial.get("asset_type")
+            or (
+                self.instance.security.asset_type
+                if self.instance.pk and self.instance.security_id
+                else ""
+            )
+        )
+        self.fields["asset_type"].initial = selected_asset_type
         watched_ids = WatchlistItem.objects.filter(
             family_id=family_id,
             is_active=True,
@@ -690,6 +1052,10 @@ class InvestmentTransactionForm(BaseModelForm):
                 Q(pk=self.instance.security_id) | Q(pk__in=security_queryset)
             )
         self.fields["security"].queryset = security_queryset
+        self.fields["option_underlying"].queryset = Security.objects.filter(
+            Q(watchlist_items__family_id=family_id, watchlist_items__is_active=True)
+            | Q(positions__account__bank_account__family_id=family_id)
+        ).exclude(asset_type=Security.TYPE_OPTION).distinct().order_by("market", "symbol")
         self.fields["trade_type_option"].queryset = InvestmentOption.objects.filter(
             category=InvestmentOption.CATEGORY_TRANSACTION_TYPE,
             is_active=True,
@@ -714,11 +1080,92 @@ class InvestmentTransactionForm(BaseModelForm):
         family = cleaned_data.get("family")
         member = cleaned_data.get("member")
         trade_type_option = cleaned_data.get("trade_type_option")
+        creating_option = cleaned_data.get("create_option_contract")
+        creating_bond = cleaned_data.get("create_bond")
+        asset_category = cleaned_data.get("asset_category")
+        asset_type = cleaned_data.get("asset_type")
+        category_code = asset_category.code if asset_category else ""
+        if creating_option and creating_bond:
+            raise forms.ValidationError("一笔交易不能同时新增期权和债券。")
+        if creating_option and (
+            category_code != "derivatives" or asset_type != Security.TYPE_OPTION
+        ):
+            self.add_error("create_option_contract", "请先选择“衍生品 → 期权”。")
+        if creating_bond and (
+            category_code != "fixed_income" or asset_type != Security.TYPE_BOND
+        ):
+            self.add_error("create_bond", "请先选择“固定收益类 → 债券”。")
+        allowed_asset_types = ASSET_TYPES_BY_CATEGORY.get(category_code)
+        if asset_type and allowed_asset_types and asset_type not in allowed_asset_types:
+            self.add_error("asset_type", "所选金融品种不属于当前资产类别。")
+        if security and asset_type and security.asset_type != asset_type:
+            self.add_error("security", "交易标的与所选金融品种不一致，请重新选择。")
+        if creating_option:
+            required_option_fields = {
+                "option_underlying": "请选择期权对应的正股。",
+                "option_type": "请选择期权类型。",
+                "option_strike_price": "请输入行权价。",
+                "option_expiration_date": "请输入到期日。",
+                "option_multiplier": "请输入合约乘数。",
+            }
+            for field_name, message in required_option_fields.items():
+                if cleaned_data.get(field_name) in (None, ""):
+                    self.add_error(field_name, message)
+            underlying = cleaned_data.get("option_underlying")
+            if underlying:
+                cleaned_data["currency"] = underlying.currency
+                cleaned_data["asset_category"] = Security.default_asset_category(
+                    family, Security.TYPE_OPTION
+                )
+            cleaned_data["security"] = None
+        if creating_bond:
+            required_bond_fields = {
+                "bond_symbol": "请输入债券代码。",
+                "bond_name": "请输入债券名称。",
+                "bond_market": "请选择债券市场。",
+                "currency": "请选择债券交易币种。",
+                "bond_type": "请选择债券类型。",
+                "bond_face_value": "请输入单张面值。",
+                "bond_coupon_frequency": "请输入每年付息次数。",
+                "bond_redemption_price": "请输入到期兑付价格。",
+                "bond_quote_basis": "请选择报价方式。",
+            }
+            for field_name, message in required_bond_fields.items():
+                if cleaned_data.get(field_name) in (None, ""):
+                    self.add_error(field_name, message)
+            market = (cleaned_data.get("bond_market") or "").strip().upper()
+            symbol = (cleaned_data.get("bond_symbol") or "").strip().upper()
+            if symbol and market and Security.objects.filter(
+                symbol=symbol,
+                market=market,
+            ).exists():
+                self.add_error("bond_symbol", "该市场已存在相同代码，请直接选择已有债券。")
+            exchange_token = cleaned_data.get("bond_exchange") or ""
+            if exchange_token:
+                try:
+                    exchange_market, exchange_code = exchange_token.split(":", 1)
+                except ValueError:
+                    self.add_error("bond_exchange", "债券交易所选项无效，请重新选择。")
+                else:
+                    if exchange_market != market:
+                        self.add_error("bond_exchange", "所选交易所不属于债券市场。")
+                    elif not SecurityExchange.objects.filter(
+                        market__code=market,
+                        code=exchange_code,
+                    ).exists():
+                        self.add_error("bond_exchange", "交易所字典中不存在该选项。")
+                    else:
+                        cleaned_data["bond_exchange"] = exchange_code
+            if cleaned_data.get("price") is not None and cleaned_data["price"] <= 0:
+                self.add_error("price", "债券交易价格必须大于 0。")
+            cleaned_data["security"] = None
         if (
             trade_type_option
             and trade_type_option.code
             in {TradeTypeChoices.BUY, TradeTypeChoices.IPO, TradeTypeChoices.SELL}
             and not security
+            and not creating_option
+            and not creating_bond
         ):
             self.add_error("security", "买入、打新和卖出交易必须选择交易标的。")
         if bank_account and family and bank_account.family_id != family.pk:
@@ -729,21 +1176,36 @@ class InvestmentTransactionForm(BaseModelForm):
             cleaned_data["currency"] = security.currency
         if security and not cleaned_data.get("asset_category"):
             cleaned_data["asset_category"] = security.asset_category
-        if security and security.asset_type == Security.TYPE_OPTION:
+        if creating_option or (security and security.asset_type == Security.TYPE_OPTION):
             if not cleaned_data.get("position_effect"):
                 self.add_error("position_effect", "期权交易必须选择开仓或平仓。")
         else:
             cleaned_data["position_effect"] = ""
         if cleaned_data.get("quantity") and cleaned_data.get("price"):
-            amount = (
-                security.market_value_for(
-                    cleaned_data["quantity"],
-                    cleaned_data["price"],
-                    include_accrued=False,
+            if creating_option:
+                multiplier = Decimal(str(cleaned_data.get("option_multiplier") or 100))
+                amount = (
+                    cleaned_data["quantity"]
+                    * cleaned_data["price"]
+                    * multiplier
                 )
-                if security
-                else cleaned_data["quantity"] * cleaned_data["price"]
-            )
+            elif creating_bond:
+                multiplier = (
+                    Decimal("0.01")
+                    if cleaned_data.get("bond_quote_basis") == BondDetail.PER_100
+                    else Decimal("1")
+                )
+                amount = cleaned_data["quantity"] * cleaned_data["price"] * multiplier
+            else:
+                amount = (
+                    security.market_value_for(
+                        cleaned_data["quantity"],
+                        cleaned_data["price"],
+                        include_accrued=False,
+                    )
+                    if security
+                    else cleaned_data["quantity"] * cleaned_data["price"]
+                )
             cleaned_data["amount"] = amount.quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
@@ -754,6 +1216,40 @@ class InvestmentTransactionForm(BaseModelForm):
 
     def save(self, commit=True):
         instance = super().save(commit=False)
+        if self.cleaned_data.get("create_option_contract"):
+            instance.security = save_option_contract(
+                member=self.cleaned_data["member"],
+                underlying=self.cleaned_data["option_underlying"],
+                option_type=self.cleaned_data["option_type"],
+                strike_price=self.cleaned_data["option_strike_price"],
+                expiration_date=self.cleaned_data["option_expiration_date"],
+                multiplier=self.cleaned_data.get("option_multiplier") or 100,
+                contract_symbol=self.cleaned_data.get("option_contract_symbol", ""),
+            )
+        elif self.cleaned_data.get("create_bond"):
+            instance.security = save_bond_security(
+                member=self.cleaned_data["member"],
+                asset_category=self.cleaned_data.get("asset_category"),
+                symbol=self.cleaned_data["bond_symbol"],
+                name=self.cleaned_data["bond_name"],
+                market=self.cleaned_data["bond_market"],
+                exchange=self.cleaned_data.get("bond_exchange", ""),
+                currency=self.cleaned_data["currency"],
+                isin=self.cleaned_data.get("bond_isin", ""),
+                issuer=self.cleaned_data.get("bond_issuer", ""),
+                bond_type=self.cleaned_data["bond_type"],
+                face_value=self.cleaned_data["bond_face_value"],
+                coupon_rate=self.cleaned_data.get("bond_coupon_rate") or Decimal("0"),
+                coupon_frequency=self.cleaned_data["bond_coupon_frequency"],
+                maturity_date=self.cleaned_data.get("bond_maturity_date"),
+                redemption_price=self.cleaned_data["bond_redemption_price"],
+                quote_basis=self.cleaned_data["bond_quote_basis"],
+                clean_price=self.cleaned_data["price"],
+                accrued_interest=(
+                    self.cleaned_data.get("bond_accrued_interest") or Decimal("0")
+                ),
+                valuation_date=self.cleaned_data["trade_date"],
+            )
         bank_account = self.cleaned_data["bank_account"]
         currency = self.cleaned_data.get("currency") or (
             instance.security.currency if instance.security else ""

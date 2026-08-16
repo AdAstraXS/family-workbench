@@ -1,0 +1,21 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}{% if mode == "create" %}新增{% else %}编辑{% endif %}{{ label }} · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:topics' %}">分类与标签</a><span aria-hidden="true">›</span><span>{% if mode == "create" %}新增{% else %}编辑{% endif %}{{ label }}</span>{% endblock %}
+
+{% block hub_content %}
+<section class="headline">
+  <h1>{% if mode == "create" %}新增{% else %}编辑{% endif %}{{ label }}</h1>
+  {% if mode == "create" %}{% include "knowledge/_help_tip.html" with text="新增后，AI 和人工整理都可以优先使用这个目录项目。" %}{% else %}{% include "knowledge/_help_tip.html" with text="改名会同步更新现有资料，旧名称会保留为别名。" %}{% endif %}
+</section>
+<section class="panel form-panel knowledge-taxonomy-form-panel">
+  <form method="post" class="stacked-form">
+    {% csrf_token %}
+    {% for error in form.non_field_errors %}<span class="field-error">{{ error }}</span>{% endfor %}
+    {% for field in form %}
+      <label><span>{{ field.label }}</span>{{ field }}{% for error in field.errors %}<span class="field-error">{{ error }}</span>{% endfor %}</label>
+    {% endfor %}
+    <div class="form-actions"><button class="button primary" type="submit">保存{{ label }}</button><a class="button" href="{% url 'knowledge:topics' %}">取消</a></div>
+  </form>
+</section>
+{% endblock %}

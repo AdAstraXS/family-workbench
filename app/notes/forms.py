@@ -16,7 +16,15 @@ class InvestmentNoteForm(forms.ModelForm):
 
     class Meta:
         model = InvestmentNote
-        fields = ["title", "note_type", "note_date", "visibility", "tags_text", "content"]
+        fields = [
+            "title",
+            "note_type",
+            "note_date",
+            "visibility",
+            "include_in_knowledge",
+            "tags_text",
+            "content",
+        ]
         widgets = {
             "title": forms.TextInput(attrs={"placeholder": "给这篇笔记起个标题"}),
             "note_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
@@ -30,6 +38,9 @@ class InvestmentNoteForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._was_included_in_knowledge = bool(
+            self.instance and self.instance.pk and self.instance.include_in_knowledge
+        )
         current_type_id = self.instance.note_type_id if self.instance and self.instance.pk else None
         type_query = Q(is_active=True)
         if current_type_id:
@@ -39,6 +50,9 @@ class InvestmentNoteForm(forms.ModelForm):
         ).order_by("sort_order", "id")
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
+        self.fields["include_in_knowledge"].help_text = (
+            "默认不加入。勾选后会进入归档资料和待整理；完成整理并确认后才进入精选知识。"
+        )
         if self.instance and self.instance.pk:
             self.fields["tags_text"].initial = "，".join(self.instance.tags or [])
 
@@ -58,6 +72,21 @@ class InvestmentNoteForm(forms.ModelForm):
     def save(self, commit=True):
         note = super().save(commit=False)
         note.tags = self.cleaned_data["tags_text"]
+        curated_content_changed = bool(
+            note.knowledge_state == InvestmentNote.KNOWLEDGE_CURATED
+            and {
+                "title",
+                "note_type",
+                "content",
+                "tags_text",
+            }.intersection(self.changed_data)
+        )
+        if (
+            not note.include_in_knowledge
+            or not self._was_included_in_knowledge
+            or curated_content_changed
+        ):
+            note.knowledge_state = InvestmentNote.KNOWLEDGE_PENDING
         if commit:
             note.save()
         return note

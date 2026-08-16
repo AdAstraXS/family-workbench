@@ -1,0 +1,39 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}任务记录 · 知识中心{% endblock %}
+
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>任务记录</span>{% endblock %}
+
+{% block hub_content %}
+<section class="headline">
+  <h1>任务记录</h1>
+  {% include "knowledge/_help_tip.html" with text="同步、AI 整理和索引重建在网页请求之外运行；失败可以定位到具体项目。" %}
+</section>
+<section class="panel">
+  <table>
+    <thead><tr><th>创建时间</th><th>来源</th><th>任务</th><th>状态</th><th>进度</th><th>失败</th><th>发起人</th></tr></thead>
+    <tbody>
+      {% for job in page_obj %}
+        <tr>
+          <td><a href="{% url 'knowledge:job_detail' job.pk %}">{{ job.created_at|date:"Y-m-d H:i" }}</a></td>
+          <td>{{ job.source|default:"家庭索引" }}</td>
+          <td>{{ job.get_job_type_display }}</td>
+          <td><span class="status-pill status-{{ job.status }}">{{ job.get_status_display }}</span></td>
+          <td>{{ job.success_count|add:job.updated_count|add:job.skipped_count }} / {{ job.total_count }}</td>
+          <td>{{ job.failed_count }}</td>
+          <td>{{ job.requested_by|default:"系统" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7">暂无知识任务。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% if page_obj.paginator.num_pages > 1 %}
+  <nav class="pagination">
+    {% if page_obj.has_previous %}<a class="button" href="?page={{ page_obj.previous_page_number }}">上一页</a>{% endif %}
+    <span>第 {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} 页</span>
+    {% if page_obj.has_next %}<a class="button" href="?page={{ page_obj.next_page_number }}">下一页</a>{% endif %}
+  </nav>
+{% endif %}
+{% endblock %}

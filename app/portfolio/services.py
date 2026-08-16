@@ -9,8 +9,10 @@ from .models import (
     InvestmentCashMovement,
     InvestmentPosition,
     InvestmentTransaction,
+    OptionContract,
     TradeStatusChoices,
     TradeTypeChoices,
+    TransactionSourceChoices,
 )
 
 
@@ -240,3 +242,109 @@ def rebuild_cash_only_transaction(item):
     else:
         InvestmentCashMovement.objects.filter(transaction=item).delete()
     return item
+
+
+@transaction.atomic
+def settle_option_position(
+    position,
+    *,
+    action,
+    action_date,
+    quantity,
+    fee=ZERO,
+    remark="",
+    user=None,
+):
+    if position.security.asset_type != position.security.TYPE_OPTION:
+        raise ValidationError("只有期权持仓可以执行到期作废、行权或指派。")
+    if quantity <= 0 or quantity > abs(position.quantity):
+        raise ValidationError("处理张数必须大于 0，且不能超过当前持仓。")
+    if action not in {"expire", "exercise", "assignment"}:
+        raise ValidationError("不支持的期权处理方式。")
+
+    contract = position.security.option_contract
+    is_long = position.quantity > 0
+    if action == "exercise" and not is_long:
+        raise ValidationError("空头期权不能行权，请使用到期指派。")
+    if action == "assignment" and is_long:
+        raise ValidationError("多头期权不能被指派，请使用到期行权。")
+
+    close_trade_type = TradeTypeChoices.SELL if is_long else TradeTypeChoices.BUY
+    close_transaction = InvestmentTransaction.objects.create(
+        account=position.account,
+        security=position.security,
+        asset_category=position.security.asset_category,
+        trade_date=action_date,
+        trade_type=close_trade_type,
+        position_effect=InvestmentTransaction.EFFECT_CLOSE,
+        quantity=quantity,
+        price=ZERO,
+        amount=ZERO,
+        fee=fee if action == "expire" else ZERO,
+        currency=position.security.currency,
+        source=TransactionSourceChoices.MANUAL,
+        remark=(
+            {
+                "expire": "期权到期作废",
+                "exercise": "期权行权关闭合约",
+                "assignment": "期权被指派关闭合约",
+            }[action]
+            + (f"；{remark}" if remark else "")
+        ),
+        created_by=user,
+        updated_by=user,
+        extra_data={
+            "option_action": action,
+            "option_contract_id": contract.pk,
+        },
+    )
+    rebuild_position(position.account, position.security)
+
+    underlying_transaction = None
+    if action in {"exercise", "assignment"}:
+        if action == "exercise":
+            underlying_trade_type = (
+                TradeTypeChoices.BUY
+                if contract.option_type == OptionContract.CALL
+                else TradeTypeChoices.SELL
+            )
+        else:
+            underlying_trade_type = (
+                TradeTypeChoices.SELL
+                if contract.option_type == OptionContract.CALL
+                else TradeTypeChoices.BUY
+            )
+        underlying_quantity = quantity * contract.multiplier
+        underlying_transaction = InvestmentTransaction.objects.create(
+            account=position.account,
+            security=contract.underlying,
+            asset_category=contract.underlying.asset_category,
+            trade_date=action_date,
+            trade_type=underlying_trade_type,
+            quantity=underlying_quantity,
+            price=contract.strike_price,
+            amount=underlying_quantity * contract.strike_price,
+            fee=fee,
+            currency=contract.underlying.currency,
+            source=TransactionSourceChoices.MANUAL,
+            remark=(
+                f"由 {position.security.symbol} "
+                + ("行权" if action == "exercise" else "被指派")
+                + "产生"
+                + (f"；{remark}" if remark else "")
+            ),
+            created_by=user,
+            updated_by=user,
+            extra_data={
+                "option_action": action,
+                "option_close_transaction_id": close_transaction.pk,
+            },
+        )
+        rebuild_position(position.account, contract.underlying)
+        close_transaction.extra_data = {
+            **close_transaction.extra_data,
+            "underlying_transaction_id": underlying_transaction.pk,
+        }
+        close_transaction.save(update_fields=["extra_data", "updated_at"])
+
+    return close_transaction, underlying_transaction

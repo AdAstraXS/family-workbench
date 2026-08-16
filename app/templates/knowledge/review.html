@@ -1,0 +1,86 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}等待确认 · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:library' %}">资料库</a><span aria-hidden="true">›</span><span>等待确认</span>{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-page-heading knowledge-review-heading">
+  <div><span class="eyebrow">Human review</span><h1>等待确认{% include "knowledge/_help_tip.html" with text="左侧阅读原文和当前正式结果，右侧核对 AI 提出的摘要、分类和标签；未确认的建议不会覆盖现有知识。" %}</h1></div>
+  <span class="status-pill warning">{{ pending_document_count }} 篇待处理</span>
+</section>
+
+{% if review_document %}
+<section class="knowledge-review-workspace">
+  <aside class="knowledge-review-queue">
+    <header><strong>待确认队列</strong><span>{{ pending_document_count }}</span></header>
+    <nav aria-label="待确认文档">
+      {% for document in queue %}
+        <a href="?document={{ document.pk }}"{% if review_document.pk == document.pk %} class="active"{% endif %}>
+          <strong>{{ document.title|truncatechars:34 }}</strong>
+          <small>{{ document.source.name }} · {{ document.pending_total }} 项建议</small>
+        </a>
+      {% endfor %}
+    </nav>
+  </aside>
+
+  <div class="knowledge-review-compare">
+    <article class="knowledge-review-original">
+      <header>
+        <span class="knowledge-content-label original">原文 · 不可由 AI 修改</span>
+        <h2>{{ review_document.title }}</h2>
+        <p>{{ review_document.author|default:"作者未标注" }} · {{ review_document.content_modified_at|date:"Y-m-d"|default:"日期未知" }} · {{ review_document.source.name }}</p>
+        <div>
+          {% if review_document.source_url %}<a href="{{ review_document.source_url }}" target="_blank" rel="noopener noreferrer">打开来源链接</a>{% endif %}
+          <a href="{% url 'knowledge:document_detail' review_document.pk %}">打开完整详情</a>
+        </div>
+      </header>
+      <div class="knowledge-rich-content knowledge-review-body">
+        {% if review_document.current_revision %}{{ review_document.current_revision.normalized_html|safe }}{% else %}<p>正文尚未同步成功。</p>{% endif %}
+      </div>
+      {% if review_document.confirmed_summary or review_document.category or review_document.tags %}
+        <aside class="knowledge-review-current-result">
+          <span class="knowledge-content-label confirmed">当前正式结果</span>
+          {% if review_document.confirmed_summary %}<p>{{ review_document.confirmed_summary|linebreaksbr }}</p>{% endif %}
+          <div class="knowledge-tags">{% if review_document.category %}<span>{{ review_document.category }}</span>{% endif %}{% for tag in review_document.tags %}<span>#{{ tag }}</span>{% endfor %}</div>
+        </aside>
+      {% endif %}
+    </article>
+
+    <aside class="knowledge-review-suggestions">
+      <header><span class="knowledge-content-label ai">AI 建议 · 待确认</span><h2>整理建议{% include "knowledge/_help_tip.html" with text="可以单独修改并接受；最后一项处理后自动进入下一篇。" %}</h2></header>
+      {% for proposal in review_proposals %}
+        <article class="proposal-card status-{{ proposal.status }}">
+          <header><strong>{{ proposal.get_proposal_type_display }}</strong><span class="status-pill warning">待确认</span></header>
+          <form method="post" action="{% url 'knowledge:proposal_review' proposal.pk %}" class="proposal-form">
+            {% csrf_token %}
+            <input type="hidden" name="return_to" value="review">
+            <textarea class="form-control" name="value" rows="{% if proposal.proposal_type == 'summary' %}7{% else %}2{% endif %}">{% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}</textarea>
+            {% if proposal.proposal_type == "category" and proposal.suggested_value.is_new %}<p class="knowledge-new-taxonomy">建议新增分类；确认后才会加入目录。</p>{% elif proposal.proposal_type == "tags" and proposal.suggested_value.new_items %}<p class="knowledge-new-taxonomy">建议新增：{{ proposal.suggested_value.new_items|join:"、" }}；确认后才会加入目录。</p>{% endif %}
+            <p class="knowledge-suggestion-basis"><strong>建议依据：</strong>{% include "knowledge/_help_tip.html" with text="由当前原文版本生成；第一版不展示复杂推理，请直接对照原文判断。" %}</p>
+            <div><button class="button primary" type="submit" name="action" value="accept">修改并确认</button><button class="button danger-outline" type="submit" name="action" value="reject">拒绝此项</button></div>
+          </form>
+        </article>
+      {% endfor %}
+
+      {% if can_write %}
+        <form method="post" action="{% url 'knowledge:proposal_bulk_preview' %}" class="knowledge-review-all-form">
+          {% csrf_token %}
+          {% for proposal in review_proposals %}<input type="hidden" name="selected" value="{{ proposal.pk }}">{% endfor %}
+          <button class="button primary" type="submit">预览并确认本篇全部建议</button>
+        </form>
+      {% endif %}
+
+      <div class="knowledge-review-deferred-actions">
+        {% if next_document_id %}<a class="button" href="?document={{ next_document_id }}">暂不处理，下一篇</a>{% else %}<span class="button disabled" aria-disabled="true">已经是队列最后一篇</span>{% endif %}
+        <span class="button disabled" aria-disabled="true" title="需要重复关系模型">标记重复 · 后续</span>
+        <span class="button disabled" aria-disabled="true" title="需要文档级忽略操作与审计记录">忽略低价值 · 后续</span>
+      </div>
+    </aside>
+  </div>
+</section>
+{% else %}
+<section class="panel empty-state knowledge-review-empty"><h2>当前没有等待确认的资料</h2><p>可以返回资料库，为待整理资料生成建议，或在精选知识中发起 AI 重新整理。</p><a class="button" href="{% url 'knowledge:library' %}">返回资料库</a></section>
+{% endif %}
+
+<aside class="knowledge-planning-note"><strong>后续动作边界</strong>{% include "knowledge/_help_tip.html" with text="“标记重复”和“忽略低价值”需要文档级状态、原因与审计记录后才能开放；确认全部仍保留预览步骤，避免一次误操作覆盖多项正式结果。" %}</aside>
+{% endblock %}

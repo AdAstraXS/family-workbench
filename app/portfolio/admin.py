@@ -36,6 +36,7 @@ from .models import (
     SecurityQuoteConfig,
     SecurityNews,
     TransactionSourceChoices,
+    WatchlistGroup,
     WatchlistItem,
 )
 from .services import rebuild_cash_only_transaction, rebuild_position
@@ -163,9 +164,17 @@ class BondDetailAdmin(admin.ModelAdmin):
 
 @admin.register(WatchlistItem)
 class WatchlistItemAdmin(admin.ModelAdmin):
-    list_display = ("security", "family", "member", "is_active", "created_at")
-    list_filter = ("family", "member", "is_active")
+    list_display = ("security", "family", "member", "group", "is_active", "created_at")
+    list_filter = ("family", "member", "group", "is_active")
     search_fields = ("security__symbol", "security__name", "remark")
+
+
+@admin.register(WatchlistGroup)
+class WatchlistGroupAdmin(admin.ModelAdmin):
+    list_display = ("name", "family", "display_order", "updated_at")
+    list_editable = ("display_order",)
+    list_filter = ("family",)
+    search_fields = ("name",)
 
 
 @admin.register(SecurityMarketSnapshot)

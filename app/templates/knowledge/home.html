@@ -1,0 +1,86 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}知识中心{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-home-hero">
+  <div>
+    <span class="eyebrow">家庭知识底座</span>
+    <h1>今天需要做什么？</h1>
+    {% include "knowledge/_help_tip.html" with text="正式资料统一进入归档底座，值得长期复用的内容再经过待整理进入精选知识；这里集中查看需要处理的事项。" %}
+  </div>
+  <div class="knowledge-home-commandbar">
+    <form method="get" action="{% url 'knowledge:library' %}" class="knowledge-global-search" role="search">
+      <label class="sr-only" for="knowledge-home-search">搜索家庭知识</label>
+      <input id="knowledge-home-search" type="search" name="q" placeholder="搜索家庭知识……">
+      <button type="submit">搜索</button>
+    </form>
+    <div class="knowledge-home-import-actions" aria-label="资料导入入口">
+      <a class="button" href="{% url 'knowledge:imports' %}">上传资料</a>
+      <a class="button" href="{% url 'knowledge:imports' %}">导入记录</a>
+    </div>
+  </div>
+</section>
+
+<section class="knowledge-home-shortcuts" aria-label="知识空间快捷入口">
+  <a href="{% url 'knowledge:library' %}?collection=curated"><span>我的精选知识</span><strong>{{ stats.total }}</strong>{% include "knowledge/_help_tip.html" with text="默认只看当前账号。" skip_focus=True %}</a>
+  <a href="{% url 'knowledge:library' %}?collection=curated&amp;date_from={% now 'Y-m-d' %}"><span>今日精选</span><strong>{{ stats.today_new }}</strong>{% include "knowledge/_help_tip.html" with text="今天加入的精选知识。" skip_focus=True %}</a>
+  <a href="{% url 'knowledge:inbox' %}"><span>待整理</span><strong>{{ stats.inbox }}</strong>{% include "knowledge/_help_tip.html" with text="OneNote 摘录等候提炼。" skip_focus=True %}</a>
+  <a href="{% url 'knowledge:review' %}"><span>等待确认</span><strong>{{ stats.pending_review }}</strong>{% include "knowledge/_help_tip.html" with text="待整理或精选知识产生的新建议。" skip_focus=True %}</a>
+  <a href="{% url 'knowledge:sources' %}"><span>同步异常</span><strong>{{ stats.source_errors }}</strong>{% include "knowledge/_help_tip.html" with text="账号失效与来源错误。" skip_focus=True %}</a>
+</section>
+
+<section class="knowledge-home-grid">
+  <article class="knowledge-home-section knowledge-home-section-wide">
+    <header><div><span class="eyebrow">Today</span><h2>今日入库</h2></div><a href="{% url 'knowledge:library' %}">打开知识库</a></header>
+    <div class="knowledge-flow-strip" aria-label="知识整理流程">
+      <span><strong>1</strong>来源决定去向</span><i aria-hidden="true">→</i>
+      <span><strong>2</strong>进入归档资料</span><i aria-hidden="true">→</i>
+      <span><strong>3</strong>选择后人工或 AI 整理</span><i aria-hidden="true">→</i>
+      <span><strong>4</strong>确认精选知识</span>
+    </div>
+    <div class="knowledge-compact-list">
+      {% for entry in today_entries %}{% include "knowledge/_compact_entry.html" %}
+      {% empty %}<div class="knowledge-gentle-empty"><strong>今天还没有新知识</strong><span>OneNote 按分区规则分流；随手记只有明确勾选后才会加入。</span></div>{% endfor %}
+    </div>
+  </article>
+
+  <article class="knowledge-home-section">
+    <header><div><span class="eyebrow">Reading</span><h2>继续阅读</h2></div><a href="{% url 'reading:index' %}">打开在线书库</a></header>
+    <div class="knowledge-gentle-empty"><strong>尚未产生阅读进度</strong><span>reading 模块落地后，这里显示最近阅读的图书、章节和真实进度；不使用演示书籍伪造数据。</span></div>
+  </article>
+
+  <article class="knowledge-home-section">
+    <header><div><span class="eyebrow">长期保存</span><h2>最近精选</h2></div><a href="{% url 'knowledge:library' %}?collection=curated">精选知识</a></header>
+    <div class="knowledge-compact-list">
+      {% for entry in recent_confirmed %}{% include "knowledge/_compact_entry.html" %}
+      {% empty %}<div class="knowledge-gentle-empty"><span>完成整理并由成员确认的内容会显示在这里。</span></div>{% endfor %}
+    </div>
+  </article>
+
+  <article class="knowledge-home-section">
+    <header><div><span class="eyebrow">People</span><h2>关注人物的重要更新</h2></div><a href="{% url 'knowledge:people' %}">人物动态</a></header>
+    <div class="knowledge-gentle-empty"><strong>尚未接入关注人物来源</strong><span>接入前需核验本人、机构、采访和媒体转述来源，AI 摘要不会冒充原话。</span></div>
+  </article>
+
+  <article class="knowledge-home-section">
+    <header><div><span class="eyebrow">Recent</span><h2>最近更新</h2></div><a href="{% url 'knowledge:library' %}">资料库</a></header>
+    <div class="knowledge-compact-list">
+      {% for entry in recent_entries %}{% include "knowledge/_compact_entry.html" %}
+      {% empty %}<div class="knowledge-gentle-empty"><span>绑定 OneNote 或继续使用随手记后，最近内容会显示在这里。</span></div>{% endfor %}
+    </div>
+  </article>
+</section>
+
+{% if source_issues %}
+<section class="knowledge-home-alert" aria-label="来源异常">
+  <div><strong>有 {{ stats.source_errors }} 个来源需要处理</strong><span>来源异常不会删除 NAS 中已经保存的原文。</span></div>
+  <a class="button" href="{% url 'knowledge:sources' %}">查看来源状态</a>
+</section>
+{% endif %}
+
+<section class="knowledge-future-ribbon">
+  <div><span class="eyebrow">逐步开放</span><strong>在线阅读与交易复盘保持独立模块</strong>{% include "knowledge/_help_tip.html" with text="书籍、批注和评论由阅读模块负责；交易案例、纪律版本和复盘由交易日志模块负责。两者只把可检索知识投影到知识底座。" %}</div>
+  <a href="{% url 'knowledge:architecture' %}">查看完整边界与后续工作</a>
+</section>
+{% endblock %}

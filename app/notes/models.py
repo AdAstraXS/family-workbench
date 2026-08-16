@@ -45,6 +45,13 @@ class InvestmentNote(TimestampedModel):
         (VISIBILITY_FAMILY, "家庭共享"),
     ]
 
+    KNOWLEDGE_PENDING = "pending"
+    KNOWLEDGE_CURATED = "curated"
+    KNOWLEDGE_STATE_CHOICES = [
+        (KNOWLEDGE_PENDING, "待整理"),
+        (KNOWLEDGE_CURATED, "精选知识"),
+    ]
+
     family = models.ForeignKey(Family, verbose_name="所属家庭", on_delete=models.CASCADE, related_name="investment_notes")
     member = models.ForeignKey(FamilyMember, verbose_name="作者", on_delete=models.CASCADE, related_name="investment_notes")
     title = models.CharField("标题", max_length=200)
@@ -64,6 +71,17 @@ class InvestmentNote(TimestampedModel):
     )
     tags = models.JSONField("标签", default=list, blank=True)
     ai_summary = models.TextField("AI 总结", blank=True)
+    include_in_knowledge = models.BooleanField(
+        "加入家庭知识库",
+        default=False,
+        help_text="勾选后才会在家庭知识中心建立可重建的搜索投影。",
+    )
+    knowledge_state = models.CharField(
+        "知识整理状态",
+        max_length=20,
+        choices=KNOWLEDGE_STATE_CHOICES,
+        default=KNOWLEDGE_PENDING,
+    )
     remark = models.TextField("备注", blank=True)
     extra_data = models.JSONField("扩展字段", default=dict, blank=True)
 

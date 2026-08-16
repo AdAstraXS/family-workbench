@@ -1,0 +1,18 @@
+<tr>
+  <td class="knowledge-compact-cell">
+    <div class="knowledge-compact-row-layout">
+      {% if selected_collection == "pending" and entry.can_ai_organize %}<label class="knowledge-ai-select knowledge-compact-select"><input type="checkbox" name="document_ids" value="{{ entry.document_id }}" aria-label="选择 {{ entry.title }}"><span>选择</span></label>{% endif %}
+      <div class="knowledge-compact-content">
+        <div class="knowledge-compact-meta">
+          <span class="knowledge-compact-source">{{ entry.source_name }}</span>
+          {% if entry.author_name %}<span>作者：{{ entry.author_name }}</span>{% endif %}
+          {% if entry.content_time %}<time datetime="{{ entry.content_time|date:'c' }}">{{ entry.content_time|date:"Y-m-d" }}</time>{% endif %}
+          {% if entry.category %}<span>分类：{{ entry.category }}</span>{% endif %}
+          {% if entry.tags %}<span class="knowledge-compact-tags">{% for tag in entry.tags %}<a href="{% url 'knowledge:library' %}?collection={{ selected_collection|default:'library' }}&amp;tag={{ tag|urlencode }}">#{{ tag }}</a>{% endfor %}</span>{% endif %}
+          {% if selected_collection == "pending" %}<span class="status-pill{% if entry.workflow_stage == 'processing' %} source{% else %} warning{% endif %}">{{ entry.workflow_stage_label }}</span>{% elif selected_collection == "archive" or selected_collection == "all" %}{% if entry.knowledge_status == "pending" %}<span class="status-pill warning">待整理</span>{% elif entry.item_kind == "investment_note" or entry.document.library_tier == "knowledge" %}<span class="status-pill">精选知识</span>{% else %}<span class="status-pill source">已归档</span>{% endif %}{% endif %}
+        </div>
+        <div class="knowledge-compact-title"><a href="{{ entry.target_url }}">{{ entry.title }}</a></div>
+      </div>
+    </div>
+  </td>
+</tr>

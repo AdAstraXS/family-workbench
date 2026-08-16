@@ -140,7 +140,12 @@ def page_navigation(request):
                 "portfolio:account_detail",
                 kwargs={"pk": kwargs["account_id"]},
             )
-        elif url_name in {"option_contract_create", "bond_create", "bond_edit"}:
+        elif url_name in {
+            "option_contract_create",
+            "option_contract_edit",
+            "bond_create",
+            "bond_edit",
+        }:
             parent_url = reverse("portfolio:security_list")
         elif url_name.endswith("_create") or url_name.endswith("_edit"):
             parent_url = reverse(
@@ -159,19 +164,51 @@ def page_navigation(request):
             parent_url = reverse("notes:index")
         return {"page_parent_url": parent_url}
 
+    if app_name == "knowledge":
+        if url_name == "index":
+            parent_url = reverse("dashboard:home")
+        elif url_name in {
+            "microsoft_start",
+            "microsoft_callback",
+            "notebooks_refresh",
+            "notebook_select",
+        }:
+            parent_url = reverse("knowledge:sources")
+        elif url_name in {"document_detail", "document_organize"}:
+            parent_url = reverse("knowledge:library")
+        elif url_name in {"job_detail", "job_cancel", "job_retry"}:
+            parent_url = reverse("knowledge:jobs")
+        else:
+            parent_url = reverse("knowledge:index")
+        return {"page_parent_url": parent_url}
+
     if app_name == "intelligence":
         if url_name == "index":
             parent_url = reverse("dashboard:home")
         elif url_name in {"event_edit", "event_ignore"}:
-            parent_url = reverse("intelligence:event_detail", kwargs={"pk": kwargs["pk"]})
+            parent_url = reverse(
+                "intelligence:event_detail",
+                kwargs={"pk": kwargs["pk"]},
+            )
         elif url_name in {"subject_edit", "subject_toggle_follow"}:
-            parent_url = reverse("intelligence:subject_detail", kwargs={"slug": kwargs["slug"]})
+            parent_url = reverse(
+                "intelligence:subject_detail",
+                kwargs={"slug": kwargs["slug"]},
+            )
         elif url_name in {"source_edit", "source_create"}:
             parent_url = reverse("intelligence:source_list")
         elif url_name in {"event_detail", "event_create", "event_list"}:
-            parent_url = reverse("intelligence:event_list") if url_name != "event_list" else reverse("intelligence:index")
+            parent_url = (
+                reverse("intelligence:event_list")
+                if url_name != "event_list"
+                else reverse("intelligence:index")
+            )
         elif url_name in {"subject_detail", "subject_create", "subject_list"}:
-            parent_url = reverse("intelligence:subject_list") if url_name != "subject_list" else reverse("intelligence:index")
+            parent_url = (
+                reverse("intelligence:subject_list")
+                if url_name != "subject_list"
+                else reverse("intelligence:index")
+            )
         elif url_name in {"source_list", "pipeline", "operations"}:
             parent_url = reverse("intelligence:index")
         else:

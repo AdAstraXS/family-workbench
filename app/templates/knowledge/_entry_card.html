@@ -1,0 +1,32 @@
+<article class="panel knowledge-result-card">
+  {% if selected_collection == "pending" and entry.can_ai_organize %}
+    <label class="knowledge-ai-select">
+      <input type="checkbox" name="document_ids" value="{{ entry.document_id }}">
+      <span>选择</span>
+    </label>
+  {% endif %}
+  <div class="knowledge-card-main">
+    <div class="knowledge-card-meta">
+      <span class="knowledge-source-mark source-{{ entry.source_kind }}" aria-label="来源 {{ entry.source_name }}">{% if entry.source_kind == "onenote" %}N{% elif entry.source_kind == "internal_notes" %}记{% else %}源{% endif %}</span>
+      <span class="status-pill source">{{ entry.source_name }}</span>
+      {% if selected_member == "all" or scope != "all" %}<span>{% if entry.visibility == "family" %}家庭可见{% else %}仅自己{% endif %}</span><span>所属成员：{{ entry.owner.display_name }}</span>{% endif %}
+      {% if entry.author_name %}<span>作者：{{ entry.author_name }}</span>{% endif %}
+      {% if entry.content_time %}<time>{{ entry.content_time|date:"Y-m-d" }}</time>{% endif %}
+      {% if selected_collection == "pending" %}<span class="status-pill{% if entry.workflow_stage == 'processing' %} source{% else %} warning{% endif %}">{{ entry.workflow_stage_label }}</span>{% endif %}
+      {% if selected_collection == "archive" or selected_collection == "all" %}{% if entry.knowledge_status == "pending" %}<span class="status-pill warning">待整理</span>{% elif entry.item_kind == "investment_note" or entry.document.library_tier == "knowledge" %}<span class="status-pill">精选知识</span>{% else %}<span class="status-pill source">已归档</span>{% endif %}{% endif %}
+      {% if entry.category %}<span>分类：{{ entry.category }}</span>{% endif %}
+    </div>
+    <h2><a href="{{ entry.target_url }}">{{ entry.title }}</a></h2>
+    <p class="{% if entry.summary %}knowledge-summary{% else %}knowledge-snippet{% endif %}">{{ entry.hit_snippet|truncatechars:240 }}</p>
+    {% if entry.tags %}
+      <div class="knowledge-tags">
+        {% for tag in entry.tags %}<a href="{% url 'knowledge:library' %}?collection={{ selected_collection|default:'library' }}&amp;tag={{ tag|urlencode }}">#{{ tag }}</a>{% endfor %}
+      </div>
+    {% endif %}
+    <div class="knowledge-entry-evidence">
+      {% if entry.document and entry.document.section_name %}<span>原始位置：{{ entry.source_name }}{% if entry.document.hierarchy.section_group %} / {{ entry.document.hierarchy.section_group }}{% endif %} / {{ entry.document.section_name }}</span>{% endif %}
+      {% if entry.has_original %}<span>有原文</span>{% else %}<span>原笔记</span>{% endif %}
+      {% if entry.has_images %}<span>含图片</span>{% endif %}
+    </div>
+  </div>
+</article>

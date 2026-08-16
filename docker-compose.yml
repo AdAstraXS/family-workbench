@@ -30,6 +30,7 @@ services:
     volumes:
       - ./app:/app
       - ./media:/app/media
+      - ./knowledge_files:/app/knowledge_files
       - ./staticfiles:/app/staticfiles
     depends_on:
       db:

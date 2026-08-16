@@ -1,0 +1,66 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}任务 #{{ job.pk }} · 知识中心{% endblock %}
+
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:jobs' %}">任务记录</a><span aria-hidden="true">›</span><span>任务 #{{ job.pk }}</span>{% endblock %}
+
+{% block hub_content %}
+<section class="headline knowledge-headline">
+  <div>
+    <span class="eyebrow">任务 #{{ job.pk }}</span>
+    <h1>{{ job.get_job_type_display }}</h1>
+    <p>{{ job.source|default:"家庭搜索索引" }}</p>
+  </div>
+  <span class="status-pill status-{{ job.status }}">{{ job.get_status_display }}</span>
+</section>
+
+<section class="metrics knowledge-metrics">
+  <div class="metric"><span>总项数</span><strong>{{ job.total_count }}</strong></div>
+  <div class="metric"><span>新增</span><strong>{{ job.success_count }}</strong></div>
+  <div class="metric"><span>更新</span><strong>{{ job.updated_count }}</strong></div>
+  <div class="metric"><span>跳过</span><strong>{{ job.skipped_count }}</strong></div>
+  <div class="metric"><span>失败</span><strong>{{ job.failed_count }}</strong></div>
+</section>
+
+<section class="panel">
+  <dl class="knowledge-metadata">
+    <div><dt>发起人</dt><dd>{{ job.requested_by|default:"系统" }}</dd></div>
+    <div><dt>排队时间</dt><dd>{{ job.created_at|date:"Y-m-d H:i:s" }}</dd></div>
+    <div><dt>开始时间</dt><dd>{{ job.started_at|date:"Y-m-d H:i:s"|default:"-" }}</dd></div>
+    <div><dt>完成时间</dt><dd>{{ job.finished_at|date:"Y-m-d H:i:s"|default:"-" }}</dd></div>
+    <div><dt>最近心跳</dt><dd>{{ job.heartbeat_at|date:"Y-m-d H:i:s"|default:"-" }}</dd></div>
+  </dl>
+  {% if job.error_message %}<div class="notice warning">{{ job.error_message }}</div>{% endif %}
+  {% if can_manage %}
+    <div class="knowledge-document-actions">
+      {% if job.status == "pending" or job.status == "running" %}
+        <form method="post" action="{% url 'knowledge:job_cancel' job.pk %}">{% csrf_token %}<button class="button danger-outline" type="submit">安全取消</button></form>
+      {% elif job.status == "failed" or job.status == "partial" or job.status == "source_unavailable" or job.status == "cancelled" %}
+        <form method="post" action="{% url 'knowledge:job_retry' job.pk %}">{% csrf_token %}<button class="button primary" type="submit">创建重试任务</button></form>
+      {% endif %}
+    </div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>单项处理结果</h2>
+  {% if items_redacted %}
+    <div class="notice warning">这是其他成员的私密来源；管理员只能查看任务汇总和错误状态，不能查看页面标题或正文。</div>
+  {% endif %}
+  <table>
+    <thead><tr><th>项目</th><th>状态</th><th>错误</th><th>时间</th></tr></thead>
+    <tbody>
+      {% for item in items %}
+        <tr>
+          <td>{{ item.title|default:item.external_id }}</td>
+          <td>{{ item.get_status_display }}</td>
+          <td>{{ item.error_message|default:"-" }}</td>
+          <td>{{ item.created_at|date:"Y-m-d H:i:s" }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="4">任务尚无单项结果。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

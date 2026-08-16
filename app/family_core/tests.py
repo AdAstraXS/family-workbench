@@ -1,12 +1,20 @@
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from ledger.models import BankAccount
 
+from .form_widgets import CleanDecimalInput
 from .models import Family, FamilyMember, SiteSetting
 
 
+class CleanDecimalInputTests(SimpleTestCase):
+    def test_integer_trailing_zeroes_are_preserved(self):
+        widget = CleanDecimalInput()
+
+        self.assertEqual(widget.format_value(100), "100")
+        self.assertEqual(widget.format_value("100.000000"), "100")
+        self.assertEqual(widget.format_value("2.500000"), "2.5")
 class HouseholdAccessTests(TestCase):
     def setUp(self):
         self.family = Family.objects.create(name="共享家庭")

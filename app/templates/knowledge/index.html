@@ -1,0 +1,199 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}{{ page_title }} · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>{{ page_title }}</span>{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-page-heading">
+  <div>
+    <span class="eyebrow">Knowledge Library</span>
+    <h1>{{ page_title }}</h1>
+    {% include "knowledge/_help_tip.html" with text=page_description %}
+  </div>
+  {% if selected_collection == "pending" %}
+    <a class="button primary" href="{% url 'knowledge:review' %}">等待确认 {{ workflow_counts.waiting_review }}</a>
+  {% else %}
+    <a class="button" href="{% url 'knowledge:topics' %}">管理分类与标签</a>
+  {% endif %}
+</section>
+
+<div class="knowledge-library-workspace">
+  <details class="panel knowledge-library-directory" open>
+    <summary><span>知识目录</span><small>当前成员可见范围</small></summary>
+    <div class="knowledge-directory-body">
+      <nav class="knowledge-directory-modes" aria-label="目录组织方式">
+        <a href="{% url directory_view_name %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=category"{% if directory_mode == "category" %} class="active"{% endif %}>按分类</a>
+        <a href="{% url directory_view_name %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=source"{% if directory_mode == "source" %} class="active"{% endif %}>按来源</a>
+      </nav>
+
+      <section class="knowledge-directory-section knowledge-directory-collections">
+        <h2>资料分区</h2>
+        <nav class="knowledge-directory-links">
+          <a href="{% url 'knowledge:library' %}?collection=curated&amp;member={{ selected_member|urlencode }}"{% if selected_collection == "curated" and not selected_category and not selected_source_id and not quick_filter %} class="active"{% endif %}><span>精选知识</span></a>
+          <a href="{% url 'knowledge:inbox' %}"{% if selected_collection == "pending" and not selected_category and not selected_source_id and not selected_source_author and not quick_filter %} class="active"{% endif %}><span>待整理</span></a>
+          <a href="{% url 'knowledge:library' %}?collection=archive&amp;member={{ selected_member|urlencode }}&amp;directory={{ directory_mode }}"{% if selected_collection == "archive" and not selected_category and not selected_source_id and not selected_source_author and not quick_filter %} class="active"{% endif %}><span>归档资料</span></a>
+        </nav>
+      </section>
+
+      <section class="knowledge-directory-section">
+        <h2>快捷入口</h2>
+        <nav class="knowledge-directory-links">
+          <a href="{% url directory_view_name %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory={{ directory_mode }}"{% if not selected_category and not selected_source_id and not selected_source_author and not quick_filter %} class="active"{% endif %}><span>{% if selected_collection == "all" %}全部资料（含仅同步）{% elif selected_collection == "archive" %}全部归档资料{% elif selected_collection == "pending" %}全部待整理{% else %}全部精选知识{% endif %}</span><strong>{{ directory_total }}</strong></a>
+          <a href="{% url directory_view_name %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory={{ directory_mode }}&amp;quick=recent"{% if quick_filter == "recent" %} class="active"{% endif %}><span>最近 30 天</span></a>
+          <a href="{% url directory_view_name %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=category&amp;quick=uncategorized"{% if quick_filter == "uncategorized" %} class="active"{% endif %}><span>未分类</span><strong>{{ uncategorized_count }}</strong></a>
+        </nav>
+      </section>
+
+      {% if directory_mode == "category" %}
+        <section class="knowledge-directory-section">
+          <h2>分类</h2>
+          <nav class="knowledge-directory-links">
+            {% for item in category_directory %}
+              <a href="{% url directory_view_name %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=category&amp;category={{ item.category|urlencode }}"{% if selected_category == item.category %} class="active"{% endif %}><span>{{ item.category }}</span><strong>{{ item.total }}</strong></a>
+            {% empty %}<p>还没有已确认分类；未整理的归档资料统一归入“未分类”。</p>{% endfor %}
+          </nav>
+        </section>
+      {% else %}
+        <section class="knowledge-directory-section">
+          <h2>来源</h2>
+          <div class="knowledge-source-tree">
+            {% for group in source_directory %}
+              <details{% if group.is_selected %} open{% endif %}>
+                <summary><span>{{ group.name }}</span><strong>{{ group.count }}</strong></summary>
+                <nav>
+                  <a href="{% url directory_view_name %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=source&amp;source_group={{ group.id|urlencode }}"{% if selected_source_group == group.id and not selected_source_id and not selected_source_author %} class="active"{% endif %}><span>全部{{ group.name }}</span><strong>{{ group.count }}</strong></a>
+                  {% for node in group.nodes %}
+                    <a href="{% url directory_view_name %}?collection={{ selected_collection }}&amp;member={{ selected_member|urlencode }}&amp;kind={{ selected_kind|urlencode }}&amp;directory=source&amp;source_group={{ group.id|urlencode }}{% if node.source_id %}&amp;source_id={{ node.source_id|urlencode }}{% endif %}{% if node.author %}&amp;source_author={{ node.author|urlencode }}{% endif %}"{% if node.is_selected %} class="active"{% endif %}><span>{{ node.name }}</span><strong>{{ node.count }}</strong></a>
+                  {% endfor %}
+                </nav>
+              </details>
+            {% empty %}<p>当前范围还没有可浏览的来源。</p>{% endfor %}
+          </div>
+        </section>
+      {% endif %}
+    </div>
+  </details>
+
+  <main class="knowledge-library-results">
+<section class="panel knowledge-search-panel">
+  <form method="get" class="knowledge-library-form">
+    <input type="hidden" name="collection" value="{{ selected_collection }}">
+    <input type="hidden" name="kind" value="{{ selected_kind }}">
+    <input type="hidden" name="directory" value="{{ directory_mode }}">
+    <input type="hidden" name="category" value="{{ selected_category }}">
+    <input type="hidden" name="source_id" value="{{ selected_source_id }}">
+    <input type="hidden" name="source_group" value="{{ selected_source_group }}">
+    <input type="hidden" name="source_author" value="{{ selected_source_author }}">
+    <input type="hidden" name="section" value="{{ selected_section }}">
+    <input type="hidden" name="section_group" value="{{ selected_section_group }}">
+    <input type="hidden" name="quick" value="{{ quick_filter }}">
+    <input type="hidden" name="stage" value="{{ selected_stage }}">
+    <div class="knowledge-library-primary-filter">
+      <label class="knowledge-search-main">
+        <span>{% if selected_collection == "pending" %}搜索待整理资料{% else %}搜索全部归档资料{% endif %}：标题、正文、作者和关键词</span>
+        <input class="form-control" type="search" name="q" value="{{ query }}" placeholder="例如：英伟达估值、风险控制、利率周期">
+      </label>
+      <label>
+        <span>成员</span>
+        <select class="form-control" name="member">
+          {% for member in family_members %}
+            <option value="{{ member.pk }}"{% if selected_member == member.pk|stringformat:"s" %} selected{% endif %}>{{ member.display_name }}{% if member.pk == current_member.pk %}（当前账号）{% endif %}</option>
+          {% endfor %}
+          <option value="all"{% if selected_member == "all" %} selected{% endif %}>全部成员</option>
+        </select>
+      </label>
+      <button class="button primary" type="submit" name="search_scope" value="{% if selected_collection == 'pending' %}pending{% else %}archive{% endif %}">搜索{% if selected_collection == "pending" %}待整理{% else %}归档资料{% endif %}</button>
+    </div>
+
+    {% if selected_collection == "pending" %}
+      <nav class="knowledge-status-filter" aria-label="待整理进度">
+        <a href="{% url 'knowledge:inbox' %}?member={{ selected_member|urlencode }}&amp;directory={{ directory_mode }}"{% if not selected_stage %} class="active"{% endif %}>全部待整理 <span>{{ workflow_counts.all }}</span></a>
+        <a href="{% url 'knowledge:inbox' %}?member={{ selected_member|urlencode }}&amp;directory={{ directory_mode }}&amp;stage=unorganized"{% if selected_stage == "unorganized" %} class="active"{% endif %}>尚未整理 <span>{{ workflow_counts.unorganized }}</span></a>
+        <a href="{% url 'knowledge:inbox' %}?member={{ selected_member|urlencode }}&amp;directory={{ directory_mode }}&amp;stage=waiting_review"{% if selected_stage == "waiting_review" %} class="active"{% endif %}>等待确认 <span>{{ workflow_counts.waiting_review }}</span></a>
+      </nav>
+      {% if workflow_counts.processing %}<p class="knowledge-processing-note">另有 {{ workflow_counts.processing }} 项正在由 AI 整理，完成后会进入“等待确认”。</p>{% endif %}
+    {% endif %}
+
+    <details class="knowledge-advanced-filter"{% if selected_source or selected_tag or selected_author or date_from or date_to or scope != "all" or selected_category or selected_source_id or selected_source_group or selected_source_author or quick_filter %} open{% endif %}>
+      <summary>高级筛选 <span>来源、人物、标签、日期与可见范围</span></summary>
+      <div class="knowledge-advanced-filter-grid">
+        <label>
+          <span>来源</span>
+          <select class="form-control" name="source">
+            <option value="">全部来源</option>
+            {% for source in source_choices %}<option value="{{ source.source_kind }}"{% if selected_source == source.source_kind %} selected{% endif %}>{{ source.label }}（{{ source.total }}）</option>{% endfor %}
+          </select>
+        </label>
+        <label><span>人物或作者</span><input class="form-control" type="text" name="person" value="{{ selected_author }}" placeholder="输入姓名"></label>
+        <label><span>标签</span><input class="form-control" type="text" name="tag" value="{{ selected_tag }}" placeholder="精确标签"></label>
+        <label><span>开始日期</span><input class="form-control" type="date" name="date_from" value="{{ date_from }}"></label>
+        <label><span>结束日期</span><input class="form-control" type="date" name="date_to" value="{{ date_to }}"></label>
+        <label>
+          <span>可见范围</span>
+          <select class="form-control" name="scope">
+            <option value="all"{% if scope == "all" %} selected{% endif %}>不限</option>
+            <option value="personal"{% if scope == "personal" %} selected{% endif %}>仅自己</option>
+            <option value="family"{% if scope == "family" %} selected{% endif %}>家庭共享</option>
+          </select>
+        </label>
+        <div class="knowledge-filter-actions">
+          <button class="button primary" type="submit">应用筛选</button>
+          <a class="button" href="{% url directory_view_name %}?collection={{ selected_collection }}">清空</a>
+        </div>
+      </div>
+    </details>
+  </form>
+</section>
+
+{% if selected_collection == "pending" %}<form method="post" action="{% url 'knowledge:document_ai_organize' %}" class="knowledge-ai-bulk-form">{% csrf_token %}{% endif %}
+  <header class="knowledge-result-heading">
+    <div><span class="eyebrow">Current directory</span><h2>{{ directory_title }}</h2></div>
+    <div class="knowledge-result-heading-actions">
+      <div class="knowledge-view-switcher" data-library-display-switcher data-cookie-name="{{ display_mode_cookie_name }}" role="group" aria-label="资料显示模式">
+        <span class="knowledge-view-switcher-label">显示</span>
+        {% for choice in display_mode_choices %}<button type="button" data-library-mode="{{ choice.value }}" aria-pressed="{% if display_mode == choice.value %}true{% else %}false{% endif %}"{% if display_mode == choice.value %} class="active"{% endif %}>{{ choice.label }}</button>{% endfor %}
+      </div>
+      <strong>{{ page_obj.paginator.count }} 项</strong>
+      {% if selected_collection == "pending" and ai_selectable_count %}<button class="button primary" type="submit">AI 批量整理所选文章</button>{% endif %}
+    </div>
+  </header>
+
+  {% if selected_collection == "pending" and ai_selectable_count %}<p class="knowledge-ai-bulk-hint">勾选本页“尚未整理”的文章后创建任务；AI 只生成建议，不会自动进入精选知识。</p>{% endif %}
+  {% if display_mode == "compact" %}
+    <div class="knowledge-compact-table-wrap">
+      <table class="knowledge-compact-table">
+        <tbody>
+          {% for entry in page_obj %}{% include "knowledge/_entry_compact_row.html" %}
+          {% empty %}<tr><td><div class="empty-state compact"><h2>{% if selected_collection == "pending" %}当前没有匹配的待整理资料{% else %}当前范围没有匹配内容{% endif %}</h2><p>{% if selected_collection == "pending" %}可以从归档资料中选择文章，或在 OneNote 分区和随手记中设置“归档并加入待整理”。{% else %}默认只显示当前登录成员的知识；可以切换成员为“全部成员”，或调整高级筛选。{% endif %}</p></div></td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <section class="knowledge-result-list{% if display_mode == 'cards' %} knowledge-result-list-cards{% endif %}" aria-label="知识列表结果">
+      {% for entry in page_obj %}{% include "knowledge/_entry_card.html" %}
+      {% empty %}<div class="panel empty-state"><h2>{% if selected_collection == "pending" %}当前没有匹配的待整理资料{% else %}当前范围没有匹配内容{% endif %}</h2><p>{% if selected_collection == "pending" %}可以从归档资料中选择文章，或在 OneNote 分区和随手记中设置“归档并加入待整理”。{% else %}默认只显示当前登录成员的知识；可以切换成员为“全部成员”，或调整高级筛选。{% endif %}</p></div>{% endfor %}
+    </section>
+  {% endif %}
+{% if selected_collection == "pending" %}</form>{% endif %}
+
+{% include "knowledge/_pagination.html" %}
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (() => {
+    const switcher = document.querySelector("[data-library-display-switcher]");
+    if (!switcher) return;
+    const cookieName = switcher.dataset.cookieName;
+    switcher.querySelectorAll("[data-library-mode]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const mode = button.dataset.libraryMode;
+        document.cookie = `${encodeURIComponent(cookieName)}=${encodeURIComponent(mode)}; max-age=31536000; path=/; SameSite=Lax`;
+        window.location.reload();
+      });
+    });
+  })();
+</script>
+{% endblock %}

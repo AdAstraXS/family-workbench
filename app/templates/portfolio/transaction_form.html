@@ -1,5 +1,106 @@
 {% extends "form.html" %}
 
+{% block content %}
+<section class="panel form-panel wide-form-panel transaction-form-panel">
+  <div class="section-head transaction-form-heading">
+    <div>
+      <span class="transaction-form-eyebrow">交易录入</span>
+      <h1>{{ title }}</h1>
+      {% if form_intro %}<p>{{ form_intro }}</p>{% endif %}
+    </div>
+  </div>
+  <form method="post" class="data-form transaction-data-form">
+    {% csrf_token %}
+    {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+    {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+
+    <fieldset class="transaction-form-section transaction-context-section">
+      <legend><span class="transaction-section-index">01</span>账户与标的</legend>
+      <p class="transaction-section-intro">先确定归属账户和资产类型，再选择已有标的或在当前页面建立新合约。</p>
+      <div class="transaction-form-grid">
+        {% include "includes/form_field.html" with field=form.family %}
+        {% include "includes/form_field.html" with field=form.member %}
+        {% include "includes/form_field.html" with field=form.bank_account %}
+        {% include "includes/form_field.html" with field=form.asset_category %}
+        {% include "includes/form_field.html" with field=form.asset_type %}
+        {% include "includes/form_field.html" with field=form.security %}
+        {% include "includes/form_field.html" with field=form.create_option_contract row_class="transaction-create-toggle option-create-toggle" %}
+        {% include "includes/form_field.html" with field=form.create_bond row_class="transaction-create-toggle bond-create-toggle" %}
+      </div>
+    </fieldset>
+
+    <fieldset id="option-contract-section" class="transaction-form-section transaction-special-section transaction-option-section" hidden>
+      <legend><span class="transaction-section-mark">期</span>新期权合约</legend>
+      <p class="transaction-section-intro">补全合约要素后，系统会先建立期权合约，再记录本次交易。</p>
+      <div class="transaction-form-grid">
+        {% include "includes/form_field.html" with field=form.option_underlying %}
+        {% include "includes/form_field.html" with field=form.option_contract_symbol %}
+        {% include "includes/form_field.html" with field=form.option_type %}
+        {% include "includes/form_field.html" with field=form.option_strike_price %}
+        {% include "includes/form_field.html" with field=form.option_expiration_date %}
+        {% include "includes/form_field.html" with field=form.option_multiplier %}
+      </div>
+    </fieldset>
+
+    <fieldset id="bond-security-section" class="transaction-form-section transaction-special-section transaction-bond-section" hidden>
+      <legend><span class="transaction-section-mark">债</span>新债券资料</legend>
+      <p class="transaction-section-intro">债券资料和本次买卖会一并保存；请按券商成交单核对代码、报价方式和应计利息。</p>
+      <div class="transaction-form-grid transaction-bond-grid">
+        {% include "includes/form_field.html" with field=form.bond_symbol %}
+        {% include "includes/form_field.html" with field=form.bond_name %}
+        {% include "includes/form_field.html" with field=form.bond_market %}
+        {% include "includes/form_field.html" with field=form.bond_exchange %}
+        {% include "includes/form_field.html" with field=form.bond_isin %}
+        {% include "includes/form_field.html" with field=form.bond_issuer %}
+        {% include "includes/form_field.html" with field=form.bond_type %}
+        {% include "includes/form_field.html" with field=form.bond_face_value %}
+        {% include "includes/form_field.html" with field=form.bond_coupon_rate %}
+        {% include "includes/form_field.html" with field=form.bond_coupon_frequency %}
+        {% include "includes/form_field.html" with field=form.bond_maturity_date %}
+        {% include "includes/form_field.html" with field=form.bond_redemption_price %}
+        {% include "includes/form_field.html" with field=form.bond_quote_basis %}
+        {% include "includes/form_field.html" with field=form.bond_accrued_interest %}
+      </div>
+    </fieldset>
+
+    <fieldset class="transaction-form-section transaction-trade-section">
+      <legend><span class="transaction-section-index">02</span>成交信息</legend>
+      <p class="transaction-section-intro">按成交记录填写方向、数量和价格，成交金额会根据品种规则自动计算。</p>
+      <div class="transaction-form-grid">
+        {% include "includes/form_field.html" with field=form.trade_date %}
+        {% include "includes/form_field.html" with field=form.trade_type_option %}
+        {% include "includes/form_field.html" with field=form.position_effect %}
+        {% include "includes/form_field.html" with field=form.currency %}
+        {% include "includes/form_field.html" with field=form.quantity %}
+        {% include "includes/form_field.html" with field=form.price %}
+        {% include "includes/form_field.html" with field=form.amount %}
+        {% include "includes/form_field.html" with field=form.fee %}
+        {% include "includes/form_field.html" with field=form.tax %}
+      </div>
+    </fieldset>
+
+    <fieldset class="transaction-form-section transaction-review-section">
+      <legend><span class="transaction-section-index">03</span>交易复盘</legend>
+      <p class="transaction-section-intro">这些信息不会影响持仓计算，用于以后回看当时的判断和退出计划。</p>
+      <div class="transaction-form-grid">
+        {% include "includes/form_field.html" with field=form.trade_logic %}
+        {% include "includes/form_field.html" with field=form.information_source_option %}
+        {% include "includes/form_field.html" with field=form.strategy_option %}
+        {% include "includes/form_field.html" with field=form.strategy_other %}
+        {% include "includes/form_field.html" with field=form.emotion_option %}
+        {% include "includes/form_field.html" with field=form.exit_condition %}
+        {% include "includes/form_field.html" with field=form.remark %}
+      </div>
+    </fieldset>
+
+    <div class="form-actions transaction-form-actions">
+      <button type="submit">保存交易</button>
+      <a class="button ghost" href="{{ page_parent_url|default:'/' }}">返回</a>
+    </div>
+  </form>
+</section>
+{% endblock %}
+
 {% block scripts %}
 <script>
   (() => {
@@ -7,7 +108,17 @@
     const member = document.getElementById("id_member");
     const account = document.getElementById("id_bank_account");
     const category = document.getElementById("id_asset_category");
+    const assetType = document.getElementById("id_asset_type");
     const security = document.getElementById("id_security");
+    const createOption = document.getElementById("id_create_option_contract");
+    const optionUnderlying = document.getElementById("id_option_underlying");
+    const optionMultiplier = document.getElementById("id_option_multiplier");
+    const createBond = document.getElementById("id_create_bond");
+    const optionSection = document.getElementById("option-contract-section");
+    const bondSection = document.getElementById("bond-security-section");
+    const bondMarket = document.getElementById("id_bond_market");
+    const bondExchange = document.getElementById("id_bond_exchange");
+    const bondQuoteBasis = document.getElementById("id_bond_quote_basis");
     const currency = document.getElementById("id_currency");
     const quantity = document.getElementById("id_quantity");
     const price = document.getElementById("id_price");
@@ -16,11 +127,148 @@
     const strategy = document.getElementById("id_strategy_option");
     const strategyOther = document.getElementById("id_strategy_other");
 
-    const replaceOptions = (select, rows, blankLabel) => {
+    const optionFields = [
+      "id_option_underlying",
+      "id_option_contract_symbol",
+      "id_option_type",
+      "id_option_strike_price",
+      "id_option_expiration_date",
+      "id_option_multiplier",
+    ].map((id) => document.getElementById(id));
+    const bondFields = [
+      "id_bond_symbol",
+      "id_bond_name",
+      "id_bond_market",
+      "id_bond_exchange",
+      "id_bond_isin",
+      "id_bond_issuer",
+      "id_bond_type",
+      "id_bond_face_value",
+      "id_bond_coupon_rate",
+      "id_bond_coupon_frequency",
+      "id_bond_maturity_date",
+      "id_bond_redemption_price",
+      "id_bond_quote_basis",
+      "id_bond_accrued_interest",
+    ].map((id) => document.getElementById(id));
+
+    const assetTypesByCategory = {
+      equity: ["stock"],
+      fixed_income: ["bond"],
+      fund: ["etf", "fund"],
+      derivatives: ["option"],
+      commodities: ["other"],
+      alternatives: ["other"],
+    };
+    const assetTypeLabels = {
+      stock: "股票",
+      etf: "ETF",
+      bond: "债券",
+      option: "期权",
+      fund: "基金",
+      other: "其他",
+    };
+    let categoryRows = [];
+    let securityRows = [];
+
+    const rowFor = (field) => field?.closest(".form-row");
+    const setFieldVisible = (field, visible, disableWhenHidden = false) => {
+      const row = rowFor(field);
+      row?.toggleAttribute("hidden", !visible);
+      if (row) row.style.display = visible ? "" : "none";
+      if (field && disableWhenHidden) field.disabled = !visible;
+    };
+    const replaceOptions = (select, rows, blankLabel, configure = null) => {
       const current = select.value;
       select.replaceChildren(new Option(blankLabel, ""));
-      rows.forEach((row) => select.add(new Option(row.name, row.id)));
-      if ([...select.options].some((option) => option.value === current)) select.value = current;
+      rows.forEach((row) => {
+        const option = new Option(row.name, row.id);
+        configure?.(option, row);
+        select.add(option);
+      });
+      if ([...select.options].some((option) => option.value === current)) {
+        select.value = current;
+      }
+    };
+    const selectedCategoryCode = () => {
+      const selected = category.options[category.selectedIndex];
+      return selected?.dataset.code || "";
+    };
+
+    const updateAssetTypes = (reset = false) => {
+      const current = reset ? "" : assetType.value;
+      const allowed = assetTypesByCategory[selectedCategoryCode()] || [];
+      assetType.replaceChildren(new Option("请选择金融品种", ""));
+      allowed.forEach((value) => assetType.add(new Option(assetTypeLabels[value], value)));
+      assetType.value = allowed.includes(current) ? current : "";
+      setFieldVisible(assetType, allowed.length > 0);
+    };
+    const updateSecurities = (reset = false) => {
+      const current = reset ? "" : security.value;
+      const rows = assetType.value
+        ? securityRows.filter((row) => row.asset_type === assetType.value)
+        : [];
+      security.replaceChildren(new Option("---------", ""));
+      rows.forEach((row) => {
+        const option = new Option(row.name, row.id);
+        option.dataset.currency = row.currency;
+        option.dataset.assetType = row.asset_type;
+        option.dataset.multiplier = row.multiplier;
+        security.add(option);
+      });
+      if ([...security.options].some((option) => option.value === current)) {
+        security.value = current;
+      }
+    };
+
+    const filterBondExchanges = () => {
+      if (!bondMarket || !bondExchange) return;
+      const previous = bondExchange.value;
+      const allOptions = JSON.parse(bondExchange.dataset.allOptions || "[]");
+      bondExchange.replaceChildren(
+        ...allOptions
+          .filter((option) => !option.value || option.value.startsWith(`${bondMarket.value}:`))
+          .map((option) => new Option(option.label, option.value, false, option.value === previous)),
+      );
+      if (![...bondExchange.options].some((option) => option.selected)) {
+        bondExchange.value = "";
+      }
+    };
+
+    const updateAmount = () => {
+      const selected = security.options[security.selectedIndex];
+      let multiplier = Number(selected?.dataset.multiplier || 1);
+      if (createOption.checked) multiplier = Number(optionMultiplier.value || 100);
+      if (createBond.checked) multiplier = bondQuoteBasis.value === "per_100" ? 0.01 : 1;
+      const value = Number(quantity.value || 0) * Number(price.value || 0) * multiplier;
+      amount.value = value ? value.toFixed(2) : "0.00";
+    };
+    const updateSpecialFields = () => {
+      const optionMode = selectedCategoryCode() === "derivatives" && assetType.value === "option";
+      const bondMode = selectedCategoryCode() === "fixed_income" && assetType.value === "bond";
+
+      if (!optionMode) createOption.checked = false;
+      if (!bondMode) createBond.checked = false;
+      setFieldVisible(createOption, optionMode, true);
+      setFieldVisible(createBond, bondMode, true);
+
+      optionFields.forEach((field) => setFieldVisible(field, optionMode && createOption.checked, true));
+      bondFields.forEach((field) => setFieldVisible(field, bondMode && createBond.checked, true));
+      optionSection.hidden = !(optionMode && createOption.checked);
+      optionSection.style.display = optionMode && createOption.checked ? "" : "none";
+      bondSection.hidden = !(bondMode && createBond.checked);
+      bondSection.style.display = bondMode && createBond.checked ? "" : "none";
+      setFieldVisible(positionEffect, optionMode, true);
+      setFieldVisible(security, Boolean(assetType.value));
+
+      const creatingSecurity = createOption.checked || createBond.checked;
+      security.disabled = creatingSecurity || !assetType.value;
+      rowFor(security)?.classList.toggle("muted-form-row", creatingSecurity);
+      updateAmount();
+    };
+    const updateStrategyOther = () => {
+      const selected = strategy.options[strategy.selectedIndex];
+      setFieldVisible(strategyOther, Boolean(selected && selected.text.includes("其他")), true);
     };
 
     const refresh = async (resetMember = false) => {
@@ -31,47 +279,61 @@
       const data = await fetch(url).then((response) => response.json());
       if (resetMember) replaceOptions(member, data.members, "---------");
       replaceOptions(account, data.accounts, "---------");
-      replaceOptions(category, data.categories, "---------");
-      replaceOptions(security, data.securities, "---------");
-      data.securities.forEach((row) => {
-        const option = [...security.options].find((item) => item.value === String(row.id));
-        if (option) option.dataset.currency = row.currency;
-        if (option) option.dataset.assetType = row.asset_type;
-        if (option) option.dataset.multiplier = row.multiplier;
+      categoryRows = data.categories || [];
+      securityRows = data.securities || [];
+      replaceOptions(category, categoryRows, "---------", (option, row) => {
+        option.dataset.code = row.code;
       });
+      replaceOptions(optionUnderlying, data.underlyings || [], "---------");
+      updateAssetTypes(false);
+      updateSecurities(false);
+      updateSpecialFields();
     };
 
-    const updateAmount = () => {
-      const selected = security.options[security.selectedIndex];
-      const multiplier = Number(selected?.dataset.multiplier || 1);
-      const value = Number(quantity.value || 0) * Number(price.value || 0) * multiplier;
-      amount.value = value ? value.toFixed(2) : "0.00";
-    };
-    const updatePositionEffect = () => {
-      const selected = security.options[security.selectedIndex];
-      positionEffect.closest(".form-row").hidden = selected?.dataset.assetType !== "option";
-    };
-    const updateStrategyOther = () => {
-      const selected = strategy.options[strategy.selectedIndex];
-      strategyOther.closest(".form-row").hidden = !selected || !selected.text.includes("其他");
-    };
-
+    if (bondExchange) {
+      bondExchange.dataset.allOptions = JSON.stringify(
+        [...bondExchange.options].map((option) => ({
+          value: option.value,
+          label: option.textContent,
+        })),
+      );
+    }
     family.addEventListener("change", () => refresh(true));
     member.addEventListener("change", () => refresh(false));
+    category.addEventListener("change", () => {
+      updateAssetTypes(true);
+      updateSecurities(true);
+      updateSpecialFields();
+    });
+    assetType.addEventListener("change", () => {
+      updateSecurities(true);
+      updateSpecialFields();
+    });
     security.addEventListener("change", () => {
-      if (!currency.value) currency.value = security.options[security.selectedIndex]?.dataset.currency || "";
-      updatePositionEffect();
+      if (!currency.value) {
+        currency.value = security.options[security.selectedIndex]?.dataset.currency || "";
+      }
       updateAmount();
     });
+    createOption.addEventListener("change", updateSpecialFields);
+    createBond.addEventListener("change", updateSpecialFields);
+    optionMultiplier.addEventListener("input", updateAmount);
+    bondQuoteBasis.addEventListener("change", updateAmount);
+    bondMarket.addEventListener("change", filterBondExchanges);
     quantity.addEventListener("input", updateAmount);
     price.addEventListener("input", updateAmount);
     strategy.addEventListener("change", updateStrategyOther);
-    updateAmount();
+
+    setFieldVisible(assetType, false);
+    setFieldVisible(security, false);
+    setFieldVisible(createOption, false);
+    setFieldVisible(createBond, false);
+    setFieldVisible(positionEffect, false);
+    optionFields.forEach((field) => setFieldVisible(field, false));
+    bondFields.forEach((field) => setFieldVisible(field, false));
     updateStrategyOther();
-    refresh(false).then(() => {
-      updatePositionEffect();
-      updateAmount();
-    });
+    filterBondExchanges();
+    refresh(false);
   })();
 </script>
 {% endblock %}

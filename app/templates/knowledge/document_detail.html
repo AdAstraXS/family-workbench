@@ -1,0 +1,179 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}{{ document.title }} · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:library' %}">资料库</a><span aria-hidden="true">›</span><span>{{ document.title|truncatechars:24 }}</span>{% endblock %}
+
+{% block hub_content %}
+<article class="knowledge-document-layout">
+  <section class="knowledge-document-reading">
+    <header class="knowledge-document-header">
+      <div class="knowledge-card-meta">
+        <span class="knowledge-content-label original">原文</span>
+        <span>{{ document.author|default:"作者未标注" }}</span>
+        <span>{{ document.content_modified_at|date:"Y-m-d"|default:"日期未知" }}</span>
+        <span>{{ document.source.name }}</span>
+      </div>
+      <h1>{{ document.title }}</h1>
+      <div class="knowledge-document-actions">
+        {% if document.source_url %}<a class="button" href="{{ document.source_url }}" rel="noopener noreferrer" target="_blank">打开原文链接</a>{% endif %}
+        {% if revision %}<a class="button" href="{% url 'knowledge:revision_raw_download' revision.pk %}">下载原始版本</a>{% endif %}
+        {% if can_organize %}
+          {% if document.knowledge_status == "pending" %}
+            {% if document.curation_status == "pending_ai" %}
+              <button class="button primary" type="button" disabled>AI 整理中</button>
+            {% elif document.curation_status == "pending_review" %}
+              <a class="button primary" href="{% url 'knowledge:review' %}?document={{ document.pk }}">查看并确认 AI 建议</a>
+            {% else %}
+              <form method="post" action="{% url 'knowledge:document_ai_organize' %}">
+                {% csrf_token %}
+                <input type="hidden" name="document_ids" value="{{ document.pk }}">
+                <input type="hidden" name="return_document_id" value="{{ document.pk }}">
+                <button class="button primary" type="submit">AI 整理</button>
+              </form>
+            {% endif %}
+            <a class="button" href="{% url 'knowledge:document_organize' document.pk %}">手动整理为精选</a>
+            <form method="post" action="{% url 'knowledge:document_cancel_organizing' document.pk %}">{% csrf_token %}<button class="button" type="submit">取消待整理</button></form>
+          {% elif document.library_tier == "knowledge" %}
+            {% if document.curation_status == "pending_ai" %}
+              <button class="button primary" type="button" disabled>AI 重新整理中</button>
+            {% elif document.curation_status == "pending_review" %}
+              <a class="button primary" href="{% url 'knowledge:review' %}?document={{ document.pk }}">查看并确认新建议</a>
+            {% else %}
+              <form method="post" action="{% url 'knowledge:document_ai_organize' %}">
+                {% csrf_token %}
+                <input type="hidden" name="document_ids" value="{{ document.pk }}">
+                <input type="hidden" name="return_document_id" value="{{ document.pk }}">
+                <input type="hidden" name="mode" value="curated_reorganization">
+                <button class="button primary" type="submit">AI 重新整理</button>
+              </form>
+            {% endif %}
+            <a class="button" href="{% url 'knowledge:document_organize' document.pk %}">重新编辑精选结果</a>
+          {% elif document.knowledge_status == "included" %}
+            <form method="post" action="{% url 'knowledge:document_add_to_inbox' document.pk %}">{% csrf_token %}<button class="button primary" type="submit">加入待整理</button></form>
+          {% endif %}
+        {% endif %}
+      </div>
+    </header>
+
+    {% if document.confirmed_summary or document.category or document.tags %}
+      <aside class="knowledge-confirmed-summary">
+        <header><div><span class="knowledge-content-label confirmed">当前精选结果</span><strong>已由家庭成员确认</strong></div>{% if can_organize %}<a href="{% url 'knowledge:document_organize' document.pk %}">重新编辑</a>{% endif %}</header>
+        {% if document.confirmed_summary %}<p>{{ document.confirmed_summary|linebreaksbr }}</p>{% endif %}
+        {% if document.category or document.tags %}<div class="knowledge-tags">{% if document.category %}<span>{{ document.category }}</span>{% endif %}{% for tag in document.tags %}<a href="{% url 'knowledge:library' %}?collection=curated&amp;tag={{ tag|urlencode }}">#{{ tag }}</a>{% endfor %}</div>{% endif %}
+        {% if confirmed_summary_proposal %}<small>摘要由 {{ confirmed_summary_proposal.confirmed_by }} 于 {{ confirmed_summary_proposal.confirmed_at|date:"Y-m-d H:i" }} 确认</small>{% endif %}
+      </aside>
+    {% endif %}
+
+    <div class="knowledge-original-label"><span>原始正文</span><strong>同步版本 v{{ revision.revision_number|default:"-" }} · AI 无权修改</strong></div>
+    <div class="knowledge-reading-controls" aria-label="正文显示设置">
+      <div class="knowledge-reading-control-group">
+        <span class="knowledge-reading-control-label">字号</span>
+        {% for option in reading_font_size_options %}
+          <form method="post" action="{% url 'knowledge:document_reading_preferences' document.pk %}" class="knowledge-reading-control-form">
+            {% csrf_token %}
+            <input type="hidden" name="font_size" value="{{ option.value }}">
+            <input type="hidden" name="line_spacing" value="{{ reading_line_spacing }}">
+            <button type="submit" class="knowledge-reading-control{% if reading_font_size == option.value %} active{% endif %}"{% if reading_font_size == option.value %} aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ option.label }}</button>
+          </form>
+        {% endfor %}
+      </div>
+      <div class="knowledge-reading-control-group">
+        <span class="knowledge-reading-control-label">行间距</span>
+        {% for option in reading_line_spacing_options %}
+          <form method="post" action="{% url 'knowledge:document_reading_preferences' document.pk %}" class="knowledge-reading-control-form">
+            {% csrf_token %}
+            <input type="hidden" name="font_size" value="{{ reading_font_size }}">
+            <input type="hidden" name="line_spacing" value="{{ option.value }}">
+            <button type="submit" class="knowledge-reading-control{% if reading_line_spacing == option.value %} active{% endif %}"{% if reading_line_spacing == option.value %} aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ option.label }}</button>
+          </form>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="knowledge-rich-content reading-size-{{ reading_font_size }} reading-spacing-{{ reading_line_spacing }}{% if document.source.kind == 'html_import' or document.source.kind == 'markdown_import' %} knowledge-rich-content-imported{% endif %}">
+      {% if revision %}{{ revision.normalized_html|safe }}{% else %}<p>正文尚未同步成功。</p>{% endif %}
+    </div>
+
+    <section class="knowledge-related-placeholder">
+      <header><span class="eyebrow">Connections</span><h2>相关知识</h2></header>
+      {% include "knowledge/_help_tip.html" with text="相关内容和反向链接将在关系模型完成后按权限计算；当前不根据关键词伪造关联。" %}
+    </section>
+  </section>
+
+  <aside class="knowledge-detail-sidebar">
+    <section class="panel knowledge-property-panel">
+      <header><span class="eyebrow">Document</span><h2>文档信息</h2></header>
+      <div class="knowledge-document-state">
+        <span>当前状态</span>
+        <strong class="status-pill{% if document.knowledge_status == 'pending' or document.curation_status == 'pending_review' %} warning{% endif %}">{% if document.curation_status == "pending_ai" %}AI 整理中{% elif document.curation_status == "pending_review" and document.library_tier == "knowledge" %}精选知识 · 新建议待确认{% elif document.curation_status == "pending_review" %}待整理 · 等待确认{% elif document.knowledge_status == "pending" %}待整理 · 尚未整理{% elif document.library_tier == "knowledge" %}精选知识{% elif document.knowledge_status == "included" %}归档资料{% else %}仅同步归档{% endif %}</strong>
+      </div>
+      <dl class="knowledge-property-list">
+        <div><dt>作者</dt><dd>{{ document.author|default:"未标注" }}</dd></div>
+        <div><dt>内容日期</dt><dd>{{ document.content_modified_at|date:"Y-m-d H:i"|default:"未知" }}</dd></div>
+        <div><dt>所属成员</dt><dd>{{ document.owner|default:"已转交家庭" }}</dd></div>
+      </dl>
+      {% if document.sync_status == "source_deleted" %}<p class="notice warning">来源已删除或不可访问；NAS 已保存副本继续保留。</p>{% endif %}
+    </section>
+
+    <section class="panel knowledge-provenance-panel">
+      <header><span class="eyebrow">Source</span><h2>来源与原文</h2></header>
+      <dl class="knowledge-property-list">
+        <div><dt>来源</dt><dd>{{ document.source.name }}</dd></div>
+        {% if document.section_name %}<div><dt>原始位置</dt><dd>{{ document.source.name }}{% if document.hierarchy.section_group %} / {{ document.hierarchy.section_group }}{% endif %} / {{ document.section_name }}</dd></div>{% endif %}
+        {% if document.source_url %}<div><dt>原文链接</dt><dd><a href="{{ document.source_url }}" rel="noopener noreferrer" target="_blank">打开来源页面</a></dd></div>{% endif %}
+      </dl>
+      <details class="knowledge-system-details">
+        <summary>查看保存与同步信息</summary>
+        <dl class="knowledge-property-list">
+          <div><dt>可见范围</dt><dd>{{ document.get_visibility_display }}</dd></div>
+          <div><dt>保存状态</dt><dd>{% if document.sync_status == "available" %}已保存到 NAS{% else %}{{ document.get_sync_status_display }}{% endif %}</dd></div>
+          <div><dt>同步版本</dt><dd>{% if revision %}v{{ revision.revision_number }} · {{ revision.created_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</dd></div>
+        </dl>
+      </details>
+    </section>
+
+    {% if pending_proposals %}
+    <section class="panel knowledge-ai-panel knowledge-ai-pending-panel">
+      <header><span class="knowledge-content-label ai">AI 新建议 · 等待确认</span><h2>本次整理建议{% include "knowledge/_help_tip.html" with text="当前正式结果不会自动改变；请对照原文逐项确认、修改或拒绝。" %}</h2></header>
+      {% for proposal in pending_proposals %}
+        <article class="proposal-card status-{{ proposal.status }}">
+          <header><strong>{{ proposal.get_proposal_type_display }}</strong><span class="status-pill status-{{ proposal.status }}">{{ proposal.get_status_display }}</span></header>
+          <div class="proposal-value">{% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}</div>
+          {% if proposal.proposal_type == "category" and proposal.suggested_value.is_new %}<small class="knowledge-new-taxonomy">建议新增分类；确认后才会加入目录</small>{% elif proposal.proposal_type == "tags" and proposal.suggested_value.new_items %}<small class="knowledge-new-taxonomy">建议新增：{{ proposal.suggested_value.new_items|join:"、" }}；确认后才会加入目录</small>{% endif %}
+          <small>第 {{ proposal.run.sequence }} 次 AI 整理 · {{ proposal.model_name }} · {{ proposal.created_at|date:"Y-m-d H:i" }}</small>
+          {% if can_organize %}
+            <form method="post" action="{% url 'knowledge:proposal_review' proposal.pk %}" class="proposal-form">
+              {% csrf_token %}
+              <textarea class="form-control" name="value" rows="{% if proposal.proposal_type == 'summary' %}6{% else %}2{% endif %}">{% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}</textarea>
+              <div><button class="button primary" type="submit" name="action" value="accept">修改并确认</button><button class="button danger-outline" type="submit" name="action" value="reject">拒绝</button></div>
+            </form>
+          {% endif %}
+        </article>
+      {% endfor %}
+      <a class="button knowledge-review-entry" href="{% url 'knowledge:review' %}?document={{ document.pk }}">进入左右对照确认</a>
+    </section>
+    {% endif %}
+
+    {% if history_runs %}
+    <section class="panel knowledge-ai-history-panel">
+      <header><span class="eyebrow">Organization history</span><h2>AI 整理历史{% include "knowledge/_help_tip.html" with text="这里保存已经接受、拒绝或因原文更新而失效的旧建议，不再作为当前待办。" %}</h2></header>
+      <div class="knowledge-ai-history-list">
+        {% for proposal_run in history_runs %}
+          <details>
+            <summary><span>第 {{ proposal_run.sequence }} 次 · 原文 v{{ proposal_run.revision.revision_number }} · {{ proposal_run.created_at|date:"Y-m-d H:i" }}</span><small>接受 {{ proposal_run.accepted_count }} · 拒绝 {{ proposal_run.rejected_count }}{% if proposal_run.stale_count %} · 失效 {{ proposal_run.stale_count }}{% endif %}</small></summary>
+            <div class="knowledge-ai-history-run">
+              <p>{{ proposal_run.model_name }} · {{ proposal_run.prompt_version }}</p>
+              {% for proposal in proposal_run.proposals.all %}
+                <article><strong>{{ proposal.get_proposal_type_display }}</strong><span class="status-pill status-{{ proposal.status }}">{{ proposal.get_status_display }}</span><p>{% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}</p>{% if proposal.confirmed_by %}<small>{{ proposal.confirmed_by }} · {{ proposal.confirmed_at|date:"Y-m-d H:i" }}</small>{% endif %}</article>
+              {% endfor %}
+            </div>
+          </details>
+        {% endfor %}
+      </div>
+      {% if can_organize and document.library_tier == "knowledge" %}<a class="button" href="{% url 'knowledge:document_organize' document.pk %}">重新编辑当前精选结果</a>{% endif %}
+    </section>
+    {% endif %}
+
+    <section class="knowledge-detail-future"><strong>评论与反向链接 · 后续</strong>{% include "knowledge/_help_tip.html" with text="家庭评论、相关知识、反向链接和人物关系将在权限与关系模型完成后接入。" %}</section>
+  </aside>
+</article>
+{% endblock %}
