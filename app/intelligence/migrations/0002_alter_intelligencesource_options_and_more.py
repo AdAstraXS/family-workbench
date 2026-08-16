@@ -6,6 +6,57 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+class AddFieldIfMissing(migrations.AddField):
+    """Apply an AddField operation safely after a partially applied release.
+
+    The production database has already received part of this migration while
+    Django still considers the migration unapplied.  Fresh databases continue
+    to use Django's normal AddField behavior; only an existing column or
+    auto-created many-to-many table is skipped.
+    """
+
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        model = to_state.apps.get_model(app_label, self.model_name)
+        if not self.allow_migrate_model(schema_editor.connection.alias, model):
+            return
+
+        field = model._meta.get_field(self.name)
+        introspection = schema_editor.connection.introspection
+        with schema_editor.connection.cursor() as cursor:
+            if field.many_to_many:
+                through_table = field.remote_field.through._meta.db_table
+                if through_table in introspection.table_names(cursor):
+                    return
+            else:
+                columns = {
+                    column.name
+                    for column in introspection.get_table_description(cursor, model._meta.db_table)
+                }
+                if field.column in columns:
+                    return
+
+        super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+
+class AddIndexIfMissing(migrations.AddIndex):
+    """Avoid repeating an index that was created before migration bookkeeping."""
+
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        model = to_state.apps.get_model(app_label, self.model_name)
+        if not self.allow_migrate_model(schema_editor.connection.alias, model):
+            return
+
+        with schema_editor.connection.cursor() as cursor:
+            constraints = schema_editor.connection.introspection.get_constraints(
+                cursor,
+                model._meta.db_table,
+            )
+        if self.index.name in constraints:
+            return
+
+        super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+
 def backfill_topics_and_selection(apps, schema_editor):
     IntelligenceSource = apps.get_model('intelligence', 'IntelligenceSource')
     IntelligenceEvent = apps.get_model('intelligence', 'IntelligenceEvent')
@@ -44,122 +95,122 @@ class Migration(migrations.Migration):
             name='intelligencesubject',
             options={'ordering': ['-importance_level', 'display_name', 'pk'], 'verbose_name': '情报关注主题', 'verbose_name_plural': '情报关注主题'},
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='collectionrun',
             name='classified_count',
             field=models.PositiveIntegerField(default=0, verbose_name='分类数量'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='collectionrun',
             name='clustered_count',
             field=models.PositiveIntegerField(default=0, verbose_name='聚类数量'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='collectionrun',
             name='noise_count',
             field=models.PositiveIntegerField(default=0, verbose_name='噪音数量'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='collectionrun',
             name='normalized_count',
             field=models.PositiveIntegerField(default=0, verbose_name='标准化数量'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='collectionrun',
             name='review_count',
             field=models.PositiveIntegerField(default=0, verbose_name='待复核数量'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='collectionrun',
             name='selected_count',
             field=models.PositiveIntegerField(default=0, verbose_name='精选数量'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligenceevent',
             name='actionability_score',
             field=models.PositiveSmallIntegerField(default=50, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)], verbose_name='投资参考价值'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligenceevent',
             name='impact_score',
             field=models.PositiveSmallIntegerField(default=50, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)], verbose_name='影响程度'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligenceevent',
             name='novelty_score',
             field=models.PositiveSmallIntegerField(default=50, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)], verbose_name='新颖性'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligenceevent',
             name='relevance_score',
             field=models.PositiveSmallIntegerField(default=50, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)], verbose_name='相关性'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligenceevent',
             name='score_origin',
             field=models.CharField(choices=[('manual', '人工特征 + 代码评分'), ('rules', '规则特征 + 代码评分'), ('ai', 'AI 特征 + 代码评分')], default='manual', max_length=20, verbose_name='评分来源'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligenceevent',
             name='scoring_breakdown',
             field=models.JSONField(blank=True, default=dict, verbose_name='评分明细'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligenceevent',
             name='scoring_policy_version',
             field=models.CharField(default='people-v1', max_length=50, verbose_name='评分策略版本'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligenceevent',
             name='selection_status',
             field=models.CharField(choices=[('selected', '今日精选'), ('feed', '全部动态'), ('review', '待复核'), ('noise', '噪音箱')], default='feed', max_length=20, verbose_name='展示分层'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligenceevent',
             name='timeliness_score',
             field=models.PositiveSmallIntegerField(default=50, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)], verbose_name='时效性'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligencesource',
             name='last_attempt_at',
             field=models.DateTimeField(blank=True, null=True, verbose_name='最近尝试时间'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligencesource',
             name='last_error_summary',
             field=models.CharField(blank=True, max_length=500, verbose_name='最近错误摘要'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligencesource',
             name='source_group',
             field=models.CharField(choices=[('official', '官方网站与官方账号'), ('expert', '人物博客与访谈'), ('institution', '公司与研究机构'), ('media', '可信媒体'), ('social', '社交与视频平台'), ('regulatory', '监管与正式披露'), ('other', '其他')], default='other', max_length=30, verbose_name='信源类别'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='intelligencesource',
             name='topics',
             field=models.ManyToManyField(blank=True, related_name='sources', to='intelligence.intelligencesubject', verbose_name='关联主题'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='sourceitem',
             name='classification_labels',
             field=models.JSONField(blank=True, default=list, verbose_name='分类标签'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='sourceitem',
             name='matched_subjects',
             field=models.ManyToManyField(blank=True, related_name='matched_source_items', to='intelligence.intelligencesubject', verbose_name='命中主题'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='sourceitem',
             name='processed_at',
             field=models.DateTimeField(blank=True, null=True, verbose_name='处理完成时间'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='sourceitem',
             name='processing_reason',
             field=models.CharField(blank=True, max_length=500, verbose_name='处理说明'),
         ),
-        migrations.AddField(
+        AddFieldIfMissing(
             model_name='sourceitem',
             name='relevance_score',
             field=models.PositiveSmallIntegerField(default=0, validators=[django.core.validators.MinValueValidator(0), django.core.validators.MaxValueValidator(100)], verbose_name='相关性分数'),
@@ -189,7 +240,7 @@ class Migration(migrations.Migration):
             name='processing_status',
             field=models.CharField(choices=[('pending', '待处理'), ('normalized', '已标准化'), ('classified', '已分类'), ('scored', '已评分'), ('clustered', '已聚类'), ('analyzed', '已分析'), ('published', '已发布'), ('noise', '噪音箱'), ('failed', '处理失败'), ('ignored', '已忽略')], default='pending', max_length=20, verbose_name='处理状态'),
         ),
-        migrations.AddIndex(
+        AddIndexIfMissing(
             model_name='intelligenceevent',
             index=models.Index(fields=['family', 'selection_status', 'occurred_at'], name='intelligenc_family__efeead_idx'),
         ),
