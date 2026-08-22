@@ -101,3 +101,26 @@ python manage.py generate_intelligence_digest --family-id <家庭ID> [--date YYY
 - Django 系统检查、Gunicorn 启动、主域名、www 和旧入口均验证通过；
 - 部署前后财务账户、持仓、交易、快照、快照明细、最新快照日期和估值运行数完全一致；
 - 未调用 DeepSeek、未生成生产简报、未自动复核候选，也未创建 DSM 情报任务。
+
+## 9. 生产真实 AI 验收
+
+2026-08-22 在用户明确同意“选择 1–3 条候选调用 DeepSeek”后，完成首次生产真实调用：
+
+- 调用前新建并验证 PostgreSQL 备份
+  `family-workbench-pre-intelligence-m4-ai-validation-20260822.dump`，SHA-256 为
+  `c1154a49640875452130fcc2d8dafcf251ca885dbf6fdb0baa7db775582edc7c`；
+- 页面最初显示 0 个可用文本模型，原因是已有 DeepSeek Provider 尚未补齐 M4 强制要求的
+  `public-metadata-v1` 策略字段；系统因此在联网前拒绝调用，未产生费用；
+- 保留既有环境变量名称且不读取、展示或修改密钥，仅补齐 M3.2 已确认的数据范围、模型、Token、价格
+  和费用上限后，页面正确识别 1 个可用文本模型；
+- 选择《Nvidia partners with data center developer Cloverleaf》和
+  《Nvidia just showed that the harness, not the AI model, is now the real hero》两条公开媒体候选；
+- 两条均使用 `deepseek-v4-flash`、`intelligence-event-v2` 成功返回，Token 分别为 936 和 992，费用估算
+  分别为 0.000174 和 0.000186 美元，合计 1,928 Token、0.000360 美元；
+- 两条摘要、事实、媒体观点和不确定项均回指保存的 `source-item` 证据，事件详情、`EventAnalysis`、
+  `AiAnalysisRequest` 与 `AiAnalysisResult` 审计一致；
+- 未发送家庭知识正文、成员备注、密钥、Cookie 或付费全文，未分析第三条 Tesla 候选；
+- 未自动复核、发布、收藏、归档、生成简报或创建 DSM 任务；生产运行提交仍为
+  `003b4a0f41758d37d23cd1948bdc17d7fe6acd80`，`.env` 哈希和全部财务业务基线未变。
+
+下一步需由管理员人工确认两条结果是否值得进入“全部动态”，之后再生成首份生产简报。
