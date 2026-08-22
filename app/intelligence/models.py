@@ -1168,6 +1168,127 @@ class EventKnowledgeArchive(TimestampedModel):
         return f"{self.event} → {self.document}"
 
 
+class IntelligenceDigest(TimestampedModel):
+    POLICY_VERSION = "daily-brief-v1"
+
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="intelligence_digests",
+    )
+    digest_date = models.DateField("简报日期")
+    title = models.CharField("标题", max_length=200)
+    window_start = models.DateTimeField("窗口开始")
+    window_end = models.DateTimeField("窗口结束")
+    policy_version = models.CharField("选取策略版本", max_length=50, default=POLICY_VERSION)
+    input_fingerprint = models.CharField("输入指纹", max_length=64, db_index=True)
+    provider_names = models.JSONField("采用模型", default=list, blank=True)
+    analysis_count = models.PositiveIntegerField("采用分析数量", default=0)
+    tokens_used = models.PositiveIntegerField("采用分析 Token 合计", default=0)
+    cost_estimate = models.DecimalField(
+        "采用分析费用估算",
+        max_digits=12,
+        decimal_places=6,
+        default=0,
+    )
+    generated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        verbose_name="生成人",
+        on_delete=models.SET_NULL,
+        related_name="generated_intelligence_digests",
+        null=True,
+        blank=True,
+    )
+    generated_at = models.DateTimeField("生成时间", default=timezone.now)
+
+    class Meta:
+        verbose_name = "AI 情报简报"
+        verbose_name_plural = "AI 情报简报"
+        ordering = ["-digest_date", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["family", "digest_date"],
+                name="unique_family_intelligence_digest_date",
+            ),
+        ]
+        indexes = [models.Index(fields=["family", "digest_date"])]
+
+    def __str__(self):
+        return self.title
+
+
+class IntelligenceDigestItem(models.Model):
+    BUCKET_IMPORTANT = "important"
+    BUCKET_FOLLOW_UP = "follow_up"
+    BUCKET_REVIEW = "review"
+    BUCKET_CHOICES = [
+        (BUCKET_IMPORTANT, "今日重要"),
+        (BUCKET_FOLLOW_UP, "值得跟进"),
+        (BUCKET_REVIEW, "待确认"),
+    ]
+
+    digest = models.ForeignKey(
+        IntelligenceDigest,
+        verbose_name="所属简报",
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    event = models.ForeignKey(
+        IntelligenceEvent,
+        verbose_name="情报事件",
+        on_delete=models.PROTECT,
+        related_name="digest_items",
+    )
+    analysis = models.ForeignKey(
+        EventAnalysis,
+        verbose_name="采用的 AI 分析",
+        on_delete=models.SET_NULL,
+        related_name="digest_items",
+        null=True,
+        blank=True,
+    )
+    bucket = models.CharField("简报分组", max_length=20, choices=BUCKET_CHOICES)
+    position = models.PositiveSmallIntegerField("组内顺序")
+    selection_reason = models.CharField("入选理由", max_length=500)
+    title_snapshot = models.CharField("标题快照", max_length=500)
+    summary_snapshot = models.TextField("摘要快照")
+    why_it_matters_snapshot = models.TextField("重要性说明快照", blank=True)
+    subject_names = models.JSONField("关注对象快照", default=list, blank=True)
+    source_name = models.CharField("主来源快照", max_length=200, blank=True)
+    source_url = models.URLField("主来源链接快照", max_length=1000, blank=True)
+    occurred_at = models.DateTimeField("事件时间快照")
+    importance_score = models.PositiveSmallIntegerField("重要性快照")
+    confidence_score = models.PositiveSmallIntegerField("置信度快照")
+    evidence_refs = models.JSONField("证据引用快照", default=list, blank=True)
+    model_name_snapshot = models.CharField("采用模型快照", max_length=200, blank=True)
+    tokens_used_snapshot = models.PositiveIntegerField("Token 用量快照", default=0)
+    cost_estimate_snapshot = models.DecimalField(
+        "费用估算快照",
+        max_digits=12,
+        decimal_places=6,
+        default=0,
+    )
+
+    class Meta:
+        verbose_name = "AI 情报简报条目"
+        verbose_name_plural = "AI 情报简报条目"
+        ordering = ["bucket", "position", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["digest", "event"],
+                name="unique_intelligence_digest_event",
+            ),
+            models.UniqueConstraint(
+                fields=["digest", "bucket", "position"],
+                name="unique_intelligence_digest_bucket_position",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.digest} · {self.get_bucket_display()} · {self.title_snapshot}"
+
+
 class CollectionRun(models.Model):
     KIND_COLLECTION = "collection"
     KIND_PROCESSING = "processing"

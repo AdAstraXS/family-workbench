@@ -1,0 +1,17 @@
+<article class="intel-digest-item intel-digest-item-{{ item.bucket }}">
+  <div class="intel-event-card-meta">
+    <span>{{ item.occurred_at|date:"m-d H:i" }}</span>
+    <span>重要性 {{ item.importance_score }}</span>
+    <span>置信度 {{ item.confidence_score }}</span>
+  </div>
+  <h3><a href="{% url 'intelligence:event_detail' item.event.pk %}">{{ item.title_snapshot }}</a></h3>
+  <p>{{ item.summary_snapshot }}</p>
+  {% if item.why_it_matters_snapshot %}<p class="intel-digest-why"><strong>为什么重要：</strong>{{ item.why_it_matters_snapshot }}</p>{% endif %}
+  <p class="intel-digest-reason">{{ item.selection_reason }}</p>
+  {% if item.subject_names %}<div class="intel-subject-chips">{% for name in item.subject_names %}<span>{{ name }}</span>{% endfor %}</div>{% endif %}
+  {% if can_admin %}<p class="intel-muted">{{ item.model_name_snapshot|default:"模型待核对" }} · {{ item.tokens_used_snapshot }} Token · 费用估算 ${{ item.cost_estimate_snapshot }}</p>{% endif %}
+  <footer>
+    <span>{{ item.source_name|default:"来源待核对" }}</span>
+    {% if item.source_url %}<a href="{{ item.source_url }}" target="_blank" rel="noopener">打开原文 →</a>{% else %}<a href="{% url 'intelligence:event_detail' item.event.pk %}">查看证据 →</a>{% endif %}
+  </footer>
+</article>

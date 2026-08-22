@@ -31,6 +31,8 @@ from .models import (
     EventMergeRecord,
     EventMergeSuggestion,
     EventUserState,
+    IntelligenceDigest,
+    IntelligenceDigestItem,
     IntelligenceEvent,
     IntelligenceSource,
     IntelligenceSubject,
@@ -41,8 +43,16 @@ from .models import (
 from .ai_enrichment import (
     IntelligenceAiError,
     analyze_event,
+    intelligence_provider_policy,
     provider_is_configured,
     text_ai_providers,
+)
+from .digest import (
+    MAX_BATCH_ANALYSES,
+    IntelligenceDigestError,
+    analyze_digest_candidates,
+    generate_daily_digest,
+    pending_analysis_candidates,
 )
 from .event_merging import (
     AUTO_MERGE_ENABLED,
@@ -281,6 +291,126 @@ def event_list(request):
             "can_admin": _is_family_admin(request),
         },
     )
+
+
+@login_required
+def digest_workbench(request):
+    member = _current_member(request)
+    can_admin = _is_family_admin(request)
+    digest = (
+        IntelligenceDigest.objects.filter(family=member.family)
+        .select_related("generated_by")
+        .prefetch_related("items__event", "items__analysis")
+        .first()
+    )
+    digest_items = list(digest.items.all()) if digest else []
+    item_groups = {
+        IntelligenceDigestItem.BUCKET_IMPORTANT: [
+            item for item in digest_items if item.bucket == IntelligenceDigestItem.BUCKET_IMPORTANT
+        ],
+        IntelligenceDigestItem.BUCKET_FOLLOW_UP: [
+            item for item in digest_items if item.bucket == IntelligenceDigestItem.BUCKET_FOLLOW_UP
+        ],
+        IntelligenceDigestItem.BUCKET_REVIEW: [
+            item for item in digest_items
+            if can_admin and item.bucket == IntelligenceDigestItem.BUCKET_REVIEW
+        ],
+    }
+    provider_options = []
+    for provider in text_ai_providers():
+        configured = provider_is_configured(provider)
+        policy = None
+        if configured:
+            try:
+                policy = intelligence_provider_policy(provider)
+            except IntelligenceAiError:
+                configured = False
+        provider_options.append(
+            {
+                "provider": provider,
+                "configured": configured,
+                "max_cost": policy["max_estimated_usd"] if policy else None,
+                "batch_max_cost": (
+                    policy["max_estimated_usd"] * MAX_BATCH_ANALYSES if policy else None
+                ),
+                "max_output_tokens": policy["max_output_tokens"] if policy else None,
+            }
+        )
+    candidates = pending_analysis_candidates(member.family) if can_admin else []
+    analyzed_candidate_count = sum(bool(event.current_ai_analysis) for event in candidates)
+    return render(
+        request,
+        "intelligence/digest_workbench.html",
+        {
+            "digest": digest,
+            "important_items": item_groups[IntelligenceDigestItem.BUCKET_IMPORTANT],
+            "follow_up_items": item_groups[IntelligenceDigestItem.BUCKET_FOLLOW_UP],
+            "review_items": item_groups[IntelligenceDigestItem.BUCKET_REVIEW],
+            "candidates": candidates,
+            "analyzed_candidate_count": analyzed_candidate_count,
+            "provider_options": provider_options,
+            "configured_provider_count": sum(item["configured"] for item in provider_options),
+            "max_batch_analyses": MAX_BATCH_ANALYSES,
+            "can_admin": can_admin,
+        },
+    )
+
+
+@login_required
+@require_POST
+def digest_analyze_batch(request):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    provider_id = request.POST.get("provider_id", "").strip()
+    if provider_id and not provider_id.isdigit():
+        messages.error(request, "AI 服务商参数不正确，请刷新页面后重试。")
+        return redirect("intelligence:digest_workbench")
+    event_ids = [value for value in request.POST.getlist("event_ids") if value.isdigit()]
+    try:
+        run = analyze_digest_candidates(
+            family=member.family,
+            member=member,
+            user=request.user,
+            event_ids=event_ids,
+            provider_id=int(provider_id) if provider_id else None,
+        )
+    except (IntelligenceAiError, IntelligenceDigestError) as exc:
+        messages.error(request, str(exc))
+    else:
+        summary = (
+            f"AI 整理完成：成功 {run.classified_count}，新调用 {run.updated_count}，"
+            f"复用 {run.ignored_count}，失败 {run.failed_count}。"
+        )
+        if run.status == CollectionRun.STATUS_SUCCESS:
+            messages.success(request, summary)
+        else:
+            messages.warning(request, summary + " 请查看运行记录中的安全错误摘要。")
+    return redirect("intelligence:digest_workbench")
+
+
+@login_required
+@require_POST
+def digest_generate(request):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    try:
+        digest, changed, _run = generate_daily_digest(
+            family=member.family,
+            user=request.user,
+        )
+    except IntelligenceDigestError as exc:
+        messages.error(request, str(exc))
+    else:
+        if changed:
+            messages.success(
+                request,
+                f"已生成 {digest.digest_date:%Y-%m-%d} 情报简报；AI 摘要与证据采用当时快照。",
+            )
+        else:
+            messages.info(request, "候选、AI 分析和分层没有变化，已复用现有简报。")
+    return redirect("intelligence:digest_workbench")
 
 
 @login_required

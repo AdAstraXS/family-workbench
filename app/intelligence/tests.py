@@ -34,6 +34,12 @@ from .ai_enrichment import (
     parse_analysis_result,
     provider_is_configured,
 )
+from .digest import (
+    MAX_BATCH_ANALYSES,
+    IntelligenceDigestError,
+    analyze_digest_candidates,
+    generate_daily_digest,
+)
 from .http_client import FetchResponse, SafeHttpError, validate_public_http_url
 from .management.commands.seed_intelligence_sources import SOURCE_DEFINITIONS
 from .management.commands.seed_key_people import SUBJECTS
@@ -46,6 +52,8 @@ from .models import (
     EventMergeSuggestion,
     EventSubject,
     EventUserState,
+    IntelligenceDigest,
+    IntelligenceDigestItem,
     IntelligenceEvent,
     IntelligenceSource,
     IntelligenceSubject,
@@ -1588,6 +1596,203 @@ class M3EventAnalysisTests(IntelligenceTestBase):
         )
         self.assertEqual(forbidden.status_code, 403)
         self.assertEqual(urlopen.call_count, 1)
+
+    def make_success_analysis(self, event, provider=None):
+        provider = provider or self.make_provider()
+        reference = f"source-item-{event.primary_source_item_id}"
+        return EventAnalysis.objects.create(
+            event=event,
+            provider=provider,
+            model_name=provider.model_name,
+            prompt_version="intelligence-event-v2",
+            schema_version="intelligence-event-analysis-v1",
+            input_fingerprint=(f"{event.pk:064d}")[-64:],
+            result_json=self.analysis_result(reference),
+            status=EventAnalysis.STATUS_SUCCESS,
+            tokens_used=321,
+            cost_estimate=Decimal("0.000076"),
+            is_current=True,
+            created_by=self.admin_user,
+        )
+
+    def test_daily_digest_is_idempotent_snapshotted_and_moves_reviewed_event_to_public_bucket(self):
+        event = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="今日待整理事件",
+        )
+        event.occurred_at = timezone.now()
+        event.save(update_fields=["occurred_at", "updated_at"])
+        analysis = self.make_success_analysis(event)
+
+        digest, changed, run = generate_daily_digest(
+            family=self.family,
+            user=self.admin_user,
+        )
+        reused, reused_changed, reused_run = generate_daily_digest(
+            family=self.family,
+            user=self.admin_user,
+        )
+
+        item = digest.items.get()
+        self.assertTrue(changed)
+        self.assertFalse(reused_changed)
+        self.assertEqual(reused.pk, digest.pk)
+        self.assertEqual(IntelligenceDigest.objects.count(), 1)
+        self.assertEqual(item.bucket, IntelligenceDigestItem.BUCKET_REVIEW)
+        self.assertEqual(item.analysis, analysis)
+        self.assertEqual(item.summary_snapshot, "测试人物宣布新的企业级产品计划。")
+        self.assertEqual(item.model_name_snapshot, analysis.model_name)
+        self.assertEqual(item.tokens_used_snapshot, 321)
+        self.assertEqual(item.cost_estimate_snapshot, Decimal("0.000076"))
+        self.assertEqual(run.run_kind, CollectionRun.KIND_DIGEST)
+        self.assertEqual(reused_run.ignored_count, 1)
+
+        event.review_status = IntelligenceEvent.REVIEW_REVIEWED
+        event.selection_status = IntelligenceEvent.SELECTION_SELECTED
+        event.save(update_fields=["review_status", "selection_status", "updated_at"])
+        regenerated, regenerated_changed, _run = generate_daily_digest(
+            family=self.family,
+            user=self.admin_user,
+        )
+        public_item = regenerated.items.get()
+        self.assertTrue(regenerated_changed)
+        self.assertEqual(regenerated.pk, digest.pk)
+        self.assertEqual(public_item.bucket, IntelligenceDigestItem.BUCKET_IMPORTANT)
+
+        analysis.result_json["summary"] = "后来被改写的分析摘要"
+        analysis.save(update_fields=["result_json", "updated_at"])
+        public_item.refresh_from_db()
+        self.assertEqual(public_item.summary_snapshot, "测试人物宣布新的企业级产品计划。")
+
+    @patch("intelligence.ai_enrichment.validate_public_http_url")
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_digest_batch_analysis_is_bounded_audited_and_reuses_current_results(
+        self,
+        urlopen,
+        validate_url,
+    ):
+        events = [
+            self.make_event(
+                status=IntelligenceEvent.REVIEW_PENDING,
+                selection=IntelligenceEvent.SELECTION_REVIEW,
+                title=f"批量候选 {index}",
+            )
+            for index in range(2)
+        ]
+        for event in events:
+            event.occurred_at = timezone.now()
+            event.save(update_fields=["occurred_at", "updated_at"])
+        provider = self.make_provider()
+        validate_url.return_value = "https://api.example.com/v1/chat/completions"
+        urlopen.side_effect = [FakeAiResponse(self.ai_payload(event)) for event in events]
+
+        with patch.dict("os.environ", {"INTELLIGENCE_TEST_API_KEY": "test-key"}):
+            run = analyze_digest_candidates(
+                family=self.family,
+                member=self.admin_member,
+                user=self.admin_user,
+                event_ids=[event.pk for event in events],
+                provider_id=provider.pk,
+            )
+            reused_run = analyze_digest_candidates(
+                family=self.family,
+                member=self.admin_member,
+                user=self.admin_user,
+                event_ids=[event.pk for event in events],
+                provider_id=provider.pk,
+            )
+
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertEqual(run.status, CollectionRun.STATUS_SUCCESS)
+        self.assertEqual(run.updated_count, 2)
+        self.assertEqual(run.parameters["maximum_cost_estimate_usd"], "0.020000")
+        self.assertEqual(reused_run.ignored_count, 2)
+        self.assertEqual(EventAnalysis.objects.filter(is_current=True).count(), 2)
+
+        too_many = [
+            self.make_event(
+                status=IntelligenceEvent.REVIEW_PENDING,
+                selection=IntelligenceEvent.SELECTION_REVIEW,
+                title=f"超限候选 {index}",
+            ).pk
+            for index in range(MAX_BATCH_ANALYSES + 1)
+        ]
+        with self.assertRaisesMessage(IntelligenceDigestError, "一次最多整理"):
+            analyze_digest_candidates(
+                family=self.family,
+                member=self.admin_member,
+                user=self.admin_user,
+                event_ids=too_many,
+                provider_id=provider.pk,
+            )
+
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_digest_page_hides_pending_items_from_members_and_get_never_calls_ai(self, urlopen):
+        event = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="仅管理员待确认事件",
+        )
+        event.occurred_at = timezone.now()
+        event.save(update_fields=["occurred_at", "updated_at"])
+        self.make_success_analysis(event)
+        generate_daily_digest(family=self.family, user=self.admin_user)
+
+        self.client.force_login(self.admin_user)
+        admin_response = self.client.get(reverse("intelligence:digest_workbench"))
+        self.assertEqual(admin_response.status_code, 200)
+        self.assertContains(admin_response, event.title)
+        self.assertContains(admin_response, "AI 整理今日候选")
+        self.assertFalse(urlopen.called)
+
+        self.client.force_login(self.member_user)
+        member_response = self.client.get(reverse("intelligence:digest_workbench"))
+        self.assertEqual(member_response.status_code, 200)
+        self.assertNotContains(member_response, event.title)
+        self.assertNotContains(member_response, "AI 整理今日候选")
+        self.assertEqual(
+            self.client.post(reverse("intelligence:digest_generate")).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(
+                reverse("intelligence:digest_analyze_batch"),
+                {"event_ids": [event.pk]},
+            ).status_code,
+            403,
+        )
+        self.assertFalse(urlopen.called)
+
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_generate_digest_command_is_idempotent_and_never_calls_ai(self, urlopen):
+        event = self.make_event(
+            status=IntelligenceEvent.REVIEW_REVIEWED,
+            selection=IntelligenceEvent.SELECTION_SELECTED,
+            title="命令生成的简报事件",
+        )
+        event.occurred_at = timezone.now()
+        event.save(update_fields=["occurred_at", "updated_at"])
+        self.make_success_analysis(event)
+        output = StringIO()
+
+        call_command(
+            "generate_intelligence_digest",
+            "--family-id",
+            str(self.family.pk),
+            stdout=output,
+        )
+        call_command(
+            "generate_intelligence_digest",
+            "--family-id",
+            str(self.family.pk),
+            stdout=output,
+        )
+
+        self.assertEqual(IntelligenceDigest.objects.count(), 1)
+        self.assertEqual(IntelligenceDigestItem.objects.count(), 1)
+        self.assertIn("内容未变化", output.getvalue())
+        self.assertFalse(urlopen.called)
 
 
 class M3EventMergeTests(IntelligenceTestBase):

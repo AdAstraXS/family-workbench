@@ -7,6 +7,9 @@ app_name = "intelligence"
 
 urlpatterns = [
     path("people/", views.index, name="index"),
+    path("people/digests/", views.digest_workbench, name="digest_workbench"),
+    path("people/digests/analyze/", views.digest_analyze_batch, name="digest_analyze_batch"),
+    path("people/digests/generate/", views.digest_generate, name="digest_generate"),
     path("people/events/", views.event_list, name="event_list"),
     path("people/review/", views.triage_review, name="triage_review"),
     path("people/review/batch/", views.triage_batch_apply, name="triage_batch_apply"),

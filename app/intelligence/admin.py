@@ -10,6 +10,8 @@ from .models import (
     EventMergeSuggestion,
     EventSubject,
     EventUserState,
+    IntelligenceDigest,
+    IntelligenceDigestItem,
     IntelligenceEvent,
     IntelligenceSource,
     IntelligenceSubject,
@@ -158,6 +160,35 @@ class EventKnowledgeArchiveAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+
+
+class IntelligenceDigestItemInline(admin.TabularInline):
+    model = IntelligenceDigestItem
+    extra = 0
+    readonly_fields = (
+        "event", "analysis", "bucket", "position", "selection_reason",
+        "title_snapshot", "summary_snapshot", "why_it_matters_snapshot",
+        "subject_names", "source_name", "source_url", "occurred_at",
+        "importance_score", "confidence_score", "evidence_refs",
+        "model_name_snapshot", "tokens_used_snapshot", "cost_estimate_snapshot",
+    )
+
+
+@admin.register(IntelligenceDigest)
+class IntelligenceDigestAdmin(admin.ModelAdmin):
+    list_display = (
+        "digest_date", "family", "analysis_count", "tokens_used",
+        "cost_estimate", "generated_by", "generated_at",
+    )
+    list_filter = ("family", "digest_date", "policy_version")
+    search_fields = ("title",)
+    readonly_fields = (
+        "family", "digest_date", "title", "window_start", "window_end",
+        "policy_version", "input_fingerprint", "provider_names",
+        "analysis_count", "tokens_used", "cost_estimate", "generated_by",
+        "generated_at", "created_at", "updated_at",
+    )
+    inlines = (IntelligenceDigestItemInline,)
 
 
 class CollectionRunItemInline(admin.TabularInline):

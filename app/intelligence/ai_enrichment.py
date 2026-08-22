@@ -179,7 +179,7 @@ def _enforce_request_limits(*, system_prompt, user_prompt, input_snapshot, polic
     )
 
 
-def _provider(provider_id=None):
+def resolve_text_ai_provider(provider_id=None):
     providers = text_ai_providers()
     if provider_id:
         try:
@@ -193,6 +193,11 @@ def _provider(provider_id=None):
     if not providers:
         raise IntelligenceAiError("尚未配置可用于 AI 情报的文本模型。")
     return providers[0]
+
+
+def intelligence_provider_policy(provider):
+    """Return the reviewed public-metadata policy without reading the API key."""
+    return _provider_policy(provider)
 
 
 def _api_key(provider):
@@ -553,7 +558,7 @@ def _mark_failed(analysis, analysis_request, message):
 def analyze_event(event, *, member, user, provider_id=None, force=False):
     if event.family_id != member.family_id:
         raise IntelligenceAiError("不能分析其他家庭的情报事件。")
-    provider = _provider(provider_id)
+    provider = resolve_text_ai_provider(provider_id)
     input_payload, input_snapshot, fingerprint = _event_input(event)
     current = event.analyses.filter(
         status=EventAnalysis.STATUS_SUCCESS,

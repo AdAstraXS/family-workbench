@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}情报简报 · AI 情报{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260822-5">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head intel-digest-head">
+  <div>
+    <span class="intel-eyebrow">AI BRIEF</span>
+    <h1>情报简报</h1>
+    <p>公开信源先经规则门控，再由管理员明确选择少量候选发送给文本 AI。简报复用已验证的结构化摘要并由代码分组，不会重复调用 AI。</p>
+  </div>
+  {% if can_admin %}<a class="button ghost" href="{% url 'intelligence:operations' %}">查看采集运行</a>{% endif %}
+</section>
+
+{% include "intelligence/_tabs.html" %}
+
+{% if can_admin %}
+<section class="intel-metrics intel-metrics-three">
+  <article><span>今日待复核</span><strong>{{ candidates|length }}</strong><small>最多展示 20 条</small></article>
+  <article><span>已有 AI 整理</span><strong>{{ analyzed_candidate_count }}</strong><small>按当前分析版本</small></article>
+  <article><span>可用文本模型</span><strong>{{ configured_provider_count }}</strong><small>API Key 只从环境变量读取</small></article>
+</section>
+
+<section class="intel-digest-admin-grid">
+  <article class="intel-section intel-digest-action-card">
+    <div class="intel-section-head">
+      <div><span>STEP 1</span><h2>AI 整理今日候选</h2><p>一次最多 {{ max_batch_analyses }} 条，只发送公开标题、短摘录和来源编号。</p></div>
+    </div>
+    {% if candidates and configured_provider_count %}
+    <form method="post" action="{% url 'intelligence:digest_analyze_batch' %}" class="intel-digest-analysis-form">
+      {% csrf_token %}
+      <div class="intel-digest-provider">
+        <label for="digest-provider">文本模型</label>
+        <select id="digest-provider" name="provider_id" required>
+          {% for option in provider_options %}
+          <option value="{{ option.provider.pk }}" {% if not option.configured %}disabled{% endif %}>{{ option.provider.name }} · {{ option.provider.model_name }}{% if option.configured %} · 单条最高 ${{ option.max_cost }}{% else %} · 未完成授权或 Key 配置{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="intel-digest-candidate-list">
+        {% for event in candidates %}
+        <label class="intel-digest-candidate">
+          <input type="checkbox" name="event_ids" value="{{ event.pk }}">
+          <span>
+            <strong>{{ event.title }}</strong>
+            <small>{% if event.primary_source_item %}{{ event.primary_source_item.source.name }} · {% endif %}重要性 {{ event.importance_score }} / 置信度 {{ event.confidence_score }} · {% if event.current_ai_analysis %}已有 AI 整理，可安全复用{% else %}尚未整理{% endif %}</small>
+          </span>
+        </label>
+        {% endfor %}
+      </div>
+      <div class="intel-digest-action-row">
+        <button class="button intel-primary" type="submit">AI 整理所选候选</button>
+        <small>最多费用按所选模型的单条上限 × 实际新调用数计算；复用不产生新调用。</small>
+      </div>
+    </form>
+    {% elif not configured_provider_count %}
+    <div class="intel-empty"><strong>没有可用的文本模型</strong><p>请先完成 AI 情报数据范围、费用边界和 API Key 环境变量配置。</p></div>
+    {% else %}
+    <div class="intel-empty"><strong>今日没有待整理候选</strong><p>可先在运行状态页手工采集到期信源；普通浏览不会联网。</p></div>
+    {% endif %}
+  </article>
+
+  <article class="intel-section intel-digest-action-card">
+    <div class="intel-section-head">
+      <div><span>STEP 2</span><h2>生成今日简报</h2><p>采用已有 AI 分析快照；已复核内容向家庭成员展示，待确认内容仅管理员可见。</p></div>
+    </div>
+    <div class="intel-digest-generate-copy">
+      <p>先查看 AI 摘要和证据，再到候选复核决定保留或忽略。重新生成同一天简报会更新原简报，不创建重复正式版本。</p>
+      <div class="intel-inline-actions">
+        <a class="button ghost" href="{% url 'intelligence:triage_review' %}">去候选复核</a>
+        <form method="post" action="{% url 'intelligence:digest_generate' %}">{% csrf_token %}<button class="button intel-primary" type="submit">生成 / 更新今日简报</button></form>
+      </div>
+    </div>
+  </article>
+</section>
+{% endif %}
+
+{% if digest %}
+<section class="intel-digest-output">
+  <header class="intel-digest-titlebar">
+    <div><span>DAILY OUTPUT</span><h2>{{ digest.title }}</h2><p>{{ digest.generated_at|date:"Y-m-d H:i" }} 生成 · 策略 {{ digest.policy_version }}</p></div>
+    {% if can_admin %}<div class="intel-digest-audit"><span>{{ digest.analysis_count }} 条分析</span><span>{{ digest.tokens_used }} Token</span><span>费用估算 ${{ digest.cost_estimate }}</span></div>{% endif %}
+  </header>
+  {% if can_admin and digest.provider_names %}<p class="intel-muted">采用模型：{{ digest.provider_names|join:", " }}。费用是本期采用事件分析的累计估算，生成简报本身不再次调用 AI。</p>{% endif %}
+
+  <section class="intel-digest-section">
+    <div class="intel-section-head"><div><span>IMPORTANT</span><h2>今日重要</h2></div><strong>{{ important_items|length }}</strong></div>
+    <div class="intel-digest-items">
+      {% for item in important_items %}{% include "intelligence/_digest_item.html" %}{% empty %}<div class="intel-empty"><p>本期没有已复核的今日精选。</p></div>{% endfor %}
+    </div>
+  </section>
+
+  <section class="intel-digest-section">
+    <div class="intel-section-head"><div><span>FOLLOW UP</span><h2>值得跟进</h2></div><strong>{{ follow_up_items|length }}</strong></div>
+    <div class="intel-digest-items">
+      {% for item in follow_up_items %}{% include "intelligence/_digest_item.html" %}{% empty %}<div class="intel-empty"><p>本期没有已复核的跟进动态。</p></div>{% endfor %}
+    </div>
+  </section>
+
+  {% if can_admin %}
+  <section class="intel-digest-section intel-digest-review-section">
+    <div class="intel-section-head"><div><span>ADMIN ONLY</span><h2>待确认</h2><p>该组不会向普通成员展示，也不会自动保存到知识中心。</p></div><strong>{{ review_items|length }}</strong></div>
+    <div class="intel-digest-items">
+      {% for item in review_items %}{% include "intelligence/_digest_item.html" %}{% empty %}<div class="intel-empty"><p>本期没有已整理但尚未复核的候选。</p></div>{% endfor %}
+    </div>
+  </section>
+  {% endif %}
+</section>
+{% else %}
+<div class="intel-empty intel-digest-empty"><strong>尚未生成情报简报</strong><p>{% if can_admin %}先选择少量候选完成 AI 整理，再生成今日简报。{% else %}管理员尚未生成可供家庭成员查看的简报。{% endif %}</p></div>
+{% endif %}
+{% endblock %}
