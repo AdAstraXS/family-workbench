@@ -28,6 +28,13 @@
     </div>
   </header>
 
+  {% if event.review_status == 'ai_published' %}
+  <section class="intel-notice">
+    <strong>AI 自动发布 · 未经人工复核</strong>
+    <span>该动态已通过来源、相关性、证据清晰度和代码评分门槛，可直接阅读；如发现问题，管理员仍可更正或移出信息流。</span>
+  </section>
+  {% endif %}
+
   {% if current_analysis %}
   <section class="intel-notice">
     <strong>AI 结构化整理</strong>
@@ -70,7 +77,8 @@
     {% for evidence in event.evidence_links.all %}
       <article class="intel-evidence-card" id="source-item-{{ evidence.source_item_id }}">
         <div><span class="intel-tier tier-{{ evidence.source_item.source.source_tier|lower }}">{{ evidence.source_item.source.source_tier }}级</span><strong>{{ evidence.source_item.title }}</strong></div>
-        <p>{{ evidence.excerpt|default:evidence.source_item.excerpt|default:"未保存摘录，请通过原文链接核查。" }}</p>
+        <p>{{ evidence.excerpt|default:evidence.source_item.excerpt|default:"未保存摘录，请通过原文链接核查。"|linebreaksbr }}</p>
+        {% if evidence.source_item.article_fetch_status != 'not_requested' %}<small class="intel-muted">网页证据：{{ evidence.source_item.get_article_fetch_status_display }} · {{ evidence.source_item.article_fetch_reason }}</small>{% endif %}
         <footer><span>{{ evidence.source_item.source.name }} · {{ evidence.get_evidence_type_display }}</span>{% if evidence.source_item.canonical_url %}<a href="{{ evidence.source_item.canonical_url }}" target="_blank" rel="noopener noreferrer">打开原文 ↗</a>{% endif %}</footer>
       </article>
     {% empty %}<div class="intel-empty"><strong>暂无证据</strong><p>该事件不应作为正式结论使用。</p></div>{% endfor %}

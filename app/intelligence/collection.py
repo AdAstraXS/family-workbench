@@ -7,9 +7,10 @@ from django.db import transaction
 from django.utils import timezone
 
 from .adapters import FeedParseError, collected_item_fingerprint, get_adapter
+from .article_evidence import fetch_article_evidence
 from .http_client import SafeHttpError
 from .models import CollectionRun, CollectionRunItem, IntelligenceSource, SourceItem
-from .processing import process_source_item
+from .processing import RELEVANCE_THRESHOLD, classify_source_item, process_source_item
 
 
 SUPPORTED_ADAPTERS = {
@@ -160,6 +161,9 @@ def collect_one_source(source, *, max_items=50):
                     result.ignored += 1
                     continue
                 result.normalized += 1
+                _matched_topics, initial_relevance, _labels, _gate_reason = classify_source_item(item)
+                if initial_relevance >= RELEVANCE_THRESHOLD and source.article_fetch_enabled:
+                    fetch_article_evidence(item)
                 processed = process_source_item(item)
                 result.classified += 1
                 result.noise += int(processed.is_noise)

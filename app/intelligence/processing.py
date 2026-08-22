@@ -55,6 +55,7 @@ STOP_WORDS = {
 EXTRACTION_CONFIDENCE = {
     SourceItem.DEPTH_TITLE: 20,
     SourceItem.DEPTH_DESCRIPTION: 45,
+    SourceItem.DEPTH_PUBLIC_ARTICLE: 75,
     SourceItem.DEPTH_OFFICIAL_ARTICLE: 75,
     SourceItem.DEPTH_TRANSCRIPT: 90,
     SourceItem.DEPTH_MANUAL: 100,
@@ -87,7 +88,7 @@ def _subject_terms(subject):
 
 def classify_source_item(item):
     title = _normalized_text(item.title)
-    excerpt = _normalized_text(item.excerpt)
+    excerpt = _normalized_text(" ".join(filter(None, [item.excerpt, item.article_evidence])))
     source = item.source
     topics = list(source.topics.filter(is_active=True))
     matched = []
@@ -258,7 +259,7 @@ def _upsert_candidate_event(family, item, matched_topics, relevance, labels):
     features = _candidate_features(relevance, labels, occurred_at)
     created = event is None
     if created:
-        excerpt = item.excerpt[:600].strip()
+        excerpt = (item.article_evidence or item.excerpt)[:600].strip()
         if item.source.source_group == item.source.GROUP_MEDIA:
             source_label = "媒体信源"
         elif item.source.source_group == item.source.GROUP_OFFICIAL:
@@ -268,7 +269,10 @@ def _upsert_candidate_event(family, item, matched_topics, relevance, labels):
         summary = f"自动采集到{source_label}条目《{item.title}》。"
         if excerpt:
             summary += f"来源简介：{excerpt}"
-        summary += " 当前尚未核查完整正文或视频内容。"
+        if item.article_fetch_status == SourceItem.ARTICLE_EXTRACTED:
+            summary += " 系统已从公开网页提取必要证据段落，但未保存完整正文。"
+        else:
+            summary += " 当前尚未核查完整正文或视频内容；只有标题或订阅简介。"
         event = IntelligenceEvent.objects.create(
             family=family,
             channel=IntelligenceEvent.CHANNEL_PEOPLE,
@@ -277,7 +281,7 @@ def _upsert_candidate_event(family, item, matched_topics, relevance, labels):
             occurred_at=occurred_at,
             occurred_precision=IntelligenceEvent.PRECISION_EXACT,
             summary=summary,
-            why_it_matters="自动采集候选，需管理员结合原文确认重要性和具体陈述。",
+            why_it_matters="自动采集候选；AI 只会依据已保存的公开证据整理，最终知识归档仍由成员决定。",
             relevance_score=features["relevance"],
             impact_score=features["impact"],
             novelty_score=features["novelty"],
@@ -302,17 +306,24 @@ def _upsert_candidate_event(family, item, matched_topics, relevance, labels):
             role=EventSubject.ROLE_SUBJECT,
             defaults={"confidence_score": 80, "is_primary": index == 0},
         )
-    _evidence, evidence_created = EventEvidence.objects.get_or_create(
+    evidence_excerpt = item.article_evidence or item.excerpt
+    evidence, evidence_created = EventEvidence.objects.get_or_create(
         event=event,
         source_item=item,
         defaults={
             "evidence_type": EventEvidence.TYPE_CONTEXT,
-            "excerpt": item.excerpt,
+            "excerpt": evidence_excerpt,
             "source_quality_score": SOURCE_QUALITY_SCORES[item.source.source_tier],
             "is_primary": created,
         },
     )
-    if evidence_created and not created:
+    evidence_changed = False
+    if not evidence_created and evidence.excerpt != evidence_excerpt:
+        evidence.excerpt = evidence_excerpt
+        evidence.source_quality_score = SOURCE_QUALITY_SCORES[item.source.source_tier]
+        evidence.save(update_fields=["excerpt", "source_quality_score"])
+        evidence_changed = True
+    if (evidence_created and not created) or evidence_changed:
         event.analyses.filter(is_current=True).update(is_current=False)
     source_count = event.evidence_links.values("source_item__source_id").distinct().count()
     tiers = list(event.evidence_links.values_list("source_item__source__source_tier", flat=True))

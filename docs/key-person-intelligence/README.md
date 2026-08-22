@@ -1,8 +1,8 @@
 # 关键人物动态模块：设计文档索引
 
-状态：M1–M2、M3.1–M3.3 已完成本地实现，尚未部署 NAS
+状态：M1–M4 已部署；M4.1 自动情报循环已完成本地实现，待 NAS 真实验收
 开发分支：`codex/integrate-key-person-intelligence`
-更新时间：2026-08-16
+更新时间：2026-08-22
 
 本目录保存“关键人物动态”模块的需求与技术设计。专业的软件工程交付物可概括为：
 
@@ -23,6 +23,8 @@
 8. [M3.1 事件结构化分析设计与验收](./m3-event-analysis-design.md)
 9. [M3.2 真实文本分析边界与样本验收](./m3-2-real-analysis-validation.md)
 10. [M3.3 跨来源事件聚合与人工复核](./m3-3-event-aggregation.md)
+11. [M4 最小可用 AI 情报闭环与每日简报](./m4-minimum-ai-digest.md)
+12. [M4.1 自动情报循环与公开证据摘录](./m4-1-automatic-intelligence.md)
 
 ## 当前设计结论
 
@@ -52,8 +54,9 @@ python manage.py seed_key_people --dry-run
 python manage.py seed_key_people --follow-all --family-id <家庭ID>
 ```
 
-M2 在不增加 Python 依赖的前提下接入 RSS / Atom 和 YouTube 官方频道元数据。YouTube 不下载视频、
-音频或字幕；文本大模型、SEC、X 和公开网页正文仍未启用，也不需要新增 API Key。
+M2 在不增加 Python 依赖的前提下接入 RSS / Atom 和 YouTube 官方频道元数据。M4.1 可对管理员逐个
+启用的 RSS 信源提取少量公开证据段落并自动调用既有文本模型；不保存完整正文、不绕过登录或付费墙。
+YouTube 仍不下载视频、音频或字幕，SEC 与 X 仍未启用。
 
 用户验收后确认采用五段式轻量流水线，并将“关注主题”和“信源”拆开：人物只是关注主题的一种，
 信源可以同时服务于人物、机构、行业、技术、政策和证券主题。详见

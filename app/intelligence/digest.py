@@ -70,6 +70,7 @@ def digest_candidates(family, digest_date=None):
             | Q(
                 review_status__in=[
                     IntelligenceEvent.REVIEW_PUBLISHED,
+                    IntelligenceEvent.REVIEW_AI_PUBLISHED,
                     IntelligenceEvent.REVIEW_REVIEWED,
                 ],
                 selection_status__in=[
@@ -144,11 +145,21 @@ def _ranked_items(events):
 
 def _selection_reason(event, bucket):
     if bucket == IntelligenceDigestItem.BUCKET_IMPORTANT:
+        if event.review_status == IntelligenceEvent.REVIEW_AI_PUBLISHED:
+            return (
+                f"AI 自动整理并由代码评分进入今日重要，尚未人工复核；"
+                f"重要性 {event.importance_score}，置信度 {event.confidence_score}。"
+            )
         return (
             f"已复核并进入今日精选；重要性 {event.importance_score}，"
             f"置信度 {event.confidence_score}。"
         )
     if bucket == IntelligenceDigestItem.BUCKET_FOLLOW_UP:
+        if event.review_status == IntelligenceEvent.REVIEW_AI_PUBLISHED:
+            return (
+                f"AI 自动整理并通过代码门槛，尚未人工复核；重要性 {event.importance_score}，"
+                f"置信度 {event.confidence_score}。"
+            )
         return (
             f"已复核并保留到全部动态；重要性 {event.importance_score}，"
             f"置信度 {event.confidence_score}。"

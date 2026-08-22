@@ -9,7 +9,7 @@
   <div>
     <span class="intel-eyebrow">AI BRIEF</span>
     <h1>情报简报</h1>
-    <p>公开信源先经规则门控，再由管理员明确选择少量候选发送给文本 AI。简报复用已验证的结构化摘要并由代码分组，不会重复调用 AI。</p>
+    <p>正式任务自动完成增量采集、公开证据提取、受控 AI 整理和简报更新。高相关结果直接展示，只有失败、转向或证据不足的项目需要管理员处理。</p>
   </div>
   {% if can_admin %}<a class="button ghost" href="{% url 'intelligence:operations' %}">查看采集运行</a>{% endif %}
 </section>
@@ -17,16 +17,22 @@
 {% include "intelligence/_tabs.html" %}
 
 {% if can_admin %}
+<section class="intel-notice">
+  <strong>自动循环状态</strong>
+  <span>{% if latest_automation_run %}最近一次于 {{ latest_automation_run.started_at|date:"Y-m-d H:i" }} 启动，状态：{{ latest_automation_run.get_status_display }}。{% else %}尚未运行 M4.1 自动循环；部署后将先人工执行一次验收，再启用 NAS 定时任务。{% endif %}</span>
+</section>
 <section class="intel-metrics intel-metrics-three">
-  <article><span>今日待复核</span><strong>{{ candidates|length }}</strong><small>最多展示 20 条</small></article>
+  <article><span>异常待复核</span><strong>{{ candidates|length }}</strong><small>失败、转向或未过门槛</small></article>
   <article><span>已有 AI 整理</span><strong>{{ analyzed_candidate_count }}</strong><small>按当前分析版本</small></article>
   <article><span>可用文本模型</span><strong>{{ configured_provider_count }}</strong><small>API Key 只从环境变量读取</small></article>
 </section>
 
+<details class="intel-section intel-run-details">
+  <summary>维护与故障恢复：手工 AI 整理 / 重新生成简报</summary>
 <section class="intel-digest-admin-grid">
   <article class="intel-section intel-digest-action-card">
     <div class="intel-section-head">
-      <div><span>STEP 1</span><h2>AI 整理今日候选</h2><p>一次最多 {{ max_batch_analyses }} 条，只发送公开标题、短摘录和来源编号。</p></div>
+      <div><span>FALLBACK 1</span><h2>手工重试：AI 整理今日候选</h2><p>正常情况下无需操作。一次最多 {{ max_batch_analyses }} 条；按服务商授权发送公开标题、订阅简介或必要证据摘录。</p></div>
     </div>
     {% if candidates and configured_provider_count %}
     <form method="post" action="{% url 'intelligence:digest_analyze_batch' %}" class="intel-digest-analysis-form">
@@ -58,13 +64,13 @@
     {% elif not configured_provider_count %}
     <div class="intel-empty"><strong>没有可用的文本模型</strong><p>请先完成 AI 情报数据范围、费用边界和 API Key 环境变量配置。</p></div>
     {% else %}
-    <div class="intel-empty"><strong>今日没有待整理候选</strong><p>可先在运行状态页手工采集到期信源；普通浏览不会联网。</p></div>
+    <div class="intel-empty"><strong>没有需要手工重试的候选</strong><p>自动任务会处理新候选；普通浏览不会联网。</p></div>
     {% endif %}
   </article>
 
   <article class="intel-section intel-digest-action-card">
     <div class="intel-section-head">
-      <div><span>STEP 2</span><h2>生成今日简报</h2><p>采用已有 AI 分析快照；已复核内容向家庭成员展示，待确认内容仅管理员可见。</p></div>
+      <div><span>FALLBACK 2</span><h2>手工重建今日简报</h2><p>自动循环会幂等更新简报；此按钮只用于故障恢复或立刻刷新。</p></div>
     </div>
     <div class="intel-digest-generate-copy">
       <p>先查看 AI 摘要和证据，再到候选复核决定保留或忽略。重新生成同一天简报会更新原简报，不创建重复正式版本。</p>
@@ -75,6 +81,7 @@
     </div>
   </article>
 </section>
+</details>
 {% endif %}
 
 {% if digest %}
@@ -88,14 +95,14 @@
   <section class="intel-digest-section">
     <div class="intel-section-head"><div><span>IMPORTANT</span><h2>今日重要</h2></div><strong>{{ important_items|length }}</strong></div>
     <div class="intel-digest-items">
-      {% for item in important_items %}{% include "intelligence/_digest_item.html" %}{% empty %}<div class="intel-empty"><p>本期没有已复核的今日精选。</p></div>{% endfor %}
+      {% for item in important_items %}{% include "intelligence/_digest_item.html" %}{% empty %}<div class="intel-empty"><p>本期没有达到今日重要门槛的动态。</p></div>{% endfor %}
     </div>
   </section>
 
   <section class="intel-digest-section">
     <div class="intel-section-head"><div><span>FOLLOW UP</span><h2>值得跟进</h2></div><strong>{{ follow_up_items|length }}</strong></div>
     <div class="intel-digest-items">
-      {% for item in follow_up_items %}{% include "intelligence/_digest_item.html" %}{% empty %}<div class="intel-empty"><p>本期没有已复核的跟进动态。</p></div>{% endfor %}
+      {% for item in follow_up_items %}{% include "intelligence/_digest_item.html" %}{% empty %}<div class="intel-empty"><p>本期没有值得跟进的动态。</p></div>{% endfor %}
     </div>
   </section>
 
@@ -109,6 +116,6 @@
   {% endif %}
 </section>
 {% else %}
-<div class="intel-empty intel-digest-empty"><strong>尚未生成情报简报</strong><p>{% if can_admin %}先选择少量候选完成 AI 整理，再生成今日简报。{% else %}管理员尚未生成可供家庭成员查看的简报。{% endif %}</p></div>
+<div class="intel-empty intel-digest-empty"><strong>尚未生成情报简报</strong><p>{% if can_admin %}运行一次 M4.1 自动情报循环后会自动创建；不需要逐条人工确认。{% else %}自动任务尚未生成可供家庭成员查看的简报。{% endif %}</p></div>
 {% endif %}
 {% endblock %}

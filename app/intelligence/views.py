@@ -75,6 +75,7 @@ from .collection import SUPPORTED_ADAPTERS, collect_intelligence_sources
 
 VISIBLE_EVENT_STATUSES = (
     IntelligenceEvent.REVIEW_PUBLISHED,
+    IntelligenceEvent.REVIEW_AI_PUBLISHED,
     IntelligenceEvent.REVIEW_REVIEWED,
 )
 PUBLIC_SELECTION_STATUSES = (
@@ -219,6 +220,12 @@ def index(request):
         .annotate(event_count=Count("intelligence_events", filter=Q(intelligence_events__family=member.family), distinct=True))
         .order_by("-family_follows__priority", "-importance_level", "display_name")[:10]
     )
+    latest_digest = (
+        IntelligenceDigest.objects.filter(family=member.family)
+        .prefetch_related("items__event")
+        .first()
+    )
+    latest_digest_items = list(latest_digest.items.all()) if latest_digest else []
     return render(
         request,
         "intelligence/index.html",
@@ -233,6 +240,11 @@ def index(request):
                 merged_into__isnull=True,
                 selection_status=IntelligenceEvent.SELECTION_REVIEW,
             ).count(),
+            "latest_digest": latest_digest,
+            "latest_digest_public_items": [
+                item for item in latest_digest_items
+                if item.bucket != IntelligenceDigestItem.BUCKET_REVIEW
+            ][:6],
             "can_admin": _is_family_admin(request),
         },
     )
@@ -338,6 +350,14 @@ def digest_workbench(request):
         )
     candidates = pending_analysis_candidates(member.family) if can_admin else []
     analyzed_candidate_count = sum(bool(event.current_ai_analysis) for event in candidates)
+    latest_automation_run = (
+        CollectionRun.objects.filter(
+            family=member.family,
+            run_kind=CollectionRun.KIND_AUTOMATION,
+        ).first()
+        if can_admin
+        else None
+    )
     return render(
         request,
         "intelligence/digest_workbench.html",
@@ -351,6 +371,7 @@ def digest_workbench(request):
             "provider_options": provider_options,
             "configured_provider_count": sum(item["configured"] for item in provider_options),
             "max_batch_analyses": MAX_BATCH_ANALYSES,
+            "latest_automation_run": latest_automation_run,
             "can_admin": can_admin,
         },
     )
@@ -1214,6 +1235,10 @@ def operations(request):
     ).select_related("created_by").prefetch_related("source_results__source")[:30]
     recent_items = SourceItem.objects.select_related("source").prefetch_related("matched_subjects")[:30]
     automatic_sources = sources.filter(adapter_key__in=SUPPORTED_ADAPTERS)
+    latest_automation_run = CollectionRun.objects.filter(
+        family=member.family,
+        run_kind=CollectionRun.KIND_AUTOMATION,
+    ).first()
     return render(
         request,
         "intelligence/operations.html",
@@ -1229,6 +1254,11 @@ def operations(request):
             "active_automatic_source_count": automatic_sources.filter(is_active=True).count(),
             "disabled_automatic_source_count": automatic_sources.filter(is_active=False).count(),
             "due_source_count": sum(source.is_due for source in sources),
+            "article_enabled_source_count": sum(source.article_fetch_enabled for source in sources),
+            "article_extracted_count": SourceItem.objects.filter(
+                article_fetch_status=SourceItem.ARTICLE_EXTRACTED,
+            ).count(),
+            "latest_automation_run": latest_automation_run,
             "can_admin": True,
         },
     )

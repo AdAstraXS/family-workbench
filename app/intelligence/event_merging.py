@@ -113,6 +113,7 @@ def _event_rank(event):
     archived = EventKnowledgeArchive.objects.filter(event=event).exists()
     reviewed = event.review_status in {
         IntelligenceEvent.REVIEW_PUBLISHED,
+        IntelligenceEvent.REVIEW_AI_PUBLISHED,
         IntelligenceEvent.REVIEW_REVIEWED,
     }
     primary = event.primary_source_item
@@ -133,6 +134,7 @@ def _protected_reasons(event):
     reasons = []
     if event.review_status in {
         IntelligenceEvent.REVIEW_PUBLISHED,
+        IntelligenceEvent.REVIEW_AI_PUBLISHED,
         IntelligenceEvent.REVIEW_REVIEWED,
     }:
         reasons.append("事件已经发布或人工复核")

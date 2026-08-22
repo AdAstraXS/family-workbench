@@ -1,5 +1,6 @@
 <article class="intel-digest-item intel-digest-item-{{ item.bucket }}">
   <div class="intel-event-card-meta">
+    {% if item.event.review_status == 'ai_published' %}<span class="intel-status warning">AI 自动发布 · 未人工复核</span>{% endif %}
     <span>{{ item.occurred_at|date:"m-d H:i" }}</span>
     <span>重要性 {{ item.importance_score }}</span>
     <span>置信度 {{ item.confidence_score }}</span>

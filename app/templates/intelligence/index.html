@@ -9,7 +9,7 @@
   <div>
     <span class="intel-eyebrow">AI INTELLIGENCE</span>
     <h1>关键人物动态</h1>
-    <p>从少量高质量信源中提取事件，以主题组织、以证据核查，并用可解释规则筛出真正重要的新动向。</p>
+    <p>系统按时增量采集公开信源，提取必要证据并用 AI 整理；高相关结果自动进入简报，异常项才交给管理员处理。</p>
   </div>
   <div class="intel-hero-actions">
     <a class="button ghost" href="{% url 'intelligence:source_list' %}">信源管理</a>
@@ -25,6 +25,30 @@
 
 {% include "intelligence/_tabs.html" %}
 
+<section class="intel-section intel-digest-preview">
+  <div class="intel-section-head">
+    <div><span>AUTOMATIC BRIEF</span><h2>最新 AI 情报简报</h2></div>
+    <a href="{% url 'intelligence:digest_workbench' %}">打开完整简报</a>
+  </div>
+  {% if latest_digest and latest_digest_public_items %}
+    <p class="intel-muted">{{ latest_digest.digest_date|date:"Y-m-d" }} · {{ latest_digest.generated_at|date:"H:i" }} 更新 · AI 内容均标明证据来源，可能尚未人工复核。</p>
+    <div class="intel-compact-list">
+      {% for item in latest_digest_public_items %}
+        <a href="{% url 'intelligence:event_detail' item.event_id %}">
+          <time>{{ item.occurred_at|date:"m-d H:i" }}</time>
+          <span><strong>{{ item.title_snapshot }}</strong><small>{{ item.summary_snapshot|truncatechars:120 }}</small></span>
+          <em>{{ item.importance_score }}</em>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="intel-empty">
+      <strong>自动简报正在等待第一批通过门槛的动态</strong>
+      <p>普通浏览不会触发采集或 AI。正式任务运行后，这里会直接显示结果，不需要逐条人工确认。</p>
+    </div>
+  {% endif %}
+</section>
+
 <section class="intel-section">
   <div class="intel-section-head">
     <div><span>PAST 24 HOURS</span><h2>今日精选</h2></div>
@@ -37,7 +61,7 @@
   {% else %}
     <div class="intel-empty">
       <strong>过去 24 小时暂无达到阈值的精选事件</strong>
-      <p>普通相关信息仍可在“全部动态”查看。RSS 自动采集已启用，文本 AI 尚未接入；当前由规则提取特征、代码完成评分。</p>
+      <p>普通相关信息仍可在“全部动态”查看；AI 自动结果会明确标记“未经人工复核”。</p>
       {% if can_admin %}<a class="button intel-primary" href="{% url 'intelligence:event_create' %}">录入第一条动态</a>{% endif %}
     </div>
   {% endif %}

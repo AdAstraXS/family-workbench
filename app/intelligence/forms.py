@@ -163,6 +163,13 @@ class IntelligenceSubjectForm(StyledFormMixin, forms.ModelForm):
 
 
 class IntelligenceSourceForm(StyledFormMixin, forms.ModelForm):
+    article_fetch_policy = forms.ChoiceField(
+        label="公开网页正文",
+        choices=IntelligenceSource.ARTICLE_FETCH_POLICY_CHOICES,
+        required=False,
+        help_text="启用后只提取少量公开证据段落；不登录、不绕过付费墙，也不保存完整正文。",
+    )
+
     class Meta:
         model = IntelligenceSource
         fields = [
@@ -178,6 +185,7 @@ class IntelligenceSourceForm(StyledFormMixin, forms.ModelForm):
             "transport_weight",
             "poll_interval_minutes",
             "is_active",
+            "article_fetch_policy",
         ]
         help_texts = {
             "subject": "可选，用于指定默认归属；同一信源仍可关联多个主题。",
@@ -187,6 +195,15 @@ class IntelligenceSourceForm(StyledFormMixin, forms.ModelForm):
             "transport_weight": "同等级来源中，官网可高于官方社交账号。",
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            self.initial.setdefault("article_fetch_policy", self.instance.article_fetch_policy)
+        else:
+            self.initial.setdefault(
+                "article_fetch_policy", IntelligenceSource.ARTICLE_FETCH_METADATA_ONLY
+            )
+
     def clean(self):
         cleaned_data = super().clean()
         if not cleaned_data.get("subject") and not cleaned_data.get("topics"):
@@ -195,6 +212,11 @@ class IntelligenceSourceForm(StyledFormMixin, forms.ModelForm):
         source_type = cleaned_data.get("source_type")
         url = (cleaned_data.get("url") or "").strip()
         external_id = (cleaned_data.get("external_id") or "").strip()
+        article_fetch_policy = (
+            cleaned_data.get("article_fetch_policy")
+            or IntelligenceSource.ARTICLE_FETCH_METADATA_ONLY
+        )
+        cleaned_data["article_fetch_policy"] = article_fetch_policy
         if adapter_key == IntelligenceSource.ADAPTER_RSS:
             if source_type != IntelligenceSource.TYPE_RSS:
                 self.add_error("source_type", "RSS 适配器必须选择 RSS / Atom 来源类型。")
@@ -209,6 +231,11 @@ class IntelligenceSourceForm(StyledFormMixin, forms.ModelForm):
                 self.instance.external_id = external_id
             if not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", external_id):
                 self.add_error("external_id", "请填写以 UC 开头的 24 位 YouTube 频道 ID，不要填写频道昵称。")
+        if (
+            article_fetch_policy == IntelligenceSource.ARTICLE_FETCH_PUBLIC_HTML
+            and adapter_key != IntelligenceSource.ADAPTER_RSS
+        ):
+            self.add_error("article_fetch_policy", "公开网页证据提取目前只适用于 RSS / Atom 信源。")
         if adapter_key in {IntelligenceSource.ADAPTER_RSS, IntelligenceSource.ADAPTER_YOUTUBE} and url:
             parsed = urlsplit(url)
             if parsed.scheme not in {"http", "https"} or not parsed.hostname:
@@ -234,6 +261,9 @@ class IntelligenceSourceForm(StyledFormMixin, forms.ModelForm):
         return cleaned_data
 
     def save(self, commit=True):
+        extra_data = dict(self.instance.extra_data or {})
+        extra_data["article_fetch_policy"] = self.cleaned_data["article_fetch_policy"]
+        self.instance.extra_data = extra_data
         source = super().save(commit=commit)
         if commit and source.subject_id:
             source.topics.add(source.subject_id)

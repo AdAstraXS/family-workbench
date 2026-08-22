@@ -244,6 +244,12 @@ class Command(BaseCommand):
         created_count = 0
         updated_count = 0
         for definition in SOURCE_DEFINITIONS:
+            existing = IntelligenceSource.objects.filter(
+                adapter_key=definition["adapter_key"],
+                url=definition["url"],
+            ).first()
+            extra_data = dict(existing.extra_data or {}) if existing else {}
+            extra_data.update(definition.get("extra_data", {}))
             defaults = {
                 "subject": subjects[definition["primary"]] if definition["primary"] else None,
                 "name": definition["name"],
@@ -254,7 +260,7 @@ class Command(BaseCommand):
                 "poll_interval_minutes": definition["poll_interval_minutes"],
                 "transport_weight": definition.get("transport_weight", 100),
                 "is_active": definition["enabled_by_default"],
-                "extra_data": definition.get("extra_data", {}),
+                "extra_data": extra_data,
             }
             source, created = IntelligenceSource.objects.update_or_create(
                 adapter_key=definition["adapter_key"],

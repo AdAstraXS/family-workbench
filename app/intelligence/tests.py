@@ -26,6 +26,8 @@ from knowledge.models import (
 from .forms import IntelligenceSourceForm, IntelligenceSubjectForm
 from .adapters import AdapterResult, CollectedItem, FeedParseError, parse_rss_or_atom, parse_youtube_atom
 from .collection import collect_intelligence_sources
+from .article_evidence import extract_public_article_evidence, fetch_article_evidence
+from .automation import run_intelligence_cycle
 from .ai_enrichment import (
     IntelligenceAiError,
     _chat_url,
@@ -1171,6 +1173,15 @@ class M2CollectionTests(IntelligenceTestBase):
         self.assertFalse(
             media_sources.exclude(extra_data__discovery_policy=MEDIA_DISCOVERY_POLICY).exists()
         )
+        opted_in = media_sources.first()
+        opted_in.extra_data = {
+            **opted_in.extra_data,
+            "article_fetch_policy": IntelligenceSource.ARTICLE_FETCH_PUBLIC_HTML,
+        }
+        opted_in.save(update_fields=["extra_data", "updated_at"])
+        call_command("seed_intelligence_sources", stdout=StringIO())
+        opted_in.refresh_from_db()
+        self.assertTrue(opted_in.article_fetch_enabled)
 
     def test_collection_command_returns_nonzero_after_partial_failure(self):
         healthy = self.make_rss_source(name="Healthy command RSS", url="https://example.com/cmd-ok.xml")
@@ -1247,6 +1258,74 @@ class M2OperationsViewTests(IntelligenceTestBase):
         response = self.client.post(reverse("intelligence:collect_sources_now"))
 
         self.assertEqual(response.status_code, 403)
+
+
+class M4ArticleEvidenceTests(IntelligenceTestBase):
+    def test_public_article_extraction_keeps_only_bounded_evidence_paragraphs(self):
+        paragraphs = "".join(
+            f"<p>Test Person announced AI product milestone {index}. "
+            f"This paragraph contains public context and verifiable details for the release.</p>"
+            for index in range(1, 8)
+        )
+
+        result = extract_public_article_evidence(
+            f"<html><body><nav>navigation</nav><article>{paragraphs}</article></body></html>".encode(),
+            title="Test Person AI product milestone",
+            subject_names=["Test Person"],
+        )
+
+        self.assertEqual(result.status, SourceItem.ARTICLE_EXTRACTED)
+        self.assertIn("[P1]", result.evidence)
+        self.assertLessEqual(result.evidence.count("[P"), 4)
+        self.assertNotIn("navigation", result.evidence)
+        self.assertLessEqual(len(result.evidence), 5000)
+
+    def test_public_article_extraction_refuses_paywall_content(self):
+        result = extract_public_article_evidence(
+            (
+                "<main><p>Subscribe to continue reading this premium content.</p>"
+                "<p>Test Person article preview with several details that are not fully available.</p>"
+                "<p>Additional teaser text repeats that the complete report requires a subscription.</p></main>"
+            ).encode(),
+            title="Test Person report",
+        )
+
+        self.assertEqual(result.status, SourceItem.ARTICLE_BLOCKED)
+        self.assertEqual(result.evidence, "")
+
+    @patch("intelligence.article_evidence.fetch_with_retries")
+    def test_opted_in_source_saves_public_evidence_without_full_body(self, fetch):
+        self.source.adapter_key = IntelligenceSource.ADAPTER_RSS
+        self.source.source_type = IntelligenceSource.TYPE_RSS
+        self.source.url = "https://example.com/feed.xml"
+        self.source.extra_data = {
+            "article_fetch_policy": IntelligenceSource.ARTICLE_FETCH_PUBLIC_HTML,
+        }
+        self.source.save(update_fields=["adapter_key", "source_type", "url", "extra_data", "updated_at"])
+        item = SourceItem.objects.create(
+            source=self.source,
+            title="Test Person launches a new AI product",
+            canonical_url="https://example.com/article",
+            excerpt="Short feed summary.",
+        )
+        body = (
+            "<article><p>Test Person launched a new AI product for enterprise customers, "
+            "according to the public announcement with a clearly stated release date.</p>"
+            "<p>The company said the product focuses on reliable inference and lower operating costs "
+            "for organizations adopting artificial intelligence systems.</p>"
+            "<p>Additional public details describe availability, customer scope, and evaluation plans "
+            "without requiring a login or subscription.</p></article>"
+        ).encode()
+        fetch.return_value = FetchResponse(200, item.canonical_url, body)
+
+        result = fetch_article_evidence(item)
+
+        item.refresh_from_db()
+        self.assertEqual(result.status, SourceItem.ARTICLE_EXTRACTED)
+        self.assertEqual(item.content_depth, SourceItem.DEPTH_PUBLIC_ARTICLE)
+        self.assertIn("[P1]", item.article_evidence)
+        self.assertNotEqual(item.article_content_hash, "")
+        self.assertNotEqual(item.article_evidence, body.decode())
 
 
 class FakeAiResponse:
@@ -1793,6 +1872,149 @@ class M3EventAnalysisTests(IntelligenceTestBase):
         self.assertEqual(IntelligenceDigestItem.objects.count(), 1)
         self.assertIn("内容未变化", output.getvalue())
         self.assertFalse(urlopen.called)
+
+    @patch("intelligence.ai_enrichment.validate_public_http_url")
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_article_scope_sends_only_saved_public_evidence_snippets(self, urlopen, validate_url):
+        event = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="公开证据测试事件",
+        )
+        item = event.primary_source_item
+        item.article_evidence = "[P1] Test Person announced a verifiable enterprise AI release."
+        item.article_content_hash = "c" * 64
+        item.article_fetch_status = SourceItem.ARTICLE_EXTRACTED
+        item.content_depth = SourceItem.DEPTH_PUBLIC_ARTICLE
+        item.save(
+            update_fields=[
+                "article_evidence", "article_content_hash", "article_fetch_status",
+                "content_depth", "updated_at",
+            ]
+        )
+        event.evidence_links.update(excerpt=item.article_evidence)
+        provider = self.make_provider()
+        validate_url.return_value = "https://api.example.com/v1/chat/completions"
+        urlopen.return_value = FakeAiResponse(self.ai_payload(event))
+
+        with patch.dict("os.environ", {"INTELLIGENCE_TEST_API_KEY": "test-key"}):
+            analyze_event(
+                event,
+                member=self.admin_member,
+                user=self.admin_user,
+                provider_id=provider.pk,
+            )
+            metadata_request = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
+            metadata_payload = json.loads(metadata_request["messages"][1]["content"])
+            self.assertEqual(metadata_payload["evidence"][0]["content_mode"], "feed_metadata")
+            self.assertNotIn(item.article_evidence, metadata_request["messages"][1]["content"])
+
+            provider.extra_data.update(
+                {
+                    "intelligence_data_scope": "public_article_snippets",
+                    "intelligence_policy_version": "public-article-snippets-v1",
+                }
+            )
+            provider.save(update_fields=["extra_data", "updated_at"])
+            analysis, _created = analyze_event(
+                event,
+                member=self.admin_member,
+                user=self.admin_user,
+                provider_id=provider.pk,
+            )
+
+        request_payload = json.loads(urlopen.call_args.args[0].data.decode("utf-8"))
+        user_payload = json.loads(request_payload["messages"][1]["content"])
+        self.assertEqual(user_payload["evidence"][0]["content_mode"], "public_article_evidence")
+        self.assertEqual(user_payload["evidence"][0]["excerpt"], item.article_evidence)
+        self.assertEqual(analysis.input_snapshot["data_scope"], "public_article_snippets")
+        self.assertNotIn(item.canonical_url, request_payload["messages"][1]["content"])
+        self.assertEqual(urlopen.call_count, 2)
+
+    @patch("intelligence.automation.collect_intelligence_sources")
+    @patch("intelligence.ai_enrichment.validate_public_http_url")
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_automatic_cycle_publishes_high_quality_ai_result_and_updates_digest(
+        self,
+        urlopen,
+        validate_url,
+        collect,
+    ):
+        event = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="自动循环高相关事件",
+        )
+        event.relevance_score = 65
+        event.save(update_fields=["relevance_score", "updated_at"])
+        provider = self.make_provider()
+        validate_url.return_value = "https://api.example.com/v1/chat/completions"
+        urlopen.return_value = FakeAiResponse(self.ai_payload(event))
+        collect.return_value = CollectionRun.objects.create(
+            family=self.family,
+            run_kind=CollectionRun.KIND_COLLECTION,
+            status=CollectionRun.STATUS_SUCCESS,
+            finished_at=timezone.now(),
+        )
+
+        with patch.dict("os.environ", {"INTELLIGENCE_TEST_API_KEY": "test-key"}):
+            cycle = run_intelligence_cycle(
+                family=self.family,
+                member=self.admin_member,
+                user=self.admin_user,
+                provider_id=provider.pk,
+            )
+
+        event.refresh_from_db()
+        self.assertEqual(cycle.run.status, CollectionRun.STATUS_SUCCESS)
+        self.assertEqual(event.review_status, IntelligenceEvent.REVIEW_AI_PUBLISHED)
+        self.assertIn(
+            event.selection_status,
+            {IntelligenceEvent.SELECTION_SELECTED, IntelligenceEvent.SELECTION_FEED},
+        )
+        self.assertEqual(cycle.run.selected_count, 1)
+        self.assertIsNotNone(cycle.digest_id)
+        self.assertNotEqual(IntelligenceDigestItem.objects.get(event=event).bucket, IntelligenceDigestItem.BUCKET_REVIEW)
+
+        self.client.force_login(self.member_user)
+        detail = self.client.get(reverse("intelligence:event_detail", args=[event.pk]))
+        home = self.client.get(reverse("intelligence:index"))
+        self.assertContains(detail, "AI 自动发布 · 未经人工复核")
+        self.assertContains(home, event.title)
+
+    @patch("intelligence.automation.collect_intelligence_sources")
+    @patch("intelligence.ai_enrichment.urllib.request.urlopen")
+    def test_automatic_cycle_routes_existing_current_analysis_without_new_ai_call(
+        self,
+        urlopen,
+        collect,
+    ):
+        event = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="已有 AI 分析的历史候选",
+        )
+        event.relevance_score = 85
+        event.save(update_fields=["relevance_score", "updated_at"])
+        analysis = self.make_success_analysis(event)
+        collect.return_value = CollectionRun.objects.create(
+            family=self.family,
+            run_kind=CollectionRun.KIND_COLLECTION,
+            status=CollectionRun.STATUS_SUCCESS,
+            finished_at=timezone.now(),
+        )
+
+        cycle = run_intelligence_cycle(
+            family=self.family,
+            member=self.admin_member,
+            user=self.admin_user,
+        )
+
+        event.refresh_from_db()
+        self.assertFalse(urlopen.called)
+        self.assertEqual(event.review_status, IntelligenceEvent.REVIEW_AI_PUBLISHED)
+        self.assertEqual(event.scoring_breakdown["automation_analysis_id"], analysis.pk)
+        self.assertEqual(cycle.run.selected_count, 1)
 
 
 class M3EventMergeTests(IntelligenceTestBase):

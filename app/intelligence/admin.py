@@ -54,10 +54,19 @@ class IntelligenceSourceAdmin(admin.ModelAdmin):
 
 @admin.register(SourceItem)
 class SourceItemAdmin(admin.ModelAdmin):
-    list_display = ("title", "source", "published_at", "content_depth", "relevance_score", "processing_status", "created_by")
-    list_filter = ("processing_status", "content_depth", "source__source_type", "source__source_tier")
-    search_fields = ("title", "author_name", "canonical_url", "excerpt")
-    readonly_fields = ("content_hash", "fetched_at", "created_at", "updated_at")
+    list_display = (
+        "title", "source", "published_at", "content_depth", "article_fetch_status",
+        "relevance_score", "processing_status", "created_by",
+    )
+    list_filter = (
+        "processing_status", "content_depth", "article_fetch_status",
+        "source__source_type", "source__source_tier",
+    )
+    search_fields = ("title", "author_name", "canonical_url", "excerpt", "article_evidence")
+    readonly_fields = (
+        "content_hash", "article_content_hash", "article_fetched_at",
+        "fetched_at", "created_at", "updated_at",
+    )
 
 
 class EventSubjectInline(admin.TabularInline):

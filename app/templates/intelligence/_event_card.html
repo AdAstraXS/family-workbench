@@ -1,5 +1,6 @@
 <article class="intel-event-card{% if not event.member_state.read_at %} is-unread{% endif %}">
   <div class="intel-event-card-meta">
+    {% if event.review_status == 'ai_published' %}<span class="intel-status warning">AI 自动发布 · 未人工复核</span>{% endif %}
     <span class="intel-selection intel-selection-{{ event.selection_status }}">{{ event.get_selection_status_display }}</span>
     <span class="intel-type intel-type-{{ event.event_type }}">{{ event.get_event_type_display }}</span>
     <span>{{ event.occurred_at|date:"m-d H:i" }}</span>

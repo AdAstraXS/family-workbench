@@ -189,6 +189,13 @@ class IntelligenceSource(TimestampedModel):
         (ADAPTER_WEB, "公开网页（待后续阶段）"),
     ]
 
+    ARTICLE_FETCH_METADATA_ONLY = "metadata_only"
+    ARTICLE_FETCH_PUBLIC_HTML = "public_html"
+    ARTICLE_FETCH_POLICY_CHOICES = [
+        (ARTICLE_FETCH_METADATA_ONLY, "只使用订阅元数据"),
+        (ARTICLE_FETCH_PUBLIC_HTML, "提取公开网页证据摘录"),
+    ]
+
     TIER_A = "A"
     TIER_B = "B"
     TIER_C = "C"
@@ -282,6 +289,19 @@ class IntelligenceSource(TimestampedModel):
         return self.adapter_key in {self.ADAPTER_RSS, self.ADAPTER_YOUTUBE}
 
     @property
+    def article_fetch_policy(self):
+        return (self.extra_data or {}).get(
+            "article_fetch_policy", self.ARTICLE_FETCH_METADATA_ONLY
+        )
+
+    @property
+    def article_fetch_enabled(self):
+        return (
+            self.adapter_key == self.ADAPTER_RSS
+            and self.article_fetch_policy == self.ARTICLE_FETCH_PUBLIC_HTML
+        )
+
+    @property
     def is_due(self):
         if not self.is_active or self.adapter_key == self.ADAPTER_MANUAL:
             return False
@@ -294,12 +314,14 @@ class IntelligenceSource(TimestampedModel):
 class SourceItem(TimestampedModel):
     DEPTH_TITLE = "title"
     DEPTH_DESCRIPTION = "description"
+    DEPTH_PUBLIC_ARTICLE = "public_article"
     DEPTH_OFFICIAL_ARTICLE = "official_article"
     DEPTH_TRANSCRIPT = "transcript"
     DEPTH_MANUAL = "manual"
     DEPTH_CHOICES = [
         (DEPTH_TITLE, "仅标题"),
         (DEPTH_DESCRIPTION, "标题与简介"),
+        (DEPTH_PUBLIC_ARTICLE, "公开网页证据摘录"),
         (DEPTH_OFFICIAL_ARTICLE, "官方文章正文"),
         (DEPTH_TRANSCRIPT, "完整字幕/文字稿"),
         (DEPTH_MANUAL, "人工核查"),
@@ -328,6 +350,19 @@ class SourceItem(TimestampedModel):
         (STATUS_IGNORED, "已忽略"),
     ]
 
+    ARTICLE_NOT_REQUESTED = "not_requested"
+    ARTICLE_EXTRACTED = "extracted"
+    ARTICLE_METADATA_ONLY = "metadata_only"
+    ARTICLE_BLOCKED = "blocked"
+    ARTICLE_FAILED = "failed"
+    ARTICLE_FETCH_CHOICES = [
+        (ARTICLE_NOT_REQUESTED, "未请求"),
+        (ARTICLE_EXTRACTED, "已提取公开证据"),
+        (ARTICLE_METADATA_ONLY, "仅保留元数据"),
+        (ARTICLE_BLOCKED, "访问受限"),
+        (ARTICLE_FAILED, "提取失败"),
+    ]
+
     source = models.ForeignKey(
         IntelligenceSource,
         verbose_name="信息源",
@@ -350,6 +385,23 @@ class SourceItem(TimestampedModel):
         choices=DEPTH_CHOICES,
         default=DEPTH_TITLE,
     )
+    article_evidence = models.TextField(
+        "公开网页证据摘录",
+        blank=True,
+        help_text="只保存自动整理所需的少量公开段落，不保存完整版权正文。",
+    )
+    article_content_hash = models.CharField(
+        "公开网页内容指纹", max_length=64, blank=True, db_index=True
+    )
+    article_fetch_status = models.CharField(
+        "网页提取状态",
+        max_length=20,
+        choices=ARTICLE_FETCH_CHOICES,
+        default=ARTICLE_NOT_REQUESTED,
+    )
+    article_fetch_reason = models.CharField("网页提取说明", max_length=500, blank=True)
+    article_fetched_at = models.DateTimeField("网页提取时间", null=True, blank=True)
+    article_extraction_version = models.CharField("网页提取器版本", max_length=50, blank=True)
     matched_subjects = models.ManyToManyField(
         IntelligenceSubject,
         verbose_name="命中主题",
@@ -451,11 +503,13 @@ class IntelligenceEvent(TimestampedModel):
     ]
 
     REVIEW_PUBLISHED = "published"
+    REVIEW_AI_PUBLISHED = "ai_published"
     REVIEW_PENDING = "pending"
     REVIEW_REVIEWED = "reviewed"
     REVIEW_IGNORED = "ignored"
     REVIEW_CHOICES = [
         (REVIEW_PUBLISHED, "已发布"),
+        (REVIEW_AI_PUBLISHED, "AI 自动发布（未人工复核）"),
         (REVIEW_PENDING, "待复核"),
         (REVIEW_REVIEWED, "已复核"),
         (REVIEW_IGNORED, "已忽略"),
@@ -627,7 +681,7 @@ class IntelligenceEvent(TimestampedModel):
     @property
     def display_summary(self):
         analysis = self.current_ai_analysis
-        if analysis and self.review_status == self.REVIEW_PENDING:
+        if analysis and self.review_status in {self.REVIEW_PENDING, self.REVIEW_AI_PUBLISHED}:
             return analysis.result_json.get("summary") or self.summary
         return self.summary
 
@@ -1293,11 +1347,13 @@ class CollectionRun(models.Model):
     KIND_COLLECTION = "collection"
     KIND_PROCESSING = "processing"
     KIND_DIGEST = "digest"
+    KIND_AUTOMATION = "automation"
     KIND_MANUAL = "manual"
     KIND_CHOICES = [
         (KIND_COLLECTION, "来源采集"),
         (KIND_PROCESSING, "条目处理"),
         (KIND_DIGEST, "简报生成"),
+        (KIND_AUTOMATION, "自动情报循环"),
         (KIND_MANUAL, "人工录入"),
     ]
 

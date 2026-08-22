@@ -6,5 +6,6 @@
   <a class="{% if request.resolver_match.url_name == 'subject_list' %}active{% endif %}" href="{% url 'intelligence:subject_list' %}">关注主题</a>
   {% if can_admin %}<a class="{% if request.resolver_match.url_name == 'triage_review' %}active{% endif %}" href="{% url 'intelligence:triage_review' %}">候选复核</a>{% endif %}
   {% if can_admin %}<a class="{% if request.resolver_match.url_name == 'merge_review' or request.resolver_match.url_name == 'merge_suggestion_confirm' %}active{% endif %}" href="{% url 'intelligence:merge_review' %}">重复复核</a>{% endif %}
-  {% if can_admin %}<a class="{% if request.resolver_match.url_name == 'pipeline' or request.resolver_match.url_name == 'operations' %}active{% endif %}" href="{% url 'intelligence:pipeline' %}">流水线</a>{% endif %}
+  {% if can_admin %}<a class="{% if request.resolver_match.url_name == 'pipeline' %}active{% endif %}" href="{% url 'intelligence:pipeline' %}">流水线</a>{% endif %}
+  {% if can_admin %}<a class="{% if request.resolver_match.url_name == 'operations' %}active{% endif %}" href="{% url 'intelligence:operations' %}">运行状态</a>{% endif %}
 </nav>
