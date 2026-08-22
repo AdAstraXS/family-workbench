@@ -37,5 +37,6 @@ urlpatterns = [
     path("sources/<int:pk>/edit/", views.source_edit, name="source_edit"),
     path("pipeline/", views.pipeline, name="pipeline"),
     path("operations/", views.operations, name="operations"),
+    path("operations/run-cycle/", views.run_automatic_cycle_now, name="run_automatic_cycle_now"),
     path("operations/collect/", views.collect_sources_now, name="collect_sources_now"),
 ]

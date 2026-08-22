@@ -12,9 +12,19 @@
     <p>M4.1 正式任务在后台完成增量采集、公开证据提取、受控 AI 整理与简报更新。普通浏览不会访问外部网站，也不会调用 AI。</p>
   </div>
   <div class="intel-head-actions">
+    <form method="post" action="{% url 'intelligence:run_automatic_cycle_now' %}">
+      {% csrf_token %}
+      <label class="sr-only" for="automation-provider">自动循环文本模型</label>
+      <select id="automation-provider" name="provider_id" required>
+        {% for option in automation_provider_options %}
+        <option value="{{ option.provider.pk }}" {% if option.selected %}selected{% endif %} {% if not option.configured %}disabled{% endif %}>{{ option.provider.name }} · {{ option.provider.model_name }}{% if not option.configured %} · 未完成授权或 Key 配置{% endif %}</option>
+        {% endfor %}
+      </select>
+      <button class="button intel-primary" type="submit" {% if not configured_automation_provider_count %}disabled{% endif %}>运行完整自动循环</button>
+    </form>
     <form method="post" action="{% url 'intelligence:collect_sources_now' %}">
       {% csrf_token %}
-      <button class="button intel-primary" type="submit" {% if not due_source_count %}disabled{% endif %}>仅采集到期信源</button>
+      <button class="button ghost" type="submit" {% if not due_source_count %}disabled{% endif %}>仅采集到期信源</button>
     </form>
     <a class="button ghost" href="{% url 'intelligence:source_create' %}">新增信源</a>
     <a class="button ghost" href="{% url 'intelligence:event_create' %}">人工录入</a>
@@ -32,7 +42,7 @@
 
 <section class="intel-notice">
   <strong>自动任务与内容边界</strong>
-  <span>{% if latest_automation_run %}最近自动循环：{{ latest_automation_run.started_at|date:"Y-m-d H:i" }} · {{ latest_automation_run.get_status_display }}。{% else %}尚无 M4.1 自动循环记录。{% endif %} 公开网页只保存少量必要证据段落；不登录、不使用 Cookie、不绕过付费墙，也不保存完整版权正文。YouTube 仍只保留元数据。</span>
+  <span>{% if latest_automation_run %}最近自动循环：{{ latest_automation_run.started_at|date:"Y-m-d H:i" }} · {{ latest_automation_run.get_status_display }}。{% else %}尚无 M4.1 自动循环记录。{% endif %} 网页按钮是管理员验收与故障恢复入口，正式自动化仍由 NAS 每小时任务运行。公开网页只保存少量必要证据段落；不登录、不使用 Cookie、不绕过付费墙，也不保存完整版权正文。YouTube 仍只保留元数据。</span>
 </section>
 
 <section class="intel-section">

@@ -71,6 +71,7 @@ from .services import (
 )
 from .scoring import POLICY_VERSION, rescore_event
 from .collection import SUPPORTED_ADAPTERS, collect_intelligence_sources
+from .automation import run_intelligence_cycle
 
 
 VISIBLE_EVENT_STATUSES = (
@@ -1239,6 +1240,19 @@ def operations(request):
         family=member.family,
         run_kind=CollectionRun.KIND_AUTOMATION,
     ).first()
+    automation_provider_options = []
+    selected_provider = False
+    for provider in text_ai_providers():
+        configured = provider_is_configured(provider)
+        selected = configured and not selected_provider
+        automation_provider_options.append(
+            {
+                "provider": provider,
+                "configured": configured,
+                "selected": selected,
+            }
+        )
+        selected_provider = selected_provider or selected
     return render(
         request,
         "intelligence/operations.html",
@@ -1259,9 +1273,53 @@ def operations(request):
                 article_fetch_status=SourceItem.ARTICLE_EXTRACTED,
             ).count(),
             "latest_automation_run": latest_automation_run,
+            "automation_provider_options": automation_provider_options,
+            "configured_automation_provider_count": sum(
+                option["configured"] for option in automation_provider_options
+            ),
             "can_admin": True,
         },
     )
+
+
+@login_required
+@require_POST
+def run_automatic_cycle_now(request):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    provider_id = request.POST.get("provider_id", "").strip()
+    if provider_id and not provider_id.isdigit():
+        messages.error(request, "AI 服务商参数不正确，请刷新页面后重试。")
+        return redirect("intelligence:operations")
+
+    result = run_intelligence_cycle(
+        family=member.family,
+        member=member,
+        user=request.user,
+        provider_id=int(provider_id) if provider_id else None,
+        max_items=20,
+    )
+    if result.skipped:
+        messages.info(request, f"自动循环 #{result.run.pk} 仍在运行，本次没有重复启动。")
+        return redirect("intelligence:operations")
+
+    run = result.run
+    summary = (
+        f"自动循环 #{run.pk} 完成：AI 整理 {run.classified_count}，"
+        f"自动发布 {run.selected_count}，异常待复核 {run.review_count}，"
+        f"噪音 {run.noise_count}，失败 {run.failed_count}"
+    )
+    if result.digest_id:
+        summary += f"，简报 #{result.digest_id}"
+    summary += "。"
+    if run.status == CollectionRun.STATUS_SUCCESS:
+        messages.success(request, summary)
+    elif run.status == CollectionRun.STATUS_PARTIAL:
+        messages.warning(request, summary + " 部分步骤已降级，请查看运行记录。")
+    else:
+        messages.error(request, summary + " 请查看运行记录中的错误摘要。")
+    return redirect("intelligence:operations")
 
 
 @login_required

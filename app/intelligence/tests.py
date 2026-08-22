@@ -3,6 +3,7 @@ from decimal import Decimal
 from io import StringIO
 import json
 import tempfile
+from types import SimpleNamespace
 import urllib.error
 import urllib.request
 from unittest.mock import patch
@@ -1258,6 +1259,46 @@ class M2OperationsViewTests(IntelligenceTestBase):
         response = self.client.post(reverse("intelligence:collect_sources_now"))
 
         self.assertEqual(response.status_code, 403)
+
+    @patch("intelligence.views.run_intelligence_cycle")
+    def test_admin_can_trigger_complete_automatic_cycle(self, run_cycle):
+        run = CollectionRun.objects.create(
+            family=self.family,
+            run_kind=CollectionRun.KIND_AUTOMATION,
+            status=CollectionRun.STATUS_SUCCESS,
+            classified_count=2,
+            selected_count=1,
+            review_count=1,
+        )
+        run_cycle.return_value = SimpleNamespace(
+            run=run,
+            digest_id=7,
+            skipped=False,
+        )
+        self.client.force_login(self.admin_user)
+
+        response = self.client.post(
+            reverse("intelligence:run_automatic_cycle_now"),
+            {"provider_id": "4"},
+        )
+
+        self.assertRedirects(response, reverse("intelligence:operations"))
+        run_cycle.assert_called_once_with(
+            family=self.family,
+            member=self.admin_member,
+            user=self.admin_user,
+            provider_id=4,
+            max_items=20,
+        )
+
+    @patch("intelligence.views.run_intelligence_cycle")
+    def test_non_admin_cannot_trigger_complete_automatic_cycle(self, run_cycle):
+        self.client.force_login(self.member_user)
+
+        response = self.client.post(reverse("intelligence:run_automatic_cycle_now"))
+
+        self.assertEqual(response.status_code, 403)
+        run_cycle.assert_not_called()
 
 
 class M4ArticleEvidenceTests(IntelligenceTestBase):
