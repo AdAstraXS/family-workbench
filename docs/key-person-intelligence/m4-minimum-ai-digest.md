@@ -1,6 +1,6 @@
 # M4 最小可用 AI 情报闭环与每日简报
 
-状态：本地实现完成，待页面验收和 NAS 部署验证
+状态：已完成本地验收并部署 NAS；待少量真实 DeepSeek 候选验收
 更新时间：2026-08-22
 
 ## 1. 本轮目标
@@ -89,3 +89,15 @@ python manage.py generate_intelligence_digest --family-id <家庭ID> [--date YYY
 5. 候选质量稳定后，再讨论定时采集、批量分析策略和站外推送。
 
 每次只调整少量来源或规则，保留策略版本和运行审计，不能用扩大抓取量掩盖筛选质量问题。
+
+## 8. 生产部署记录
+
+2026-08-22 已以提交 `003b4a0f41758d37d23cd1948bdc17d7fe6acd80` 完成 NAS 安全部署：
+
+- 部署前 PostgreSQL 自包含备份已通过 `pg_restore -l` 验证；
+- 受限包装器只安装 `app/`，并自动建立旧版源码回滚包；
+- 复用既有镜像，未修改依赖、Dockerfile、Compose、`.env` 或持久化目录；
+- `intelligence.0007_add_intelligence_digest` 已成功应用；
+- Django 系统检查、Gunicorn 启动、主域名、www 和旧入口均验证通过；
+- 部署前后财务账户、持仓、交易、快照、快照明细、最新快照日期和估值运行数完全一致；
+- 未调用 DeepSeek、未生成生产简报、未自动复核候选，也未创建 DSM 情报任务。
