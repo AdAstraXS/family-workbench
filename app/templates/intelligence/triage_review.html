@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}候选复核 · AI 情报{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}?v=20260822-4">{% endblock %}
+
+{% block content %}
+<section class="intel-page-head">
+  <div><span class="intel-eyebrow">FIRST-RUN TRIAGE</span><h1>候选复核</h1><p>首轮回溯只给出确定性建议。批量操作只改变展示分层并保留原始证据，不会自动发布今日精选、归档知识或调用文本 AI。</p></div>
+  <a class="button ghost" href="{% url 'intelligence:event_list' %}?selection=review">普通候选列表</a>
+</section>
+
+{% include "intelligence/_tabs.html" %}
+
+<section class="intel-metrics intel-metrics-three">
+  <article><span>当前候选</span><strong>{{ page_obj.paginator.count }}</strong><small>符合当前筛选</small></article>
+  <article><span>建议批量保留</span><strong>{{ recommendation_counts.feed }}</strong><small>仅建议进入全部动态</small></article>
+  <article><span>需要单项确认</span><strong>{{ recommendation_counts.review }}</strong><small>媒体或中间分数候选</small></article>
+</section>
+
+<form method="get" class="intel-filter-bar intel-triage-filter">
+  <input type="search" name="q" value="{{ query }}" placeholder="搜索标题、摘要或重要性说明">
+  <select name="subject"><option value="">全部主题</option>{% for subject in subjects %}<option value="{{ subject.pk }}" {% if selected_subject == subject.pk|stringformat:"s" %}selected{% endif %}>{{ subject.display_name }}</option>{% endfor %}</select>
+  <select name="type"><option value="">全部类型</option>{% for value, label in event_types %}<option value="{{ value }}" {% if selected_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  <select name="source_tier"><option value="">全部来源等级</option>{% for value, label in source_tiers %}<option value="{{ value }}" {% if selected_source_tier == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+  <button type="submit">筛选</button>
+  <a class="button ghost" href="{% url 'intelligence:triage_review' %}">清除</a>
+</form>
+
+<form method="post" action="{% url 'intelligence:triage_batch_apply' %}" class="intel-triage-form">
+  {% csrf_token %}
+  <input type="hidden" name="next" value="{{ return_url }}">
+  <section class="intel-triage-toolbar">
+    <label><input id="intel-triage-select-all" type="checkbox"> 本页全选</label>
+    <select name="action" aria-label="批量复核动作">
+      <option value="feed">保留到全部动态</option>
+      <option value="noise">移入噪音箱</option>
+    </select>
+    <button class="button intel-primary" type="submit">批量执行</button>
+    <small>最多一次处理 50 条；动作会记录到每条事件的更新人和更新时间。</small>
+  </section>
+
+  <section class="intel-event-grid">
+    {% for event in page_obj %}
+    <article class="intel-event-card intel-triage-card intel-triage-{{ event.triage_recommendation.code }}">
+      <div class="intel-triage-card-head">
+        <label><input type="checkbox" name="event_ids" value="{{ event.pk }}"> 选择</label>
+        <span class="intel-triage-label intel-triage-label-{{ event.triage_recommendation.code }}">{{ event.triage_recommendation.label }}</span>
+      </div>
+      <div class="intel-event-card-meta">
+        <span class="intel-type intel-type-{{ event.event_type }}">{{ event.get_event_type_display }}</span>
+        <span>{{ event.occurred_at|date:"m-d H:i" }}</span>
+        <span>重要性 {{ event.importance_score }}</span>
+        <span>置信度 {{ event.confidence_score }}</span>
+      </div>
+      <h3><a href="{% url 'intelligence:event_detail' event.pk %}">{{ event.title }}</a></h3>
+      <p>{{ event.display_summary|truncatechars:160 }}</p>
+      <p class="intel-triage-reason">{{ event.triage_recommendation.reason }}</p>
+      <div class="intel-subject-chips">{% for subject in event.subjects.all %}<a href="{% url 'intelligence:subject_detail' subject.slug %}">{{ subject.display_name }}</a>{% endfor %}</div>
+      <footer><span>{% if event.primary_source_item %}{{ event.primary_source_item.source.name }} · {{ event.primary_source_item.source.get_source_tier_display }}{% else %}暂无主来源{% endif %}</span><a href="{% url 'intelligence:event_detail' event.pk %}">查看证据 →</a></footer>
+    </article>
+    {% empty %}<div class="intel-empty intel-span-all"><strong>没有待复核候选</strong><p>当前筛选下没有需要处理的项目；日常增量采集仍需由管理员主动发起。</p></div>{% endfor %}
+  </section>
+</form>
+
+{% if page_obj.has_other_pages %}
+<nav class="intel-pagination">
+  {% if page_obj.has_previous %}<a class="button ghost" href="?page={{ page_obj.previous_page_number }}&q={{ query|urlencode }}&subject={{ selected_subject }}&type={{ selected_type }}&source_tier={{ selected_source_tier }}">上一页</a>{% endif %}
+  <span>第 {{ page_obj.number }} / {{ page_obj.paginator.num_pages }} 页</span>
+  {% if page_obj.has_next %}<a class="button ghost" href="?page={{ page_obj.next_page_number }}&q={{ query|urlencode }}&subject={{ selected_subject }}&type={{ selected_type }}&source_tier={{ selected_source_tier }}">下一页</a>{% endif %}
+</nav>
+{% endif %}
+
+<script>
+  document.getElementById("intel-triage-select-all")?.addEventListener("change", function () {
+    document.querySelectorAll('input[name="event_ids"]').forEach((input) => { input.checked = this.checked; });
+  });
+</script>
+{% endblock %}

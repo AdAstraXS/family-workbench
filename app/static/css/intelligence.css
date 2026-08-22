@@ -194,6 +194,18 @@
 }
 .intel-filter-bar input, .intel-filter-bar select { min-width: 0; }
 .intel-pagination { align-items: center; display: flex; gap: 12px; justify-content: center; margin-top: 20px; }
+.intel-triage-toolbar { align-items: center; background: #fff; border: 1px solid var(--intel-line); border-radius: 13px; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; padding: 13px; }
+.intel-triage-toolbar label { color: var(--intel-ink); font-weight: 750; }
+.intel-triage-toolbar small { color: var(--intel-muted); margin-left: auto; }
+.intel-triage-card { border-left-color: #7186a1; }
+.intel-triage-card-feed { border-left-color: var(--intel-green); }
+.intel-triage-card-noise { border-left-color: #949ca2; }
+.intel-triage-card-head { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+.intel-triage-card-head label { color: var(--intel-muted); font-size: .8rem; }
+.intel-triage-label { background: #f7efdc; border-radius: 999px; color: #75571e; font-size: .75rem; font-weight: 750; padding: 3px 8px; }
+.intel-triage-label-feed { background: var(--intel-green-soft); color: var(--intel-green); }
+.intel-triage-label-noise { background: #eceff1; color: #65717a; }
+.intel-triage-reason { color: var(--intel-muted) !important; font-size: .82rem; }
 
 .intel-subject-grid { display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .intel-subject-card { background: #fff; border: 1px solid var(--intel-line); border-radius: 14px; display: grid; gap: 13px; padding: 19px; }
@@ -411,4 +423,5 @@
   .intel-score-explanation,
   .intel-detail-actions { padding-left: 18px; padding-right: 18px; }
   .intel-notice { align-items: flex-start; flex-direction: column; }
+  .intel-triage-toolbar small { margin-left: 0; }
 }

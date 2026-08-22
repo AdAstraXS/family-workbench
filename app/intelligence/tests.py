@@ -506,6 +506,100 @@ class IntelligenceViewsTests(IntelligenceTestBase):
         self.assertFalse(EventUserState.objects.filter(event=event).exists())
         self.assertFalse(EventKnowledgeArchive.objects.filter(event=event).exists())
 
+    def test_triage_review_prioritizes_direct_sources_and_keeps_media_for_individual_review(self):
+        official = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="官方高置信候选",
+        )
+        media = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="媒体待核查候选",
+        )
+        media_source = IntelligenceSource.objects.create(
+            subject=self.subject,
+            source_type=IntelligenceSource.TYPE_RSS,
+            adapter_key=IntelligenceSource.ADAPTER_RSS,
+            name="测试可信媒体",
+            source_tier=IntelligenceSource.TIER_C,
+            source_group=IntelligenceSource.GROUP_MEDIA,
+        )
+        media_source.topics.add(self.subject)
+        media_item = media.primary_source_item
+        media_item.source = media_source
+        media_item.save(update_fields=["source", "updated_at"])
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(reverse("intelligence:triage_review"))
+
+        self.assertContains(response, "建议保留到全部动态")
+        self.assertContains(response, "需要单项确认")
+        self.assertLess(response.content.find(official.title.encode()), response.content.find(media.title.encode()))
+        filtered = self.client.get(
+            reverse("intelligence:triage_review"),
+            {"source_tier": IntelligenceSource.TIER_C},
+        )
+        self.assertContains(filtered, media.title)
+        self.assertNotContains(filtered, official.title)
+
+    def test_triage_batch_feed_is_audited_and_never_auto_publishes_to_today_selection(self):
+        event = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="可批量保留候选",
+        )
+        other_family = Family.objects.create(name="候选隔离家庭")
+        other_event = self.make_event(
+            family=other_family,
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="其他家庭候选",
+        )
+        self.client.force_login(self.admin_user)
+        review_url = reverse("intelligence:triage_review")
+
+        response = self.client.post(
+            reverse("intelligence:triage_batch_apply"),
+            {
+                "action": "feed",
+                "event_ids": [event.pk, other_event.pk],
+                "next": review_url,
+            },
+        )
+
+        self.assertRedirects(response, review_url)
+        event.refresh_from_db()
+        other_event.refresh_from_db()
+        self.assertEqual(event.review_status, IntelligenceEvent.REVIEW_REVIEWED)
+        self.assertEqual(event.selection_status, IntelligenceEvent.SELECTION_FEED)
+        self.assertEqual(event.updated_by, self.admin_user)
+        self.assertEqual(other_event.review_status, IntelligenceEvent.REVIEW_PENDING)
+        self.assertEqual(other_event.selection_status, IntelligenceEvent.SELECTION_REVIEW)
+
+    def test_triage_batch_ignore_preserves_evidence_and_rejects_non_admin(self):
+        event = self.make_event(
+            status=IntelligenceEvent.REVIEW_PENDING,
+            selection=IntelligenceEvent.SELECTION_REVIEW,
+            title="低价值候选",
+        )
+        action_url = reverse("intelligence:triage_batch_apply")
+        self.client.force_login(self.member_user)
+        self.assertEqual(
+            self.client.post(action_url, {"action": "noise", "event_ids": [event.pk]}).status_code,
+            403,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.post(action_url, {"action": "noise", "event_ids": [event.pk]})
+
+        self.assertRedirects(response, reverse("intelligence:triage_review"))
+        event.refresh_from_db()
+        self.assertEqual(event.review_status, IntelligenceEvent.REVIEW_IGNORED)
+        self.assertEqual(event.selection_status, IntelligenceEvent.SELECTION_NOISE)
+        self.assertTrue(EventEvidence.objects.filter(event=event).exists())
+        self.assertTrue(SourceItem.objects.filter(pk=event.primary_source_item_id).exists())
+
     def test_next_url_redirects_do_not_append_detail_arguments(self):
         event = self.make_event()
         self.client.force_login(self.member_user)

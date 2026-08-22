@@ -4,7 +4,7 @@ from collections import defaultdict
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Case, Count, IntegerField, Prefetch, Q, When
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -71,6 +71,9 @@ PUBLIC_SELECTION_STATUSES = (
     IntelligenceEvent.SELECTION_SELECTED,
     IntelligenceEvent.SELECTION_FEED,
 )
+TRIAGE_RECOMMENDATION_FEED = "feed"
+TRIAGE_RECOMMENDATION_REVIEW = "review"
+TRIAGE_RECOMMENDATION_NOISE = "noise"
 
 
 def _current_member(request):
@@ -122,6 +125,46 @@ def _family_events(member, *, include_nonpublic=False):
             to_attr="_current_ai_analyses",
         ),
     )
+
+
+def _pending_review_events(member):
+    return IntelligenceEvent.objects.filter(
+        family=member.family,
+        channel=IntelligenceEvent.CHANNEL_PEOPLE,
+        merged_into__isnull=True,
+        review_status=IntelligenceEvent.REVIEW_PENDING,
+        selection_status=IntelligenceEvent.SELECTION_REVIEW,
+    )
+
+
+def _triage_recommendation(event):
+    """Return a deterministic, non-publishing recommendation for a candidate."""
+    source = event.primary_source_item.source if event.primary_source_item_id else None
+    source_tier = source.source_tier if source else IntelligenceSource.TIER_D
+    if (
+        source_tier in {IntelligenceSource.TIER_A, IntelligenceSource.TIER_B}
+        and event.importance_score >= 50
+        and event.confidence_score >= 70
+    ):
+        return {
+            "code": TRIAGE_RECOMMENDATION_FEED,
+            "label": "建议保留到全部动态",
+            "reason": "一手或直接来源，且重要性与置信度达到首轮批量保留门槛；不会进入今日精选。",
+        }
+    if (
+        source_tier == IntelligenceSource.TIER_D
+        or (event.importance_score < 45 and event.confidence_score < 70)
+    ):
+        return {
+            "code": TRIAGE_RECOMMENDATION_NOISE,
+            "label": "建议移入噪音箱",
+            "reason": "来源或综合分数不足，保留原始证据但不占用日常信息流。",
+        }
+    return {
+        "code": TRIAGE_RECOMMENDATION_REVIEW,
+        "label": "需要单项确认",
+        "reason": "媒体或分数处于中间区间，请先核查标题、短摘录和原文链接。",
+    }
 
 
 def _attach_user_states(events, member):
@@ -238,6 +281,115 @@ def event_list(request):
             "can_admin": _is_family_admin(request),
         },
     )
+
+
+@login_required
+def triage_review(request):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    query = request.GET.get("q", "").strip()
+    event_type = request.GET.get("type", "").strip()
+    subject_id = request.GET.get("subject", "").strip()
+    source_tier = request.GET.get("source_tier", "").strip()
+
+    events = _pending_review_events(member).select_related(
+        "primary_source_item__source",
+    ).prefetch_related("subjects")
+    if query:
+        events = events.filter(
+            Q(title__icontains=query)
+            | Q(summary__icontains=query)
+            | Q(why_it_matters__icontains=query)
+        )
+    valid_types = {value for value, _label in IntelligenceEvent.TYPE_CHOICES}
+    if event_type in valid_types:
+        events = events.filter(event_type=event_type)
+    else:
+        event_type = ""
+    if subject_id.isdigit():
+        events = events.filter(subjects__pk=subject_id)
+    else:
+        subject_id = ""
+    valid_tiers = {value for value, _label in IntelligenceSource.TIER_CHOICES}
+    if source_tier in valid_tiers:
+        events = events.filter(primary_source_item__source__source_tier=source_tier)
+    else:
+        source_tier = ""
+
+    tier_rank = Case(
+        When(primary_source_item__source__source_tier=IntelligenceSource.TIER_A, then=0),
+        When(primary_source_item__source__source_tier=IntelligenceSource.TIER_B, then=1),
+        When(primary_source_item__source__source_tier=IntelligenceSource.TIER_C, then=2),
+        When(primary_source_item__source__source_tier=IntelligenceSource.TIER_D, then=3),
+        default=4,
+        output_field=IntegerField(),
+    )
+    candidates = list(
+        events.distinct()
+        .annotate(_triage_tier_rank=tier_rank)
+        .order_by("_triage_tier_rank", "-importance_score", "-confidence_score", "-occurred_at", "-pk")
+    )
+    recommendation_counts = defaultdict(int)
+    for event in candidates:
+        event.triage_recommendation = _triage_recommendation(event)
+        recommendation_counts[event.triage_recommendation["code"]] += 1
+    page_obj = Paginator(candidates, 20).get_page(request.GET.get("page"))
+    return render(
+        request,
+        "intelligence/triage_review.html",
+        {
+            "page_obj": page_obj,
+            "query": query,
+            "selected_type": event_type,
+            "selected_subject": subject_id,
+            "selected_source_tier": source_tier,
+            "event_types": IntelligenceEvent.TYPE_CHOICES,
+            "source_tiers": IntelligenceSource.TIER_CHOICES,
+            "subjects": IntelligenceSubject.objects.filter(is_active=True),
+            "recommendation_counts": recommendation_counts,
+            "return_url": request.get_full_path(),
+            "can_admin": True,
+        },
+    )
+
+
+@login_required
+@require_POST
+def triage_batch_apply(request):
+    member = _current_member(request)
+    if not _is_family_admin(request):
+        return _admin_required_response()
+    action = request.POST.get("action", "").strip()
+    if action not in {TRIAGE_RECOMMENDATION_FEED, TRIAGE_RECOMMENDATION_NOISE}:
+        messages.error(request, "请选择“保留到全部动态”或“移入噪音箱”。")
+        return _redirect_next_or(request, "intelligence:triage_review")
+    selected_ids = list(dict.fromkeys(
+        value for value in request.POST.getlist("event_ids") if value.isdigit()
+    ))[:50]
+    events = list(
+        _pending_review_events(member)
+        .filter(pk__in=selected_ids)
+        .order_by("pk")
+    )
+    if not events:
+        messages.info(request, "没有选择仍处于待复核状态的候选。")
+        return _redirect_next_or(request, "intelligence:triage_review")
+    for event in events:
+        if action == TRIAGE_RECOMMENDATION_FEED:
+            event.review_status = IntelligenceEvent.REVIEW_REVIEWED
+            # 批量保留只进入全部动态，绝不因分数自动推入今日精选。
+            event.selection_status = IntelligenceEvent.SELECTION_FEED
+        else:
+            event.review_status = IntelligenceEvent.REVIEW_IGNORED
+            event.selection_status = IntelligenceEvent.SELECTION_NOISE
+        stamp_actor(event, request.user)
+        event.save(update_fields=["review_status", "selection_status", "updated_by", "updated_at"])
+    if action == TRIAGE_RECOMMENDATION_FEED:
+        messages.success(request, f"已将 {len(events)} 条候选保留到全部动态；没有自动加入今日精选。")
+    else:
+        messages.success(request, f"已将 {len(events)} 条候选移入噪音箱；原始证据仍被保留。")
+    return _redirect_next_or(request, "intelligence:triage_review")
 
 
 @login_required
