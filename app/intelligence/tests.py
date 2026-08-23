@@ -362,6 +362,28 @@ class IntelligenceModelsAndCommandsTests(IntelligenceTestBase):
 
 
 class IntelligenceViewsTests(IntelligenceTestBase):
+    def test_admin_can_open_prefilled_identity_verification_form(self):
+        self.client.force_login(self.admin_user)
+
+        response = self.client.get(
+            reverse("intelligence:subject_create"),
+            {
+                "display_name": "金渐成",
+                "knowledge_author_name": "  金渐成  ",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context["form"].initial["subject_type"],
+            IntelligenceSubject.TYPE_PERSON,
+        )
+        self.assertEqual(response.context["form"].initial["display_name"], "金渐成")
+        self.assertEqual(
+            response.context["form"].initial["knowledge_author_names"],
+            "金渐成",
+        )
+
     def test_admin_manual_create_builds_traceable_event_chain(self):
         self.client.force_login(self.admin_user)
 

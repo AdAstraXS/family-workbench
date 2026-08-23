@@ -1119,7 +1119,18 @@ def subject_create(request):
             messages.success(request, "关注主题已创建。")
             return redirect("intelligence:subject_detail", slug=subject.slug)
     else:
-        form = IntelligenceSubjectForm(family=member.family)
+        historical_author = " ".join(
+            request.GET.get("knowledge_author_name", "").strip().split()
+        )
+        initial = {}
+        if historical_author:
+            initial = {
+                "subject_type": IntelligenceSubject.TYPE_PERSON,
+                "display_name": request.GET.get("display_name", "").strip()
+                or historical_author,
+                "knowledge_author_names": historical_author,
+            }
+        form = IntelligenceSubjectForm(family=member.family, initial=initial)
     return render(request, "intelligence/model_form.html", {"form": form, "title": "新增关注主题"})
 
 

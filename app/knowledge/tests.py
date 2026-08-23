@@ -913,7 +913,79 @@ class KnowledgeBaseTests(TestCase):
             {"person": "黄仁勋"},
         )
         self.assertContains(person_timeline, document.title)
-        self.assertContains(person_timeline, "身份待核验")
+        self.assertContains(person_timeline, "未关联人物档案")
+        self.assertContains(person_timeline, "去核验")
+        self.assertContains(person_timeline, "搜索这个人物的文章")
+
+    def test_people_page_searches_filters_and_paginates_all_history(self):
+        source = self.make_source(suffix="person-history")
+        for index in range(22):
+            document = self.make_document(
+                source=source,
+                title=("目标关键词文章" if index == 21 else f"历史文章 {index:02d}"),
+                external_id=f"person-history-{index}",
+                plain_text=f"人物历史正文 {index}",
+            )
+            document.author = "分页作者"
+            update_fields = ["author", "updated_at"]
+            if index == 0:
+                document.library_tier = KnowledgeDocument.LIBRARY_ARCHIVE
+                update_fields.append("library_tier")
+            elif index == 1:
+                document.knowledge_status = KnowledgeDocument.KNOWLEDGE_PENDING
+                document.library_tier = KnowledgeDocument.LIBRARY_ARCHIVE
+                update_fields.extend(["knowledge_status", "library_tier"])
+            document.save(update_fields=update_fields)
+            index_document(document)
+
+        first_page = self.client.get(
+            reverse("knowledge:people"),
+            {"person": "分页作者"},
+        )
+        self.assertEqual(first_page.context["timeline_page"].paginator.count, 22)
+        self.assertEqual(len(first_page.context["timeline_page"]), 20)
+        self.assertContains(first_page, "第 1 / 2 页")
+        self.assertContains(first_page, "全部 <strong>22</strong>", html=True)
+
+        second_page = self.client.get(
+            reverse("knowledge:people"),
+            {"person": "分页作者", "page": 2},
+        )
+        self.assertEqual(len(second_page.context["timeline_page"]), 2)
+
+        search = self.client.get(
+            reverse("knowledge:people"),
+            {"person": "分页作者", "q": "目标关键词"},
+        )
+        self.assertEqual(search.context["timeline_page"].paginator.count, 1)
+        self.assertContains(search, "目标关键词文章")
+        self.assertContains(search, "“目标关键词”找到 1 篇")
+
+        archived = self.client.get(
+            reverse("knowledge:people"),
+            {"person": "分页作者", "status": "archive"},
+        )
+        self.assertEqual(archived.context["timeline_page"].paginator.count, 1)
+
+        curated = self.client.get(
+            reverse("knowledge:people"),
+            {"person": "分页作者", "status": "curated"},
+        )
+        self.assertEqual(curated.context["timeline_page"].paginator.count, 20)
+
+        pending = self.client.get(
+            reverse("knowledge:people"),
+            {"person": "分页作者", "status": "pending"},
+        )
+        self.assertEqual(pending.context["timeline_page"].paginator.count, 1)
+
+        self.client.force_login(self.other_user)
+        member_view = self.client.get(
+            reverse("knowledge:people"),
+            {"person": "分页作者"},
+        )
+        self.assertContains(member_view, "未关联人物档案")
+        self.assertNotContains(member_view, "去核验")
 
     def test_library_defaults_to_current_member_and_can_switch_to_all_members(self):
         private_document = self.make_document(

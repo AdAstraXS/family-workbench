@@ -1026,6 +1026,10 @@ def people(request):
         .order_by("-total", "author_name")[:40]
     )
     selected_person = request.GET.get("person", "").strip()
+    query = request.GET.get("q", "").strip()
+    selected_status = request.GET.get("status", "all").strip()
+    if selected_status not in {"all", "archive", "curated", "pending"}:
+        selected_status = "all"
     selected_subject = None
     selected_author_names = []
     subject_slug = request.GET.get("subject", "").strip()
@@ -1062,10 +1066,85 @@ def people(request):
             selected_person = selected_subject.display_name
         else:
             selected_author_names = [selected_person]
-    timeline = entries.none()
+    person_entries = entries.none()
     if selected_author_names:
-        timeline = entries.filter(author_name__in=selected_author_names)[:50]
-    timeline = _decorate_entries(list(timeline))
+        person_entries = entries.filter(author_name__in=selected_author_names)
+    status_counts = {
+        "all": person_entries.count(),
+        "archive": person_entries.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+            document__library_tier=KnowledgeDocument.LIBRARY_ARCHIVE,
+        ).count(),
+        "curated": _curated_entries(person_entries).count(),
+        "pending": person_entries.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
+        ).count(),
+    }
+    if selected_status == "archive":
+        person_entries = person_entries.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+            document__library_tier=KnowledgeDocument.LIBRARY_ARCHIVE,
+        )
+    elif selected_status == "curated":
+        person_entries = _curated_entries(person_entries)
+    elif selected_status == "pending":
+        person_entries = person_entries.filter(
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
+        )
+    if query:
+        normalized_query = query.casefold()
+        person_entries = (
+            person_entries.filter(searchable_text__icontains=normalized_query)
+            .annotate(
+                search_rank=Case(
+                    When(title__iexact=query, then=0),
+                    When(title__istartswith=query, then=1),
+                    When(title__icontains=query, then=2),
+                    default=3,
+                    output_field=IntegerField(),
+                )
+            )
+            .order_by("search_rank", "-content_time", "-updated_at")
+        )
+    timeline_page = Paginator(person_entries, 20).get_page(request.GET.get("page"))
+    _decorate_entries(timeline_page.object_list, query, member)
+    pagination_params = request.GET.copy()
+    pagination_params.pop("page", None)
+    status_filters = []
+    for value, label in [
+        ("all", "全部"),
+        ("archive", "已归档"),
+        ("curated", "精选知识"),
+        ("pending", "待整理"),
+    ]:
+        params = request.GET.copy()
+        params.pop("page", None)
+        if value == "all":
+            params.pop("status", None)
+        else:
+            params["status"] = value
+        status_filters.append(
+            {
+                "value": value,
+                "label": label,
+                "count": status_counts[value],
+                "url": f"?{params.urlencode()}",
+            }
+        )
+    clear_search_params = request.GET.copy()
+    clear_search_params.pop("q", None)
+    clear_search_params.pop("page", None)
+    identity_verification_params = request.GET.copy()
+    identity_verification_params.clear()
+    identity_verification_params.update(
+        {
+            "subject_type": IntelligenceSubject.TYPE_PERSON,
+            "display_name": selected_person,
+            "knowledge_author_name": selected_author_names[0]
+            if selected_author_names
+            else selected_person,
+        }
+    )
     historical_people = list(
         entries.filter(
             source_kind__in=[
@@ -1087,7 +1166,16 @@ def people(request):
             "selected_person": selected_person,
             "selected_subject": selected_subject,
             "selected_author_names": selected_author_names,
-            "timeline": timeline,
+            "timeline_page": timeline_page,
+            "query": query,
+            "selected_status": selected_status,
+            "status_filters": status_filters,
+            "pagination_query": pagination_params.urlencode(),
+            "clear_search_url": f"?{clear_search_params.urlencode()}",
+            "can_verify_identity": request.user.is_superuser
+            or member.role == FamilyMember.ROLE_ADMIN,
+            "identity_verification_url": reverse("intelligence:subject_create")
+            + f"?{identity_verification_params.urlencode()}",
             "historical_people": historical_people,
         },
     )

@@ -7546,6 +7546,32 @@ textarea {
   line-height: 1.65;
 }
 
+.knowledge-person-heading-actions {
+  display: grid;
+  min-width: min(100%, 390px);
+  justify-items: end;
+  gap: 9px;
+}
+
+.knowledge-person-search,
+.knowledge-person-identity-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.knowledge-person-search .form-control {
+  width: clamp(220px, 22vw, 310px);
+  min-height: 36px;
+}
+
+.knowledge-person-search .button,
+.knowledge-person-identity-actions .button {
+  min-height: 36px;
+  white-space: nowrap;
+}
+
 .knowledge-person-identity-note {
   margin: 12px 0 0;
   color: #667772;
@@ -7559,6 +7585,7 @@ textarea {
   margin: 20px 0;
 }
 
+.knowledge-person-filters a,
 .knowledge-person-filters span {
   padding: 6px 9px;
   border: 1px solid #e1e8e4;
@@ -7567,10 +7594,36 @@ textarea {
   font-size: 10px;
 }
 
-.knowledge-person-filters span.active {
+.knowledge-person-filters a {
+  text-decoration: none;
+}
+
+.knowledge-person-filters a strong {
+  margin-left: 3px;
+  color: inherit;
+  font-size: 9px;
+}
+
+.knowledge-person-filters a.active,
+.knowledge-person-filters a:hover {
   border-color: #afd0c6;
   background: var(--knowledge-soft);
   color: var(--knowledge-accent-dark);
+}
+
+.knowledge-person-result-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 0 10px;
+  color: #7a8884;
+  font-size: 11px;
+}
+
+.knowledge-person-result-heading strong {
+  color: #485d56;
+  font-size: 12px;
 }
 
 .knowledge-person-timeline {
@@ -7579,33 +7632,53 @@ textarea {
 
 .knowledge-person-timeline > article {
   display: grid;
-  grid-template-columns: 90px minmax(0, 1fr);
-  gap: 18px;
-  padding: 17px 0;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 15px;
+  padding: 13px 0;
   border-top: 1px solid #e7edea;
 }
 
-.knowledge-person-timeline time {
+.knowledge-person-entry-date {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 8px;
+}
+
+.knowledge-person-entry-date time {
   color: #82908c;
   font-size: 11px;
 }
 
 .knowledge-person-timeline h3 {
-  margin: 8px 0 5px;
+  margin: 0 0 5px;
   color: #324b44;
   font-size: 16px;
 }
 
 .knowledge-person-timeline p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   margin: 0 0 8px;
   color: #687873;
   font-size: 12px;
   line-height: 1.6;
 }
 
-.knowledge-person-timeline small {
+.knowledge-person-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
   color: #899490;
   font-size: 10px;
+}
+
+.knowledge-person-entry-meta span:not(:last-child)::after {
+  margin-left: 10px;
+  color: #c0c9c5;
+  content: "·";
 }
 
 .knowledge-person-empty {
@@ -7793,6 +7866,32 @@ textarea {
   .knowledge-person-timeline > article {
     grid-template-columns: 1fr;
     gap: 7px;
+  }
+
+  .knowledge-person-heading-actions,
+  .knowledge-person-search,
+  .knowledge-person-identity-actions {
+    width: 100%;
+    justify-items: stretch;
+  }
+
+  .knowledge-person-search {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .knowledge-person-search .form-control {
+    width: 100%;
+  }
+
+  .knowledge-person-entry-date {
+    display: flex;
+    align-items: center;
+  }
+
+  .knowledge-person-result-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
@@ -8532,6 +8631,7 @@ textarea {
   .knowledge-help-tip-popup {
     right: auto;
     left: 0;
+    width: min(300px, calc(100vw - 48px));
     transform: none;
   }
 

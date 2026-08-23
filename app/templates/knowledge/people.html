@@ -22,21 +22,46 @@
   <article class="knowledge-person-profile">
     {% if selected_person %}
       <header class="knowledge-person-heading">
-        <div><span class="eyebrow">Author found in knowledge</span><h2>{{ selected_person }}{% include "knowledge/_help_tip.html" with text="这里汇总该作者已经归档的历史产出；身份和来源等级尚未核验，不能默认视为本人直接发言。" %}</h2></div>
-        {% if selected_subject %}<a class="button" href="{% url 'intelligence:subject_detail' selected_subject.slug %}">查看最新动态</a>{% else %}<span class="status-pill warning">身份待核验</span>{% endif %}
+        <div><span class="eyebrow">Author found in knowledge</span><h2>{{ selected_person }}{% if selected_subject %}{% include "knowledge/_help_tip.html" with text="历史作者名称已经与关注人物档案明确关联；文章是否属于本人直接发言，仍以每篇资料的来源标记为准。" %}{% else %}{% include "knowledge/_help_tip.html" with text="历史作者名称尚未与唯一人物档案建立明确关联，不能默认视为本人直接发言。" %}{% endif %}</h2></div>
+        <div class="knowledge-person-heading-actions">
+          <form method="get" class="knowledge-person-search" role="search">
+            {% if selected_subject %}<input type="hidden" name="subject" value="{{ selected_subject.slug }}">{% else %}<input type="hidden" name="person" value="{{ selected_person }}">{% endif %}
+            {% if selected_status != "all" %}<input type="hidden" name="status" value="{{ selected_status }}">{% endif %}
+            <label class="sr-only" for="person-article-search">搜索 {{ selected_person }} 的文章</label>
+            <input id="person-article-search" class="form-control" type="search" name="q" value="{{ query }}" placeholder="搜索这个人物的文章">
+            <button class="button" type="submit">搜索</button>
+            {% if query %}<a class="button ghost" href="{{ clear_search_url }}">清除</a>{% endif %}
+          </form>
+          <div class="knowledge-person-identity-actions">
+            {% if selected_subject %}
+              <span class="status-pill">已关联人物档案</span>
+              <a class="button" href="{% url 'intelligence:subject_detail' selected_subject.slug %}">查看最新动态</a>
+            {% else %}
+              <span class="status-pill warning">未关联人物档案</span>
+              {% if can_verify_identity %}<a class="button" href="{{ identity_verification_url }}">去核验</a>{% endif %}
+            {% endif %}
+          </div>
+        </div>
       </header>
       {% if selected_subject and selected_author_names %}<p class="knowledge-person-identity-note">已连接历史作者：{{ selected_author_names|join:"、" }}</p>{% elif selected_subject %}<p class="notice warning">这个关注对象尚未连接知识中心的历史作者名称；家庭管理员可在 AI 情报中编辑人物资料完成关联。</p>{% endif %}
       <nav class="knowledge-person-filters" aria-label="人物动态类型">
-        <span class="active">全部历史知识</span><span>最新动态与资讯请在 AI 情报查看</span>
+        {% for filter in status_filters %}<a href="{{ filter.url }}"{% if selected_status == filter.value %} class="active" aria-current="page"{% endif %}>{{ filter.label }} <strong>{{ filter.count }}</strong></a>{% endfor %}
+        <span>最新动态与资讯请在 AI 情报查看</span>
       </nav>
+      <div class="knowledge-person-result-heading"><strong>{% if query %}“{{ query }}”找到 {% endif %}{{ timeline_page.paginator.count }} 篇</strong><span>按发布时间倒序 · 每页 20 篇</span></div>
       <div class="knowledge-person-timeline">
-        {% for entry in timeline %}
+        {% for entry in timeline_page %}
           <article>
-            <time>{% if entry.content_time %}{{ entry.content_time|date:"Y-m-d" }}{% else %}日期未知{% endif %}</time>
-            <div><span class="status-pill">{% if entry.knowledge_status == "pending" %}待整理{% elif entry.item_kind == "investment_note" or entry.document.library_tier == "knowledge" %}精选知识{% else %}已归档{% endif %}</span><h3><a href="{{ entry.target_url }}">{{ entry.title }}</a></h3><p>{{ entry.hit_snippet|truncatechars:180 }}</p><small>{{ entry.source_name }} · 所属成员 {{ entry.owner.display_name }}</small></div>
+            <div class="knowledge-person-entry-date"><time>{% if entry.content_time %}{{ entry.content_time|date:"Y-m-d" }}{% else %}日期未知{% endif %}</time><span class="status-pill{% if entry.knowledge_status == 'pending' %} warning{% elif entry.item_kind == 'investment_note' or entry.document.library_tier == 'knowledge' %}{% else %} source{% endif %}">{% if entry.knowledge_status == "pending" %}待整理{% elif entry.item_kind == "investment_note" or entry.document.library_tier == "knowledge" %}精选知识{% else %}已归档{% endif %}</span></div>
+            <div class="knowledge-person-entry-main">
+              <h3><a href="{{ entry.target_url }}">{{ entry.title }}</a></h3>
+              <p>{{ entry.hit_snippet|truncatechars:220 }}</p>
+              <div class="knowledge-person-entry-meta"><span>{{ entry.source_name }}</span>{% if entry.category %}<span>分类：{{ entry.category }}</span>{% endif %}{% for tag in entry.tags|slice:":3" %}<span>#{{ tag }}</span>{% endfor %}<span>所属成员 {{ entry.owner.display_name }}</span></div>
+            </div>
           </article>
-        {% empty %}<div class="knowledge-gentle-empty"><span>没有与该人物身份映射精确匹配的可见知识。</span></div>{% endfor %}
+        {% empty %}<div class="knowledge-gentle-empty"><span>{% if query %}没有找到包含“{{ query }}”的文章，可以换一个标题、正文或标签关键词。{% else %}当前筛选下没有与该人物身份精确匹配的可见知识。{% endif %}</span></div>{% endfor %}
       </div>
+      {% include "knowledge/_pagination.html" with page_obj=timeline_page %}
     {% else %}
       <div class="knowledge-person-empty">
         <span class="knowledge-hub-brand-mark" aria-hidden="true">人</span>
