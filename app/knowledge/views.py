@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, When
-from django.http import FileResponse, Http404, HttpResponseForbidden
+from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -28,6 +28,7 @@ from .forms import (
     BulkProposalPreviewForm,
     DocumentOrganizeForm,
     KnowledgeCategoryForm,
+    KnowledgeArtifactUploadForm,
     KnowledgeImportUploadForm,
     KnowledgeTagForm,
     NotebookSelectionForm,
@@ -46,6 +47,8 @@ from .microsoft import (
     start_authorization_flow,
 )
 from .models import (
+    KnowledgeArtifact,
+    KnowledgeArtifactEvidence,
     KnowledgeAsset,
     KnowledgeCategory,
     KnowledgeCurationRevision,
@@ -60,9 +63,11 @@ from .models import (
     SourceConnection,
 )
 from .permissions import (
+    accessible_artifacts,
     accessible_documents,
     accessible_search_entries,
     can_change_source_settings,
+    can_manage_artifact,
     can_manage_source,
     can_organize_document,
     current_member,
@@ -70,6 +75,12 @@ from .permissions import (
     visible_sources,
 )
 from .search import index_document
+from .search import index_artifact
+from .artifacts import (
+    KnowledgeArtifactError,
+    apply_family_theme,
+    create_or_update_artifact,
+)
 from .services import (
     mark_ai_processing_documents,
     queue_knowledge_job,
@@ -142,6 +153,8 @@ def _entry_target(entry):
         return reverse("knowledge:document_detail", kwargs={"pk": entry.document_id})
     if entry.item_kind == KnowledgeSearchEntry.KIND_INVESTMENT_NOTE:
         return reverse("notes:detail", kwargs={"pk": int(entry.object_id)})
+    if entry.item_kind == KnowledgeSearchEntry.KIND_ARTIFACT and entry.artifact_id:
+        return reverse("knowledge:artifact_detail", kwargs={"pk": entry.artifact_id})
     return reverse("knowledge:library")
 
 
@@ -236,6 +249,7 @@ def _curated_entries(entries):
     ).filter(
         Q(item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE)
         | Q(document__library_tier=KnowledgeDocument.LIBRARY_KNOWLEDGE)
+        | Q(artifact__status=KnowledgeArtifact.STATUS_CONFIRMED)
     )
 
 
@@ -321,12 +335,15 @@ def _build_source_directory(entries):
 
     people_rows = list(
         entries.filter(
-            item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
-            source_kind__in=[
-                KnowledgeSource.KIND_HTML_IMPORT,
-                KnowledgeSource.KIND_MARKDOWN_IMPORT,
-                KnowledgeSource.KIND_INTELLIGENCE,
-            ],
+            Q(
+                item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
+                source_kind__in=[
+                    KnowledgeSource.KIND_HTML_IMPORT,
+                    KnowledgeSource.KIND_MARKDOWN_IMPORT,
+                    KnowledgeSource.KIND_INTELLIGENCE,
+                ],
+            )
+            | Q(item_kind=KnowledgeSearchEntry.KIND_ARTIFACT)
         )
         .order_by()
         .values("author_name", "source_name")
@@ -517,7 +534,12 @@ def _library_response(
     if content_type == "notes":
         entries = entries.filter(item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE)
     elif content_type == "external":
-        entries = entries.filter(item_kind=KnowledgeSearchEntry.KIND_DOCUMENT)
+        entries = entries.filter(
+            item_kind__in=[
+                KnowledgeSearchEntry.KIND_DOCUMENT,
+                KnowledgeSearchEntry.KIND_ARTIFACT,
+            ]
+        )
     else:
         content_type = "all"
 
@@ -563,11 +585,14 @@ def _library_response(
         )
     elif source_group == "people":
         entries = entries.filter(
-            source_kind__in=[
-                KnowledgeSource.KIND_HTML_IMPORT,
-                KnowledgeSource.KIND_MARKDOWN_IMPORT,
-                KnowledgeSource.KIND_INTELLIGENCE,
-            ]
+            Q(
+                source_kind__in=[
+                    KnowledgeSource.KIND_HTML_IMPORT,
+                    KnowledgeSource.KIND_MARKDOWN_IMPORT,
+                    KnowledgeSource.KIND_INTELLIGENCE,
+                ]
+            )
+            | Q(item_kind=KnowledgeSearchEntry.KIND_ARTIFACT)
         )
     elif source_group == "other":
         entries = entries.exclude(
@@ -655,6 +680,7 @@ def _library_response(
     pagination_params.pop("page", None)
 
     source_labels = dict(KnowledgeSource.KIND_CHOICES)
+    source_labels["ai_artifact"] = "AI 专题成果"
     source_choices = list(
         directory_entries.order_by()
         .values("source_kind")
@@ -1018,8 +1044,9 @@ def people(request):
     if member is None:
         return _membership_required_response(request)
     entries = _formal_entries(accessible_search_entries(member))
+    article_entries = entries.exclude(item_kind=KnowledgeSearchEntry.KIND_ARTIFACT)
     authors = list(
-        entries.exclude(author_name="")
+        article_entries.exclude(author_name="")
         .order_by()
         .values("author_name")
         .annotate(total=Count("id"))
@@ -1066,9 +1093,9 @@ def people(request):
             selected_person = selected_subject.display_name
         else:
             selected_author_names = [selected_person]
-    person_entries = entries.none()
+    person_entries = article_entries.none()
     if selected_author_names:
-        person_entries = entries.filter(author_name__in=selected_author_names)
+        person_entries = article_entries.filter(author_name__in=selected_author_names)
     status_counts = {
         "all": person_entries.count(),
         "archive": person_entries.filter(
@@ -1146,7 +1173,7 @@ def people(request):
         }
     )
     historical_people = list(
-        entries.filter(
+        article_entries.filter(
             source_kind__in=[
                 KnowledgeSource.KIND_HTML_IMPORT,
                 KnowledgeSource.KIND_MARKDOWN_IMPORT,
@@ -1158,6 +1185,22 @@ def people(request):
         .annotate(history_count=Count("id"))
         .order_by("author_name")
     )
+    artifact_person_keys = {
+        normalize_knowledge_author_name(value)
+        for value in selected_author_names + ([selected_person] if selected_person else [])
+        if value
+    }
+    artifacts = list(
+        accessible_artifacts(member)
+        .filter(normalized_person_name__in=artifact_person_keys)
+        .select_related("current_version", "confirmed_by")
+        if artifact_person_keys
+        else []
+    )
+    artifact_upload_params = request.GET.copy()
+    artifact_upload_params.clear()
+    if selected_person:
+        artifact_upload_params["person"] = selected_person
     return render(
         request,
         "knowledge/people.html",
@@ -1177,8 +1220,187 @@ def people(request):
             "identity_verification_url": reverse("intelligence:subject_create")
             + f"?{identity_verification_params.urlencode()}",
             "historical_people": historical_people,
+            "artifacts": artifacts,
+            "can_upload_artifact": _can_write(member),
+            "artifact_upload_url": reverse("knowledge:artifact_create")
+            + (f"?{artifact_upload_params.urlencode()}" if artifact_upload_params else ""),
         },
     )
+
+
+@login_required
+def artifact_create(request):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    if not _can_write(member):
+        return HttpResponseForbidden("只读成员不能上传专题成果。")
+    initial = {
+        "person_name": request.GET.get("person", "").strip(),
+        "visibility": KnowledgeVisibility.FAMILY,
+        "source_article_count": 439,
+        "generator_name": "Claude",
+        "prompt_version": "external-ai-synthesis-v1",
+    }
+    if request.method == "POST":
+        form = KnowledgeArtifactUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            try:
+                artifact, version, version_created = create_or_update_artifact(
+                    family=member.family,
+                    owner=member,
+                    cleaned_data=form.cleaned_data,
+                )
+            except KnowledgeArtifactError as exc:
+                form.add_error("html_file", str(exc))
+            else:
+                if version_created:
+                    messages.success(
+                        request,
+                        f"专题成果已保存为 v{version.version_number}；已自动映射 "
+                        f"{version.matched_reference_count} / {version.reference_count} 条引用。",
+                    )
+                else:
+                    messages.info(request, "相同文件已经保存，本次没有创建重复版本。")
+                return redirect("knowledge:artifact_detail", pk=artifact.pk)
+    else:
+        form = KnowledgeArtifactUploadForm(initial=initial)
+    return render(
+        request,
+        "knowledge/artifact_form.html",
+        {"form": form},
+    )
+
+
+@login_required
+def artifact_detail(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    artifact = get_object_or_404(accessible_artifacts(member), pk=pk)
+    version = artifact.current_version
+    unresolved = []
+    if version:
+        unresolved = list(
+            version.evidence_links.exclude(
+                status=KnowledgeArtifactEvidence.STATUS_MATCHED
+            ).order_by("status", "citation_date", "citation_title")[:100]
+        )
+    return render(
+        request,
+        "knowledge/artifact_detail.html",
+        {
+            "artifact": artifact,
+            "version": version,
+            "unresolved_evidence": unresolved,
+            "can_manage_artifact": can_manage_artifact(member, artifact),
+        },
+    )
+
+
+@login_required
+@require_POST
+def artifact_confirm(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    artifact = get_object_or_404(accessible_artifacts(member), pk=pk)
+    if not can_manage_artifact(member, artifact):
+        return HttpResponseForbidden("只有成果所有者或家庭管理员可以确认。")
+    if artifact.current_version_id is None:
+        messages.error(request, "成果文件尚未保存，不能确认。")
+    else:
+        artifact.status = KnowledgeArtifact.STATUS_CONFIRMED
+        artifact.confirmed_by = member
+        artifact.confirmed_at = timezone.now()
+        artifact.save(
+            update_fields=["status", "confirmed_by", "confirmed_at", "updated_at"]
+        )
+        index_artifact(artifact)
+        messages.success(request, "已确认这份 AI 专题成果；原文件和引用证据版本保持不变。")
+    return redirect("knowledge:artifact_detail", pk=artifact.pk)
+
+
+@login_required
+def artifact_render(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    artifact = get_object_or_404(accessible_artifacts(member), pk=pk)
+    version = artifact.current_version
+    if not version or not version.rendered_file:
+        raise Http404
+    rendered_file = _open_protected_file(version.rendered_file)
+    if artifact.artifact_type in {
+        KnowledgeArtifact.TYPE_MANUAL,
+        KnowledgeArtifact.TYPE_MIND_MAP,
+    }:
+        rendered = rendered_file.read().decode("utf-8")
+        rendered_file.close()
+        response = HttpResponse(
+            apply_family_theme(rendered),
+            content_type="text/html; charset=utf-8",
+        )
+    else:
+        response = FileResponse(
+            rendered_file,
+            as_attachment=False,
+            filename="artifact.html",
+            content_type="text/html; charset=utf-8",
+        )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+        "img-src data:; font-src data:; connect-src 'none'; object-src 'none'; "
+        "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+    )
+    return response
+
+
+@login_required
+def artifact_original_download(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    artifact = get_object_or_404(accessible_artifacts(member), pk=pk)
+    version = artifact.current_version
+    if not version or not version.original_file:
+        raise Http404
+    response = FileResponse(
+        _open_protected_file(version.original_file),
+        as_attachment=True,
+        filename=Path(version.original_name).name,
+        content_type="application/octet-stream",
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@login_required
+def artifact_evidence(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    evidence = get_object_or_404(
+        KnowledgeArtifactEvidence.objects.select_related(
+            "version__artifact",
+            "document",
+            "revision",
+        ),
+        pk=pk,
+        version__artifact__in=accessible_artifacts(member),
+    )
+    if not evidence.document_id or not evidence.revision_id:
+        raise Http404
+    document = get_object_or_404(accessible_documents(member), pk=evidence.document_id)
+    target = reverse("knowledge:document_detail", kwargs={"pk": document.pk})
+    return redirect(
+        f"{target}?evidence={evidence.pk}&artifact={evidence.version.artifact_id}"
+    )
+
+
 @login_required
 def architecture(request):
     member = current_member(request)
@@ -1193,6 +1415,22 @@ def document_detail(request, pk):
     if member is None:
         return _membership_required_response(request)
     document = get_object_or_404(accessible_documents(member), pk=pk)
+    revision = document.current_revision
+    artifact_evidence = None
+    evidence_id = request.GET.get("evidence", "").strip()
+    if evidence_id.isdigit():
+        artifact_evidence = (
+            KnowledgeArtifactEvidence.objects.filter(
+                pk=int(evidence_id),
+                document=document,
+                revision__document=document,
+                version__artifact__in=accessible_artifacts(member),
+            )
+            .select_related("revision", "version__artifact")
+            .first()
+        )
+        if artifact_evidence is not None:
+            revision = artifact_evidence.revision
     stored_reading = (member.extra_data or {}).get("knowledge_reading") or {}
     font_size = request.GET.get(
         "font_size",
@@ -1254,7 +1492,8 @@ def document_detail(request, pk):
         "knowledge/document_detail.html",
         {
             "document": document,
-            "revision": document.current_revision,
+            "revision": revision,
+            "artifact_evidence": artifact_evidence,
             "proposals": proposals,
             "pending_proposals": pending_proposals,
             "history_runs": history_runs,

@@ -6,6 +6,7 @@ from django.utils import timezone
 from notes.models import InvestmentNote
 
 from .models import (
+    KnowledgeArtifact,
     KnowledgeDocument,
     KnowledgeSearchEntry,
     KnowledgeSource,
@@ -148,6 +149,54 @@ def index_document(document):
     return entry
 
 
+def index_artifact(artifact):
+    version = artifact.current_version
+    if not artifact.owner_id or not version:
+        KnowledgeSearchEntry.objects.filter(
+            family=artifact.family,
+            item_kind=KnowledgeSearchEntry.KIND_ARTIFACT,
+            object_id=str(artifact.pk),
+        ).delete()
+        return None
+    confirmed = artifact.status == KnowledgeArtifact.STATUS_CONFIRMED
+    defaults = {
+        "owner": artifact.owner,
+        "visibility": artifact.visibility,
+        "title": artifact.title,
+        "body": version.plain_text,
+        "summary": artifact.description,
+        "source_kind": "ai_artifact",
+        "source_name": "AI 专题成果",
+        "author_name": artifact.person_name,
+        "category": "专题成果",
+        "tags": [artifact.get_artifact_type_display()],
+        "tags_text": artifact.get_artifact_type_display(),
+        "searchable_text": _searchable_text(
+            artifact.title,
+            artifact.description,
+            artifact.person_name,
+            artifact.get_artifact_type_display(),
+            version.plain_text,
+        ),
+        "curation_status": (
+            KnowledgeDocument.CURATION_CONFIRMED
+            if confirmed
+            else KnowledgeDocument.CURATION_PENDING_REVIEW
+        ),
+        "knowledge_status": KnowledgeDocument.KNOWLEDGE_INCLUDED,
+        "content_time": version.generated_at or version.created_at,
+        "document": None,
+        "artifact": artifact,
+    }
+    entry, _ = KnowledgeSearchEntry.objects.update_or_create(
+        family=artifact.family,
+        item_kind=KnowledgeSearchEntry.KIND_ARTIFACT,
+        object_id=str(artifact.pk),
+        defaults=defaults,
+    )
+    return entry
+
+
 @transaction.atomic
 def rebuild_family_search(family):
     KnowledgeSearchEntry.objects.filter(family=family).delete()
@@ -167,4 +216,16 @@ def rebuild_family_search(family):
     ):
         index_document(document)
         document_count += 1
-    return {"notes": notes_count, "documents": document_count}
+    artifact_count = 0
+    for artifact in (
+        KnowledgeArtifact.objects.filter(family=family, current_version__isnull=False)
+        .select_related("owner", "current_version")
+        .iterator()
+    ):
+        index_artifact(artifact)
+        artifact_count += 1
+    return {
+        "notes": notes_count,
+        "documents": document_count,
+        "artifacts": artifact_count,
+    }

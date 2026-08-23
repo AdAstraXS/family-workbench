@@ -4,6 +4,7 @@ from pathlib import Path
 from django import forms
 
 from .models import (
+    KnowledgeArtifact,
     KnowledgeCategory,
     KnowledgeDocument,
     KnowledgeTag,
@@ -94,6 +95,97 @@ class KnowledgeImportUploadForm(forms.Form):
         suffix = Path(uploaded.name).suffix.lower()
         if suffix not in {".html", ".zip"}:
             raise forms.ValidationError("目前只支持 .html 或 .zip 导入包。")
+        return uploaded
+
+
+class KnowledgeArtifactUploadForm(forms.Form):
+    person_name = forms.CharField(
+        label="关联人物",
+        max_length=300,
+        help_text="成果会显示在这个人物的历史知识主页。",
+    )
+    artifact_type = forms.ChoiceField(
+        label="成果类型",
+        choices=KnowledgeArtifact.TYPE_CHOICES,
+    )
+    title = forms.CharField(
+        label="成果标题",
+        max_length=500,
+        required=False,
+        help_text="留空时使用 HTML 的页面标题。",
+    )
+    description = forms.CharField(
+        label="成果说明",
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+    visibility = forms.ChoiceField(
+        label="可见范围",
+        choices=KnowledgeVisibility.choices,
+        initial=KnowledgeVisibility.FAMILY,
+    )
+    source_article_count = forms.IntegerField(
+        label="生成时使用的文章数",
+        min_value=0,
+        initial=439,
+        help_text="这里记录 AI 实际使用的来源规模；当前已导入 437 篇不影响先建立映射。",
+    )
+    source_cutoff_date = forms.DateField(
+        label="来源截止日期",
+        required=False,
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    generator_name = forms.CharField(
+        label="生成工具",
+        max_length=100,
+        required=False,
+        initial="Claude",
+    )
+    generated_at = forms.DateTimeField(
+        label="生成时间",
+        required=False,
+        widget=forms.DateTimeInput(attrs={"type": "datetime-local"}),
+        help_text="不知道准确时间时可留空，页面会明确显示未记录。",
+    )
+    model_name = forms.CharField(
+        label="模型",
+        max_length=200,
+        required=False,
+        help_text="不知道具体模型时可留空，不进行猜测。",
+    )
+    prompt_version = forms.CharField(
+        label="提示词版本",
+        max_length=100,
+        required=False,
+        initial="external-ai-synthesis-v1",
+    )
+    html_file = forms.FileField(
+        label="AI 生成的 HTML 文件",
+        help_text="仅支持自包含 HTML，最大 5 MB；原文件会按版本保存在 NAS。",
+        widget=forms.ClearableFileInput(attrs={"accept": ".html,.htm,text/html"}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.widget.attrs.setdefault("class", "form-control")
+
+    def clean_person_name(self):
+        value = " ".join(self.cleaned_data["person_name"].strip().split())
+        if not value:
+            raise forms.ValidationError("请填写关联人物。")
+        return value
+
+    def clean_html_file(self):
+        uploaded = self.cleaned_data["html_file"]
+        if Path(uploaded.name).suffix.lower() not in {".html", ".htm"}:
+            raise forms.ValidationError("只支持 .html 或 .htm 文件。")
+        if uploaded.size > 5 * 1024 * 1024:
+            raise forms.ValidationError("HTML 文件不能超过 5 MB。")
+        prefix = uploaded.read(4096)
+        uploaded.seek(0)
+        if b"\x00" in prefix or b"<html" not in prefix.lower():
+            raise forms.ValidationError("文件不是可识别的 HTML 文档。")
         return uploaded
 
 

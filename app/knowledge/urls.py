@@ -33,6 +33,28 @@ urlpatterns = [
         name="taxonomy_merge",
     ),
     path("people/", views.people, name="people"),
+    path("artifacts/new/", views.artifact_create, name="artifact_create"),
+    path("artifacts/<int:pk>/", views.artifact_detail, name="artifact_detail"),
+    path(
+        "artifacts/<int:pk>/confirm/",
+        views.artifact_confirm,
+        name="artifact_confirm",
+    ),
+    path(
+        "artifacts/<int:pk>/render/",
+        views.artifact_render,
+        name="artifact_render",
+    ),
+    path(
+        "artifacts/<int:pk>/original/",
+        views.artifact_original_download,
+        name="artifact_original_download",
+    ),
+    path(
+        "artifacts/evidence/<int:pk>/",
+        views.artifact_evidence,
+        name="artifact_evidence",
+    ),
     path("architecture/", views.architecture, name="architecture"),
     path("documents/<int:pk>/", views.document_detail, name="document_detail"),
     path(

@@ -40,10 +40,34 @@
               <span class="status-pill warning">未关联人物档案</span>
               {% if can_verify_identity %}<a class="button" href="{{ identity_verification_url }}">去核验</a>{% endif %}
             {% endif %}
+            {% if can_upload_artifact %}<a class="button" href="{{ artifact_upload_url }}">上传专题成果</a>{% endif %}
           </div>
         </div>
       </header>
       {% if selected_subject and selected_author_names %}<p class="knowledge-person-identity-note">已连接历史作者：{{ selected_author_names|join:"、" }}</p>{% elif selected_subject %}<p class="notice warning">这个关注对象尚未连接知识中心的历史作者名称；家庭管理员可在 AI 情报中编辑人物资料完成关联。</p>{% endif %}
+
+      {% if artifacts %}
+      <section class="knowledge-artifact-shelf" aria-labelledby="person-artifact-heading">
+        <header>
+          <div><span class="eyebrow">AI synthesis</span><h3 id="person-artifact-heading">专题成果{% include "knowledge/_help_tip.html" with text="这些内容由 AI 从历史文章中提炼，原始文章仍是权威来源；点击成果中的出处可以返回知识中心原文。" %}</h3></div>
+          <span>{{ artifacts|length }} 项</span>
+        </header>
+        <div class="knowledge-artifact-cards">
+          {% for artifact in artifacts %}
+          <a class="knowledge-artifact-card" href="{% url 'knowledge:artifact_detail' artifact.pk %}">
+            <span class="knowledge-artifact-mark" aria-hidden="true">{% if artifact.artifact_type == "mind_map" %}图{% else %}册{% endif %}</span>
+            <div>
+              <span>{{ artifact.get_artifact_type_display }}</span>
+              <strong>{{ artifact.title }}</strong>
+              {% if artifact.description %}<small>{{ artifact.description|truncatechars:72 }}</small>{% endif %}
+              {% if artifact.current_version %}<small>v{{ artifact.current_version.version_number }} · 来源 {{ artifact.current_version.source_article_count }} 篇 · 引用已映射 {{ artifact.current_version.matched_reference_count }}/{{ artifact.current_version.reference_count }}</small>{% endif %}
+            </div>
+            <span class="status-pill{% if artifact.status == 'pending' %} warning{% endif %}">{{ artifact.get_status_display }}</span>
+          </a>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
       <nav class="knowledge-person-filters" aria-label="人物动态类型">
         {% for filter in status_filters %}<a href="{{ filter.url }}"{% if selected_status == filter.value %} class="active" aria-current="page"{% endif %}>{{ filter.label }} <strong>{{ filter.count }}</strong></a>{% endfor %}
         <span>最新动态与资讯请在 AI 情报查看</span>

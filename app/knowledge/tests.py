@@ -1,7 +1,7 @@
 import tempfile
 import json
 import zipfile
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -36,6 +36,8 @@ from .imports import (
     parse_wechat_html,
 )
 from .models import (
+    KnowledgeArtifact,
+    KnowledgeArtifactEvidence,
     KnowledgeAsset,
     KnowledgeCategory,
     KnowledgeCurationRevision,
@@ -989,6 +991,219 @@ class KnowledgeBaseTests(TestCase):
         )
         self.assertContains(member_view, "未关联人物档案")
         self.assertNotContains(member_view, "去核验")
+
+    def make_artifact_article(self, *, title, published_date, external_id):
+        source = self.make_source(suffix=f"artifact-{external_id}")
+        source.kind = KnowledgeSource.KIND_HTML_IMPORT
+        source.name = "微信公众号 · 金渐成"
+        source.save(update_fields=["kind", "name", "updated_at"])
+        document = self.make_document(
+            source=source,
+            title=title,
+            external_id=external_id,
+            plain_text=f"{title} 原文正文",
+        )
+        document.author = "金渐成"
+        document.content_created_at = timezone.make_aware(
+            datetime.combine(published_date, datetime.min.time())
+        )
+        document.save(update_fields=["author", "content_created_at", "updated_at"])
+        index_document(document)
+        return document
+
+    def test_artifact_upload_maps_citations_and_embeds_in_people_page(self):
+        document = self.make_artifact_article(
+            title="祖传秘诀",
+            published_date=date(2024, 2, 19),
+            external_id="artifact-source-1",
+        )
+        artifact_html = b"""<!doctype html><html><head><title>\xe9\x87\x91\xe6\xb8\x90\xe6\x88\x90\xe6\x8a\x95\xe8\xb5\x84\xe7\x9f\xa5\xe8\xaf\x86\xe5\xba\x93</title></head><body><aside class=\"sidebar\"></aside>
+        <h1>\xe9\x81\x93\xe5\x8a\xbf\xe6\xb3\x95\xe6\x9c\xaf\xe5\xbf\x83</h1>
+        <cite>2024-02-19\xe3\x80\x8a\xe7\xa5\x96\xe4\xbc\xa0\xe7\xa7\x98\xe8\xaf\x80\xe3\x80\x8b\xef\xbc\x9b2024-02-20\xe3\x80\x8a\xe6\x9c\xaa\xe5\xaf\xbc\xe5\x85\xa5\xe6\x96\x87\xe7\xab\xa0\xe3\x80\x8b</cite>
+        </body></html>"""
+        response = self.client.post(
+            reverse("knowledge:artifact_create"),
+            {
+                "person_name": "金渐成",
+                "artifact_type": KnowledgeArtifact.TYPE_MANUAL,
+                "title": "",
+                "description": "道势法术心投资方法论",
+                "visibility": KnowledgeVisibility.FAMILY,
+                "source_article_count": 439,
+                "source_cutoff_date": "2026-08-20",
+                "generator_name": "Claude",
+                "model_name": "",
+                "prompt_version": "external-ai-synthesis-v1",
+                "html_file": SimpleUploadedFile(
+                    "manual.html",
+                    artifact_html,
+                    content_type="text/html",
+                ),
+            },
+        )
+
+        artifact = KnowledgeArtifact.objects.get()
+        version = artifact.current_version
+        self.assertRedirects(
+            response,
+            reverse("knowledge:artifact_detail", kwargs={"pk": artifact.pk}),
+        )
+        self.assertEqual(version.reference_count, 2)
+        self.assertEqual(version.matched_reference_count, 1)
+        self.assertEqual(version.unmatched_reference_count, 1)
+        matched = version.evidence_links.get(
+            status=KnowledgeArtifactEvidence.STATUS_MATCHED
+        )
+        self.assertEqual(matched.document, document)
+        self.assertEqual(matched.revision, document.current_revision)
+        with version.rendered_file.open("rb") as rendered_file:
+            rendered = rendered_file.read().decode("utf-8")
+        self.assertIn("knowledge-evidence-link", rendered)
+        self.assertIn("knowledge-evidence-unmatched", rendered)
+        self.assertIn("openKnowledgeEvidence", rendered)
+        self.assertIn('data-knowledge-family-theme="v1"', rendered)
+        self.assertIn('font-family:-apple-system', rendered)
+
+        people = self.client.get(reverse("knowledge:people"), {"person": "金渐成"})
+        self.assertContains(people, "专题成果")
+        self.assertContains(people, artifact.title)
+        self.assertContains(people, "引用已映射 1/2")
+
+        render_response = self.client.get(
+            reverse("knowledge:artifact_render", kwargs={"pk": artifact.pk})
+        )
+        self.assertEqual(render_response.status_code, 200)
+        self.assertIn('data-knowledge-family-theme="v1"', render_response.content.decode("utf-8"))
+        self.assertIn("sandbox", self.client.get(
+            reverse("knowledge:artifact_detail", kwargs={"pk": artifact.pk})
+        ).content.decode("utf-8"))
+        self.assertIn("default-src 'none'", render_response.headers["Content-Security-Policy"])
+        evidence_response = self.client.get(
+            reverse("knowledge:artifact_evidence", kwargs={"pk": matched.pk})
+        )
+        self.assertRedirects(
+            evidence_response,
+            reverse("knowledge:document_detail", kwargs={"pk": document.pk})
+            + f"?evidence={matched.pk}&artifact="
+            + str(artifact.pk),
+            fetch_redirect_response=False,
+        )
+        evidence_page = self.client.get(evidence_response.url)
+        self.assertContains(evidence_page, "固定证据版本 v1")
+        search_entry = KnowledgeSearchEntry.objects.get(
+            item_kind=KnowledgeSearchEntry.KIND_ARTIFACT
+        )
+        self.assertEqual(search_entry.artifact, artifact)
+        self.assertIn("道势法术心", search_entry.searchable_text)
+        library = self.client.get(
+            reverse("knowledge:library"),
+            {"q": "道势法术心", "member": str(self.member.pk)},
+        )
+        self.assertContains(library, artifact.title)
+        self.assertContains(library, "AI 生成 · 待人工确认")
+
+        confirmed = self.client.post(
+            reverse("knowledge:artifact_confirm", kwargs={"pk": artifact.pk})
+        )
+        self.assertRedirects(
+            confirmed,
+            reverse("knowledge:artifact_detail", kwargs={"pk": artifact.pk}),
+        )
+        artifact.refresh_from_db()
+        search_entry.refresh_from_db()
+        self.assertEqual(artifact.status, KnowledgeArtifact.STATUS_CONFIRMED)
+        self.assertEqual(artifact.confirmed_by, self.member)
+        self.assertEqual(
+            search_entry.curation_status,
+            KnowledgeDocument.CURATION_CONFIRMED,
+        )
+
+    def test_mind_map_artifact_rewrites_structured_sources_as_links(self):
+        self.make_artifact_article(
+            title="起风了",
+            published_date=date(2024, 8, 24),
+            external_id="artifact-source-2",
+        )
+        source = """<!doctype html><html><head><title>金渐成 · 投资知识体系</title></head><body><div id=\"mindmap-card\"></div><div id=\"tree\"></div>
+        <script>
+        const DATA = [{"name":"投资认知","color":"#123456","subthemes":[{"name":"认知","points":[{"title":"认知决定本质","yaodian":"核心要点","yuanwen":"原话","chuchu":"《起风了》(2024-08-24)"}]}]}];
+        const state = { query: "" };
+        function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+        function renderTree(){const p=DATA[0].subthemes[0].points[0];const chuchu = p.chuchu ? `<div class="point-chuchu">出处：<span class="src">${esc(p.chuchu)}</span></div>` : "";document.getElementById("tree").innerHTML=chuchu;}
+        renderTree();
+        </script></body></html>""".encode("utf-8")
+        response = self.client.post(
+            reverse("knowledge:artifact_create"),
+            {
+                "person_name": "金渐成",
+                "artifact_type": KnowledgeArtifact.TYPE_MIND_MAP,
+                "title": "",
+                "description": "交互式知识体系图",
+                "visibility": KnowledgeVisibility.FAMILY,
+                "source_article_count": 439,
+                "source_cutoff_date": "2026-08-20",
+                "generator_name": "Claude",
+                "model_name": "",
+                "prompt_version": "external-ai-synthesis-v1",
+                "html_file": SimpleUploadedFile("map.html", source, content_type="text/html"),
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        version = KnowledgeArtifact.objects.get().current_version
+        self.assertEqual(version.matched_reference_count, 1)
+        with version.rendered_file.open("rb") as rendered_file:
+            rendered = rendered_file.read().decode("utf-8")
+        self.assertIn('"_evidence"', rendered)
+        self.assertIn("renderEvidence(p)", rendered)
+        self.assertIn("knowledge-evidence-button", rendered)
+        self.assertIn('data-knowledge-family-theme="v1"', rendered)
+
+    def test_private_artifact_and_evidence_are_not_visible_to_other_members(self):
+        document = self.make_artifact_article(
+            title="私密文章",
+            published_date=date(2025, 1, 2),
+            external_id="private-artifact-source",
+        )
+        document.visibility = KnowledgeVisibility.PRIVATE
+        document.source.visibility = KnowledgeVisibility.PRIVATE
+        document.source.save(update_fields=["visibility", "updated_at"])
+        document.save(update_fields=["visibility", "updated_at"])
+        self.client.post(
+            reverse("knowledge:artifact_create"),
+            {
+                "person_name": "金渐成",
+                "artifact_type": KnowledgeArtifact.TYPE_MANUAL,
+                "title": "私密成果",
+                "description": "",
+                "visibility": KnowledgeVisibility.PRIVATE,
+                "source_article_count": 1,
+                "source_cutoff_date": "2025-01-02",
+                "generator_name": "Claude",
+                "model_name": "",
+                "prompt_version": "v1",
+                "html_file": SimpleUploadedFile(
+                    "private.html",
+                    "<html><head><title>私密成果</title></head><body><cite>2025-01-02《私密文章》</cite></body></html>".encode(),
+                    content_type="text/html",
+                ),
+            },
+        )
+        artifact = KnowledgeArtifact.objects.get()
+        evidence = artifact.current_version.evidence_links.get()
+        self.client.force_login(self.other_user)
+        self.assertEqual(
+            self.client.get(reverse("knowledge:artifact_detail", kwargs={"pk": artifact.pk})).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(reverse("knowledge:artifact_render", kwargs={"pk": artifact.pk})).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(reverse("knowledge:artifact_evidence", kwargs={"pk": evidence.pk})).status_code,
+            404,
+        )
 
     def test_job_detail_paginates_items_and_keeps_long_titles_in_table(self):
         source = self.make_source(suffix="job-detail-pagination")
@@ -2821,7 +3036,7 @@ class KnowledgeBaseTests(TestCase):
             .order_by("item_kind", "object_id")
         )
 
-        self.assertEqual(first, {"notes": 1, "documents": 1})
+        self.assertEqual(first, {"notes": 1, "documents": 1, "artifacts": 0})
         self.assertEqual(second, first)
         self.assertEqual(first_rows, second_rows)
         self.assertIn(

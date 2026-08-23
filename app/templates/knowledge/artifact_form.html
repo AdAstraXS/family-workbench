@@ -1,0 +1,31 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}上传专题成果 · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:people' %}">关注人物</a><span aria-hidden="true">›</span><span>上传专题成果</span>{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-page-heading">
+  <div><span class="eyebrow">AI synthesis</span><h1>上传专题成果</h1><p>保存 AI 生成原文件，建立不可变版本，并把出处自动映射到知识中心已有文章。</p></div>
+  <span class="status-pill warning">上传后待人工确认</span>
+</section>
+
+<section class="panel knowledge-artifact-form-panel">
+  <form method="post" enctype="multipart/form-data" class="form-grid">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
+    {% for field in form %}
+      <div class="form-field{% if field.name == 'description' or field.name == 'html_file' %} span-2{% endif %}">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}
+        {% for error in field.errors %}<span class="form-error">{{ error }}</span>{% endfor %}
+      </div>
+    {% endfor %}
+    <aside class="notice warning span-2">
+      <strong>成果与原文分开保存</strong>
+      <p>页面会明确标记 AI 生成；确认成果不会修改任何历史文章。引用按“文章标题＋日期”自动匹配，未匹配或重复候选会保留清单。</p>
+    </aside>
+    <div class="form-actions span-2"><button class="button primary" type="submit">保存并建立引用映射</button><a class="button" href="{% url 'knowledge:people' %}">取消</a></div>
+  </form>
+</section>
+{% endblock %}

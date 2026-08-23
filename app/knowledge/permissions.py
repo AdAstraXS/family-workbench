@@ -3,6 +3,7 @@ from django.db.models import Q
 from family_core.models import FamilyMember
 
 from .models import (
+    KnowledgeArtifact,
     KnowledgeDocument,
     KnowledgeSearchEntry,
     KnowledgeSource,
@@ -40,7 +41,15 @@ def accessible_search_entries(member):
     return (
         KnowledgeSearchEntry.objects.filter(family=member.family)
         .filter(Q(owner=member) | Q(visibility=KnowledgeVisibility.FAMILY))
-        .select_related("owner", "document", "document__source")
+        .select_related("owner", "document", "document__source", "artifact")
+    )
+
+
+def accessible_artifacts(member):
+    return (
+        KnowledgeArtifact.objects.filter(family=member.family)
+        .filter(Q(owner=member) | Q(visibility=KnowledgeVisibility.FAMILY))
+        .select_related("owner", "current_version", "confirmed_by")
     )
 
 
@@ -95,6 +104,16 @@ def can_organize_document(member, document):
         document.family_id == member.family_id
         and (
             document.owner_id == member.id
+            or member.role == FamilyMember.ROLE_ADMIN
+        )
+    )
+
+
+def can_manage_artifact(member, artifact):
+    return (
+        artifact.family_id == member.family_id
+        and (
+            artifact.owner_id == member.id
             or member.role == FamilyMember.ROLE_ADMIN
         )
     )

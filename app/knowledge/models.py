@@ -51,6 +51,22 @@ def import_package_upload_to(instance, filename):
     )
 
 
+def artifact_original_upload_to(instance, filename):
+    return (
+        f"families/{instance.artifact.family_id}/artifacts/{instance.artifact_id}/"
+        f"versions/{instance.version_number}/original/"
+        f"{_safe_filename(filename, 'artifact.html')}"
+    )
+
+
+def artifact_rendered_upload_to(instance, filename):
+    return (
+        f"families/{instance.artifact.family_id}/artifacts/{instance.artifact_id}/"
+        f"versions/{instance.version_number}/rendered/"
+        f"{_safe_filename(filename, 'artifact.html')}"
+    )
+
+
 class KnowledgeVisibility(models.TextChoices):
     PRIVATE = "private", "仅自己"
     FAMILY = "family", "家庭可见"
@@ -1109,12 +1125,225 @@ class KnowledgeImportItem(models.Model):
         return self.title or self.relative_path
 
 
+class KnowledgeArtifact(TimestampedModel):
+    TYPE_MANUAL = "manual"
+    TYPE_MIND_MAP = "mind_map"
+    TYPE_CHOICES = [
+        (TYPE_MANUAL, "专题知识手册"),
+        (TYPE_MIND_MAP, "交互式知识体系图"),
+    ]
+
+    STATUS_PENDING = "pending"
+    STATUS_CONFIRMED = "confirmed"
+    STATUS_SUPERSEDED = "superseded"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "AI 生成 · 待人工确认"),
+        (STATUS_CONFIRMED, "已人工确认"),
+        (STATUS_SUPERSEDED, "已被新成果替代"),
+    ]
+
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="knowledge_artifacts",
+    )
+    owner = models.ForeignKey(
+        FamilyMember,
+        verbose_name="成果所有者",
+        on_delete=models.PROTECT,
+        related_name="knowledge_artifacts",
+    )
+    person_name = models.CharField("关联人物", max_length=300)
+    normalized_person_name = models.CharField("规范人物名", max_length=300)
+    artifact_type = models.CharField("成果类型", max_length=30, choices=TYPE_CHOICES)
+    title = models.CharField("成果标题", max_length=500)
+    description = models.TextField("成果说明", blank=True)
+    visibility = models.CharField(
+        "可见范围",
+        max_length=20,
+        choices=KnowledgeVisibility.choices,
+        default=KnowledgeVisibility.FAMILY,
+    )
+    status = models.CharField(
+        "确认状态",
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    current_version = models.ForeignKey(
+        "KnowledgeArtifactVersion",
+        verbose_name="当前成果版本",
+        on_delete=models.SET_NULL,
+        related_name="+",
+        null=True,
+        blank=True,
+    )
+    confirmed_by = models.ForeignKey(
+        FamilyMember,
+        verbose_name="确认人",
+        on_delete=models.SET_NULL,
+        related_name="confirmed_knowledge_artifacts",
+        null=True,
+        blank=True,
+    )
+    confirmed_at = models.DateTimeField("确认时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "AI 专题成果"
+        verbose_name_plural = "AI 专题成果"
+        ordering = ["person_name", "artifact_type", "title", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["family", "normalized_person_name", "artifact_type"],
+                name="unique_knowledge_artifact_type_per_person",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["family", "visibility", "owner"]),
+            models.Index(fields=["family", "normalized_person_name", "status"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.person_name = " ".join(str(self.person_name or "").strip().split())
+        self.normalized_person_name = normalize_taxonomy_name(self.person_name)
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.title
+
+
+class KnowledgeArtifactVersion(models.Model):
+    artifact = models.ForeignKey(
+        KnowledgeArtifact,
+        verbose_name="专题成果",
+        on_delete=models.CASCADE,
+        related_name="versions",
+    )
+    version_number = models.PositiveIntegerField("版本号")
+    original_file = models.FileField(
+        "AI 生成原文件",
+        storage=protected_knowledge_storage,
+        upload_to=artifact_original_upload_to,
+        max_length=1000,
+    )
+    rendered_file = models.FileField(
+        "安全展示版本",
+        storage=protected_knowledge_storage,
+        upload_to=artifact_rendered_upload_to,
+        max_length=1000,
+        blank=True,
+    )
+    original_name = models.CharField("原始文件名", max_length=300)
+    content_hash = models.CharField("原文件 SHA-256", max_length=64)
+    byte_size = models.PositiveBigIntegerField("原文件大小")
+    plain_text = models.TextField("可搜索文本", blank=True)
+    generator_name = models.CharField("生成工具", max_length=100, blank=True)
+    model_name = models.CharField("模型", max_length=200, blank=True)
+    prompt_version = models.CharField("提示词版本", max_length=100, blank=True)
+    generated_at = models.DateTimeField("生成时间", null=True, blank=True)
+    source_article_count = models.PositiveIntegerField("声明来源文章数", default=0)
+    source_cutoff_date = models.DateField("来源截止日期", null=True, blank=True)
+    source_snapshot = models.JSONField("来源版本快照", default=list, blank=True)
+    reference_count = models.PositiveIntegerField("引用数", default=0)
+    matched_reference_count = models.PositiveIntegerField("已匹配引用数", default=0)
+    ambiguous_reference_count = models.PositiveIntegerField("重复待核对引用数", default=0)
+    unmatched_reference_count = models.PositiveIntegerField("未匹配引用数", default=0)
+    created_by = models.ForeignKey(
+        FamilyMember,
+        verbose_name="上传人",
+        on_delete=models.PROTECT,
+        related_name="created_knowledge_artifact_versions",
+    )
+    created_at = models.DateTimeField("保存时间", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "AI 专题成果版本"
+        verbose_name_plural = "AI 专题成果版本"
+        ordering = ["-version_number", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["artifact", "version_number"],
+                name="unique_knowledge_artifact_version_number",
+            ),
+            models.UniqueConstraint(
+                fields=["artifact", "content_hash"],
+                name="unique_knowledge_artifact_content_hash",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.artifact} · v{self.version_number}"
+
+
+class KnowledgeArtifactEvidence(models.Model):
+    STATUS_MATCHED = "matched"
+    STATUS_AMBIGUOUS = "ambiguous"
+    STATUS_UNMATCHED = "unmatched"
+    STATUS_CHOICES = [
+        (STATUS_MATCHED, "已映射原文"),
+        (STATUS_AMBIGUOUS, "存在重复候选"),
+        (STATUS_UNMATCHED, "未找到原文"),
+    ]
+
+    version = models.ForeignKey(
+        KnowledgeArtifactVersion,
+        verbose_name="成果版本",
+        on_delete=models.CASCADE,
+        related_name="evidence_links",
+    )
+    reference_key = models.CharField("稳定引用键", max_length=64)
+    citation_text = models.CharField("引用原文", max_length=1000)
+    citation_title = models.CharField("引用文章标题", max_length=500)
+    citation_date = models.DateField("引用文章日期", null=True, blank=True)
+    status = models.CharField("映射状态", max_length=20, choices=STATUS_CHOICES)
+    match_method = models.CharField("匹配方式", max_length=50, blank=True)
+    document = models.ForeignKey(
+        KnowledgeDocument,
+        verbose_name="映射文档",
+        on_delete=models.SET_NULL,
+        related_name="artifact_evidence_links",
+        null=True,
+        blank=True,
+    )
+    revision = models.ForeignKey(
+        KnowledgeRevision,
+        verbose_name="映射内容版本",
+        on_delete=models.SET_NULL,
+        related_name="artifact_evidence_links",
+        null=True,
+        blank=True,
+    )
+    candidate_document_ids = models.JSONField("候选文档 ID", default=list, blank=True)
+    created_at = models.DateTimeField("建立时间", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "专题成果引用证据"
+        verbose_name_plural = "专题成果引用证据"
+        ordering = ["citation_date", "citation_title", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["version", "reference_key"],
+                name="unique_knowledge_artifact_reference",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["version", "status"]),
+            models.Index(fields=["document", "revision"]),
+        ]
+
+    def __str__(self):
+        return self.citation_text
+
+
 class KnowledgeSearchEntry(TimestampedModel):
     KIND_DOCUMENT = "document"
     KIND_INVESTMENT_NOTE = "investment_note"
+    KIND_ARTIFACT = "artifact"
     KIND_CHOICES = [
         (KIND_DOCUMENT, "知识文档"),
         (KIND_INVESTMENT_NOTE, "随手记"),
+        (KIND_ARTIFACT, "AI 专题成果"),
     ]
 
     family = models.ForeignKey(
@@ -1134,6 +1363,14 @@ class KnowledgeSearchEntry(TimestampedModel):
     document = models.OneToOneField(
         KnowledgeDocument,
         verbose_name="知识文档",
+        on_delete=models.CASCADE,
+        related_name="search_entry",
+        null=True,
+        blank=True,
+    )
+    artifact = models.OneToOneField(
+        KnowledgeArtifact,
+        verbose_name="AI 专题成果",
         on_delete=models.CASCADE,
         related_name="search_entry",
         null=True,

@@ -177,6 +177,18 @@ docker compose exec -T web python manage.py queue_knowledge_syncs --full-reconci
 
 ## 8. 备份与恢复
 
+专题成果 HTML 由普通成员在“知识中心 → 关注人物 → 上传专题成果”提交，不需要命令行。上传后
+系统立即保存不可变原文件和安全展示版本，并按文章标题与日期建立引用映射；成果详情页会列出
+已匹配、重复候选和未匹配数量。首次上传默认待人工确认，成员核对后在详情页确认。部署或恢复时，
+`KnowledgeArtifact`、版本和引用记录位于 PostgreSQL，原始/展示 HTML 位于 `knowledge_files/`，
+两者必须进入同一个恢复点。
+
+交互成果的展示端点使用无同源权限的 sandbox iframe 和独立 CSP。两份金渐成专题成果的展示版本会
+自动套用家庭知识中心的浅色青绿色主题并统一无衬线字体；“下载 AI 原文件”仍保持原始样式，便于审计。
+不得把上传 HTML 移到公开
+`media/`，也不得在 Django 模板中直接使用 `safe` 渲染；原文件下载和成果展示都必须先检查当前
+家庭成员权限。
+
 知识底座的同一恢复点必须同时包含：
 
 - PostgreSQL 逻辑备份；

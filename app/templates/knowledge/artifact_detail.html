@@ -1,0 +1,75 @@
+{% extends "knowledge_hub/base.html" %}
+
+{% block title %}{{ artifact.title }} · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:people' %}?person={{ artifact.person_name|urlencode }}">{{ artifact.person_name }}</a><span aria-hidden="true">›</span><span>{{ artifact.title|truncatechars:24 }}</span>{% endblock %}
+
+{% block hub_content %}
+<section class="knowledge-page-heading knowledge-artifact-page-heading">
+  <div>
+    <span class="eyebrow">AI synthesis · {{ artifact.get_artifact_type_display }}</span>
+    <h1>{{ artifact.title }}</h1>
+    <p>{{ artifact.description|default:"由 AI 从历史原文中提炼的专题成果；原始文章仍是权威来源。" }}</p>
+  </div>
+  <div class="knowledge-artifact-heading-actions">
+    <span class="status-pill{% if artifact.status == 'pending' %} warning{% endif %}">{{ artifact.get_status_display }}</span>
+    {% if can_manage_artifact and artifact.status == 'pending' %}<form method="post" action="{% url 'knowledge:artifact_confirm' artifact.pk %}">{% csrf_token %}<button class="button primary" type="submit">确认这份成果</button></form>{% endif %}
+    <a class="button" href="{% url 'knowledge:artifact_original_download' artifact.pk %}">下载 AI 原文件</a>
+  </div>
+</section>
+
+{% if version %}
+<section class="knowledge-artifact-metadata" aria-label="成果来源与版本">
+  <div><span>当前版本</span><strong>v{{ version.version_number }}</strong><small>{{ version.created_at|date:"Y-m-d H:i" }} 保存</small></div>
+  <div><span>生成时来源</span><strong>{{ version.source_article_count }} 篇</strong><small>截止 {{ version.source_cutoff_date|date:"Y-m-d"|default:"未填写" }}</small></div>
+  <div><span>引用映射</span><strong>{{ version.matched_reference_count }} / {{ version.reference_count }}</strong><small>按标题与日期映射到原文</small></div>
+  <div><span>待核对</span><strong>{{ version.ambiguous_reference_count|add:version.unmatched_reference_count }}</strong><small>重复 {{ version.ambiguous_reference_count }} · 未匹配 {{ version.unmatched_reference_count }}</small></div>
+</section>
+
+<section class="knowledge-artifact-viewer-panel">
+  <header>
+    <div><span class="eyebrow">Interactive artifact</span><h2>成果内容{% include "knowledge/_help_tip.html" with text="绿色下划线出处已经映射，可点击返回知识中心原文；橙色虚线表示仍需核对。HTML 在隔离环境中运行，不能读取工作台身份或向外联网。" %}</h2></div>
+    <span>原文件 SHA-256：<code>{{ version.content_hash|slice:":12" }}…</code></span>
+  </header>
+  <iframe id="knowledge-artifact-frame" class="knowledge-artifact-frame" src="{% url 'knowledge:artifact_render' artifact.pk %}" sandbox="allow-scripts" title="{{ artifact.title }}"></iframe>
+</section>
+
+<section class="knowledge-artifact-audit-grid">
+  <article class="panel">
+    <header class="panel-heading"><div><span class="eyebrow">Provenance</span><h2>生成与确认信息</h2></div></header>
+    <dl class="knowledge-property-list">
+      <div><dt>关联人物</dt><dd>{{ artifact.person_name }}</dd></div>
+      <div><dt>生成工具</dt><dd>{{ version.generator_name|default:"未记录" }}</dd></div>
+      <div><dt>生成时间</dt><dd>{{ version.generated_at|date:"Y-m-d H:i"|default:"未记录" }}</dd></div>
+      <div><dt>模型</dt><dd>{{ version.model_name|default:"未记录" }}</dd></div>
+      <div><dt>提示词版本</dt><dd>{{ version.prompt_version|default:"未记录" }}</dd></div>
+      <div><dt>可见范围</dt><dd>{{ artifact.get_visibility_display }}</dd></div>
+      {% if artifact.confirmed_by %}<div><dt>确认记录</dt><dd>{{ artifact.confirmed_by }} · {{ artifact.confirmed_at|date:"Y-m-d H:i" }}</dd></div>{% endif %}
+    </dl>
+  </article>
+  <article class="panel">
+    <header class="panel-heading"><div><span class="eyebrow">Unresolved evidence</span><h2>待核对出处</h2></div><span>{{ version.ambiguous_reference_count|add:version.unmatched_reference_count }} 条</span></header>
+    {% if unresolved_evidence %}
+      <div class="knowledge-artifact-unresolved-list">
+        {% for evidence in unresolved_evidence %}<div><span class="status-pill warning">{{ evidence.get_status_display }}</span><strong>{{ evidence.citation_title }}</strong><time>{{ evidence.citation_date|date:"Y-m-d"|default:"日期未知" }}</time>{% if evidence.candidate_document_ids %}<small>{{ evidence.candidate_document_ids|length }} 个候选文档</small>{% endif %}</div>{% endfor %}
+      </div>
+    {% else %}<div class="knowledge-gentle-empty"><span>所有可识别出处都已建立原文映射。</span></div>{% endif %}
+  </article>
+</section>
+{% else %}
+<div class="empty-state"><p>成果版本尚未保存。</p></div>
+{% endif %}
+
+<script>
+(function(){
+  const frame=document.getElementById("knowledge-artifact-frame");
+  if(!frame)return;
+  window.addEventListener("message",function(event){
+    if(event.source!==frame.contentWindow)return;
+    const data=event.data||{};
+    if(data.type!=="knowledge-artifact-evidence")return;
+    if(!/^\/knowledge\/artifacts\/evidence\/\d+\/$/.test(data.url||""))return;
+    window.location.assign(data.url);
+  });
+})();
+</script>
+{% endblock %}

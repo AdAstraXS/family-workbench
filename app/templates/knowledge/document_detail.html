@@ -56,6 +56,13 @@
       </div>
     </header>
 
+    {% if artifact_evidence %}
+    <aside class="notice warning knowledge-evidence-version-notice">
+      <strong>正在查看专题成果引用的固定证据版本 v{{ revision.revision_number }}</strong>
+      <p>引用来自“<a href="{% url 'knowledge:artifact_detail' artifact_evidence.version.artifact.pk %}">{{ artifact_evidence.version.artifact.title }}</a>”，建立于成果 v{{ artifact_evidence.version.version_number }}。{% if revision.pk != document.current_revision_id %}这不是文章当前版本；<a href="{% url 'knowledge:document_detail' document.pk %}">查看当前版本</a>。{% endif %}</p>
+    </aside>
+    {% endif %}
+
     {% if document.confirmed_summary or document.category or document.tags %}
       <aside class="knowledge-confirmed-summary">
         <header><div><span class="knowledge-content-label confirmed">当前精选结果</span><strong>已由家庭成员确认</strong></div>{% if can_organize %}<a href="{% url 'knowledge:document_organize' document.pk %}">重新编辑</a>{% endif %}</header>

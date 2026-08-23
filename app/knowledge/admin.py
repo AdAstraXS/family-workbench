@@ -1,6 +1,9 @@
 from django.contrib import admin
 
 from .models import (
+    KnowledgeArtifact,
+    KnowledgeArtifactEvidence,
+    KnowledgeArtifactVersion,
     KnowledgeAsset,
     KnowledgeCategory,
     KnowledgeCurationRevision,
@@ -17,6 +20,72 @@ from .models import (
     KnowledgeTag,
     SourceConnection,
 )
+
+
+class KnowledgeArtifactVersionInline(admin.TabularInline):
+    model = KnowledgeArtifactVersion
+    fields = (
+        "version_number",
+        "original_name",
+        "content_hash",
+        "reference_count",
+        "matched_reference_count",
+        "created_at",
+    )
+    readonly_fields = fields
+    extra = 0
+    can_delete = False
+
+
+@admin.register(KnowledgeArtifact)
+class KnowledgeArtifactAdmin(admin.ModelAdmin):
+    list_display = (
+        "title",
+        "person_name",
+        "artifact_type",
+        "owner",
+        "visibility",
+        "status",
+        "updated_at",
+    )
+    list_filter = ("family", "artifact_type", "visibility", "status")
+    search_fields = ("title", "person_name", "description")
+    readonly_fields = (
+        "normalized_person_name",
+        "current_version",
+        "confirmed_by",
+        "confirmed_at",
+        "created_at",
+        "updated_at",
+    )
+    inlines = [KnowledgeArtifactVersionInline]
+
+
+@admin.register(KnowledgeArtifactEvidence)
+class KnowledgeArtifactEvidenceAdmin(admin.ModelAdmin):
+    list_display = (
+        "citation_title",
+        "citation_date",
+        "version",
+        "status",
+        "document",
+        "revision",
+    )
+    list_filter = ("status", "match_method")
+    search_fields = ("citation_title", "citation_text", "document__title")
+    readonly_fields = (
+        "version",
+        "reference_key",
+        "citation_text",
+        "citation_title",
+        "citation_date",
+        "status",
+        "match_method",
+        "document",
+        "revision",
+        "candidate_document_ids",
+        "created_at",
+    )
 
 
 @admin.register(KnowledgeCategory)
