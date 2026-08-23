@@ -1380,6 +1380,87 @@ table {
   margin-top: 12px;
 }
 
+/* 知识中心数据表：长标题和错误摘要不得把页面撑出横向滚动条。 */
+.knowledge-data-table {
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.knowledge-data-table th,
+.knowledge-data-table td {
+  max-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  vertical-align: top;
+}
+
+.knowledge-data-table th {
+  font-size: 11px;
+}
+
+.knowledge-table-primary,
+.knowledge-table-error {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.knowledge-table-primary {
+  color: var(--knowledge-ink);
+  font-weight: 700;
+}
+
+.knowledge-table-error {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-height: 1.5;
+}
+
+.knowledge-job-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-jobs-col-created { width: 14%; }
+.knowledge-jobs-col-source { width: 22%; }
+.knowledge-jobs-col-task { width: 17%; }
+.knowledge-jobs-col-status { width: 12%; }
+.knowledge-jobs-col-progress { width: 13%; }
+.knowledge-jobs-col-failed { width: 8%; }
+.knowledge-jobs-col-requested { width: 14%; }
+
+.knowledge-job-item-col-title { width: 38%; }
+.knowledge-job-item-col-status { width: 14%; }
+.knowledge-job-item-col-error { width: 30%; }
+.knowledge-job-item-col-time { width: 18%; }
+
+.knowledge-imports-col-time { width: 13%; }
+.knowledge-imports-col-person { width: 20%; }
+.knowledge-imports-col-file { width: 24%; }
+.knowledge-imports-col-status { width: 13%; }
+.knowledge-imports-col-count { width: 7.5%; }
+
+.knowledge-import-items-col-title { width: 35%; }
+.knowledge-import-items-col-date { width: 13%; }
+.knowledge-import-items-col-result { width: 16%; }
+.knowledge-import-items-col-assets { width: 11%; }
+.knowledge-import-items-col-warning { width: 25%; }
+
+.knowledge-connections-col-member { width: 16%; }
+.knowledge-connections-col-provider { width: 16%; }
+.knowledge-connections-col-status { width: 15%; }
+.knowledge-connections-col-success { width: 18%; }
+.knowledge-connections-col-error { width: 35%; }
+
+.knowledge-source-jobs-col-time { width: 17%; }
+.knowledge-source-jobs-col-task { width: 25%; }
+.knowledge-source-jobs-col-status { width: 13%; }
+.knowledge-source-jobs-col-count { width: 11.25%; }
+
 th,
 td {
   padding: 10px 8px;

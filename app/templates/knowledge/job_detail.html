@@ -47,14 +47,15 @@
   {% if items_redacted %}
     <div class="notice warning">这是其他成员的私密来源；管理员只能查看任务汇总和错误状态，不能查看页面标题或正文。</div>
   {% endif %}
-  <table>
+  <table class="knowledge-data-table knowledge-job-items-table">
+    <colgroup><col class="knowledge-job-item-col-title"><col class="knowledge-job-item-col-status"><col class="knowledge-job-item-col-error"><col class="knowledge-job-item-col-time"></colgroup>
     <thead><tr><th>项目</th><th>状态</th><th>错误</th><th>时间</th></tr></thead>
     <tbody>
-      {% for item in items %}
+      {% for item in items_page %}
         <tr>
-          <td>{{ item.title|default:item.external_id }}</td>
+          <td><span class="knowledge-table-primary knowledge-job-item-title" title="{{ item.title|default:item.external_id }}">{{ item.title|default:item.external_id }}</span></td>
           <td>{{ item.get_status_display }}</td>
-          <td>{{ item.error_message|default:"-" }}</td>
+          <td><span class="knowledge-table-error">{{ item.error_message|default:"-" }}</span></td>
           <td>{{ item.created_at|date:"Y-m-d H:i:s" }}</td>
         </tr>
       {% empty %}
@@ -62,5 +63,6 @@
       {% endfor %}
     </tbody>
   </table>
+  {% include "knowledge/_pagination.html" with page_obj=items_page %}
 </section>
 {% endblock %}

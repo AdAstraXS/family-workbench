@@ -43,7 +43,8 @@
   <div class="panel-heading">
     <div><span class="eyebrow">审计记录</span><h2>最近导入批次</h2></div>
   </div>
-  <table>
+  <table class="knowledge-data-table knowledge-imports-table">
+    <colgroup><col class="knowledge-imports-col-time"><col class="knowledge-imports-col-person"><col class="knowledge-imports-col-file"><col class="knowledge-imports-col-status"><col class="knowledge-imports-col-count"><col class="knowledge-imports-col-count"><col class="knowledge-imports-col-count"><col class="knowledge-imports-col-count"></colgroup>
     <thead><tr><th>时间</th><th>归属人物 / 来源</th><th>文件</th><th>状态</th><th>新增</th><th>更新</th><th>跳过/重复</th><th>错误</th></tr></thead>
     <tbody>
       {% for batch in batches %}

@@ -48,18 +48,15 @@
         {% for filter in status_filters %}<a href="{{ filter.url }}"{% if selected_status == filter.value %} class="active" aria-current="page"{% endif %}>{{ filter.label }} <strong>{{ filter.count }}</strong></a>{% endfor %}
         <span>最新动态与资讯请在 AI 情报查看</span>
       </nav>
-      <div class="knowledge-person-result-heading"><strong>{% if query %}“{{ query }}”找到 {% endif %}{{ timeline_page.paginator.count }} 篇</strong><span>按发布时间倒序 · 每页 20 篇</span></div>
-      <div class="knowledge-person-timeline">
+      <div class="knowledge-person-result-heading"><strong>{% if query %}“{{ query }}”找到 {% endif %}{{ timeline_page.paginator.count }} 篇</strong><span>按发布时间倒序 · 紧凑列表 · 每页 20 篇</span></div>
+      <div class="knowledge-compact-table-wrap knowledge-person-compact-table-wrap">
+        <table class="knowledge-compact-table" aria-label="人物历史文章列表">
+          <tbody>
         {% for entry in timeline_page %}
-          <article>
-            <div class="knowledge-person-entry-date"><time>{% if entry.content_time %}{{ entry.content_time|date:"Y-m-d" }}{% else %}日期未知{% endif %}</time><span class="status-pill{% if entry.knowledge_status == 'pending' %} warning{% elif entry.item_kind == 'investment_note' or entry.document.library_tier == 'knowledge' %}{% else %} source{% endif %}">{% if entry.knowledge_status == "pending" %}待整理{% elif entry.item_kind == "investment_note" or entry.document.library_tier == "knowledge" %}精选知识{% else %}已归档{% endif %}</span></div>
-            <div class="knowledge-person-entry-main">
-              <h3><a href="{{ entry.target_url }}">{{ entry.title }}</a></h3>
-              <p>{{ entry.hit_snippet|truncatechars:220 }}</p>
-              <div class="knowledge-person-entry-meta"><span>{{ entry.source_name }}</span>{% if entry.category %}<span>分类：{{ entry.category }}</span>{% endif %}{% for tag in entry.tags|slice:":3" %}<span>#{{ tag }}</span>{% endfor %}<span>所属成员 {{ entry.owner.display_name }}</span></div>
-            </div>
-          </article>
-        {% empty %}<div class="knowledge-gentle-empty"><span>{% if query %}没有找到包含“{{ query }}”的文章，可以换一个标题、正文或标签关键词。{% else %}当前筛选下没有与该人物身份精确匹配的可见知识。{% endif %}</span></div>{% endfor %}
+          {% include "knowledge/_entry_compact_row.html" with selected_collection="all" %}
+        {% empty %}<tr><td><div class="knowledge-gentle-empty">{% if query %}没有找到包含“{{ query }}”的文章，可以换一个标题、正文或标签关键词。{% else %}当前筛选下没有与该人物身份精确匹配的可见知识。{% endif %}</div></td></tr>{% endfor %}
+          </tbody>
+        </table>
       </div>
       {% include "knowledge/_pagination.html" with page_obj=timeline_page %}
     {% else %}

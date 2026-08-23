@@ -2258,13 +2258,18 @@ def job_detail(request, pk):
         or job.source.owner_id == member.id
         or job.source.visibility == KnowledgeVisibility.FAMILY
     )
+    items_queryset = job.items.order_by("id") if may_view_items else job.items.none()
+    items_page = Paginator(items_queryset, 50).get_page(request.GET.get("page"))
+    pagination_params = request.GET.copy()
+    pagination_params.pop("page", None)
     return render(
         request,
         "knowledge/job_detail.html",
         {
             "job": job,
-            "items": job.items.order_by("id") if may_view_items else job.items.none(),
+            "items_page": items_page,
             "items_redacted": not may_view_items,
+            "pagination_query": pagination_params.urlencode(),
             "can_manage": _can_write(member)
             and (
                 job.requested_by_id == member.id

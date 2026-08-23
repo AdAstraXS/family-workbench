@@ -43,6 +43,7 @@ from .models import (
     KnowledgeImportBatch,
     KnowledgeImportItem,
     KnowledgeJob,
+    KnowledgeJobItem,
     KnowledgeProposal,
     KnowledgeProposalRun,
     KnowledgeRevision,
@@ -946,6 +947,8 @@ class KnowledgeBaseTests(TestCase):
         self.assertEqual(len(first_page.context["timeline_page"]), 20)
         self.assertContains(first_page, "第 1 / 2 页")
         self.assertContains(first_page, "全部 <strong>22</strong>", html=True)
+        self.assertContains(first_page, "knowledge-person-compact-table-wrap")
+        self.assertNotContains(first_page, "人物历史正文 0")
 
         second_page = self.client.get(
             reverse("knowledge:people"),
@@ -986,6 +989,38 @@ class KnowledgeBaseTests(TestCase):
         )
         self.assertContains(member_view, "未关联人物档案")
         self.assertNotContains(member_view, "去核验")
+
+    def test_job_detail_paginates_items_and_keeps_long_titles_in_table(self):
+        source = self.make_source(suffix="job-detail-pagination")
+        job = KnowledgeJob.objects.create(
+            family=self.family,
+            source=source,
+            requested_by=self.member,
+            job_type=KnowledgeJob.TYPE_SYNC_SOURCE,
+            total_count=51,
+        )
+        long_title = "这是一个非常长的知识页面标题，用来验证任务项目表格不会被标题撑出横向滚动条。"
+        for index in range(51):
+            KnowledgeJobItem.objects.create(
+                job=job,
+                external_id=f"job-item-{index}",
+                title=f"{long_title} {index}",
+                status=KnowledgeJobItem.STATUS_SUCCESS,
+            )
+
+        first_page = self.client.get(
+            reverse("knowledge:job_detail", kwargs={"pk": job.pk})
+        )
+        self.assertEqual(first_page.context["items_page"].paginator.per_page, 50)
+        self.assertEqual(len(first_page.context["items_page"]), 50)
+        self.assertContains(first_page, "knowledge-job-items-table")
+        self.assertContains(first_page, "第 1 / 2 页")
+
+        second_page = self.client.get(
+            reverse("knowledge:job_detail", kwargs={"pk": job.pk}),
+            {"page": 2},
+        )
+        self.assertEqual(len(second_page.context["items_page"]), 1)
 
     def test_library_defaults_to_current_member_and_can_switch_to_all_members(self):
         private_document = self.make_document(

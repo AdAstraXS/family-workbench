@@ -56,7 +56,8 @@
 <section class="panel">
   <h2>逐篇检查结果</h2>
   {% if items_redacted %}<div class="notice warning">该批次属于其他成员的私密资料；这里只显示汇总。</div>{% endif %}
-  <table>
+  <table class="knowledge-data-table knowledge-import-items-table">
+    <colgroup><col class="knowledge-import-items-col-title"><col class="knowledge-import-items-col-date"><col class="knowledge-import-items-col-result"><col class="knowledge-import-items-col-assets"><col class="knowledge-import-items-col-warning"></colgroup>
     <thead><tr><th>文章</th><th>发布日期</th><th>结论</th><th>图片</th><th>警告或错误</th></tr></thead>
     <tbody>
       {% for item in items %}

@@ -120,7 +120,8 @@
 <section class="panel">
   <h2>家庭连接状态</h2>
       {% include "knowledge/_help_tip.html" with text="管理员只能看到健康状态和错误摘要，看不到任何成员令牌。" %}
-  <table>
+  <table class="knowledge-data-table knowledge-connections-table">
+    <colgroup><col class="knowledge-connections-col-member"><col class="knowledge-connections-col-provider"><col class="knowledge-connections-col-status"><col class="knowledge-connections-col-success"><col class="knowledge-connections-col-error"></colgroup>
     <thead><tr><th>成员</th><th>服务商</th><th>状态</th><th>最近成功</th><th>错误摘要</th></tr></thead>
     <tbody>
       {% for connection in connections %}
