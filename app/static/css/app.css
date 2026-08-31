@@ -9349,6 +9349,41 @@ textarea {
   margin: 2px 0;
 }
 
+.option-wheel-save-form {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid #bbf7d0;
+}
+
+.option-wheel-save-form label {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  line-height: 1.45;
+}
+
+.option-wheel-save-form input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.option-wheel-save-form button {
+  justify-self: start;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #166534;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.option-wheel-save-form button:hover {
+  background: #14532d;
+}
+
 .option-wheel-account-card dl,
 .option-wheel-symbol-card dl,
 .option-wheel-candidate-card dl {

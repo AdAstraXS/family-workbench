@@ -256,6 +256,7 @@ class OptionWheelPageTests(TestCase):
         self.assertContains(response, "预演结果（未保存）")
         self.assertContains(response, "20000.25 USD")
         self.assertContains(response, "3 项")
+        self.assertNotContains(response, "保存为正式容量快照")
         self.assertEqual(WheelBrokerAccountSnapshot.objects.count(), 0)
         build_capacity.assert_called_once_with(
             account_id=account.pk,
@@ -299,6 +300,116 @@ class OptionWheelPageTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         build_capacity.assert_not_called()
+
+    @patch("option_wheel.views.import_portfolio_capacity")
+    @patch("option_wheel.views.build_portfolio_capacity")
+    def test_non_superuser_cannot_save_capacity_snapshot(
+        self,
+        build_capacity,
+        import_capacity,
+    ):
+        account = self.make_account(self.family, self.member, "盈透证券")
+
+        response = self.client.post(
+            reverse("option_wheel:index"),
+            {
+                "action": "save_capacity",
+                "account_id": account.pk,
+                "confirm_no_margin": "yes",
+                "confirm_no_open_orders": "yes",
+                "confirm_save_snapshot": "yes",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        build_capacity.assert_not_called()
+        import_capacity.assert_not_called()
+
+    @patch("option_wheel.views.import_portfolio_capacity")
+    @patch("option_wheel.views.build_portfolio_capacity")
+    def test_superuser_must_confirm_before_saving_capacity_snapshot(
+        self,
+        build_capacity,
+        import_capacity,
+    ):
+        account = self.make_account(self.family, self.member, "盈透证券")
+        build_capacity.return_value = SimpleNamespace(
+            settled_cash=Decimal("52000.25"),
+            unsettled_cash=Decimal("100.00"),
+            reserved_cash=Decimal("32000.00"),
+            nav=Decimal("121000.00"),
+            source_as_of=timezone.now(),
+            positions_summary={"count": 3},
+            open_obligations={"count": 1},
+        )
+        admin = get_user_model().objects.create_superuser(
+            username="wheel-admin",
+            email="wheel-admin@example.com",
+            password="unused",
+        )
+        self.client.force_login(admin)
+
+        response = self.client.post(
+            reverse("option_wheel:index"),
+            {
+                "action": "save_capacity",
+                "account_id": account.pk,
+                "confirm_no_margin": "yes",
+                "confirm_no_open_orders": "yes",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "保存前必须再次确认")
+        self.assertContains(response, "保存为正式容量快照")
+        import_capacity.assert_not_called()
+
+    @patch("option_wheel.views.import_portfolio_capacity")
+    @patch("option_wheel.views.build_portfolio_capacity")
+    def test_superuser_can_save_recomputed_capacity_snapshot(
+        self,
+        build_capacity,
+        import_capacity,
+    ):
+        account = self.make_account(self.family, self.member, "盈透证券")
+        evidence = SimpleNamespace(
+            settled_cash=Decimal("52000.25"),
+            unsettled_cash=Decimal("100.00"),
+            reserved_cash=Decimal("32000.00"),
+            nav=Decimal("121000.00"),
+            source_as_of=timezone.now(),
+            positions_summary={"count": 3},
+            open_obligations={"count": 1},
+        )
+        build_capacity.return_value = evidence
+        import_capacity.return_value = SimpleNamespace(snapshot_created=True)
+        admin = get_user_model().objects.create_superuser(
+            username="wheel-save-admin",
+            email="wheel-save-admin@example.com",
+            password="unused",
+        )
+        self.client.force_login(admin)
+
+        response = self.client.post(
+            reverse("option_wheel:index"),
+            {
+                "action": "save_capacity",
+                "account_id": account.pk,
+                "confirm_no_margin": "yes",
+                "confirm_no_open_orders": "yes",
+                "confirm_save_snapshot": "yes",
+            },
+            follow=True,
+        )
+
+        self.assertRedirects(response, reverse("option_wheel:index"))
+        self.assertContains(response, "已保存 盈透证券 的正式容量快照")
+        build_capacity.assert_called_once_with(
+            account_id=account.pk,
+            confirm_no_margin=True,
+            confirm_no_open_orders=True,
+        )
+        import_capacity.assert_called_once_with(evidence=evidence, commit=True)
 
     def test_account_market_event_and_candidate_evidence_are_rendered(self):
         zhifu = self.make_account(self.family, self.member, "致富证券（公户）")

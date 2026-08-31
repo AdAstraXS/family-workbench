@@ -2,17 +2,23 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseBadRequest
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from family_core.household import get_household_family
 from family_core.models import FamilyMember
 from portfolio.models import InvestmentAccount, Security
 
-from .account_capacity import CapacityImportError, build_portfolio_capacity
+from .account_capacity import (
+    CapacityImportError,
+    build_portfolio_capacity,
+    import_portfolio_capacity,
+)
 from .models import (
     DataStatus,
     DelayStatus,
@@ -216,12 +222,16 @@ def index(request):
                 "preview_error": "",
                 "confirm_no_margin": False,
                 "confirm_no_open_orders": False,
+                "confirm_save_snapshot": False,
             }
         )
 
     if request.method == "POST":
-        if request.POST.get("action") != "preview_capacity":
+        action = request.POST.get("action")
+        if action not in {"preview_capacity", "save_capacity"}:
             return HttpResponseBadRequest("未知的账户容量操作。")
+        if action == "save_capacity" and not request.user.is_superuser:
+            raise PermissionDenied("只有管理员可以保存正式账户容量快照。")
         try:
             account_id = int(request.POST.get("account_id", ""))
         except (TypeError, ValueError):
@@ -242,6 +252,9 @@ def index(request):
         target_card["confirm_no_open_orders"] = (
             request.POST.get("confirm_no_open_orders") == "yes"
         )
+        target_card["confirm_save_snapshot"] = (
+            request.POST.get("confirm_save_snapshot") == "yes"
+        )
         try:
             evidence = build_portfolio_capacity(
                 account_id=account_id,
@@ -257,6 +270,26 @@ def index(request):
                 "position_count": evidence.positions_summary.get("count", 0),
                 "obligation_count": evidence.open_obligations.get("count", 0),
             }
+            if action == "save_capacity":
+                if not target_card["confirm_save_snapshot"]:
+                    target_card["preview_error"] = (
+                        "保存前必须再次确认将当前预演结果写入正式容量快照。"
+                    )
+                else:
+                    result = import_portfolio_capacity(evidence=evidence, commit=True)
+                    if result.snapshot_created:
+                        messages.success(
+                            request,
+                            f"已保存 {target_card['name']} 的正式容量快照；"
+                            "投资组合、现金、持仓和订单均未修改。",
+                        )
+                    else:
+                        messages.success(
+                            request,
+                            f"{target_card['name']} 的同一份容量证据已存在，"
+                            "本次没有重复写入。",
+                        )
+                    return redirect(reverse("option_wheel:index"))
 
     decisions = WheelDecision.objects.filter(family=family)
     latest_decision = (

@@ -146,6 +146,18 @@
                   <div><dt>现有义务</dt><dd>{{ card.preview.obligation_count }} 项</dd></div>
                 </dl>
                 <p>本结果没有写入数据库；正式快照仍需单独确认并导入。</p>
+                {% if request.user.is_superuser %}
+                  <form method="post" class="option-wheel-save-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="save_capacity">
+                    <input type="hidden" name="account_id" value="{{ card.account.pk }}">
+                    <input type="hidden" name="confirm_no_margin" value="yes">
+                    <input type="hidden" name="confirm_no_open_orders" value="yes">
+                    <label><input type="checkbox" name="confirm_save_snapshot" value="yes" {% if card.confirm_save_snapshot %}checked{% endif %}> 我确认以上金额与券商当前状态一致，并将其保存为正式容量证据</label>
+                    <button type="submit">保存为正式容量快照</button>
+                    <small>仅写入期权车轮的证据快照；不会下单，也不会修改投资组合。</small>
+                  </form>
+                {% endif %}
               </div>
             {% endif %}
           {% endif %}
