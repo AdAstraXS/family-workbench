@@ -12,6 +12,7 @@ urlpatterns = [
     path("", include("dashboard.urls")),
     path("family/", include("family_core.urls")),
     path("portfolio/", include("portfolio.urls")),
+    path("option-wheel/", include("option_wheel.urls")),
     path("ledger/", include("ledger.urls")),
     path("ipo/", include("ipo.urls")),
     path("notes/", include("notes.urls")),

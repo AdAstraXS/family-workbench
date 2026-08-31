@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+
+{% block title %}期权车轮{% endblock %}
+
+{% block content %}
+<div class="option-wheel-page">
+  <section class="option-wheel-hero" aria-labelledby="option-wheel-title">
+    <div>
+      <span class="option-wheel-eyebrow">家庭共享策略 · 只读决策支持</span>
+      <h1 id="option-wheel-title">期权车轮</h1>
+      <p>比较全额现金担保的 Sell Put 候选，并在已有股票时为后续 Covered Call 保留证据。</p>
+    </div>
+    <div class="option-wheel-analysis-only" role="status">
+      <strong>仅分析，不下单</strong>
+      <span>本页面不会连接交易接口，也不会改变现金、持仓或订单。</span>
+    </div>
+  </section>
+
+  <section class="option-wheel-status-grid" aria-label="策略状态">
+    <article class="option-wheel-status-card {% if execution_enabled %}is-warning{% else %}is-safe{% endif %}">
+      <span>策略总闸门</span>
+      <strong>{% if execution_enabled %}已打开（仍不下单）{% else %}关闭{% endif %}</strong>
+      <p>{% if execution_enabled %}页面仍然只读；执行能力不属于当前版本。{% else %}任何候选都不能被标记为可执行。{% endif %}</p>
+    </article>
+    <article class="option-wheel-status-card {% if data_ready %}is-ready{% else %}is-warning{% endif %}">
+      <span>数据是否就绪</span>
+      <strong>{% if data_ready %}已就绪{% else %}尚未就绪{% endif %}</strong>
+      <p>账户、行情、事件和技术证据分别核对；不受总闸门文案影响。</p>
+    </article>
+    <article class="option-wheel-status-card is-safe">
+      <span>仓位口径</span>
+      <strong>全额现金担保</strong>
+      <p>不使用融资或组合保证金放大仓位，单标的不超过账户总资产。</p>
+    </article>
+  </section>
+
+  {% if readiness_blockers %}
+    <section class="option-wheel-blockers panel" aria-labelledby="readiness-title">
+      <div class="option-wheel-section-heading">
+        <div>
+          <span>当前阻断项</span>
+          <h2 id="readiness-title">为什么还不能形成可靠建议</h2>
+        </div>
+        <strong>{{ readiness_blockers|length }} 项</strong>
+      </div>
+      <ul>
+        {% for reason in readiness_blockers %}<li>{{ reason }}</li>{% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+
+  <section class="option-wheel-section" aria-labelledby="policy-title">
+    <div class="option-wheel-section-heading">
+      <div>
+        <span>共享策略基线</span>
+        <h2 id="policy-title">默认筛选偏好与硬性边界</h2>
+      </div>
+      <small>偏好用于排序；现金、融资和事件门控不可绕过</small>
+    </div>
+    <div class="option-wheel-policy-baseline">
+      <article><span>默认 DTE</span><strong>4–9 天</strong><small>偏好，不是硬门槛</small></article>
+      <article><span>每张权利金</span><strong>200–400 USD</strong><small>偏好，不是硬门槛</small></article>
+      <article><span>跨财报政策</span><strong>默认不跨</strong><small>不赌财报方向</small></article>
+      <article><span>Delta</span><strong>无固定默认值</strong><small>作为风险辅助指标</small></article>
+      <article><span>标的上限</span><strong>≤ 账户总资产</strong><small>同时受可用现金约束</small></article>
+      <article><span>担保方式</span><strong>现金 / 实股</strong><small>不融资、不跨账户担保</small></article>
+    </div>
+    {% if policies %}
+      <div class="option-wheel-table-wrap">
+        <table class="option-wheel-table">
+          <thead>
+            <tr><th>标的</th><th>账户</th><th>状态</th><th>DTE 偏好</th><th>权利金偏好</th><th>标的 NAV 上限</th></tr>
+          </thead>
+          <tbody>
+            {% for policy in policies %}
+              <tr>
+                <td><strong>{{ policy.underlying.symbol }}</strong></td>
+                <td>{{ policy.account.account_name }}</td>
+                <td>{% if policy.enabled %}<span class="option-wheel-pill is-ready">已启用</span>{% else %}<span class="option-wheel-pill">已停用</span>{% endif %}</td>
+                <td>{{ policy.preferred_dte_min }}–{{ policy.preferred_dte_max }} 天</td>
+                <td>{{ policy.preferred_premium_min|floatformat:0 }}–{{ policy.preferred_premium_max|floatformat:0 }} USD</td>
+                <td>{{ policy.display_max_underlying_nav_percent|floatformat:2 }}%</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="option-wheel-empty">尚未建立账户—标的策略记录；上方仅展示已经确认的共享基线。</p>
+    {% endif %}
+  </section>
+
+  <section class="option-wheel-section" aria-labelledby="accounts-title">
+    <div class="option-wheel-section-heading">
+      <div>
+        <span>账户容量</span>
+        <h2 id="accounts-title">参与车轮的投资账户</h2>
+      </div>
+      <small>快照需包含已结算现金、待结算现金、预留现金、NAV 与融资状态</small>
+    </div>
+    <div class="option-wheel-account-grid">
+      {% for card in account_cards %}
+        <article class="option-wheel-account-card {% if card.ready %}is-ready{% else %}is-warning{% endif %}">
+          <header>
+            <div><span>参与账户</span><h3>{{ card.name }}</h3></div>
+            <strong>{{ card.state }}</strong>
+          </header>
+          {% if card.account %}
+            <p class="option-wheel-account-owner">投资组合账户：{{ card.account.account_name }}{% if card.account.bank_account.member %} · {{ card.account.bank_account.member.display_name }}{% endif %}</p>
+          {% endif %}
+          {% if card.snapshot %}
+            <dl>
+              <div><dt>已结算现金</dt><dd>{% if card.snapshot.settled_cash is not None %}{{ card.snapshot.settled_cash|floatformat:2 }} {{ card.snapshot.currency }}{% else %}数据不可用{% endif %}</dd></div>
+              <div><dt>待结算现金</dt><dd>{% if card.snapshot.unsettled_cash is not None %}{{ card.snapshot.unsettled_cash|floatformat:2 }} {{ card.snapshot.currency }}{% else %}数据不可用{% endif %}</dd></div>
+              <div><dt>预留现金</dt><dd>{% if card.snapshot.reserved_cash is not None %}{{ card.snapshot.reserved_cash|floatformat:2 }} {{ card.snapshot.currency }}{% else %}数据不可用{% endif %}</dd></div>
+              <div><dt>账户 NAV</dt><dd>{% if card.snapshot.nav is not None %}{{ card.snapshot.nav|floatformat:2 }} {{ card.snapshot.currency }}{% else %}数据不可用{% endif %}</dd></div>
+              <div><dt>使用融资</dt><dd>{% if card.snapshot.uses_margin is True %}是（阻断）{% elif card.snapshot.uses_margin is False %}否{% else %}未知{% endif %}</dd></div>
+              <div><dt>来源时点</dt><dd>{{ card.snapshot.source_as_of|date:"Y-m-d H:i:s T" }}</dd></div>
+            </dl>
+            <p>数据状态：{{ card.snapshot.get_data_status_display }}；允许最大年龄 {{ card.max_age_minutes }} 分钟。</p>
+          {% else %}
+            <p class="option-wheel-empty">{% if card.account %}账户已找到，但尚无只读容量快照。{% else %}尚未映射到本家庭的投资账户。{% endif %}</p>
+          {% endif %}
+          {% if card.account %}
+            <form method="post" class="option-wheel-preview-form">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="preview_capacity">
+              <input type="hidden" name="account_id" value="{{ card.account.pk }}">
+              <p><strong>从投资组合只读预演</strong><span>结果仅在本页临时展示，不保存容量快照。</span></p>
+              <label><input type="checkbox" name="confirm_no_margin" value="yes" {% if card.confirm_no_margin %}checked{% endif %}> 我确认券商端当前没有融资或借贷</label>
+              <label><input type="checkbox" name="confirm_no_open_orders" value="yes" {% if card.confirm_no_open_orders %}checked{% endif %}> 我确认没有尚未录入投资组合的未成交订单</label>
+              <button type="submit">只读预演账户容量</button>
+            </form>
+            {% if card.preview_error %}
+              <div class="option-wheel-preview-message is-error" role="alert"><strong>无法完成预演</strong><span>{{ card.preview_error }}</span></div>
+            {% endif %}
+            {% if card.preview %}
+              <div class="option-wheel-preview-result" role="status">
+                <header><strong>预演结果（未保存）</strong><span>{{ card.preview.evidence.source_as_of|date:"Y-m-d H:i:s T" }}</span></header>
+                <dl>
+                  <div><dt>已结算 USD 现金</dt><dd>{{ card.preview.evidence.settled_cash|floatformat:2 }} USD</dd></div>
+                  <div><dt>现有 Put 占用</dt><dd>{{ card.preview.evidence.reserved_cash|floatformat:2 }} USD</dd></div>
+                  <div><dt>可用于新 Put</dt><dd>{{ card.preview.available_cash|floatformat:2 }} USD</dd></div>
+                  <div><dt>账户 NAV</dt><dd>{{ card.preview.evidence.nav|floatformat:2 }} USD</dd></div>
+                  <div><dt>持仓项目</dt><dd>{{ card.preview.position_count }} 项</dd></div>
+                  <div><dt>现有义务</dt><dd>{{ card.preview.obligation_count }} 项</dd></div>
+                </dl>
+                <p>本结果没有写入数据库；正式快照仍需单独确认并导入。</p>
+              </div>
+            {% endif %}
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="option-wheel-section" aria-labelledby="watchlist-title">
+    <div class="option-wheel-section-heading">
+      <div>
+        <span>首批范围</span>
+        <h2 id="watchlist-title">TSLA 等关注标的</h2>
+      </div>
+      <small>SPCX 仅按代码展示，不在此页面解释其与 SpaceX 的关系</small>
+    </div>
+    <div class="option-wheel-watchlist-grid">
+      {% for item in watchlist %}
+        <article class="option-wheel-symbol-card">
+          <header>
+            <div><strong>{{ item.symbol }}</strong><small>{% if item.security %}{{ item.security.name }}{% else %}证券资料待配置{% endif %}</small></div>
+            {% if item.policies %}<span class="option-wheel-pill is-ready">已建策略</span>{% else %}<span class="option-wheel-pill">待配置</span>{% endif %}
+          </header>
+          {% if item.market_snapshot %}
+            <dl>
+              <div><dt>最新价</dt><dd>{% if item.market_snapshot.last_price is not None %}{{ item.market_snapshot.last_price|floatformat:2 }}{% else %}数据不可用{% endif %}</dd></div>
+              <div><dt>行情来源</dt><dd>{{ item.market_snapshot.provider|default:"数据不可用" }}</dd></div>
+              <div><dt>来源时点</dt><dd>{{ item.market_snapshot.source_as_of|date:"m-d H:i:s T" }}</dd></div>
+              <div><dt>实时性</dt><dd>{{ item.market_snapshot.get_delay_status_display }}</dd></div>
+              <div><dt>新鲜度</dt><dd>{{ item.market_snapshot.get_freshness_status_display }}</dd></div>
+              <div><dt>数据质量</dt><dd>{{ item.market_snapshot.get_data_quality_display }}</dd></div>
+            </dl>
+          {% else %}
+            <p class="option-wheel-empty">暂无可安全关联到本家庭策略或决策的行情证据。</p>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="option-wheel-section" aria-labelledby="evidence-title">
+    <div class="option-wheel-section-heading">
+      <div>
+        <span>Futu 与事件证据</span>
+        <h2 id="evidence-title">行情、财报与除息数据新鲜度</h2>
+      </div>
+      <small>“未匹配事件”不等于“已核验无事件”</small>
+    </div>
+    <div class="option-wheel-evidence-grid">
+      <article>
+        <span>最近决策行情</span>
+        {% if latest_decision %}
+          <strong>{{ latest_decision.underlying.symbol }} · {{ latest_decision.market_snapshot.get_freshness_status_display }}</strong>
+          <p>{{ latest_decision.market_snapshot.provider }} · {{ latest_decision.market_snapshot.source_as_of|date:"Y-m-d H:i:s T" }} · {{ latest_decision.market_snapshot.get_delay_status_display }}</p>
+        {% else %}
+          <strong>未知</strong><p>尚无冻结决策与关联行情快照。</p>
+        {% endif %}
+      </article>
+      <article>
+        <span>未来财报</span>
+        <strong>{{ earnings_evidence.status }}</strong>
+        <p>{{ earnings_evidence.detail }}{% if earnings_evidence.as_of %} · {{ earnings_evidence.as_of }}{% endif %}</p>
+      </article>
+      <article>
+        <span>除息安排</span>
+        <strong>{{ dividend_evidence.status }}</strong>
+        <p>{{ dividend_evidence.detail }}{% if dividend_evidence.as_of %} · {{ dividend_evidence.as_of }}{% endif %}</p>
+      </article>
+      <article>
+        <span>综合事件门控</span>
+        {% if latest_decision %}
+          <strong>{{ latest_decision.get_event_status_display }}</strong>
+          <p>这是综合门控，不代替财报或除息的独立新鲜度证据。</p>
+        {% else %}
+          <strong>未知</strong><p>尚无冻结决策证据。</p>
+        {% endif %}
+      </article>
+    </div>
+  </section>
+
+  <section class="option-wheel-section" aria-labelledby="candidates-title">
+    <div class="option-wheel-section-heading">
+      <div>
+        <span>最近 20 条</span>
+        <h2 id="candidates-title">候选合约与排除原因</h2>
+      </div>
+      <small>概率是风险辅助指标，不是结果保证</small>
+    </div>
+    {% if candidates %}
+      <div class="option-wheel-candidate-list">
+        {% for candidate in candidates %}
+          <article class="option-wheel-candidate-card">
+            <header>
+              <div>
+                <span>{{ candidate.decision.account.account_name }}</span>
+                <h3>{{ candidate.decision.underlying.symbol }} · {{ candidate.get_strategy_display }}</h3>
+              </div>
+              <span class="option-wheel-pill {% if candidate.status == 'executable' %}is-ready{% elif candidate.status == 'blocked' %}is-blocked{% endif %}">{{ candidate.get_status_display }}</span>
+            </header>
+            <dl>
+              <div><dt>合约</dt><dd>{% if candidate.option_quote %}{{ candidate.option_quote.expiration|date:"Y-m-d" }} / {{ candidate.option_quote.strike|floatformat:2 }}{% else %}数据不可用{% endif %}</dd></div>
+              <div><dt>指派概率</dt><dd>{% if candidate.display_assignment_probability is not None %}{{ candidate.display_assignment_probability|floatformat:2 }}%{% else %}数据不可用{% endif %}</dd></div>
+              <div><dt>权利金</dt><dd>{% if candidate.premium_total is not None %}{{ candidate.premium_total|floatformat:2 }} USD{% else %}数据不可用{% endif %}</dd></div>
+              <div><dt>所需现金</dt><dd>{% if candidate.required_cash is not None %}{{ candidate.required_cash|floatformat:2 }} USD{% else %}数据不可用{% endif %}</dd></div>
+              <div><dt>盈亏平衡价</dt><dd>{% if candidate.break_even is not None %}{{ candidate.break_even|floatformat:2 }}{% else %}数据不可用{% endif %}</dd></div>
+              <div><dt>年化权利金率</dt><dd>{% if candidate.display_annualized_premium_rate is not None %}{{ candidate.display_annualized_premium_rate|floatformat:2 }}%{% else %}数据不可用{% endif %}</dd></div>
+            </dl>
+            <div class="option-wheel-exclusions">
+              <strong>排除原因</strong>
+              {% if candidate.display_exclusion_reasons %}
+                <ul>{% for reason in candidate.display_exclusion_reasons %}<li>{{ reason }}</li>{% endfor %}</ul>
+              {% else %}
+                <p>没有记录排除原因；仍需遵守页面顶部的总闸门和数据门控。</p>
+              {% endif %}
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="option-wheel-empty option-wheel-empty-large">暂无候选。完成账户容量、正常交易时段行情、财报/除息和技术证据后，才可在后续流程生成只读候选。</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

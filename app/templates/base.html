@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site_household_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260816-intelligence-bridge-v12">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260830-option-wheel-v1">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="app-{{ request.resolver_match.app_name|default:'site' }}">
@@ -13,6 +13,7 @@
     <a class="brand" href="{% url 'dashboard:home' %}">{{ site_household_name }}</a>
     <nav>
       <a href="{% url 'portfolio:overview' %}">投资组合</a>
+      <a href="{% url 'option_wheel:index' %}">期权车轮</a>
       <a href="{% url 'ledger:overview' %}">家庭账本</a>
       <a href="{% url 'ipo:index' %}">港股打新</a>
       <a href="{% url 'notes:index' %}">投资笔记</a>

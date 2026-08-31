@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "family_core",
     "portfolio",
+    "option_wheel",
     "ledger",
     "ipo",
     "notes",
@@ -143,6 +144,9 @@ KNOWLEDGE_MAX_RESOURCE_BYTES = int(
 
 FUTU_OPEND_HOST = os.getenv("FUTU_OPEND_HOST", "host.docker.internal")
 FUTU_OPEND_PORT = int(os.getenv("FUTU_OPEND_PORT", "11111"))
+
+# M1 stays investigation-only until all external evidence adapters pass review.
+OPTION_WHEEL_EXECUTION_ENABLED = False
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
