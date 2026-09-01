@@ -14,6 +14,7 @@ from portfolio.models import (
     CashMovementTypeChoices,
     InvestmentAccount,
     InvestmentCashMovement,
+    InvestmentTransaction,
     OptionContract,
     Security,
 )
@@ -21,6 +22,7 @@ from portfolio.models import (
 from option_wheel.account_capacity import (
     CapacityImportError,
     build_portfolio_capacity,
+    capacity_snapshot_stale_reasons,
     import_portfolio_capacity,
 )
 from option_wheel.models import WheelBrokerAccountSnapshot
@@ -118,6 +120,17 @@ class PortfolioCapacityImportTests(TestCase):
         self.assertEqual(evidence.nav, Decimal("150000.0000"))
         self.assertEqual(evidence.reserved_cash, Decimal("30000.0000"))
         self.assertEqual(evidence.positions_summary["count"], 1)
+
+    def test_formal_snapshot_becomes_stale_after_portfolio_transaction(self):
+        evidence = self.build()
+        snapshot_id = import_portfolio_capacity(evidence=evidence, commit=True).snapshot_id
+        InvestmentTransaction.objects.create(
+            account=self.account, security=self.tsla, trade_date=date(2026, 8, 31),
+            trade_type="buy", quantity=Decimal("1"), price=Decimal("1"),
+            amount=Decimal("1"), cash_change=Decimal("-1"), currency="USD",
+        )
+        snapshot = WheelBrokerAccountSnapshot.objects.get(pk=snapshot_id)
+        self.assertTrue(capacity_snapshot_stale_reasons(snapshot))
         self.assertEqual(
             evidence.open_obligations["items"][0]["kind"],
             "cash_secured_put",

@@ -9,6 +9,7 @@
       <span class="option-wheel-eyebrow">家庭共享策略 · 只读决策支持</span>
       <h1 id="option-wheel-title">期权车轮</h1>
       <p>比较全额现金担保的 Sell Put 候选，并在已有股票时为后续 Covered Call 保留证据。</p>
+      <p><a href="{% url 'option_wheel:holdings' %}">查看车轮持仓与轮转记录</a></p>
     </div>
     <div class="option-wheel-analysis-only" role="status">
       <strong>仅分析，不下单</strong>
@@ -48,6 +49,18 @@
       </ul>
     </section>
   {% endif %}
+
+  <section class="option-wheel-section" aria-labelledby="pause-title">
+    <div class="option-wheel-section-heading"><div><span>风险总闸</span><h2 id="pause-title">人工暂停</h2></div><small>暂停只阻止新建议，不修改既有持仓或交易</small></div>
+    {% if active_pauses %}
+      <div class="option-wheel-candidate-list">
+      {% for pause in active_pauses %}<article class="option-wheel-candidate-card"><header><div><span>{% if pause.account %}{{ pause.account.account_name }}{% else %}全部账户{% endif %}</span><h3>{% if pause.underlying %}{{ pause.underlying.symbol }}{% else %}全部标的{% endif %} · 已暂停</h3></div><span>{{ pause.starts_at|date:"Y-m-d H:i" }}</span></header><p>{{ pause.reason }}</p>{% if request.user.is_superuser %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="resume_pause"><input type="hidden" name="pause_id" value="{{ pause.pk }}"><button type="submit">明确恢复</button></form>{% endif %}</article>{% endfor %}
+      </div>
+    {% else %}<p class="option-wheel-empty">当前没有生效中的人工暂停。</p>{% endif %}
+    {% if request.user.is_superuser %}
+      <form method="post" class="option-wheel-preview-form">{% csrf_token %}<input type="hidden" name="action" value="pause_strategy"><p><strong>新增暂停</strong><span>可留空账户或标的，形成家庭全局暂停。</span></p><label>账户<select name="scope_account_id"><option value="">全部账户</option>{% for card in account_cards %}{% if card.account %}<option value="{{ card.account.pk }}">{{ card.name }}</option>{% endif %}{% endfor %}</select></label><label>标的<select name="scope_symbol"><option value="">全部标的</option>{% for item in watchlist %}{% if item.security %}<option value="{{ item.symbol }}">{{ item.symbol }}</option>{% endif %}{% endfor %}</select></label><label>原因<input type="text" name="reason" maxlength="500" required></label><button type="submit">暂停新候选</button></form>
+    {% endif %}
+  </section>
 
   <section class="option-wheel-section" aria-labelledby="policy-title">
     <div class="option-wheel-section-heading">
@@ -178,7 +191,7 @@
       {% for item in watchlist %}
         <article class="option-wheel-symbol-card">
           <header>
-            <div><strong>{{ item.symbol }}</strong><small>{% if item.security %}{{ item.security.name }}{% else %}证券资料待配置{% endif %}</small></div>
+            <div><strong>{% if item.security %}<a href="{% url 'option_wheel:underlying_detail' item.symbol %}">{{ item.symbol }}</a>{% else %}{{ item.symbol }}{% endif %}</strong><small>{% if item.security %}{{ item.security.name }}{% else %}证券资料待配置{% endif %}</small></div>
             {% if item.policies %}<span class="option-wheel-pill is-ready">已建策略</span>{% else %}<span class="option-wheel-pill">待配置</span>{% endif %}
           </header>
           {% if item.market_snapshot %}
@@ -204,7 +217,7 @@
         <span>Futu 与事件证据</span>
         <h2 id="evidence-title">行情、财报与除息数据新鲜度</h2>
       </div>
-      <small>“未匹配事件”不等于“已核验无事件”</small>
+      <small>仅当完整查询成功且窗口内无匹配记录时，才显示“通过”</small>
     </div>
     <div class="option-wheel-evidence-grid">
       <article>

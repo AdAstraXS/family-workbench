@@ -415,6 +415,29 @@ def select_representative_put(records, spot):
     return selected, metadata
 
 
+def select_representative_call(records, spot):
+    valid = [
+        (index, record) for index, record in enumerate(records or [])
+        if str(record.get("option_type", "")).upper() == "CALL"
+        and _is_standard_contract(record) and _strike(record) is not None
+    ]
+    metadata = {"degradation": None}
+    if not valid:
+        return None, {"degradation": "no standard calls"}
+    try:
+        spot_decimal = Decimal(str(spot)) if spot is not None else None
+    except (InvalidOperation, TypeError, ValueError):
+        spot_decimal = None
+    if spot_decimal is not None and spot_decimal.is_finite() and spot_decimal > 0:
+        at_or_above = [item for item in valid if _strike(item[1]) >= spot_decimal]
+        if at_or_above:
+            return min(at_or_above, key=lambda item: _strike(item[1]))[1], metadata
+        metadata["degradation"] = "no strike >= spot; used highest strike"
+        return max(valid, key=lambda item: _strike(item[1]))[1], metadata
+    metadata["degradation"] = "spot unavailable; used first standard call in provider order"
+    return valid[0][1], metadata
+
+
 class ProbeLock:
     """Non-blocking cross-process lock for dynamic subscription operations."""
 
@@ -966,6 +989,27 @@ def _expiration_detail(raw_value, probe_dt):
         }
 
 
+def _quote_time_quality(raw_value, probe_dt, max_age_seconds=120):
+    """Classify US quote timestamps documented by Futu as New York time."""
+    if not raw_value:
+        return "unknown", "unknown"
+    try:
+        parsed = datetime.fromisoformat(str(raw_value).strip())
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=ZoneInfo("America/New_York"))
+        reference = probe_dt
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=ZoneInfo("America/New_York"))
+        else:
+            reference = reference.astimezone(ZoneInfo("America/New_York"))
+        age = (reference - parsed).total_seconds()
+    except (TypeError, ValueError, OverflowError):
+        return "unknown", "unknown"
+    if -5 <= age <= max_age_seconds:
+        return "real_time", "fresh"
+    if age > max_age_seconds:
+        return "delayed", "stale"
+    return "unknown", "unknown"
 def probe_symbol(
     context,
     futu_module,
@@ -976,6 +1020,7 @@ def probe_symbol(
     existing_quote_codes,
     owned_codes,
     probe_dt=None,
+    market_state=None,
     event_calendar_cache=None,
     subscription_started_at=None,
     monotonic=None,
@@ -998,6 +1043,16 @@ def probe_symbol(
         else {}
     )
     monotonic = monotonic or time.monotonic
+    market_state = market_state or {
+        "status": "not_requested",
+        "market_us": None,
+    }
+    if (
+        config["profile"] == "m1-gate"
+        and market_state.get("market_us") not in {"MORNING", "AFTERNOON"}
+    ):
+        partial = True
+        errors.append("market_session:not_regular")
 
     snapshot = sdk_call(context, "get_market_snapshot", ret_ok, [symbol])
     if snapshot["status"] == "ok":
@@ -1058,6 +1113,10 @@ def probe_symbol(
             else:
                 eligible_details.append(detail)
 
+        if config.get("profile") == "m1-gate":
+            preferred = [item for item in eligible_details if item["is_4_to_9_dte"]]
+            other_future = [item for item in eligible_details if item["dte"] > 0 and not item["is_4_to_9_dte"]]
+            eligible_details = preferred + other_future
         expiration_details = eligible_details[:max_expirations]
         expirations = [
             detail["strike_time"] for detail in expiration_details
@@ -1093,6 +1152,10 @@ def probe_symbol(
             for row in chain_rows
             if str(row.get("option_type", "")).upper() == "PUT"
         ]
+        call_rows = [
+            row for row in chain_rows
+            if str(row.get("option_type", "")).upper() == "CALL"
+        ]
         call_count = sum(
             str(row.get("option_type", "")).upper() == "CALL"
             for row in chain_rows
@@ -1120,7 +1183,9 @@ def probe_symbol(
             partial = True
 
         remaining = list(put_rows)
-        for _ in range(max_contracts_per_expiration):
+        include_call = config.get("profile") == "m1-gate" and max_contracts_per_expiration > 1
+        put_limit = max_contracts_per_expiration - 1 if include_call else max_contracts_per_expiration
+        for _ in range(put_limit):
             selected, metadata = select_representative_put(remaining, spot)
             if selected is None:
                 break
@@ -1144,6 +1209,7 @@ def probe_symbol(
                     ),
                     "lot_size": selected.get("lot_size"),
                     "option_settlement_mode": settlement_mode,
+                    "settlement_evidence": "unknown",
                     "index_option_type": selected.get("index_option_type"),
                     "deliverable_shares": None,
                     "exercise_style": None,
@@ -1153,6 +1219,25 @@ def probe_symbol(
                 }
             )
             remaining.remove(selected)
+        if include_call:
+            selected, metadata = select_representative_call(call_rows, spot)
+            if selected is not None:
+                settlement_mode = selected.get("option_settlement_mode")
+                identity_unknown_fields = ["deliverable_shares", "exercise_style"]
+                if str(settlement_mode).strip().upper() != "PHYSICAL":
+                    identity_unknown_fields.append("option_settlement_mode")
+                representatives.append(
+                    {
+                        "code": selected.get("code"), "option_type": selected.get("option_type"),
+                        "stock_owner": selected.get("stock_owner"), "strike_time": selected.get("strike_time"),
+                        "expiration_date": selected.get("expiration_date"), "strike_price": selected.get("strike_price"),
+                        "option_standard_type": selected.get("option_standard_type"), "lot_size": selected.get("lot_size"),
+                        "option_settlement_mode": settlement_mode, "settlement_evidence": "unknown",
+                        "index_option_type": selected.get("index_option_type"), "deliverable_shares": None,
+                        "exercise_style": None, "contract_identity_status": "partial",
+                        "identity_unknown_fields": identity_unknown_fields, "degradation": metadata.get("degradation"),
+                    }
+                )
     if expirations and not representatives:
         partial = True
         errors.append("representative_contract:no_standard_put")
@@ -1230,21 +1315,22 @@ def probe_symbol(
                         "option_area_type",
                     )
                 }
+                snapshot_delay, snapshot_freshness = _quote_time_quality(snapshot_time, probe_dt)
                 dynamic["snapshot_delay_status"] = field_value(
-                    "unknown",
+                    snapshot_delay,
                     "delay_indicator",
                     "categorical",
                     "get_market_snapshot",
                     snapshot_time,
-                    "unknown",
+                    "ok" if snapshot_delay != "unknown" else "unknown",
                 )
                 dynamic["snapshot_freshness_status"] = field_value(
-                    "unknown",
+                    snapshot_freshness,
                     "update_time",
                     "categorical",
                     "get_market_snapshot",
                     snapshot_time,
-                    "unknown",
+                    "ok" if snapshot_freshness != "unknown" else "unknown",
                 )
 
                 quote_response = sdk_call(
@@ -1340,30 +1426,40 @@ def probe_symbol(
                     .upper()
                     != "PHYSICAL"
                 ):
-                    identity_unknown_fields.append(
-                        "option_settlement_mode"
+                    standard_equity_fallback = (
+                        str(contract.get("option_standard_type", "")).upper()
+                        in {"STANDARD", "NORMAL"}
+                        and str(contract.get("index_option_type", "")).upper() == "N/A"
+                        and contract.get("deliverable_shares") == 100
+                        and contract.get("exercise_style") == "AMERICAN"
                     )
+                    if standard_equity_fallback:
+                        contract["settlement_evidence"] = "occ_standard_equity"
+                    else:
+                        identity_unknown_fields.append("option_settlement_mode")
+                else:
+                    contract["settlement_evidence"] = "provider_physical"
                 contract["identity_unknown_fields"] = identity_unknown_fields
                 contract["contract_identity_status"] = (
                     "ok" if not identity_unknown_fields else "partial"
                 )
+                quote_delay, quote_freshness = _quote_time_quality(quote_time, probe_dt)
                 dynamic["quote_delay_status"] = field_value(
-                    "unknown",
+                    quote_delay,
                     "delay_indicator",
                     "categorical",
                     "get_stock_quote",
                     quote_time,
-                    "unknown",
+                    "ok" if quote_delay != "unknown" else "unknown",
                 )
                 dynamic["quote_freshness_status"] = field_value(
-                    "unknown",
+                    quote_freshness,
                     "data_date+data_time",
                     "categorical",
                     "get_stock_quote",
                     quote_time,
-                    "unknown",
+                    "ok" if quote_freshness != "unknown" else "unknown",
                 )
-                partial = True
                 critical_fields = (
                     "bid_price",
                     "ask_price",
@@ -1469,6 +1565,7 @@ def probe_symbol(
                     if rows
                     else None
                 ),
+                "records": sanitize_for_output(rows),
             }
             if response["status"] != "ok":
                 history["issue"] = _sdk_issue(
@@ -1522,13 +1619,10 @@ def probe_symbol(
             earnings = {
                 "status": (
                     "ok"
-                    if matching
-                    else (
-                        "unknown"
-                        if response["status"] == "ok"
-                        else response["status"]
-                    )
+                    if response["status"] == "ok"
+                    else response["status"]
                 ),
+                "event_status": "blocked" if matching else "clear",
                 "query_window": {
                     "begin": str(event_date),
                     "end": str(event_end_date),
@@ -1539,12 +1633,6 @@ def probe_symbol(
                 earnings["issue"] = _sdk_issue(
                     "get_earnings_calendar", response
                 )
-            elif not matching:
-                earnings["issue"] = {
-                    "source": "get_earnings_calendar",
-                    "status": "unknown",
-                    "category": "field_missing",
-                }
         dividend_method = getattr(context, "get_dividend_calendar", None)
         if not callable(dividend_method) or market_us is None:
             ex_dividend = {
@@ -1589,8 +1677,9 @@ def probe_symbol(
                 "status": (
                     "partial"
                     if dividend_issues
-                    else ("ok" if matching_dividends else "unknown")
+                    else "ok"
                 ),
+                "event_status": "blocked" if matching_dividends else "clear",
                 "query_dates": query_dates,
                 "records": sanitize_for_output(matching_dividends),
             }
@@ -1603,6 +1692,7 @@ def probe_symbol(
         {
             "symbol": symbol,
             "status": PARTIAL if partial else SUCCESS,
+            "market_state": market_state,
             "underlying_quote": underlying_quote,
             "expirations": expiration_details,
             "rejected_expirations": rejected_expirations,
@@ -1740,6 +1830,7 @@ def run_probe(
     methods = (
         "query_subscription",
         "get_market_snapshot",
+        "get_global_state",
         "get_option_expiration_date",
         "get_option_chain",
         "subscribe",
@@ -1759,6 +1850,11 @@ def run_probe(
     subscription_started_at = {}
     errors = []
     symbol_results = []
+    market_state = {
+        "status": "not_requested",
+        "market_us": None,
+        "timestamp": None,
+    }
     before = subscription_summary(None)
     after = subscription_summary(None)
     cleanup_status = "not_requested"
@@ -1774,6 +1870,28 @@ def run_probe(
         ret_ok = getattr(futu_module, "RET_OK", 0)
         sdk_version = getattr(futu_module, "__version__", None)
         capabilities = method_capabilities(context, methods)
+
+        if config["profile"] == "m1-gate":
+            global_state_response = sdk_call(
+                context, "get_global_state", ret_ok
+            )
+            if global_state_response["status"] == "ok":
+                rows = records_from(global_state_response["data"])
+                row = rows[0] if rows else {}
+                market_state = {
+                    "status": "ok" if row.get("market_us") else "partial",
+                    "market_us": row.get("market_us"),
+                    "timestamp": row.get("timestamp"),
+                }
+            else:
+                market_state = {
+                    "status": "failed",
+                    "market_us": None,
+                    "timestamp": None,
+                }
+            if market_state["market_us"] not in {"MORNING", "AFTERNOON"}:
+                any_partial = True
+                errors.append("market_session:not_regular")
 
         missing_required = []
         if config["subscribe_quotes"]:
@@ -1871,6 +1989,7 @@ def run_probe(
                         existing_codes,
                         owned_codes,
                         probe_dt=probe_now,
+                        market_state=market_state,
                         event_calendar_cache=event_calendar_cache,
                         subscription_started_at=subscription_started_at,
                         monotonic=monotonic,
@@ -2057,6 +2176,7 @@ def run_probe(
             "status": status,
             "sdk_version": sdk_version,
             "fetched_at": fetched_at,
+            "market_state": market_state,
             "subscription": subscription,
             "capabilities": capabilities,
             "symbols": symbol_results,

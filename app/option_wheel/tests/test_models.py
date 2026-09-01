@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from family_core.models import Family, FamilyMember
 from ledger.models import BankAccount
-from portfolio.models import InvestmentAccount, Security
+from portfolio.models import InvestmentAccount, OptionContract, Security
 
 from option_wheel.admin import (
     WheelBrokerAccountSnapshotAdmin,
@@ -33,10 +33,16 @@ from option_wheel.models import (
     TechnicalStatus,
     WheelBrokerAccountSnapshot,
     WheelCandidate,
+    WheelCollateralReservation,
+    WheelCycle,
     WheelDecision,
     WheelMarketSnapshot,
     WheelOptionQuoteSnapshot,
     WheelPolicy,
+    WheelLeg,
+    WheelTechnicalSnapshot,
+    CycleStatus,
+    LegStatus,
 )
 
 
@@ -63,6 +69,21 @@ class WheelModelTest(TestCase):
             market="US",
             asset_type=Security.TYPE_STOCK,
             currency="USD",
+        )
+        cls.tsla_put_security = Security.objects.create(
+            symbol="TSLA260904P00250000",
+            name="TSLA Put",
+            market="US",
+            asset_type=Security.TYPE_OPTION,
+            currency="USD",
+        )
+        cls.tsla_put = OptionContract.objects.create(
+            security=cls.tsla_put_security,
+            underlying=cls.tsla,
+            option_type=OptionContract.PUT,
+            strike_price=Decimal("250"),
+            expiration_date=date(2026, 9, 4),
+            multiplier=100,
         )
         cls.aapl = Security.objects.create(
             symbol="AAPL",
@@ -105,6 +126,50 @@ class WheelModelTest(TestCase):
 
     def setUp(self):
         self.sequence = count(1)
+
+    def test_lifecycle_rejects_covered_call_below_assigned_cost(self):
+        policy = self.policy()
+        cycle = WheelCycle.objects.create(
+            family=self.family, account=policy.account, underlying=self.tsla,
+            opened_on=date(2026, 8, 1), assigned_cost_basis=Decimal("300"),
+        )
+        leg = WheelLeg(
+            cycle=cycle, sequence=1, strategy=Strategy.COVERED_CALL,
+            status=LegStatus.PLANNED, expiration=date(2026, 9, 4),
+            strike=Decimal("290"),
+        )
+        with self.assertRaises(ValidationError):
+            leg.save()
+
+    def test_cash_collateral_requires_usd_and_positive_amount(self):
+        policy = self.policy()
+        cycle = WheelCycle.objects.create(
+            family=self.family, account=policy.account, underlying=self.tsla,
+            opened_on=date(2026, 8, 1),
+        )
+        leg = WheelLeg.objects.create(
+            cycle=cycle, sequence=1, strategy=Strategy.SELL_PUT,
+            option_contract=self.tsla_put,
+            expiration=date(2026, 9, 4), strike=Decimal("250"),
+        )
+        reservation = WheelCollateralReservation(
+            leg=leg, account=policy.account,
+            kind=WheelCollateralReservation.CASH, currency="EUR",
+            cash_amount=Decimal("25000"),
+        )
+        with self.assertRaises(ValidationError):
+            reservation.save()
+
+    def test_complete_technical_snapshot_requires_fifty_samples(self):
+        snapshot = WheelTechnicalSnapshot(
+            underlying=self.tsla, provider="test", source_as_of=timezone.now(),
+            sample_count=49, sma_20=Decimal("1"), sma_50=Decimal("1"),
+            rsi_14=Decimal("50"), atr_14=Decimal("1"),
+            return_5d=Decimal("0"), return_20d=Decimal("0"),
+            status=TechnicalStatus.COMPLETE,
+        )
+        with self.assertRaises(ValidationError):
+            snapshot.save()
 
     def uid(self, prefix):
         return f"{prefix}-{next(self.sequence)}"

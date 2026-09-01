@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}车轮持仓{% endblock %}
+{% block content %}
+<div class="option-wheel-page">
+  <section class="option-wheel-hero"><div><span class="option-wheel-eyebrow">轮转与交易关联</span><h1>车轮持仓</h1><p><a href="{% url 'option_wheel:index' %}">返回车轮首页</a>。这里展示投资组合真实流水的只读关联，不创建订单。</p></div><div class="option-wheel-analysis-only"><strong>仅分析，不下单</strong><span>现金担保和实股覆盖不会跨账户借用。</span></div></section>
+  <section class="option-wheel-section"><div class="option-wheel-section-heading"><div><span>Sell Put → 指派 → Covered Call</span><h2>轮转周期</h2></div></div>
+  {% for cycle in cycles %}<article class="option-wheel-candidate-card"><header><div><span>{{ cycle.account.account_name }}</span><h3>{{ cycle.underlying.symbol }} · {{ cycle.get_status_display }}</h3></div><span>{{ cycle.opened_on }}{% if cycle.closed_on %} 至 {{ cycle.closed_on }}{% endif %}</span></header><dl><div><dt>指派/买入成本</dt><dd>{{ cycle.assigned_cost_basis|floatformat:2|default:"未记录" }}</dd></div><div><dt>分段数</dt><dd>{{ cycle.legs.count }}</dd></div></dl><div class="option-wheel-table-wrap"><table class="option-wheel-table"><thead><tr><th>顺序</th><th>策略</th><th>状态</th><th>到期/行权价</th><th>累计权利金</th><th>流水/担保</th></tr></thead><tbody>{% for leg in cycle.legs.all %}<tr><td>{{ leg.sequence }}</td><td>{{ leg.get_strategy_display }}</td><td>{{ leg.get_status_display }}</td><td>{{ leg.expiration|default:"—" }} / {{ leg.strike|floatformat:2|default:"—" }}</td><td>{{ leg.premium_total|floatformat:2 }}</td><td>{{ leg.transaction_links.count }} 笔 / {{ leg.collateral_reservations.count }} 条</td></tr>{% empty %}<tr><td colspan="6">尚无分段。</td></tr>{% endfor %}</tbody></table></div></article>{% empty %}<p class="option-wheel-empty option-wheel-empty-large">尚未把投资组合中的期权交易关联为车轮周期。</p>{% endfor %}
+  </section>
+</div>
+{% endblock %}

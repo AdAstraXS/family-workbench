@@ -23,10 +23,12 @@ from option_wheel.models import (
     TechnicalStatus,
     WheelBrokerAccountSnapshot,
     WheelCandidate,
+    WheelCycle,
     WheelDecision,
     WheelMarketSnapshot,
     WheelOptionQuoteSnapshot,
     WheelPolicy,
+    WheelPause,
 )
 
 
@@ -476,3 +478,49 @@ class OptionWheelPageTests(TestCase):
 
         self.assertFalse(response.context["data_ready"])
         self.assertContains(response, "盈透证券容量证据未就绪")
+
+    def test_underlying_decision_and_holdings_pages_are_read_only(self):
+        account = self.make_account(self.family, self.member, "盈透证券")
+        policy = self.create_policy(account)
+        snapshot = self.create_complete_account_snapshot(account)
+        decision = self.create_decision(policy, snapshot, self.create_market())
+        WheelCycle.objects.create(
+            family=self.family, account=account, underlying=self.tsla,
+            opened_on=date.today(),
+        )
+
+        underlying_response = self.client.get(
+            reverse("option_wheel:underlying_detail", args=["TSLA"])
+        )
+        decision_response = self.client.get(
+            reverse("option_wheel:decision_detail", args=[decision.pk])
+        )
+        holdings_response = self.client.get(reverse("option_wheel:holdings"))
+
+        self.assertContains(underlying_response, "TSLA · Tesla")
+        self.assertContains(decision_response, "冻结决策证据")
+        self.assertContains(holdings_response, "轮转周期")
+        self.assertContains(holdings_response, "仅分析，不下单")
+
+    def test_only_superuser_can_pause_and_explicitly_resume(self):
+        forbidden = self.client.post(reverse("option_wheel:index"), {
+            "action": "pause_strategy", "reason": "市场异常",
+        })
+        self.assertEqual(forbidden.status_code, 403)
+        self.user.is_superuser = True
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_superuser", "is_staff"])
+
+        created = self.client.post(reverse("option_wheel:index"), {
+            "action": "pause_strategy", "reason": "市场异常",
+        }, follow=True)
+        pause = WheelPause.objects.get()
+        self.assertContains(created, "市场异常")
+        self.assertIsNone(pause.ends_at)
+
+        resumed = self.client.post(reverse("option_wheel:index"), {
+            "action": "resume_pause", "pause_id": pause.pk,
+        }, follow=True)
+        pause.refresh_from_db()
+        self.assertIsNotNone(pause.ends_at)
+        self.assertContains(resumed, "该暂停已明确恢复")

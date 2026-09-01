@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ security.symbol }} · 期权车轮{% endblock %}
+{% block content %}
+<div class="option-wheel-page">
+  <section class="option-wheel-hero"><div><span class="option-wheel-eyebrow">标的分析 · 仅分析不下单</span><h1>{{ security.symbol }} · {{ security.name }}</h1><p><a href="{% url 'option_wheel:index' %}">返回车轮首页</a> · <a href="{% url 'option_wheel:holdings' %}">查看轮转持仓</a></p></div><div class="option-wheel-analysis-only"><strong>仅分析，不下单</strong><span>所有证据均按来源时点冻结。</span></div></section>
+  {% if latest_decision %}
+  <section class="option-wheel-status-grid">
+    <article class="option-wheel-status-card"><span>最近行情</span><strong>{{ latest_decision.market_snapshot.last_price|floatformat:2 }} USD</strong><p>{{ latest_decision.market_snapshot.source_as_of|date:"Y-m-d H:i:s T" }}</p></article>
+    <article class="option-wheel-status-card"><span>技术状态</span><strong>{{ latest_decision.get_technical_status_display }}</strong><p>{% if latest_decision.technical_snapshot %}RSI14 {{ latest_decision.technical_snapshot.rsi_14|floatformat:2 }} · 20 日线 {{ latest_decision.technical_snapshot.sma_20|floatformat:2 }}{% else %}无独立技术快照{% endif %}</p></article>
+    <article class="option-wheel-status-card"><span>事件门控</span><strong>{{ latest_decision.get_event_status_display }}</strong><p>{% if latest_decision.market_regime_snapshot %}市场状态：{{ latest_decision.market_regime_snapshot.regime }}{% endif %}</p></article>
+  </section>
+  {% else %}<p class="option-wheel-empty option-wheel-empty-large">尚无该标的的冻结分析。</p>{% endif %}
+  <section class="option-wheel-section"><div class="option-wheel-section-heading"><div><span>候选</span><h2>最近合约</h2></div></div>
+    {% if candidates %}<div class="option-wheel-table-wrap"><table class="option-wheel-table"><thead><tr><th>决策时间</th><th>到期/行权价</th><th>权利金</th><th>指派概率</th><th>状态</th><th>原因</th></tr></thead><tbody>{% for item in candidates %}<tr><td><a href="{% url 'option_wheel:decision_detail' item.decision_id %}">{{ item.decision.decision_time|date:"m-d H:i" }}</a></td><td>{% if item.option_quote %}{{ item.option_quote.expiration }} / {{ item.option_quote.strike|floatformat:2 }}{% else %}等待{% endif %}</td><td>{{ item.premium_total|floatformat:2|default:"—" }}</td><td>{{ item.assignment_probability|floatformat:2|default:"—" }}%</td><td>{{ item.get_status_display }}</td><td>{{ item.exclusion_reasons|join:"、"|default:"无" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="option-wheel-empty">暂无候选。</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

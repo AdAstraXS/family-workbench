@@ -22,6 +22,7 @@ from portfolio.futu_option_probe import (
     run_probe,
     sanitize_for_output,
     sdk_call,
+    select_representative_call,
     select_representative_put,
     subscription_summary,
     validate_symbols,
@@ -226,6 +227,16 @@ class SelectRepresentativePutTest(SimpleTestCase):
         selected, metadata = select_representative_put(records, None)
         self.assertEqual(selected["code"], "FIRST")
         self.assertIn("provider order", metadata["degradation"])
+
+    def test_call_selection_prefers_nearest_strike_at_or_above_spot(self):
+        records = []
+        for code, strike in (("LOW", 190), ("ATM", 205), ("HIGH", 220)):
+            record = self._put(code, strike, "2026-07-15")
+            record["option_type"] = "CALL"
+            records.append(record)
+        selected, metadata = select_representative_call(records, 200)
+        self.assertEqual(selected["code"], "ATM")
+        self.assertIsNone(metadata["degradation"])
 
 
 class SanitizeForOutputTest(SimpleTestCase):
@@ -818,6 +829,13 @@ class DynamicContext:
         self.missing_fields = set(missing_fields or [])
         self.subscription_calls = 0
 
+    def get_global_state(self):
+        self.calls.append(("get_global_state",))
+        return 0, {
+            "market_us": "MORNING",
+            "timestamp": 1788220800,
+        }
+
     def query_subscription(self, is_all_conn=False):
         self.calls.append(("query_subscription", is_all_conn))
         self.subscription_calls += 1
@@ -1026,6 +1044,33 @@ class DynamicProbeTest(SimpleTestCase):
         self.assertLess(unsubscribe_index, second_query_index)
         self.assertLess(second_query_index, close_index)
 
+    def test_m1_gate_rejects_premarket_even_with_fresh_quotes(self):
+        class PremarketContext(DynamicContext):
+            def get_global_state(self):
+                self.calls.append(("get_global_state",))
+                return 0, {
+                    "market_us": "PRE_MARKET_BEGIN",
+                    "timestamp": 1788220800,
+                }
+
+        context = PremarketContext()
+        result = run_probe(
+            ["US.TSLA"],
+            profile="m1-gate",
+            futu_module=FakeFutu(),
+            context_factory=lambda: context,
+            lock_factory=FakeLock,
+        )
+
+        self.assertEqual(result["status"], PARTIAL)
+        self.assertEqual(
+            result["market_state"]["market_us"], "PRE_MARKET_BEGIN"
+        )
+        self.assertIn("market_session:not_regular", result["errors"])
+        self.assertIn(
+            "market_session:not_regular", result["symbols"][0]["errors"]
+        )
+
     def test_lock_failure_does_not_create_context_or_subscribe(self):
         result, context, lock = self._run(lock_acquire=False)
         self.assertEqual(result["status"], "failed")
@@ -1181,7 +1226,7 @@ class DynamicProbeTest(SimpleTestCase):
         self.assertEqual(history["sample_count"], 2)
         self.assertEqual(history["last_date"], "2026-01-03")
 
-    def test_earnings_without_matching_symbol_is_unknown(self):
+    def test_earnings_without_matching_symbol_is_clear(self):
         class NoMatchEarningsContext(DynamicContext):
             def get_earnings_calendar(
                 self, market, begin_date=None, end_date=None
@@ -1200,9 +1245,9 @@ class DynamicProbeTest(SimpleTestCase):
             context_factory=lambda: context,
             lock_factory=lambda: lock,
         )
-        self.assertEqual(
-            result["symbols"][0]["earnings"]["status"], "unknown"
-        )
+        earnings = result["symbols"][0]["earnings"]
+        self.assertEqual(earnings["status"], "ok")
+        self.assertEqual(earnings["event_status"], "clear")
 
     def test_dynamic_result_is_strict_json_serializable(self):
         result, _, _ = self._run(
@@ -1601,19 +1646,20 @@ class ProbeFlowSafetyTest(SimpleTestCase):
             ],
         )
 
-    def test_dynamic_delay_and_freshness_are_explicitly_unknown(self):
+    def test_dynamic_delay_and_freshness_are_derived_from_provider_time(self):
         result, _, _ = self._run_dynamic()
         dynamic = result["symbols"][0]["representative_contracts"][0][
             "dynamic_quote"
         ]
-        for field in (
-            "snapshot_delay_status",
-            "snapshot_freshness_status",
-            "quote_delay_status",
-            "quote_freshness_status",
-        ):
-            self.assertEqual(dynamic[field]["value"], "unknown")
-            self.assertEqual(dynamic[field]["status"], "unknown")
+        expected = {
+            "snapshot_delay_status": "delayed",
+            "snapshot_freshness_status": "stale",
+            "quote_delay_status": "delayed",
+            "quote_freshness_status": "stale",
+        }
+        for field, value in expected.items():
+            self.assertEqual(dynamic[field]["value"], value)
+            self.assertEqual(dynamic[field]["status"], "ok")
             self.assertEqual(
                 set(dynamic[field]),
                 {
@@ -1816,8 +1862,9 @@ class ProbeFlowSafetyTest(SimpleTestCase):
             result["symbols"][0]["ex_dividend"]["status"], "ok"
         )
         self.assertEqual(
-            result["symbols"][1]["ex_dividend"]["status"], "unknown"
+            result["symbols"][1]["ex_dividend"]["status"], "ok"
         )
+        self.assertEqual(result["symbols"][1]["ex_dividend"]["event_status"], "clear")
 
     def test_incomplete_dividend_calendar_is_partial(self):
         class IncompleteDividendContext(DynamicContext):
@@ -1884,7 +1931,7 @@ class ProbeFlowSafetyTest(SimpleTestCase):
         self.assertEqual(calls[0][3:], (0, 200))
         self.assertEqual(calls[1][3:], (200, 200))
 
-    def test_earnings_no_match_and_ex_dividend_are_not_success(self):
+    def test_earnings_no_match_and_ex_dividend_are_clear(self):
         class NoMatchEarningsContext(DynamicContext):
             def get_earnings_calendar(
                 self, market, begin_date=None, end_date=None
@@ -1903,9 +1950,10 @@ class ProbeFlowSafetyTest(SimpleTestCase):
             NoMatchEarningsContext(), profile="m1-gate"
         )
         symbol = result["symbols"][0]
-        self.assertEqual(symbol["earnings"]["status"], "unknown")
-        self.assertEqual(symbol["ex_dividend"]["status"], "unknown")
-        self.assertEqual(result["status"], PARTIAL)
+        self.assertEqual(symbol["earnings"]["status"], "ok")
+        self.assertEqual(symbol["earnings"]["event_status"], "clear")
+        self.assertEqual(symbol["ex_dividend"]["status"], "ok")
+        self.assertEqual(symbol["ex_dividend"]["event_status"], "clear")
 
     def test_each_missing_dynamic_method_fails_before_subscribe(self):
         class MissingMethodContext(DynamicContext):

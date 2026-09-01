@@ -11,7 +11,12 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from family_core.models import Family, TimestampedModel
-from portfolio.models import InvestmentAccount, Security
+from portfolio.models import (
+    InvestmentAccount,
+    InvestmentTransaction,
+    OptionContract,
+    Security,
+)
 
 
 class AppendOnlyQuerySet(models.QuerySet):
@@ -120,6 +125,21 @@ class Strategy(models.TextChoices):
     COVERED_CALL = "covered_call", "备兑看涨"
     ROLL = "roll", "滚动"
     WAIT = "wait", "等待"
+
+
+class CycleStatus(models.TextChoices):
+    OPEN = "open", "进行中"
+    PAUSED = "paused", "已暂停"
+    CLOSED = "closed", "已结束"
+
+
+class LegStatus(models.TextChoices):
+    PLANNED = "planned", "计划中"
+    OPEN = "open", "持仓中"
+    CLOSED = "closed", "已平仓"
+    ASSIGNED = "assigned", "已指派"
+    EXPIRED = "expired", "已到期"
+    CANCELLED = "cancelled", "已取消"
 
 
 class WheelPolicy(TimestampedModel):
@@ -853,6 +873,21 @@ class WheelDecision(AppendOnlyEvidenceMixin, TimestampedModel):
         on_delete=models.PROTECT,
         related_name="decisions",
     )
+    technical_snapshot = models.ForeignKey(
+        "WheelTechnicalSnapshot", verbose_name="技术快照",
+        on_delete=models.PROTECT, related_name="decisions",
+        null=True, blank=True,
+    )
+    event_snapshot = models.ForeignKey(
+        "WheelEventSnapshot", verbose_name="事件快照",
+        on_delete=models.PROTECT, related_name="decisions",
+        null=True, blank=True,
+    )
+    market_regime_snapshot = models.ForeignKey(
+        "WheelMarketRegimeSnapshot", verbose_name="市场环境快照",
+        on_delete=models.PROTECT, related_name="decisions",
+        null=True, blank=True,
+    )
     account_snapshot = models.ForeignKey(
         WheelBrokerAccountSnapshot,
         verbose_name="账户快照",
@@ -963,6 +998,10 @@ class WheelDecision(AppendOnlyEvidenceMixin, TimestampedModel):
                 errors["market_snapshot"] = (
                     "行情快照标的与决策标的不一致。"
                 )
+        if self.technical_snapshot_id and self.technical_snapshot.underlying_id != self.underlying_id:
+            errors["technical_snapshot"] = "技术快照标的与决策标的不一致。"
+        if self.event_snapshot_id and self.event_snapshot.underlying_id != self.underlying_id:
+            errors["event_snapshot"] = "事件快照标的与决策标的不一致。"
         if self.overall_status == OverallStatus.EXECUTABLE:
             policy = self.policy if self.policy_id else None
             if not settings.OPTION_WHEEL_EXECUTION_ENABLED:
@@ -1419,3 +1458,287 @@ class WheelCandidate(AppendOnlyEvidenceMixin, TimestampedModel):
 
     def __str__(self):
         return f"{self.candidate_key} {self.get_strategy_display()}"
+
+
+class WheelPause(TimestampedModel):
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name="wheel_pauses")
+    account = models.ForeignKey(
+        InvestmentAccount, on_delete=models.CASCADE, related_name="wheel_pauses",
+        null=True, blank=True,
+    )
+    underlying = models.ForeignKey(
+        Security, on_delete=models.CASCADE, related_name="wheel_pauses",
+        null=True, blank=True,
+    )
+    starts_at = models.DateTimeField("暂停开始", default=timezone.now)
+    ends_at = models.DateTimeField("暂停结束", null=True, blank=True)
+    reason = models.TextField("暂停原因")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="+",
+    )
+
+    class Meta:
+        verbose_name = "车轮暂停"
+        verbose_name_plural = "车轮暂停"
+        indexes = [models.Index(fields=["family", "starts_at", "ends_at"], name="wheel_pause_scope_idx")]
+
+    def clean(self):
+        errors = {}
+        if self.ends_at and self.ends_at <= self.starts_at:
+            errors["ends_at"] = "暂停结束时间必须晚于开始时间。"
+        if self.account_id and self.account.family_id != self.family_id:
+            errors["account"] = "账户与暂停范围不属于同一家庭。"
+        if self.underlying_id and self.underlying.asset_type != Security.TYPE_STOCK:
+            errors["underlying"] = "暂停标的必须是股票。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def is_active_at(self, moment=None):
+        moment = moment or timezone.now()
+        return self.starts_at <= moment and (self.ends_at is None or moment < self.ends_at)
+
+
+class WheelTechnicalSnapshot(AppendOnlyEvidenceMixin, models.Model):
+    objects = AppendOnlyManager()
+    underlying = models.ForeignKey(Security, on_delete=models.PROTECT, related_name="wheel_technical_snapshots")
+    provider = models.CharField("来源", max_length=50)
+    source_as_of = models.DateTimeField("来源时点")
+    fetched_at = models.DateTimeField("获取时间", default=timezone.now)
+    sample_count = models.PositiveIntegerField("样本数", default=0)
+    sma_20 = models.DecimalField("20 日均线", max_digits=20, decimal_places=6, null=True, blank=True)
+    sma_50 = models.DecimalField("50 日均线", max_digits=20, decimal_places=6, null=True, blank=True)
+    rsi_14 = models.DecimalField("14 日 RSI", max_digits=12, decimal_places=6, null=True, blank=True)
+    atr_14 = models.DecimalField("14 日 ATR", max_digits=20, decimal_places=6, null=True, blank=True)
+    return_5d = models.DecimalField("5 日收益率", max_digits=12, decimal_places=8, null=True, blank=True)
+    return_20d = models.DecimalField("20 日收益率", max_digits=12, decimal_places=8, null=True, blank=True)
+    status = models.CharField("状态", max_length=20, choices=TechnicalStatus.choices, default=TechnicalStatus.UNKNOWN)
+    raw_evidence = models.JSONField("原始证据", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "技术分析快照"
+        verbose_name_plural = "技术分析快照"
+        indexes = [models.Index(fields=["underlying", "-source_as_of"], name="wheel_tech_under_asof_idx")]
+
+    def clean(self):
+        if self.underlying_id and self.underlying.asset_type != Security.TYPE_STOCK:
+            raise ValidationError({"underlying": "技术快照标的必须是股票。"})
+        if self.status == TechnicalStatus.COMPLETE:
+            required = (self.sma_20, self.sma_50, self.rsi_14, self.atr_14, self.return_5d, self.return_20d)
+            if self.sample_count < 50 or any(not _finite_decimal(v) for v in required):
+                raise ValidationError({"status": "完整技术快照至少需要 50 个样本及全部指标。"})
+
+
+class WheelEventSnapshot(AppendOnlyEvidenceMixin, models.Model):
+    objects = AppendOnlyManager()
+    underlying = models.ForeignKey(Security, on_delete=models.PROTECT, related_name="wheel_event_snapshots")
+    provider = models.CharField("来源", max_length=50)
+    window_start = models.DateField("窗口开始")
+    window_end = models.DateField("窗口结束")
+    earnings_status = models.CharField("财报状态", max_length=20, choices=EventStatus.choices, default=EventStatus.UNKNOWN)
+    earnings_at = models.DateTimeField("财报时间", null=True, blank=True)
+    dividend_status = models.CharField("除息状态", max_length=20, choices=EventStatus.choices, default=EventStatus.UNKNOWN)
+    ex_dividend_date = models.DateField("除息日", null=True, blank=True)
+    source_as_of = models.DateTimeField("来源时点")
+    fetched_at = models.DateTimeField("获取时间", default=timezone.now)
+    raw_evidence = models.JSONField("原始证据", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "事件快照"
+        verbose_name_plural = "事件快照"
+        indexes = [models.Index(fields=["underlying", "-source_as_of"], name="wheel_event_under_asof_idx")]
+
+    @property
+    def overall_status(self):
+        statuses = {self.earnings_status, self.dividend_status}
+        if EventStatus.BLOCKED in statuses:
+            return EventStatus.BLOCKED
+        if statuses == {EventStatus.CLEAR}:
+            return EventStatus.CLEAR
+        return EventStatus.UNKNOWN
+
+    def clean(self):
+        if self.window_end < self.window_start:
+            raise ValidationError({"window_end": "事件窗口结束日不得早于开始日。"})
+
+
+class WheelMarketRegimeSnapshot(AppendOnlyEvidenceMixin, models.Model):
+    objects = AppendOnlyManager()
+    provider = models.CharField("来源", max_length=50)
+    regime = models.CharField("市场状态", max_length=30)
+    source_as_of = models.DateTimeField("来源时点")
+    fetched_at = models.DateTimeField("获取时间", default=timezone.now)
+    status = models.CharField("数据状态", max_length=20, choices=DataStatus.choices, default=DataStatus.PARTIAL)
+    vix = models.DecimalField("VIX", max_digits=12, decimal_places=6, null=True, blank=True)
+    raw_evidence = models.JSONField("原始证据", default=dict, blank=True)
+
+    class Meta:
+        verbose_name = "市场环境快照"
+        verbose_name_plural = "市场环境快照"
+        indexes = [models.Index(fields=["-source_as_of"], name="wheel_regime_asof_idx")]
+
+
+class WheelCycle(TimestampedModel):
+    family = models.ForeignKey(Family, on_delete=models.PROTECT, related_name="wheel_cycles")
+    account = models.ForeignKey(InvestmentAccount, on_delete=models.PROTECT, related_name="wheel_cycles")
+    underlying = models.ForeignKey(Security, on_delete=models.PROTECT, related_name="wheel_cycles")
+    status = models.CharField("状态", max_length=20, choices=CycleStatus.choices, default=CycleStatus.OPEN)
+    opened_on = models.DateField("开始日期")
+    closed_on = models.DateField("结束日期", null=True, blank=True)
+    assigned_cost_basis = models.DecimalField("指派/买入成本", max_digits=20, decimal_places=6, null=True, blank=True)
+    assigned_share_quantity = models.DecimalField("本周期持有正股数量", max_digits=24, decimal_places=6, default=0)
+    notes = models.TextField("备注", blank=True)
+
+    class Meta:
+        verbose_name = "车轮周期"
+        verbose_name_plural = "车轮周期"
+        constraints = [
+            models.UniqueConstraint(fields=["account", "underlying"], condition=Q(status__in=[CycleStatus.OPEN, CycleStatus.PAUSED]), name="unique_active_wheel_cycle"),
+            models.CheckConstraint(condition=Q(assigned_share_quantity__gte=0), name="wheel_cycle_shares_nonnegative"),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.account_id and self.family_id and self.account.family_id != self.family_id:
+            errors["account"] = "账户与周期不属于同一家庭。"
+        if self.closed_on and self.closed_on < self.opened_on:
+            errors["closed_on"] = "结束日期不得早于开始日期。"
+        if self.status == CycleStatus.CLOSED and not self.closed_on:
+            errors["closed_on"] = "结束周期必须填写结束日期。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class WheelLeg(TimestampedModel):
+    cycle = models.ForeignKey(WheelCycle, on_delete=models.PROTECT, related_name="legs")
+    parent_leg = models.ForeignKey("self", on_delete=models.PROTECT, related_name="rolled_legs", null=True, blank=True)
+    sequence = models.PositiveIntegerField("顺序")
+    strategy = models.CharField("策略", max_length=20, choices=Strategy.choices)
+    status = models.CharField("状态", max_length=20, choices=LegStatus.choices, default=LegStatus.PLANNED)
+    option_quote = models.ForeignKey(WheelOptionQuoteSnapshot, on_delete=models.PROTECT, related_name="wheel_legs", null=True, blank=True)
+    option_contract = models.ForeignKey(
+        OptionContract,
+        on_delete=models.PROTECT,
+        related_name="wheel_legs",
+        null=True,
+        blank=True,
+    )
+    expiration = models.DateField("到期日", null=True, blank=True)
+    strike = models.DecimalField("行权价", max_digits=20, decimal_places=6, null=True, blank=True)
+    contract_count = models.PositiveIntegerField("合约数", default=1)
+    open_contract_count = models.PositiveIntegerField("未平合约数", default=1)
+    premium_total = models.DecimalField("累计权利金", max_digits=24, decimal_places=4, default=0)
+    opened_at = models.DateTimeField("开仓时间", null=True, blank=True)
+    closed_at = models.DateTimeField("结束时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "车轮分段"
+        verbose_name_plural = "车轮分段"
+        ordering = ["cycle", "sequence"]
+        constraints = [models.UniqueConstraint(fields=["cycle", "sequence"], name="unique_wheel_leg_sequence")]
+
+    def clean(self):
+        errors = {}
+        if self.parent_leg_id and self.parent_leg.cycle_id != self.cycle_id:
+            errors["parent_leg"] = "滚动前后分段必须属于同一周期。"
+        if self.option_quote_id and self.option_quote.underlying_id != self.cycle.underlying_id:
+            errors["option_quote"] = "期权报价与周期标的不一致。"
+        if self.option_contract_id and self.option_contract.underlying_id != self.cycle.underlying_id:
+            errors["option_contract"] = "期权合约与周期标的不一致。"
+        if self.strategy in {Strategy.SELL_PUT, Strategy.COVERED_CALL, Strategy.ROLL}:
+            if not self.option_contract_id:
+                errors["option_contract"] = "活动期权分段必须绑定本地期权合约。"
+            if not self.expiration or not _finite_decimal(self.strike) or self.strike <= 0:
+                errors["strike"] = "期权分段必须具备有效到期日和行权价。"
+        if self.open_contract_count > self.contract_count:
+            errors["open_contract_count"] = "未平合约数不能超过原始合约数。"
+        if self.strategy == Strategy.COVERED_CALL and _finite_decimal(self.cycle.assigned_cost_basis) and _finite_decimal(self.strike) and self.strike < self.cycle.assigned_cost_basis:
+            errors["strike"] = "备兑 Call 行权价不得低于指派或买入成本。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class WheelTransactionLink(TimestampedModel):
+    leg = models.ForeignKey(WheelLeg, on_delete=models.PROTECT, related_name="transaction_links")
+    transaction = models.ForeignKey(InvestmentTransaction, on_delete=models.PROTECT, related_name="wheel_links")
+    role = models.CharField("关联角色", max_length=30)
+    linked_quantity = models.DecimalField(
+        "关联期权张数", max_digits=24, decimal_places=6,
+        default=Decimal("1"),
+    )
+
+    class Meta:
+        verbose_name = "车轮交易关联"
+        verbose_name_plural = "车轮交易关联"
+        constraints = [
+            models.UniqueConstraint(fields=["leg", "transaction", "role"], name="unique_wheel_leg_txn_role"),
+            models.CheckConstraint(condition=Q(linked_quantity__gt=0), name="wheel_txn_link_qty_positive"),
+        ]
+
+    def clean(self):
+        if self.transaction_id and self.leg_id:
+            if self.transaction.account_id != self.leg.cycle.account_id:
+                raise ValidationError({"transaction": "交易账户与车轮周期账户不一致。"})
+            security = self.transaction.security
+            if security and security_id_for_underlying(security) != self.leg.cycle.underlying_id:
+                raise ValidationError({"transaction": "交易标的与车轮周期标的不一致。"})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+def security_id_for_underlying(security):
+    option = getattr(security, "option_contract", None)
+    return option.underlying_id if option else security.pk
+
+
+class WheelCollateralReservation(TimestampedModel):
+    CASH = "cash"
+    SHARES = "shares"
+    KIND_CHOICES = [(CASH, "现金"), (SHARES, "股票")]
+    leg = models.ForeignKey(WheelLeg, on_delete=models.PROTECT, related_name="collateral_reservations")
+    account = models.ForeignKey(InvestmentAccount, on_delete=models.PROTECT, related_name="wheel_collateral_reservations")
+    kind = models.CharField("类型", max_length=10, choices=KIND_CHOICES)
+    currency = models.CharField("币种", max_length=10, blank=True)
+    cash_amount = models.DecimalField("现金金额", max_digits=24, decimal_places=4, null=True, blank=True)
+    share_quantity = models.DecimalField("股票数量", max_digits=24, decimal_places=6, null=True, blank=True)
+    reserved_at = models.DateTimeField("预留时间", default=timezone.now)
+    released_at = models.DateTimeField("释放时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "车轮担保预留"
+        verbose_name_plural = "车轮担保预留"
+        constraints = [
+            models.UniqueConstraint(fields=["leg"], condition=Q(released_at__isnull=True), name="unique_active_leg_collateral"),
+            models.CheckConstraint(condition=(Q(kind="cash", cash_amount__gt=0, share_quantity__isnull=True) | Q(kind="shares", share_quantity__gt=0, cash_amount__isnull=True)), name="wheel_collateral_kind_amount"),
+        ]
+
+    def clean(self):
+        errors = {}
+        if self.leg_id and self.account_id and self.leg.cycle.account_id != self.account_id:
+            errors["account"] = "担保账户与车轮周期账户不一致。"
+        if self.kind == self.CASH and self.currency.upper() != "USD":
+            errors["currency"] = "M1 现金担保必须是 USD。"
+        if self.kind == self.SHARES and self.currency:
+            errors["currency"] = "股票担保不填写币种。"
+        if self.released_at and self.released_at < self.reserved_at:
+            errors["released_at"] = "释放时间不得早于预留时间。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)

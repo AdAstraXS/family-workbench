@@ -147,8 +147,8 @@ class SecurityAdmin(admin.ModelAdmin):
 
 @admin.register(OptionContract)
 class OptionContractAdmin(admin.ModelAdmin):
-    list_display = ("security", "underlying", "option_type", "strike_price", "expiration_date", "multiplier")
-    list_filter = ("option_type", "expiration_date")
+    list_display = ("security", "underlying", "option_type", "strike_price", "expiration_date", "multiplier", "provider", "provider_contract_code", "is_adjusted")
+    list_filter = ("option_type", "expiration_date", "provider", "is_adjusted")
     search_fields = ("security__symbol", "underlying__symbol", "underlying__name")
 
 

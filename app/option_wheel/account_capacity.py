@@ -6,10 +6,19 @@ from hashlib import sha256
 import json
 
 from django.db import transaction
+from django.db.models import Max
 from django.utils import timezone
 
 from portfolio.historical_valuation import value_historical_portfolio
-from portfolio.models import InvestmentAccount, InvestmentCashMovement, OptionContract
+from portfolio.models import (
+    InvestmentAccount,
+    InvestmentCashMovement,
+    InvestmentPosition,
+    InvestmentTransaction,
+    OptionContract,
+    Security,
+    SecurityPriceRecord,
+)
 
 from .models import DataStatus, WheelBrokerAccountSnapshot
 
@@ -45,6 +54,42 @@ class ImportResult:
     snapshot_id: int | None
 
 
+def capacity_snapshot_stale_reasons(snapshot):
+    """Return portfolio evidence changes newer than a formal capacity snapshot."""
+    if snapshot is None:
+        return ["尚无正式容量快照"]
+    cutoff = snapshot.source_as_of
+    reasons = []
+    transaction_changed = InvestmentTransaction.objects.filter(
+        account_id=snapshot.account_id,
+        updated_at__gt=cutoff,
+    ).exists()
+    cash_changed = InvestmentCashMovement.objects.filter(
+        account_id=snapshot.account_id,
+        updated_at__gt=cutoff,
+    ).exists()
+    position_changed = InvestmentPosition.objects.filter(
+        account_id=snapshot.account_id,
+        updated_at__gt=cutoff,
+    ).exists()
+    if transaction_changed or cash_changed or position_changed:
+        reasons.append("投资组合流水、现金或持仓在确认后发生变化")
+
+    position_items = snapshot.positions_summary.get("items", []) if isinstance(snapshot.positions_summary, dict) else []
+    security_ids = {
+        item.get("security_id")
+        for item in position_items
+        if isinstance(item, dict) and isinstance(item.get("security_id"), int)
+    }
+    if security_ids:
+        latest_price = SecurityPriceRecord.objects.filter(
+            security_id__in=security_ids,
+        ).aggregate(value=Max("fetched_at"))["value"]
+        if latest_price and latest_price > cutoff:
+            reasons.append("持仓行情在确认后已更新，账户净值需要重新确认")
+    return reasons
+
+
 def _money(value):
     return Decimal(value).quantize(MONEY_STEP)
 
@@ -69,6 +114,14 @@ def _position_item(position):
         "currency": security.currency,
         "market_value_usd": str(_money(position.market_value)),
     }
+    if (
+        security.asset_type == Security.TYPE_STOCK
+        and position.quantity
+        and getattr(position, "cost_original", None) is not None
+    ):
+        item["average_cost"] = str(
+            _money(position.cost_original / position.quantity)
+        )
     option = getattr(security, "option_contract", None)
     if option:
         item.update(

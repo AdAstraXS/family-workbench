@@ -381,6 +381,9 @@ class OptionContract(TimestampedModel):
     strike_price = models.DecimalField("行权价", max_digits=20, decimal_places=6)
     expiration_date = models.DateField("到期日")
     multiplier = models.PositiveIntegerField("合约乘数", default=100)
+    provider = models.CharField("合约身份来源", max_length=30, blank=True)
+    provider_contract_code = models.CharField("行情源合约代码", max_length=100, blank=True)
+    is_adjusted = models.BooleanField("是否调整合约", null=True, blank=True, default=None)
 
     class Meta:
         verbose_name = "期权合约"
@@ -389,7 +392,12 @@ class OptionContract(TimestampedModel):
             models.UniqueConstraint(
                 fields=["underlying", "option_type", "strike_price", "expiration_date"],
                 name="unique_option_contract_terms",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["provider", "provider_contract_code"],
+                condition=~Q(provider="") & ~Q(provider_contract_code=""),
+                name="unique_option_contract_provider_code",
+            ),
         ]
 
     def __str__(self):

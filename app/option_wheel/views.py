@@ -5,8 +5,9 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.db.models import Q
 from django.http import HttpResponseBadRequest
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
@@ -17,6 +18,7 @@ from portfolio.models import InvestmentAccount, Security
 from .account_capacity import (
     CapacityImportError,
     build_portfolio_capacity,
+    capacity_snapshot_stale_reasons,
     import_portfolio_capacity,
 )
 from .models import (
@@ -27,9 +29,13 @@ from .models import (
     TechnicalStatus,
     WheelBrokerAccountSnapshot,
     WheelCandidate,
+    WheelCycle,
     WheelDecision,
     WheelMarketSnapshot,
     WheelPolicy,
+    WheelPause,
+    WheelTechnicalSnapshot,
+    WheelEventSnapshot,
 )
 
 
@@ -68,8 +74,8 @@ def _request_family(request):
     raise PermissionDenied("当前用户未关联有效家庭。")
 
 
-def _snapshot_is_ready(snapshot, *, max_age_minutes, now):
-    if snapshot is None or snapshot.data_status != DataStatus.COMPLETE:
+def _snapshot_is_ready(snapshot, *, max_age_minutes, now, stale_reasons=None):
+    if snapshot is None or snapshot.data_status != DataStatus.COMPLETE or stale_reasons:
         return False
     required_amounts = (
         snapshot.settled_cash,
@@ -162,6 +168,38 @@ def index(request):
         )
         policy_by_symbol.setdefault(policy.underlying.symbol.upper(), []).append(policy)
 
+    if request.method == "POST" and request.POST.get("action") in {"pause_strategy", "resume_pause"}:
+        if not request.user.is_superuser:
+            raise PermissionDenied("只有管理员可以暂停或恢复车轮策略。")
+        action = request.POST["action"]
+        if action == "resume_pause":
+            pause = get_object_or_404(WheelPause, pk=request.POST.get("pause_id"), family=family, ends_at__isnull=True)
+            pause.ends_at = now
+            pause.save(update_fields=["ends_at", "updated_at"])
+            messages.success(request, "该暂停已明确恢复；历史原因仍保留。")
+            return redirect(reverse("option_wheel:index"))
+        reason = request.POST.get("reason", "").strip()
+        if not reason:
+            return HttpResponseBadRequest("暂停原因不能为空。")
+        account = None
+        if request.POST.get("scope_account_id"):
+            account = get_object_or_404(
+                InvestmentAccount, pk=request.POST["scope_account_id"],
+                bank_account__family=family,
+            )
+        underlying = None
+        if request.POST.get("scope_symbol"):
+            underlying = get_object_or_404(
+                Security, symbol__iexact=request.POST["scope_symbol"],
+                market__iexact="US", asset_type=Security.TYPE_STOCK,
+            )
+        WheelPause.objects.create(
+            family=family, account=account, underlying=underlying,
+            reason=reason, created_by=request.user,
+        )
+        messages.success(request, "车轮策略已暂停；新候选会失败关闭。")
+        return redirect(reverse("option_wheel:index"))
+
     accounts_by_name = {name: [] for name in PARTICIPATING_ACCOUNTS}
     for account in InvestmentAccount.objects.filter(
         bank_account__family=family,
@@ -195,6 +233,7 @@ def index(request):
             snapshot,
             max_age_minutes=max_age_minutes,
             now=now,
+            stale_reasons=(stale_reasons := capacity_snapshot_stale_reasons(snapshot)),
         )
         if ambiguous:
             state = "身份有重名"
@@ -205,6 +244,9 @@ def index(request):
         elif snapshot is None:
             state = "数据不可用"
             account_blockers.append(f"{account_name}尚无容量快照")
+        elif stale_reasons:
+            state = "投资组合已变化，待重新确认"
+            account_blockers.append(f"{account_name}容量快照已失效：{'；'.join(stale_reasons)}")
         elif not ready:
             state = "证据不完整或已过期"
             account_blockers.append(f"{account_name}容量证据未就绪")
@@ -218,6 +260,7 @@ def index(request):
                 "ready": ready,
                 "state": state,
                 "max_age_minutes": max_age_minutes,
+                "stale_reasons": stale_reasons,
                 "preview": None,
                 "preview_error": "",
                 "confirm_no_margin": False,
@@ -397,5 +440,49 @@ def index(request):
         "latest_decision": latest_decision,
         "earnings_evidence": _event_evidence(latest_decision, "earnings"),
         "dividend_evidence": _event_evidence(latest_decision, "dividend"),
+        "active_pauses": WheelPause.objects.filter(
+            family=family, starts_at__lte=now,
+        ).filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now)).select_related("account__bank_account", "underlying"),
     }
     return render(request, "option_wheel/index.html", context)
+
+
+@login_required
+def underlying_detail(request, symbol):
+    family = _request_family(request)
+    security = get_object_or_404(
+        Security, symbol__iexact=symbol, market__iexact="US",
+        asset_type=Security.TYPE_STOCK,
+    )
+    policies = WheelPolicy.objects.filter(family=family, underlying=security).select_related("account__bank_account")
+    decisions = WheelDecision.objects.filter(family=family, underlying=security).select_related(
+        "account__bank_account", "market_snapshot", "technical_snapshot", "event_snapshot", "market_regime_snapshot"
+    ).order_by("-decision_time", "-pk")
+    latest = decisions.first()
+    candidates = WheelCandidate.objects.filter(decision__family=family, decision__underlying=security).select_related("decision", "option_quote").order_by("-created_at", "-pk")[:30]
+    return render(request, "option_wheel/underlying_detail.html", {
+        "security": security, "policies": policies, "latest_decision": latest,
+        "decisions": decisions[:20], "candidates": candidates,
+    })
+
+
+@login_required
+def decision_detail(request, pk):
+    family = _request_family(request)
+    decision = get_object_or_404(
+        WheelDecision.objects.select_related(
+            "account__bank_account", "underlying", "policy", "account_snapshot",
+            "market_snapshot", "technical_snapshot", "event_snapshot", "market_regime_snapshot",
+        ), pk=pk, family=family,
+    )
+    candidates = decision.candidates.select_related("option_quote").order_by("-premium_total", "pk")
+    return render(request, "option_wheel/decision_detail.html", {"decision": decision, "candidates": candidates})
+
+
+@login_required
+def holdings(request):
+    family = _request_family(request)
+    cycles = WheelCycle.objects.filter(family=family).select_related(
+        "account__bank_account", "underlying"
+    ).prefetch_related("legs__transaction_links", "legs__collateral_reservations").order_by("status", "underlying__symbol", "-opened_on")
+    return render(request, "option_wheel/holdings.html", {"cycles": cycles})

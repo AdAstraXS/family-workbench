@@ -5,10 +5,18 @@ from django.contrib import admin
 from .models import (
     WheelBrokerAccountSnapshot,
     WheelCandidate,
+    WheelCollateralReservation,
+    WheelCycle,
     WheelDecision,
+    WheelEventSnapshot,
+    WheelLeg,
     WheelMarketSnapshot,
+    WheelMarketRegimeSnapshot,
     WheelOptionQuoteSnapshot,
+    WheelPause,
     WheelPolicy,
+    WheelTechnicalSnapshot,
+    WheelTransactionLink,
 )
 
 
@@ -241,3 +249,22 @@ class WheelCandidateAdmin(
     date_hierarchy = "created_at"
     list_select_related = ("decision", "option_quote")
     autocomplete_fields = ("decision",)
+
+
+class GenericEvidenceReadOnlyAdmin(EvidenceReadOnlyAdminMixin, admin.ModelAdmin):
+    pass
+
+
+for evidence_model in (
+    WheelTechnicalSnapshot,
+    WheelEventSnapshot,
+    WheelMarketRegimeSnapshot,
+    WheelCycle,
+    WheelLeg,
+    WheelTransactionLink,
+    WheelCollateralReservation,
+):
+    admin.site.register(evidence_model, GenericEvidenceReadOnlyAdmin)
+
+
+admin.site.register(WheelPause)
