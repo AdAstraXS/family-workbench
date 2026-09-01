@@ -218,6 +218,100 @@ class OptionWheelPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         build_capacity.assert_not_called()
 
+    def test_refresh_analysis_is_post_only(self):
+        response = self.client.get(reverse("option_wheel:refresh_analysis"))
+
+        self.assertEqual(response.status_code, 405)
+
+    @patch("option_wheel.views.run_probe")
+    def test_non_superuser_cannot_refresh_analysis(self, run_probe):
+        account = self.make_account(self.family, self.member, "盈透证券")
+        self.create_policy(account)
+
+        response = self.client.post(
+            reverse("option_wheel:refresh_analysis"),
+            {
+                "account_ids": [account.pk],
+                "symbols": ["TSLA"],
+                "confirm_read_only": "yes",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        run_probe.assert_not_called()
+
+    @patch("option_wheel.views.persist_probe_symbol")
+    @patch("option_wheel.views.run_probe")
+    def test_superuser_can_refresh_multiple_accounts_from_one_probe(
+        self,
+        run_probe,
+        persist_probe_symbol,
+    ):
+        zhifu = self.make_account(self.family, self.member, "致富证券（公户）")
+        ibkr = self.make_account(self.family, self.member, "盈透证券")
+        msft = Security.objects.create(
+            symbol="MSFT",
+            name="Microsoft",
+            market="US",
+            asset_type=Security.TYPE_STOCK,
+            currency="USD",
+        )
+        for account in (zhifu, ibkr):
+            self.create_policy(account)
+            self.create_policy(account, underlying=msft)
+        symbol_results = [{"symbol": "US.MSFT"}, {"symbol": "US.TSLA"}]
+        run_probe.return_value = {"status": "success", "symbols": symbol_results}
+        persist_probe_symbol.side_effect = [SimpleNamespace(pk=index) for index in range(4)]
+        self.user.is_superuser = True
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_superuser", "is_staff"])
+
+        response = self.client.post(
+            reverse("option_wheel:refresh_analysis"),
+            {
+                "account_ids": [zhifu.pk, ibkr.pk],
+                "symbols": ["TSLA", "MSFT"],
+                "confirm_read_only": "yes",
+            },
+            follow=True,
+        )
+
+        self.assertRedirects(response, reverse("option_wheel:index"))
+        self.assertContains(response, "已保存 4 份正式只读分析")
+        run_probe.assert_called_once_with(
+            ["US.MSFT", "US.TSLA"],
+            profile="m1-gate",
+            max_expirations=1,
+            max_contracts_per_expiration=3,
+        )
+        self.assertEqual(persist_probe_symbol.call_count, 4)
+        self.assertTrue(
+            all(call.kwargs["family"] == self.family for call in persist_probe_symbol.call_args_list)
+        )
+
+    @patch("option_wheel.views.persist_probe_symbol")
+    @patch("option_wheel.views.run_probe")
+    def test_failed_probe_does_not_persist_analysis(self, run_probe, persist_probe_symbol):
+        account = self.make_account(self.family, self.member, "盈透证券")
+        self.create_policy(account)
+        run_probe.return_value = {"status": "partial", "symbols": []}
+        self.user.is_superuser = True
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_superuser", "is_staff"])
+
+        response = self.client.post(
+            reverse("option_wheel:refresh_analysis"),
+            {
+                "account_ids": [account.pk],
+                "symbols": ["TSLA"],
+                "confirm_read_only": "yes",
+            },
+            follow=True,
+        )
+
+        self.assertContains(response, "强门控未通过，本次未保存任何分析证据")
+        persist_probe_symbol.assert_not_called()
+
     def test_account_owned_by_me_is_preferred_over_same_name(self):
         self.make_account(self.family, self.member, "盈透证券")
         owner = FamilyMember.objects.create(family=self.family, display_name="我")

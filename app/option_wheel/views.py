@@ -5,16 +5,20 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from family_core.household import get_household_family
 from family_core.models import FamilyMember
+from portfolio.futu_option_probe import run_probe
 from portfolio.models import InvestmentAccount, Security
 
+from .analysis_service import WheelAnalysisError, persist_probe_symbol
 from .account_capacity import (
     CapacityImportError,
     build_portfolio_capacity,
@@ -443,8 +447,94 @@ def index(request):
         "active_pauses": WheelPause.objects.filter(
             family=family, starts_at__lte=now,
         ).filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now)).select_related("account__bank_account", "underlying"),
+        "analysis_accounts": [
+            card for card in account_cards if card["ready"] and card["account"] is not None
+        ],
+        "analysis_symbols": sorted(
+            {
+                policy.underlying.symbol.upper()
+                for policy in policies
+                if policy.enabled
+            }
+        ),
     }
     return render(request, "option_wheel/index.html", context)
+
+
+@login_required
+@require_POST
+def refresh_analysis(request):
+    family = _request_family(request)
+    if not request.user.is_superuser:
+        raise PermissionDenied("只有管理员可以刷新正式只读分析。")
+    if request.POST.get("confirm_read_only") != "yes":
+        return HttpResponseBadRequest("必须确认本操作仅保存分析证据且不会下单。")
+
+    try:
+        account_ids = {int(value) for value in request.POST.getlist("account_ids")}
+    except (TypeError, ValueError):
+        return HttpResponseBadRequest("账户参数无效。")
+    symbols = {
+        value.upper().removeprefix("US.")
+        for value in request.POST.getlist("symbols")
+        if value.strip()
+    }
+    if not account_ids or not symbols:
+        return HttpResponseBadRequest("至少选择一个账户和一个标的。")
+
+    accounts = list(
+        InvestmentAccount.objects.filter(
+            pk__in=account_ids,
+            bank_account__family=family,
+            bank_account__account_name__in=PARTICIPATING_ACCOUNTS,
+        ).select_related("bank_account")
+    )
+    if len(accounts) != len(account_ids):
+        raise PermissionDenied("账户不属于当前家庭的车轮参与范围。")
+
+    expected_pairs = {(account.pk, symbol) for account in accounts for symbol in symbols}
+    configured_pairs = {
+        (account_id, symbol.upper())
+        for account_id, symbol in WheelPolicy.objects.filter(
+            family=family,
+            account_id__in=account_ids,
+            underlying__symbol__in=symbols,
+            enabled=True,
+        ).values_list("account_id", "underlying__symbol")
+    }
+    if configured_pairs != expected_pairs:
+        return HttpResponseBadRequest("所选账户与标的尚未全部配置启用策略。")
+
+    result = run_probe(
+        [f"US.{symbol}" for symbol in sorted(symbols)],
+        profile="m1-gate",
+        max_expirations=1,
+        max_contracts_per_expiration=3,
+    )
+    if result.get("status") != "success":
+        messages.error(request, "Futu 正常交易时段强门控未通过，本次未保存任何分析证据。")
+        return redirect(reverse("option_wheel:index"))
+
+    try:
+        with transaction.atomic():
+            decisions = [
+                persist_probe_symbol(
+                    family=family,
+                    account=account,
+                    symbol_result=symbol_result,
+                )
+                for account in accounts
+                for symbol_result in result.get("symbols", [])
+            ]
+    except WheelAnalysisError as exc:
+        messages.error(request, f"分析证据未保存：{exc}")
+        return redirect(reverse("option_wheel:index"))
+
+    messages.success(
+        request,
+        f"已保存 {len(decisions)} 份正式只读分析；交易连接与下单闸门保持关闭。",
+    )
+    return redirect(reverse("option_wheel:index"))
 
 
 @login_required
