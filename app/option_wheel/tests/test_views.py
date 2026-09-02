@@ -294,7 +294,11 @@ class OptionWheelPageTests(TestCase):
     def test_failed_probe_does_not_persist_analysis(self, run_probe, persist_probe_symbol):
         account = self.make_account(self.family, self.member, "盈透证券")
         self.create_policy(account)
-        run_probe.return_value = {"status": "partial", "symbols": []}
+        run_probe.return_value = {
+            "status": "partial", "symbols": [],
+            "errors": [{"source": "subscription_before", "category": "provider_error",
+                        "error": "not logged in secret=never-publish"}],
+        }
         self.user.is_superuser = True
         self.user.is_staff = True
         self.user.save(update_fields=["is_superuser", "is_staff"])
@@ -310,6 +314,8 @@ class OptionWheelPageTests(TestCase):
         )
 
         self.assertContains(response, "强门控未通过，本次未保存任何分析证据")
+        self.assertContains(response, "订阅额度预检：行情服务拒绝请求（服务提示未登录）")
+        self.assertNotContains(response, "never-publish")
         persist_probe_symbol.assert_not_called()
 
     def test_account_owned_by_me_is_preferred_over_same_name(self):

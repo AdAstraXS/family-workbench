@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 from decimal import Decimal
 
@@ -19,6 +20,7 @@ from portfolio.futu_option_probe import run_probe
 from portfolio.models import InvestmentAccount, Security
 
 from .analysis_service import WheelAnalysisError, persist_probe_symbol
+from .probe_diagnostics import probe_failure_summary
 from .account_capacity import (
     CapacityImportError,
     build_portfolio_capacity,
@@ -512,7 +514,9 @@ def refresh_analysis(request):
         max_contracts_per_expiration=3,
     )
     if result.get("status") != "success":
-        messages.error(request, "Futu 正常交易时段强门控未通过，本次未保存任何分析证据。")
+        diagnostic = probe_failure_summary(result, symbols)
+        logging.getLogger(__name__).warning("Wheel analysis probe rejected: %s", diagnostic)
+        messages.error(request, "Futu 正常交易时段强门控未通过，本次未保存任何分析证据。" + diagnostic)
         return redirect(reverse("option_wheel:index"))
 
     try:
