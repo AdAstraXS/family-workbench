@@ -1,6 +1,8 @@
 {% extends "base.html" %}
+{% load static %}
 
 {% block title %}期权车轮{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/option_wheel_analysis.css' %}">{% endblock %}
 
 {% block content %}
 <div class="option-wheel-page">
@@ -26,7 +28,7 @@
         </div>
         <small>读取 Futu 行情并保存冻结证据；不会连接交易账户或下单</small>
       </div>
-      <form method="post" action="{% url 'option_wheel:refresh_analysis' %}" class="option-wheel-preview-form">
+      <form id="wheel-analysis-form" method="post" action="{% url 'option_wheel:refresh_analysis' %}" class="option-wheel-preview-form">
         {% csrf_token %}
         <fieldset>
           <legend>参与账户</legend>
@@ -42,10 +44,32 @@
         </fieldset>
         <label><input type="checkbox" name="confirm_read_only" value="yes" required> 我确认本次仅保存分析证据，交易连接和下单闸门保持关闭</label>
         <button type="submit">刷新正式只读分析</button>
-        <p>正常交易时段验证约需一分钟；失败时不保存半套分析证据。</p>
+        <p>分析可能需要 1–2 分钟或更久，包含行情查询和临时订阅清理。请勿重复提交；页面等待结束不代表后台已停止。</p>
+        <noscript><p>建议启用 JavaScript 后再提交，以便在当前页查看等待及异常提示。</p></noscript>
       </form>
+      <div id="wheel-analysis-feedback" class="option-wheel-analysis-feedback" hidden>
+        <h3 id="wheel-analysis-status" role="status" aria-live="polite" aria-atomic="true"></h3>
+        <p id="wheel-analysis-detail"></p>
+        <p id="wheel-analysis-elapsed"></p>
+        <form id="wheel-analysis-check" method="get" action="{% url 'option_wheel:index' %}#recent-analysis" hidden>
+          <button type="submit">重新读取最近分析记录（不会重新提交）</button>
+        </form>
+      </div>
     </section>
   {% endif %}
+
+  <section id="recent-analysis" class="option-wheel-section" aria-labelledby="recent-analysis-title">
+    <div class="option-wheel-section-heading"><h2 id="recent-analysis-title">最近已保存的分析</h2><small>按保存记录核对；旧记录不能证明本次请求成功，无新记录也不能证明后台已停止</small></div>
+    {% if recent_decisions %}
+      <div class="option-wheel-table-wrap"><table class="option-wheel-table">
+        <thead><tr><th>分析时间</th><th>账户</th><th>标的</th><th>证据</th></tr></thead>
+        <tbody>{% for decision in recent_decisions %}<tr>
+          <td>{{ decision.decision_time|date:"Y-m-d H:i:s T" }}</td><td>{{ decision.account.account_name }}</td>
+          <td>{{ decision.underlying.symbol }}</td><td><a href="{% url 'option_wheel:decision_detail' decision.pk %}">查看分析 #{{ decision.pk }}</a></td>
+        </tr>{% endfor %}</tbody>
+      </table></div>
+    {% else %}<p class="option-wheel-empty">尚无已保存的正式分析记录。</p>{% endif %}
+  </section>
 
   <section class="option-wheel-status-grid" aria-label="策略状态">
     <article class="option-wheel-status-card {% if execution_enabled %}is-warning{% else %}is-safe{% endif %}">
@@ -324,4 +348,8 @@
     {% endif %}
   </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{% static 'js/option_wheel_analysis.js' %}" defer></script>
 {% endblock %}

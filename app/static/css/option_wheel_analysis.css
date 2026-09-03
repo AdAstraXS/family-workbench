@@ -1,0 +1,14 @@
+.option-wheel-analysis-feedback {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #b6cce2;
+  border-radius: 10px;
+  background: #f3f7fc;
+  color: #263c54;
+  overflow-wrap: anywhere;
+}
+.option-wheel-analysis-feedback[hidden] { display: none; }
+.option-wheel-analysis-feedback h3 { margin: 0 0 8px; }
+.option-wheel-analysis-feedback p { line-height: 1.6; }
+#wheel-analysis-form[aria-busy="true"] button { cursor: wait; }
+#wheel-analysis-form button:disabled { opacity: .6; }

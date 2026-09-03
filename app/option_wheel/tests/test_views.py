@@ -13,6 +13,7 @@ from ledger.models import BankAccount
 from portfolio.models import InvestmentAccount, Security
 
 from option_wheel.account_capacity import CapacityImportError
+from option_wheel.analysis_service import WheelAnalysisError
 from option_wheel.models import (
     DataStatus,
     DelayStatus,
@@ -185,12 +186,17 @@ class OptionWheelPageTests(TestCase):
             other_member,
             "其他家庭秘密账户",
         )
-        self.create_policy(other_account)
+        other_decision = self.create_decision(
+            self.create_policy(other_account), self.create_complete_account_snapshot(other_account),
+            self.create_market(),
+        )
 
         response = self.client.get(reverse("option_wheel:index"))
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "其他家庭秘密账户")
+        self.assertNotContains(response, reverse("option_wheel:decision_detail", args=[other_decision.pk]))
+        self.assertEqual(list(response.context["recent_decisions"]), [])
         self.assertNotContains(response, "Secret Other Family")
 
     def test_get_does_not_write_wheel_tables(self):
@@ -317,6 +323,53 @@ class OptionWheelPageTests(TestCase):
         self.assertContains(response, "订阅额度预检：行情服务拒绝请求（服务提示未登录）")
         self.assertNotContains(response, "never-publish")
         persist_probe_symbol.assert_not_called()
+
+    @patch("option_wheel.views.persist_probe_symbol")
+    @patch("option_wheel.views.run_probe")
+    def test_json_refresh_reports_only_confirmed_outcomes(self, probe, persist):
+        account = self.make_account(self.family, self.member, "盈透证券")
+        self.create_policy(account)
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+        payload = {"account_ids": [account.pk], "symbols": ["TSLA"], "confirm_read_only": "yes"}
+        for outcome in ("saved", "probe_failed", "persistence_failed"):
+            with self.subTest(outcome=outcome):
+                probe.return_value = {"status": "success", "symbols": [{"symbol": "US.TSLA"}]}
+                persist.side_effect = None
+                persist.reset_mock()
+                if outcome == "probe_failed":
+                    probe.return_value = {"status": "failed", "errors": [{
+                        "source": "chain", "category": "provider_error",
+                        "error": "timeout secret=do-not-publish",
+                    }]}
+                elif outcome == "persistence_failed":
+                    persist.side_effect = WheelAnalysisError("容量证据已过期")
+                response = self.client.post(reverse("option_wheel:refresh_analysis"), payload,
+                                            HTTP_ACCEPT="application/json")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["kind"], "option-wheel-analysis-v1")
+                self.assertEqual(response.json()["outcome"], "saved" if outcome == "saved" else "not_saved")
+                self.assertNotContains(response, "do-not-publish")
+                if outcome == "probe_failed":
+                    persist.assert_not_called()
+
+    @patch("option_wheel.views.run_probe")
+    def test_json_refresh_keeps_permission_and_confirmation_checks(self, probe):
+        url = reverse("option_wheel:refresh_analysis")
+        self.assertEqual(self.client.post(url, HTTP_ACCEPT="application/json").status_code, 403)
+        self.user.is_superuser = True
+        self.user.save(update_fields=["is_superuser"])
+        self.assertEqual(self.client.post(url, HTTP_ACCEPT="application/json").status_code, 400)
+        probe.assert_not_called()
+
+    def test_recent_analysis_includes_records_without_candidates(self):
+        account = self.make_account(self.family, self.member, "盈透证券")
+        decision = self.create_decision(self.create_policy(account),
+                                        self.create_complete_account_snapshot(account), self.create_market())
+        response = self.client.get(reverse("option_wheel:index"))
+        self.assertContains(response, "最近已保存的分析")
+        self.assertContains(response, reverse("option_wheel:decision_detail", args=[decision.pk]))
+        self.assertEqual(list(response.context["recent_decisions"]), [decision])
 
     def test_account_owned_by_me_is_preferred_over_same_name(self):
         self.make_account(self.family, self.member, "盈透证券")

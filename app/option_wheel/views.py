@@ -8,7 +8,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Q
-from django.http import HttpResponseBadRequest
+from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -444,6 +444,9 @@ def index(request):
         "watchlist": watchlist,
         "candidates": candidates,
         "latest_decision": latest_decision,
+        "recent_decisions": decisions.select_related(
+            "account__bank_account", "underlying",
+        ).order_by("-decision_time", "-pk")[:12],
         "earnings_evidence": _event_evidence(latest_decision, "earnings"),
         "dividend_evidence": _event_evidence(latest_decision, "dividend"),
         "active_pauses": WheelPause.objects.filter(
@@ -516,8 +519,7 @@ def refresh_analysis(request):
     if result.get("status") != "success":
         diagnostic = probe_failure_summary(result, symbols)
         logging.getLogger(__name__).warning("Wheel analysis probe rejected: %s", diagnostic)
-        messages.error(request, "Futu 正常交易时段强门控未通过，本次未保存任何分析证据。" + diagnostic)
-        return redirect(reverse("option_wheel:index"))
+        return _analysis_response(request, "not_saved", "Futu 正常交易时段强门控未通过，本次未保存任何分析证据。" + diagnostic)
 
     try:
         with transaction.atomic():
@@ -531,13 +533,20 @@ def refresh_analysis(request):
                 for symbol_result in result.get("symbols", [])
             ]
     except WheelAnalysisError as exc:
-        messages.error(request, f"分析证据未保存：{exc}")
-        return redirect(reverse("option_wheel:index"))
+        return _analysis_response(request, "not_saved", f"分析证据未保存：{exc}")
 
-    messages.success(
-        request,
+    return _analysis_response(
+        request, "saved",
         f"已保存 {len(decisions)} 份正式只读分析；交易连接与下单闸门保持关闭。",
     )
+
+
+def _analysis_response(request, outcome, message):
+    if request.headers.get("Accept") == "application/json":
+        return JsonResponse({
+            "kind": "option-wheel-analysis-v1", "outcome": outcome, "message": message,
+        })
+    (messages.success if outcome == "saved" else messages.error)(request, message)
     return redirect(reverse("option_wheel:index"))
 
 
