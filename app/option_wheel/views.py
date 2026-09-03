@@ -1,12 +1,12 @@
-import logging
+from uuid import UUID, uuid4
 from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core import signing
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -16,11 +16,9 @@ from django.views.decorators.http import require_POST
 
 from family_core.household import get_household_family
 from family_core.models import FamilyMember
-from portfolio.futu_option_probe import run_probe
 from portfolio.models import InvestmentAccount, Security
 
-from .analysis_service import WheelAnalysisError, persist_probe_symbol
-from .probe_diagnostics import probe_failure_summary
+from .analysis_service import WheelAnalysisError
 from .account_capacity import (
     CapacityImportError,
     build_portfolio_capacity,
@@ -42,6 +40,7 @@ from .models import (
     WheelPause,
     WheelTechnicalSnapshot,
     WheelEventSnapshot,
+    WheelAnalysisJob,
 )
 
 
@@ -435,7 +434,11 @@ def index(request):
 
     readiness_blockers = account_blockers + decision_blockers
     data_ready = not readiness_blockers
+    request_key = uuid4()
     context = {
+        "analysis_request_token": signing.dumps({"family": family.pk, "key": str(request_key)}, salt="wheel-live-job-v1"),
+        "analysis_status_url": reverse("option_wheel:job_status", args=[request_key]),
+        "recent_jobs": WheelAnalysisJob.objects.filter(family=family)[:12],
         "execution_enabled": bool(settings.OPTION_WHEEL_EXECUTION_ENABLED),
         "data_ready": data_ready,
         "readiness_blockers": readiness_blockers,
@@ -510,44 +513,22 @@ def refresh_analysis(request):
     if configured_pairs != expected_pairs:
         return HttpResponseBadRequest("所选账户与标的尚未全部配置启用策略。")
 
-    result = run_probe(
-        [f"US.{symbol}" for symbol in sorted(symbols)],
-        profile="m1-gate",
-        max_expirations=1,
-        max_contracts_per_expiration=3,
-    )
-    if result.get("status") != "success":
-        diagnostic = probe_failure_summary(result, symbols)
-        logging.getLogger(__name__).warning("Wheel analysis probe rejected: %s", diagnostic)
-        return _analysis_response(request, "not_saved", "Futu 正常交易时段强门控未通过，本次未保存任何分析证据。" + diagnostic)
-
+    from .jobs import enqueue, job_payload
     try:
-        with transaction.atomic():
-            decisions = [
-                persist_probe_symbol(
-                    family=family,
-                    account=account,
-                    symbol_result=symbol_result,
-                )
-                for account in accounts
-                for symbol_result in result.get("symbols", [])
-            ]
+        token = signing.loads(request.POST.get("request_token", ""), salt="wheel-live-job-v1", max_age=7200)
+        if token["family"] != family.pk:
+            raise ValueError("wrong family")
+        key = UUID(token["key"])
+    except (signing.BadSignature, KeyError, TypeError, ValueError):
+        return HttpResponseBadRequest("提交凭证无效或过期，请重新打开页面。")
+    try:
+        job = enqueue(family, request.user, key, {"account_ids": sorted(account_ids), "symbols": sorted(symbols)})
     except WheelAnalysisError as exc:
-        return _analysis_response(request, "not_saved", f"分析证据未保存：{exc}")
-
-    return _analysis_response(
-        request, "saved",
-        f"已保存 {len(decisions)} 份正式只读分析；交易连接与下单闸门保持关闭。",
-    )
-
-
-def _analysis_response(request, outcome, message):
+        return HttpResponseBadRequest(str(exc))
+    job.refresh_from_db()
     if request.headers.get("Accept") == "application/json":
-        return JsonResponse({
-            "kind": "option-wheel-analysis-v1", "outcome": outcome, "message": message,
-        })
-    (messages.success if outcome == "saved" else messages.error)(request, message)
-    return redirect(reverse("option_wheel:index"))
+        return JsonResponse(job_payload(job), status=202)
+    return redirect("option_wheel:job_detail", pk=job.pk)
 
 
 @login_required

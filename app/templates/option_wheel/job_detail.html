@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}实时分析任务{% endblock %}
+{% block content %}
+<div class="option-wheel-page" id="wheel-job-page" data-status-url="{{ job_state.status_url }}">
+  <p>{{ job.selection.account_names|join:" / " }}</p>
+  <section class="option-wheel-hero"><div><span class="option-wheel-eyebrow">仅分析，不下单</span><h1>实时分析任务</h1><p>{{ job.selection.symbols|join:" / " }} · {{ job.created_at|date:"Y-m-d H:i:s T" }}</p><p>任务编号：{{ job.pk }}</p></div><a href="{% url 'option_wheel:index' %}">返回期权车轮</a></section>
+  <section class="option-wheel-section" id="wheel-analysis-feedback">
+    <h2 id="wheel-analysis-status" role="status" aria-live="polite">{{ job_state.label }}</h2>
+    <p id="wheel-analysis-detail">{{ job_state.message }}</p>
+    <p id="wheel-analysis-elapsed"></p>
+    <div id="wheel-job-results">{% for item in job_state.results %}<p><a href="{{ item.url }}">查看分析 #{{ item.id }}</a></p>{% endfor %}</div>
+    <form id="wheel-analysis-check" method="get"><button>重新读取任务状态（不会重新提交）</button></form>
+    <p>本页只读取当前任务。连接中断不会取消后台任务，也不会自动再次发起分析。服务重启后的中断任务不会自动重跑。</p>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'js/option_wheel_jobs.js' %}?v=20260903-jobs" defer></script>{% endblock %}

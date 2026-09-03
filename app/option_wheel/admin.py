@@ -6,6 +6,7 @@ from .models import (
     WheelBrokerAccountSnapshot,
     WheelCandidate,
     WheelCloseReport,
+    WheelAnalysisJob,
     WheelCollateralReservation,
     WheelCycle,
     WheelDecision,
@@ -50,6 +51,12 @@ class EvidenceReadOnlyAdminMixin:
 class WheelCloseReportAdmin(EvidenceReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ("family", "symbol", "target_date", "created_at")
     list_filter = ("family", "symbol", "target_date")
+
+
+@admin.register(WheelAnalysisJob)
+class WheelAnalysisJobAdmin(EvidenceReadOnlyAdminMixin, admin.ModelAdmin):
+    list_display = ("id", "family", "status", "created_at", "finished_at")
+    list_filter = ("family", "status")
 
 
 @admin.register(WheelPolicy)

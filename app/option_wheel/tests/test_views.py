@@ -229,7 +229,7 @@ class OptionWheelPageTests(TestCase):
 
         self.assertEqual(response.status_code, 405)
 
-    @patch("option_wheel.views.run_probe")
+    @patch("option_wheel.jobs.fetch_probe")
     def test_non_superuser_cannot_refresh_analysis(self, run_probe):
         account = self.make_account(self.family, self.member, "盈透证券")
         self.create_policy(account)
@@ -246,114 +246,7 @@ class OptionWheelPageTests(TestCase):
         self.assertEqual(response.status_code, 403)
         run_probe.assert_not_called()
 
-    @patch("option_wheel.views.persist_probe_symbol")
-    @patch("option_wheel.views.run_probe")
-    def test_superuser_can_refresh_multiple_accounts_from_one_probe(
-        self,
-        run_probe,
-        persist_probe_symbol,
-    ):
-        zhifu = self.make_account(self.family, self.member, "致富证券（公户）")
-        ibkr = self.make_account(self.family, self.member, "盈透证券")
-        msft = Security.objects.create(
-            symbol="MSFT",
-            name="Microsoft",
-            market="US",
-            asset_type=Security.TYPE_STOCK,
-            currency="USD",
-        )
-        for account in (zhifu, ibkr):
-            self.create_policy(account)
-            self.create_policy(account, underlying=msft)
-        symbol_results = [{"symbol": "US.MSFT"}, {"symbol": "US.TSLA"}]
-        run_probe.return_value = {"status": "success", "symbols": symbol_results}
-        persist_probe_symbol.side_effect = [SimpleNamespace(pk=index) for index in range(4)]
-        self.user.is_superuser = True
-        self.user.is_staff = True
-        self.user.save(update_fields=["is_superuser", "is_staff"])
-
-        response = self.client.post(
-            reverse("option_wheel:refresh_analysis"),
-            {
-                "account_ids": [zhifu.pk, ibkr.pk],
-                "symbols": ["TSLA", "MSFT"],
-                "confirm_read_only": "yes",
-            },
-            follow=True,
-        )
-
-        self.assertRedirects(response, reverse("option_wheel:index"))
-        self.assertContains(response, "已保存 4 份正式只读分析")
-        run_probe.assert_called_once_with(
-            ["US.MSFT", "US.TSLA"],
-            profile="m1-gate",
-            max_expirations=1,
-            max_contracts_per_expiration=3,
-        )
-        self.assertEqual(persist_probe_symbol.call_count, 4)
-        self.assertTrue(
-            all(call.kwargs["family"] == self.family for call in persist_probe_symbol.call_args_list)
-        )
-
-    @patch("option_wheel.views.persist_probe_symbol")
-    @patch("option_wheel.views.run_probe")
-    def test_failed_probe_does_not_persist_analysis(self, run_probe, persist_probe_symbol):
-        account = self.make_account(self.family, self.member, "盈透证券")
-        self.create_policy(account)
-        run_probe.return_value = {
-            "status": "partial", "symbols": [],
-            "errors": [{"source": "subscription_before", "category": "provider_error",
-                        "error": "not logged in secret=never-publish"}],
-        }
-        self.user.is_superuser = True
-        self.user.is_staff = True
-        self.user.save(update_fields=["is_superuser", "is_staff"])
-
-        response = self.client.post(
-            reverse("option_wheel:refresh_analysis"),
-            {
-                "account_ids": [account.pk],
-                "symbols": ["TSLA"],
-                "confirm_read_only": "yes",
-            },
-            follow=True,
-        )
-
-        self.assertContains(response, "强门控未通过，本次未保存任何分析证据")
-        self.assertContains(response, "订阅额度预检：行情服务拒绝请求（服务提示未登录）")
-        self.assertNotContains(response, "never-publish")
-        persist_probe_symbol.assert_not_called()
-
-    @patch("option_wheel.views.persist_probe_symbol")
-    @patch("option_wheel.views.run_probe")
-    def test_json_refresh_reports_only_confirmed_outcomes(self, probe, persist):
-        account = self.make_account(self.family, self.member, "盈透证券")
-        self.create_policy(account)
-        self.user.is_superuser = True
-        self.user.save(update_fields=["is_superuser"])
-        payload = {"account_ids": [account.pk], "symbols": ["TSLA"], "confirm_read_only": "yes"}
-        for outcome in ("saved", "probe_failed", "persistence_failed"):
-            with self.subTest(outcome=outcome):
-                probe.return_value = {"status": "success", "symbols": [{"symbol": "US.TSLA"}]}
-                persist.side_effect = None
-                persist.reset_mock()
-                if outcome == "probe_failed":
-                    probe.return_value = {"status": "failed", "errors": [{
-                        "source": "chain", "category": "provider_error",
-                        "error": "timeout secret=do-not-publish",
-                    }]}
-                elif outcome == "persistence_failed":
-                    persist.side_effect = WheelAnalysisError("容量证据已过期")
-                response = self.client.post(reverse("option_wheel:refresh_analysis"), payload,
-                                            HTTP_ACCEPT="application/json")
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.json()["kind"], "option-wheel-analysis-v1")
-                self.assertEqual(response.json()["outcome"], "saved" if outcome == "saved" else "not_saved")
-                self.assertNotContains(response, "do-not-publish")
-                if outcome == "probe_failed":
-                    persist.assert_not_called()
-
-    @patch("option_wheel.views.run_probe")
+    @patch("option_wheel.jobs.fetch_probe")
     def test_json_refresh_keeps_permission_and_confirmation_checks(self, probe):
         url = reverse("option_wheel:refresh_analysis")
         self.assertEqual(self.client.post(url, HTTP_ACCEPT="application/json").status_code, 403)

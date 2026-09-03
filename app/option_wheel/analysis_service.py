@@ -161,7 +161,7 @@ def _policy_input(policy):
 
 
 @transaction.atomic
-def persist_probe_symbol(*, family, account, symbol_result):
+def persist_probe_symbol(*, family, account, symbol_result, shared_quotes=None):
     provider_symbol = str(symbol_result.get("symbol", "")).upper()
     symbol = provider_symbol.removeprefix("US.")
     try:
@@ -307,7 +307,7 @@ def persist_probe_symbol(*, family, account, symbol_result):
             if str(item.get("option_type", "")).upper() == "CALL"
             else WheelOptionQuoteSnapshot.PUT
         )
-        option_snapshot = WheelOptionQuoteSnapshot.objects.create(
+        option_snapshot = WheelOptionQuoteSnapshot(
             underlying=underlying, market_snapshot=market, provider="futu",
             provider_contract_code=item.get("code"), currency="USD", option_type=option_type,
             expiration=expiration, strike=_quantized(item.get("strike_price"), SIX_DP),
@@ -331,6 +331,20 @@ def persist_probe_symbol(*, family, account, symbol_result):
             data_quality=DataStatus.COMPLETE if item.get("contract_identity_status") == "ok" else DataStatus.PARTIAL,
             sanitized_metadata={"analytics": item.get("analytics", {})},
         )
+        # Reuse only within this atomic job, never silently overwrite older evidence.
+        quote_key = (option_snapshot.provider, option_snapshot.provider_contract_code, quote_as_of)
+        shared = shared_quotes.get(quote_key) if shared_quotes is not None else None
+        if shared is not None:
+            option_snapshot.clean_fields()
+            ignored = {"id", "created_at", "updated_at", "fetched_at", "market_snapshot"}
+            if any(getattr(shared, f.attname) != getattr(option_snapshot, f.attname)
+                   for f in option_snapshot._meta.concrete_fields if f.name not in ignored):
+                raise WheelAnalysisError("同一任务的同一合约报价证据不一致，未保存分析。")
+            option_snapshot = shared
+        else:
+            option_snapshot.save()
+            if shared_quotes is not None:
+                shared_quotes[quote_key] = option_snapshot
         quote_input = QuoteInput(
                 option_type=option_snapshot.option_type, currency=option_snapshot.currency,
                 dte=(expiration - now.astimezone(NY).date()).days, strike=option_snapshot.strike,

@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -17,6 +18,31 @@ from portfolio.models import (
     OptionContract,
     Security,
 )
+
+
+class WheelAnalysisJob(TimestampedModel):
+    """Mutable task status; financial evidence remains append-only and atomic."""
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    family = models.ForeignKey(Family, on_delete=models.PROTECT)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    selection = models.JSONField(default=dict)
+    status = models.CharField(max_length=16, default="queued", choices=[
+        ("queued", "等待启动"), ("running", "分析与清理中"),
+        ("saved", "已保存"), ("failed", "未保存"), ("interrupted", "运行已中断"),
+    ])
+    message = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField()
+    decision_ids = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ("-created_at",)
+        constraints = [models.UniqueConstraint(
+            fields=("family",), condition=Q(status__in=("queued", "running")),
+            name="wheel_one_active_analysis_per_family",
+        )]
 
 
 class AppendOnlyQuerySet(models.QuerySet):

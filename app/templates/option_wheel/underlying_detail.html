@@ -1,7 +1,9 @@
 {% extends "base.html" %}
+{% load wheel_display %}
 {% block title %}{{ security.symbol }} · 期权车轮{% endblock %}
 {% block content %}
 <div class="option-wheel-page">
+  <p>这是采集时冻结的分析，不是当前实时行情。行权模型概率由供应商提供，不等同于真实提前指派概率或结果保证；权利金仅为当时参考，不承诺当前可成交。</p>
   <section class="option-wheel-hero"><div><span class="option-wheel-eyebrow">标的分析 · 仅分析不下单</span><h1>{{ security.symbol }} · {{ security.name }}</h1><p><a href="{% url 'option_wheel:index' %}">返回车轮首页</a> · <a href="{% url 'option_wheel:holdings' %}">查看轮转持仓</a></p></div><div class="option-wheel-analysis-only"><strong>仅分析，不下单</strong><span>所有证据均按来源时点冻结。</span></div></section>
   {% if latest_decision %}
   <section class="option-wheel-status-grid">
@@ -11,7 +13,7 @@
   </section>
   {% else %}<p class="option-wheel-empty option-wheel-empty-large">尚无该标的的冻结分析。</p>{% endif %}
   <section class="option-wheel-section"><div class="option-wheel-section-heading"><div><span>候选</span><h2>最近合约</h2></div></div>
-    {% if candidates %}<div class="option-wheel-table-wrap"><table class="option-wheel-table"><thead><tr><th>决策时间</th><th>到期/行权价</th><th>权利金</th><th>指派概率</th><th>状态</th><th>原因</th></tr></thead><tbody>{% for item in candidates %}<tr><td><a href="{% url 'option_wheel:decision_detail' item.decision_id %}">{{ item.decision.decision_time|date:"m-d H:i" }}</a></td><td>{% if item.option_quote %}{{ item.option_quote.expiration }} / {{ item.option_quote.strike|floatformat:2 }}{% else %}等待{% endif %}</td><td>{{ item.premium_total|floatformat:2|default:"—" }}</td><td>{{ item.assignment_probability|floatformat:2|default:"—" }}%</td><td>{{ item.get_status_display }}</td><td>{{ item.exclusion_reasons|join:"、"|default:"无" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="option-wheel-empty">暂无候选。</p>{% endif %}
+    {% if candidates %}<div class="option-wheel-table-wrap"><table class="option-wheel-table"><thead><tr><th>决策时间</th><th>到期/行权价</th><th>权利金</th><th>行权模型概率</th><th>状态</th><th>原因</th></tr></thead><tbody>{% for item in candidates %}<tr><td><a href="{% url 'option_wheel:decision_detail' item.decision_id %}">{{ item.decision.decision_time|date:"m-d H:i" }}</a></td><td>{% if item.option_quote %}{{ item.option_quote.expiration }} / {{ item.option_quote.strike|floatformat:2 }}{% else %}等待{% endif %}</td><td>{{ item.premium_total|floatformat:2|default:"—" }}</td><td>{{ item.assignment_probability|floatformat:2|default:"—" }}%</td><td>{{ item.get_status_display }}</td><td>{{ item.exclusion_reasons|wheel_reasons }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="option-wheel-empty">暂无候选。</p>{% endif %}
   </section>
 </div>
 {% endblock %}
