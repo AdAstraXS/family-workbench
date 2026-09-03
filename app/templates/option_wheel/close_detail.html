@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}{{ report.symbol }} 收盘观察{% endblock %}
+{% block content %}
+<div class="option-wheel-page">
+  <section class="option-wheel-hero">
+    <div><span class="option-wheel-eyebrow">日级观察 · Futu · #{{ report.pk }}</span><h1>{{ report.symbol }} 收盘观察</h1>
+      <p>市场数据日：{{ report.target_date|date:"Y-m-d" }}（纽约） · 后续交易日：{{ evidence.next_session }}</p>
+      <p><a href="{% url 'option_wheel:close_index' %}">返回收盘观察清单</a></p></div>
+    <div class="option-wheel-analysis-only"><strong>仅观察，不下单</strong><span>未形成策略建议。当前买卖盘、事件风险、交割规则和账户容量均须在实际决策前重新核验。</span></div>
+  </section>
+  <section class="option-wheel-section">
+    <h2>日期与证据边界</h2>
+    <p>开始采集：{{ evidence.collected_at }} · 查询结束：{{ evidence.finished_at }}</p>
+    <p>日历类型：{{ evidence.session_type }} · 价格口径：不复权（NONE）。目标日期是日级标签，不是最后成交时间或精确收盘盘口时刻。</p>
+    <p>当前链发现日期：{{ evidence.reference_day }}。仅采样最多 3 张最近到期、接近收盘价的价外 Put；未采样 {{ evidence.unsampled_count|default:0 }} 张，不代表它们不符合策略。</p>
+    {% for issue in evidence.issues %}<p class="option-wheel-empty">{{ issue }}</p>{% endfor %}
+    <p>财报 / 除息：{{ evidence.events }}。</p>
+    <p>历史 Bid / Ask、Delta、OI：未知，不以最新快照回填。行权概率是供应商模型的日级数值，不等同于真实提前指派概率或结果保证。</p>
+    {% if evidence.pause_active %}<p class="option-wheel-empty">采集时存在相关人工暂停；本报告不解除暂停。</p>{% endif %}
+  </section>
+  <section class="option-wheel-section">
+    <h2>正股日线参考</h2>
+    <p>目标日收盘价：{{ evidence.stock_close|default_if_none:"未知" }} USD · {{ evidence.technical.status }}</p>
+    {% if evidence.technical.sma20 %}<p>SMA20：{{ evidence.technical.sma20 }} · SMA50：{{ evidence.technical.sma50 }} · 样本 {{ evidence.technical.sample_count }} 条</p><p>{{ evidence.technical.note }}</p>{% endif %}
+  </section>
+  <section class="option-wheel-section">
+    <h2>采集时的账户状态（不是历史账户回测）</h2>
+    <p>冻结显示，不随此后投资组合变化而更新。<a href="{% url 'option_wheel:index' %}#accounts-title">核对当前账户容量</a>。</p>
+    <div class="option-wheel-account-grid">{% for account in evidence.accounts %}<article class="option-wheel-account-card">
+      <h3>{{ account.name }}</h3><p>{{ account.state }}</p>
+      <p>来源确认：{{ account.source_as_of|default_if_none:"无" }} · 核对时间：{{ account.checked_at }}</p>
+      <p>快照已结算现金：{{ account.cash|default_if_none:"未知" }} {{ account.currency|default_if_none:"" }} · NAV：{{ account.nav|default_if_none:"未知" }}</p>
+      {% for reason in account.reasons %}<p>{{ reason }}</p>{% endfor %}
+    </article>{% empty %}<p>没有可关联的账户容量证据。</p>{% endfor %}</div>
+  </section>
+  <section class="option-wheel-section">
+    <h2>合约观察与数据缺口</h2>
+    <div class="option-wheel-candidate-list">{% for item in evidence.candidates %}<article class="option-wheel-candidate-card">
+      <h3>{{ item.code }}</h3><p>{{ item.status }} · 到期 {{ item.strike_time }} · 行权价 {{ item.strike_price }} USD</p>
+      <dl><div><dt>历史成交参考价 / 每股 USD</dt><dd>{{ item.close|default_if_none:"未知" }}</dd></div>
+      <div><dt>目标日成交量 / 张</dt><dd>{{ item.volume|default_if_none:"未知" }}</dd></div>
+      <div><dt>供应商日级行权概率 / %</dt><dd>{{ item.probability|default_if_none:"未知" }}</dd></div>
+      <div><dt>日级 IV / %</dt><dd>{{ item.iv|default_if_none:"未知" }}</dd></div>
+      <div><dt>日级标的 HV / %</dt><dd>{{ item.hv|default_if_none:"未知" }}</dd></div>
+      <div><dt>当前静态乘数</dt><dd>{{ item.lot_size }} 股 / 张</dd></div></dl>
+      <p>不是当前可收权利金，不提供可卖张数或收益排名。</p>
+      {% if item.reasons %}<ul>{% for reason in item.reasons %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}
+      <details><summary>日级来源标签与静态身份</summary>
+        <p>日线：{{ item.request_history_kline.time_key|default:"未知" }}</p>
+        <p>概率：{{ item.get_option_exercise_probability.timestamp_str|default:"未知" }} · Unix {{ item.get_option_exercise_probability.timestamp|default:"未知" }}</p>
+        <p>IV：{{ item.get_option_volatility.timestamp_str|default:"未知" }} · Unix {{ item.get_option_volatility.timestamp|default:"未知" }}</p>
+        <p>标准类型：{{ item.option_standard_type }} · 供应商交割类型：{{ item.option_settlement_mode|default:"未知" }}（未在本模式完整核验交割资格）</p>
+      </details>
+    </article>{% empty %}<p class="option-wheel-empty">没有可展示的采样合约；查看上方数据缺口，不等于没有投资机会。</p>{% endfor %}</div>
+    {% if evidence.excluded %}<details><summary>静态筛选排除 {{ evidence.excluded|length }} 张</summary><ul>{% for item in evidence.excluded %}<li>{{ item.code }}：{{ item.reasons|join:"；" }}</li>{% endfor %}</ul></details>{% endif %}
+  </section>
+</div>
+{% endblock %}

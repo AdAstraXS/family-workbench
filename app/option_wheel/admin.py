@@ -5,6 +5,7 @@ from django.contrib import admin
 from .models import (
     WheelBrokerAccountSnapshot,
     WheelCandidate,
+    WheelCloseReport,
     WheelCollateralReservation,
     WheelCycle,
     WheelDecision,
@@ -43,6 +44,12 @@ class EvidenceReadOnlyAdminMixin:
         if request.user and request.user.is_superuser:
             return queryset
         return queryset.none()
+
+
+@admin.register(WheelCloseReport)
+class WheelCloseReportAdmin(EvidenceReadOnlyAdminMixin, admin.ModelAdmin):
+    list_display = ("family", "symbol", "target_date", "created_at")
+    list_filter = ("family", "symbol", "target_date")
 
 
 @admin.register(WheelPolicy)

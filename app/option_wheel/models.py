@@ -78,6 +78,31 @@ class DataStatus(models.TextChoices):
     INVALID = "invalid", "无效"
 
 
+class WheelCloseReport(AppendOnlyEvidenceMixin, TimestampedModel):
+    """Independent observation evidence; never consumed by the live candidate engine."""
+
+    family = models.ForeignKey(Family, on_delete=models.PROTECT)
+    symbol = models.CharField(max_length=12)
+    target_date = models.DateField()
+    request_key = models.UUIDField()
+    evidence = models.JSONField(default=dict)
+    objects = AppendOnlyManager()
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+        constraints = [models.UniqueConstraint(fields=("family", "request_key"), name="wheel_close_request_unique")]
+
+    def clean(self):
+        super().clean()
+        if not isinstance(self.evidence, dict) or (
+            self.evidence.get("mode") != "daily-close-observation-v1"
+            or self.evidence.get("execution_allowed") is not False
+            or self.evidence.get("symbol") != self.symbol
+            or self.evidence.get("target_date") != str(self.target_date)
+        ):
+            raise ValidationError("收盘观察证据必须独立标识模式、日期和标的，且不得允许执行。")
+
+
 class DelayStatus(models.TextChoices):
     REAL_TIME = "real_time", "实时"
     DELAYED = "delayed", "延迟"

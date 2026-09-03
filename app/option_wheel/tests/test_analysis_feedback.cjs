@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../../static/js/option_wheel_analysis.js'), 'utf8');
 
-function setup(fetcher, values = {account_ids: ['1'], symbols: ['TSLA']}) {
+function setup(fetcher, values = {account_ids: ['1'], symbols: ['TSLA']}, mode = '') {
   const ids = ['form', 'feedback', 'status', 'detail', 'elapsed', 'check'];
   const nodes = Object.fromEntries(ids.map(id => [id, {hidden: true, textContent: '', attrs: {}}]));
   let listener, calls = 0, now = 0;
@@ -17,6 +17,7 @@ function setup(fetcher, values = {account_ids: ['1'], symbols: ['TSLA']}) {
   form.action = '/option-wheel/refresh-analysis/';
   form.reportValidity = () => true;
   form.setAttribute = (k, v) => { form.attrs[k] = v; };
+  form.getAttribute = k => k === 'data-analysis-mode' ? mode : form.attrs[k];
   form.addEventListener = (_, fn) => { listener = fn; };
   class Clock extends Date { static now() { return now; } }
   vm.runInNewContext(source, {
@@ -34,6 +35,16 @@ function setup(fetcher, values = {account_ids: ['1'], symbols: ['TSLA']}) {
 const response = (outcome) => ({ok: true, status: 200, redirected: false,
   headers: {get: () => 'application/json'},
   json: async () => ({kind: 'option-wheel-analysis-v1', outcome, message: '<b>仅作为文本显示</b>'})});
+
+test('close mode needs a symbol but not a live account selection; no subscription claim', async () => {
+  let resolve;
+  const app = setup(() => new Promise(r => { resolve = r; }), {symbols: ['TSLA']}, 'close');
+  const pending = app.submit();
+  app.advance(61000);
+  assert.match(app.nodes.detail.textContent, /不新增实时订阅/);
+  resolve(response('saved')); await pending;
+  assert.equal(app.calls(), 1);
+});
 
 test('waiting, elapsed time and duplicate-click lock; cleanup after success', async () => {
   let resolve;

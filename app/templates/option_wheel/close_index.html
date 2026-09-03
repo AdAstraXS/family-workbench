@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}收盘观察清单{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/option_wheel_analysis.css' %}">{% endblock %}
+{% block content %}
+<div class="option-wheel-page">
+  <section class="option-wheel-hero">
+    <div><span class="option-wheel-eyebrow">上一完整交易日 · 独立观察模式</span><h1>收盘观察清单</h1>
+      <p>为下一交易时段准备问题和核价清单，不生成可执行策略。</p>
+      <p><a href="{% url 'option_wheel:index' %}">返回实时分析与账户容量</a></p></div>
+    <div class="option-wheel-analysis-only"><strong>仅观察，不下单</strong><span>历史成交参考价不是当前可收权利金。外接 AI 尚未接入；交易连接始终关闭。</span></div>
+  </section>
+  <section class="option-wheel-section">
+    <h2>先看日期，再看合约</h2>
+    <p>按纽约交易日历选择已收盘并经过 30 分钟发布缓冲的最近交易日，支持正常及半日交易。
+      供应商日历不覆盖临时休市；目标日数据缺失时显示不足，不使用前一天数据补齐。</p>
+    <p>每次一只标的，从查询当日之后 4–9 DTE 的当前 Put 链中，按最近到期、接近目标日收盘价的价外行权价采样最多 3 张。
+      这是有限数据检查，不是低指派概率推荐，也不是完整历史期权链。</p>
+    <p>首版不核验未来财报/除息，不提供历史 Bid/Ask、Delta、OI 或可成交收益率；这些项目均须在正式建议前补齐。
+      历史数据查询可能消耗 Futu 历史额度，但不新增实时订阅。</p>
+  </section>
+  {% if request.user.is_superuser and symbols %}
+  <section class="option-wheel-section">
+    <h2>生成一份收盘观察</h2>
+    <form id="wheel-analysis-form" data-analysis-mode="close" method="post" action="{% url 'option_wheel:close_refresh' %}" class="option-wheel-preview-form">
+      {% csrf_token %}<input type="hidden" name="request_token" value="{{ request_token }}">
+      <label>标的<select name="symbols">{% for symbol in symbols %}<option value="{{ symbol }}">{{ symbol }}</option>{% endfor %}</select></label>
+      <label><input type="checkbox" name="confirm_read_only" value="yes" required> 我确认仅保存日级观察证据，不作为下单或当前权利金依据</label>
+      <button type="submit">生成收盘观察清单</button>
+      <p>账户信息来自本家庭该标的已启用的车轮策略。过期容量只标记待确认，不自动续期；不计算可卖张数。</p>
+      <p>查询进程上限 80 秒，页面等待结束不代表请求结果已确认；请勿重复提交。</p>
+    </form>
+    <div id="wheel-analysis-feedback" class="option-wheel-analysis-feedback" hidden>
+      <h3 id="wheel-analysis-status" role="status" aria-live="polite" aria-atomic="true"></h3>
+      <p id="wheel-analysis-detail"></p><p id="wheel-analysis-elapsed"></p>
+      <form id="wheel-analysis-check" method="get" action="{% url 'option_wheel:close_index' %}#recent-analysis" hidden><button type="submit">重新读取收盘观察记录（不会重新提交）</button></form>
+    </div>
+  </section>
+  {% elif request.user.is_superuser %}<p class="option-wheel-empty">尚未启用 TSLA、MSFT 或 NVDA 的家庭车轮策略。</p>{% endif %}
+  <section id="recent-analysis" class="option-wheel-section">
+    <h2>最近的收盘观察</h2><p>此处只展示收盘报告，与实时分析记录完全分开。报告为采集时证据，旧报告不会自动更新。</p>
+    {% if reports %}<div class="option-wheel-table-wrap"><table class="option-wheel-table"><thead><tr><th>保存时间</th><th>市场数据日</th><th>标的</th><th>报告</th></tr></thead>
+      <tbody>{% for report in reports %}<tr><td>{{ report.created_at|date:"Y-m-d H:i:s T" }}</td><td>{{ report.target_date|date:"Y-m-d" }}</td><td>{{ report.symbol }}</td><td><a href="{% url 'option_wheel:close_detail' report.pk %}">观察 #{{ report.pk }} · 待核验</a></td></tr>{% endfor %}</tbody></table></div>
+    {% else %}<p class="option-wheel-empty">尚无收盘观察报告。浏览本页不会抓取行情或写入数据。</p>{% endif %}
+  </section>
+</div>
+<script src="{% static 'js/option_wheel_analysis.js' %}?v=20260903-close" defer></script>
+{% endblock %}

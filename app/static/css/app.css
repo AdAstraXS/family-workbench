@@ -9012,8 +9012,21 @@ textarea {
   --option-wheel-safe: #047857;
   --option-wheel-warning: #a16207;
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
 }
+
+/* Let tables scroll inside their card, not enlarge the whole page's grid. */
+.option-wheel-page > *,
+.option-wheel-page fieldset,
+.option-wheel-hero > *,
+.option-wheel-section-heading > * {
+  min-width: 0;
+}
+
+.option-wheel-page { overflow-wrap: anywhere; }
+.option-wheel-page button { max-width: 100%; white-space: normal; }
 
 .option-wheel-hero {
   display: flex;
@@ -9537,7 +9550,7 @@ textarea {
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 760px) {
   .option-wheel-hero,
   .option-wheel-section-heading {
     align-items: stretch;

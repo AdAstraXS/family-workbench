@@ -12,6 +12,7 @@
       <h1 id="option-wheel-title">期权车轮</h1>
       <p>比较全额现金担保的 Sell Put 候选，并在已有股票时为后续 Covered Call 保留证据。</p>
       <p><a href="{% url 'option_wheel:holdings' %}">查看车轮持仓与轮转记录</a></p>
+      <p><a href="{% url 'option_wheel:close_index' %}">上一交易日观察清单 · 待开盘核价</a></p>
     </div>
     <div class="option-wheel-analysis-only" role="status">
       <strong>仅分析，不下单</strong>
@@ -351,5 +352,5 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="{% static 'js/option_wheel_analysis.js' %}" defer></script>
+  <script src="{% static 'js/option_wheel_analysis.js' %}?v=20260903-close" defer></script>
 {% endblock %}
