@@ -13,6 +13,15 @@ from portfolio.futu_option_probe import _is_standard_contract, _normalize_bool
 NY = ZoneInfo("America/New_York")
 SYMBOLS = ("TSLA", "MSFT", "NVDA")
 MODE = "daily-close-observation-v1"
+CHILD_ERRORS = {
+    "setup": "查询进程初始化失败",
+    "connect": "行情连接建立失败",
+    "collect": "日历或历史数据采集失败",
+    "serialize": "日级证据序列化失败",
+    "close": "行情连接关闭失败",
+    "calendar_query": "交易日历接口未成功",
+    "calendar_data": "交易日历日期、类型或覆盖范围无法确认",
+}
 
 
 class CloseDataError(ValueError):
@@ -243,15 +252,21 @@ def fetch_close_report(symbol):
     try:
         completed = subprocess.run(
             [sys.executable, "-m", "option_wheel.close_data", symbol],
-            capture_output=True, text=True, timeout=80, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=80, check=False,
         )
+        errors = [line.removeprefix("WHEEL_CLOSE_ERROR:") for line in completed.stdout.splitlines() if line.startswith("WHEEL_CLOSE_ERROR:")]
+        if completed.returncode:
+            reason = CHILD_ERRORS.get(errors[-1], "查询进程未正常完成") if errors else "查询进程未正常完成"
+            raise CloseDataError(f"{reason}，未保存观察报告。")
         lines = [line.removeprefix("WHEEL_CLOSE:") for line in completed.stdout.splitlines() if line.startswith("WHEEL_CLOSE:")]
-        if completed.returncode or len(lines) != 1:
-            raise CloseDataError("收盘查询未成功，未保存观察报告。")
+        if len(lines) != 1:
+            raise CloseDataError("查询进程没有返回唯一报告，未保存观察报告。")
         result = json.loads(lines[0])
-        if result.get("mode") != MODE or result.get("symbol") != symbol:
+        if not isinstance(result, dict) or result.get("mode") != MODE or result.get("symbol") != symbol:
             raise ValueError("invalid result")
         return result
+    except CloseDataError:
+        raise
     except subprocess.TimeoutExpired:
         raise CloseDataError("收盘查询超过 80 秒，已结束只读查询进程，未保存报告。") from None
     except (OSError, ValueError):
@@ -259,19 +274,35 @@ def fetch_close_report(symbol):
 
 
 if __name__ == "__main__":
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-    import django
-    django.setup()
-    from django.conf import settings
-    import futu
-
     context = None
+    stage = "setup"
+    error = None
+    output = None
     try:
+        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+        import django
+        django.setup()
+        from django.conf import settings
+        import futu
+
+        stage = "connect"
         context = futu.OpenQuoteContext(host=settings.FUTU_OPEND_HOST, port=settings.FUTU_OPEND_PORT)
+        stage = "collect"
         result = collect(context, sys.argv[1], datetime.now(NY))
-        print("WHEEL_CLOSE:" + json.dumps(result, ensure_ascii=True))
+        stage = "serialize"
+        output = json.dumps(result, ensure_ascii=True)
+    except CloseDataError as exc:
+        error = "calendar_query" if str(exc).startswith("request_trading_days") else "calendar_data"
     except Exception:
-        sys.exit(1)
+        error = stage
     finally:
         if context is not None:
-            context.close()
+            try:
+                context.close()
+            except Exception:
+                error = error or "close"
+    # Emit after context shutdown so SDK log lines cannot interleave with the frame.
+    if error:
+        print("\nWHEEL_CLOSE_ERROR:" + error, flush=True)
+        sys.exit(1)
+    print("\nWHEEL_CLOSE:" + output, flush=True)

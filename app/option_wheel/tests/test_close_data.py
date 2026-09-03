@@ -163,3 +163,27 @@ class CloseDataTests(SimpleTestCase):
         with self.assertRaises(CloseDataError) as error:
             fetch_close_report("TSLA")
         self.assertNotIn("secret", str(error.exception))
+
+    @patch("option_wheel.close_data.subprocess.run")
+    def test_child_error_codes_survive_value_error_handler(self, run):
+        run.return_value.returncode = 1
+        run.return_value.stdout = "provider secret\nWHEEL_CLOSE_ERROR:calendar_data\n"
+        with self.assertRaisesMessage(CloseDataError, "交易日历日期、类型或覆盖范围无法确认"):
+            fetch_close_report("TSLA")
+        run.return_value.stdout = "WHEEL_CLOSE_ERROR:secret-api-token\n"
+        with self.assertRaisesMessage(CloseDataError, "查询进程未正常完成") as error:
+            fetch_close_report("TSLA")
+        self.assertNotIn("secret", str(error.exception))
+
+    @patch("option_wheel.close_data.subprocess.run")
+    def test_success_frame_and_duplicate_or_non_object_response(self, run):
+        import json
+        run.return_value.returncode = 0
+        payload = {"mode": "daily-close-observation-v1", "symbol": "TSLA"}
+        frame = "WHEEL_CLOSE:" + json.dumps(payload) + "\n"
+        run.return_value.stdout = "SDK log\n" + frame
+        self.assertEqual(fetch_close_report("TSLA"), payload)
+        for text in (frame * 2, "WHEEL_CLOSE:[]\n", "WHEEL_CLOSE:invalid\n"):
+            run.return_value.stdout = text
+            with self.assertRaises(CloseDataError):
+                fetch_close_report("TSLA")
