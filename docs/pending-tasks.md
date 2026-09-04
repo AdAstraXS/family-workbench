@@ -361,9 +361,18 @@
   `6331285a8a02094c69c0cb3815a8bf3461b94a25159bfe45dc7f88b245827a10`；源码恢复点
   `source-predeploy-32957461e23967b44fa0b6bdf56857d08bd56feb-20260904-230950.tar.gz` SHA-256 为
   `528d3a4583506ee54089f070bf04765f1c928050b645e2fce92f00b27ba2c589`。
-- [ ] 2026-09-04 待发布：正式只读分析的单次标的上限由 3 个提高到 9 个，并按每批最多 3 个
+- [x] 2026-09-04 已发布：正式只读分析的单次标的上限由 3 个提高到 9 个，并按每批最多 3 个
   顺序采集，避免突破 Futu 60 个订阅额度；任务有效期及页面轮询相应延长。页面在超过上限时
   直接阻止提交，后台明确拒绝的校验错误直接显示，不再轮询不存在的任务。
+  提交 `610d8473e3e117061f95240eec2dfdb79627cacb` 已推送至 `origin/codex/option-wheel` 并部署 NAS。
+  部署包 `family-workbench-610d847.tar.gz` SHA-256 为
+  `66e43ff68e243bebe621c741e5c86b6f9582417d109c7ff868eb3dcc531b705c`；部署前数据库备份
+  `/volume1/docker/family-workbench/backups/family-workbench-pre-wheel-batch-nine-20260904.dump`
+  SHA-256 为 `9dd872c8918a18f9321b9fa5645ea5e62b430ce9d032181a309d78b44d0754b9`，回滚包
+  `source-predeploy-ea19622db92ac6fae50c517f12558453d23b1b8b-20260904-233004.tar.gz`。
+  迁移无新增项；部署前后账户 35、持仓 468、流水 1051、快照 1472、快照明细 9066，
+  最新快照日均为 `2026-09-04`，每日估值运行均为 48；数据库与 OpenD 未重启，生产 `.env`
+  指纹未变化。
 
 #### AI 情报 / 关键人物动态
 
