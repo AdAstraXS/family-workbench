@@ -127,6 +127,15 @@ class WheelModelTest(TestCase):
     def setUp(self):
         self.sequence = count(1)
 
+    def test_policy_defaults_allow_ten_minute_quotes(self):
+        policy = WheelPolicy(
+            family=self.family,
+            account=self.other_account,
+            underlying=self.tsla,
+        )
+        self.assertEqual(policy.quote_max_age_seconds, 600)
+        self.assertEqual(policy.ruleset_version, "m1-v2")
+
     def test_lifecycle_rejects_covered_call_below_assigned_cost(self):
         policy = self.policy()
         cycle = WheelCycle.objects.create(
@@ -465,7 +474,7 @@ class WheelModelTest(TestCase):
             (
                 None,
                 None,
-                {"source_as_of": VERIFIED_TIME - timedelta(minutes=5)},
+                {"source_as_of": VERIFIED_TIME - timedelta(minutes=11)},
                 None,
                 "market_snapshot",
             ),

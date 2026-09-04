@@ -74,6 +74,11 @@ def _field(dynamic, name):
     return item.get("value") if isinstance(item, dict) else None
 
 
+def _field_as_of(dynamic, name):
+    item = dynamic.get(name, {}) if isinstance(dynamic, dict) else {}
+    return item.get("as_of") if isinstance(item, dict) else None
+
+
 def _history_metrics(history):
     rows = history.get("records", []) if isinstance(history, dict) else []
     cleaned = []
@@ -299,7 +304,11 @@ def persist_probe_symbol(*, family, account, symbol_result, shared_quotes=None):
     candidates = []
     for item in symbol_result.get("representative_contracts", []):
         dynamic = item.get("dynamic_quote", {})
-        quote_as_of = _provider_time(dynamic.get("last_price", {}).get("as_of"))
+        # Bid/ask values come from get_market_snapshot, so their source time and
+        # quality—not the last-trade time from get_stock_quote—govern whether
+        # the executable quote is fresh enough for a candidate.
+        quote_as_of = _provider_time(_field_as_of(dynamic, "bid_price"))
+        analytics_as_of = _field_as_of(dynamic, "last_price")
         expiration = datetime.fromisoformat(str(item.get("strike_time"))[:10]).date()
         standard = str(item.get("option_standard_type", "")).upper() in {"STANDARD", "NORMAL"}
         option_type = (
@@ -326,10 +335,16 @@ def persist_probe_symbol(*, family, account, symbol_result, shared_quotes=None):
             vega=_quantized(_field(dynamic, "vega"), EIGHT_DP), rho=_quantized(_field(dynamic, "rho"), EIGHT_DP),
             assignment_probability=_quantized(item.get("analytics", {}).get("probability", {}).get("fields", {}).get("strike_probability", {}).get("value"), FOUR_DP),
             quote_as_of=quote_as_of,
-            delay_status=DelayStatus.REAL_TIME if _field(dynamic, "quote_delay_status") == "real_time" else DelayStatus.UNKNOWN,
-            freshness_status=Freshness.FRESH if _field(dynamic, "quote_freshness_status") == "fresh" else Freshness.UNKNOWN,
+            delay_status=DelayStatus.REAL_TIME if _field(dynamic, "snapshot_delay_status") == "real_time" else DelayStatus.UNKNOWN,
+            freshness_status=Freshness.FRESH if _field(dynamic, "snapshot_freshness_status") == "fresh" else Freshness.UNKNOWN,
             data_quality=DataStatus.COMPLETE if item.get("contract_identity_status") == "ok" else DataStatus.PARTIAL,
-            sanitized_metadata={"analytics": item.get("analytics", {})},
+            sanitized_metadata={
+                "analytics": item.get("analytics", {}),
+                "source_times": {
+                    "executable_quote_as_of": _field_as_of(dynamic, "bid_price"),
+                    "analytics_quote_as_of": analytics_as_of,
+                },
+            },
         )
         # Reuse only within this atomic job, never silently overwrite older evidence.
         quote_key = (option_snapshot.provider, option_snapshot.provider_contract_code, quote_as_of)

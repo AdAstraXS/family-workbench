@@ -274,13 +274,13 @@ class WheelPolicy(TimestampedModel):
     )
     quote_max_age_seconds = models.PositiveIntegerField(
         "报价最大年龄（秒）",
-        default=120,
+        default=600,
         validators=[MinValueValidator(1)],
     )
     ruleset_version = models.CharField(
         "规则集版本",
         max_length=30,
-        default="m1-v1",
+        default="m1-v2",
     )
 
     class Meta:

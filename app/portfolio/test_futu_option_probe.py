@@ -16,6 +16,7 @@ from portfolio.futu_option_probe import (
     FAILED,
     PARTIAL,
     ProbeLock,
+    _quote_time_quality,
     probe_symbol,
     records_from,
     resolve_profile,
@@ -66,6 +67,24 @@ class ValidateSymbolsTest(SimpleTestCase):
     def test_rejects_code_starting_with_punctuation(self):
         with self.assertRaises(ValueError):
             validate_symbols(["US.-TSLA"])
+
+
+class QuoteTimeQualityTest(SimpleTestCase):
+    def test_five_minute_old_option_quote_is_still_fresh(self):
+        probe_time = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
+        quote_time = probe_time - timedelta(minutes=5)
+        self.assertEqual(
+            _quote_time_quality(quote_time.isoformat(), probe_time),
+            ("real_time", "fresh"),
+        )
+
+    def test_quote_older_than_ten_minutes_is_stale(self):
+        probe_time = datetime(2026, 9, 4, 10, 0, tzinfo=timezone.utc)
+        quote_time = probe_time - timedelta(seconds=601)
+        self.assertEqual(
+            _quote_time_quality(quote_time.isoformat(), probe_time),
+            ("delayed", "stale"),
+        )
 
 
 class ResolveProfileTest(SimpleTestCase):

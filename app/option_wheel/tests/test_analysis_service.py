@@ -1,5 +1,4 @@
-from datetime import timedelta
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -53,6 +52,8 @@ class WheelAnalysisServiceTests(TestCase):
             "delta": self.metadata("-0.2", as_of), "gamma": self.metadata("0.01", as_of),
             "theta": self.metadata("-0.1", as_of), "vega": self.metadata("0.2", as_of),
             "rho": self.metadata("-0.01", as_of), "contract_size": self.metadata(100, as_of),
+            "snapshot_delay_status": self.metadata("real_time", as_of),
+            "snapshot_freshness_status": self.metadata("fresh", as_of),
             "quote_delay_status": self.metadata("real_time", as_of),
             "quote_freshness_status": self.metadata("fresh", as_of),
         }
@@ -105,6 +106,78 @@ class WheelAnalysisServiceTests(TestCase):
         self.assertEqual(candidate.status, OverallStatus.INVESTIGATION)
         self.assertIn("execution_gate_closed", candidate.exclusion_reasons)
         self.assertEqual(candidate.assignment_probability, Decimal("18.5"))
+
+    @override_settings(OPTION_WHEEL_EXECUTION_ENABLED=False)
+    def test_executable_quote_freshness_uses_market_snapshot_time(self):
+        WheelPolicy.objects.create(family=self.family, account=self.account, underlying=self.stock)
+        WheelBrokerAccountSnapshot.objects.create(
+            family=self.family, account=self.account,
+            source_kind=WheelBrokerAccountSnapshot.SOURCE_PORTFOLIO_READONLY,
+            source_reference="portfolio:snapshot-time", currency="USD",
+            settled_cash=Decimal("120000"), unsettled_cash=Decimal("0"), nav=Decimal("120000"),
+            reserved_cash=Decimal("0"), margin_loan_balance=Decimal("0"), uses_margin=False,
+            positions_summary={"items": [], "complete": True}, open_obligations={"items": [], "complete": True},
+            source_as_of=timezone.now(), data_status=DataStatus.COMPLETE,
+        )
+        result = self.probe_result()
+        dynamic = result["representative_contracts"][0]["dynamic_quote"]
+        stale_last_trade = (timezone.now() - timedelta(minutes=10)).astimezone(
+            ZoneInfo("America/New_York")
+        ).replace(microsecond=0).isoformat(sep=" ")
+        for name in (
+            "last_price", "volume", "open_interest", "implied_volatility",
+            "delta", "gamma", "theta", "vega", "rho", "contract_size",
+            "quote_delay_status", "quote_freshness_status",
+        ):
+            dynamic[name]["as_of"] = stale_last_trade
+        dynamic["quote_delay_status"]["value"] = "delayed"
+        dynamic["quote_freshness_status"]["value"] = "stale"
+
+        decision = persist_probe_symbol(
+            family=self.family, account=self.account, symbol_result=result,
+        )
+
+        option_quote = decision.candidates.get().option_quote
+        expected = datetime.fromisoformat(dynamic["bid_price"]["as_of"])
+        self.assertEqual(option_quote.quote_as_of, expected.astimezone(ZoneInfo("UTC")))
+        self.assertEqual(option_quote.delay_status, "real_time")
+        self.assertEqual(option_quote.freshness_status, "fresh")
+        self.assertEqual(
+            option_quote.sanitized_metadata["source_times"]["analytics_quote_as_of"],
+            stale_last_trade,
+        )
+        self.assertNotIn("quote_age_expired", decision.candidates.get().exclusion_reasons)
+
+    @override_settings(OPTION_WHEEL_EXECUTION_ENABLED=False)
+    def test_stale_market_snapshot_still_blocks_candidate(self):
+        WheelPolicy.objects.create(family=self.family, account=self.account, underlying=self.stock)
+        WheelBrokerAccountSnapshot.objects.create(
+            family=self.family, account=self.account,
+            source_kind=WheelBrokerAccountSnapshot.SOURCE_PORTFOLIO_READONLY,
+            source_reference="portfolio:stale-snapshot", currency="USD",
+            settled_cash=Decimal("120000"), unsettled_cash=Decimal("0"), nav=Decimal("120000"),
+            reserved_cash=Decimal("0"), margin_loan_balance=Decimal("0"), uses_margin=False,
+            positions_summary={"items": [], "complete": True}, open_obligations={"items": [], "complete": True},
+            source_as_of=timezone.now(), data_status=DataStatus.COMPLETE,
+        )
+        result = self.probe_result()
+        dynamic = result["representative_contracts"][0]["dynamic_quote"]
+        stale_snapshot = (timezone.now() - timedelta(minutes=10)).astimezone(
+            ZoneInfo("America/New_York")
+        ).replace(microsecond=0).isoformat(sep=" ")
+        for name in ("bid_price", "ask_price", "bid_vol", "ask_vol"):
+            dynamic[name]["as_of"] = stale_snapshot
+        dynamic["snapshot_delay_status"] = self.metadata("delayed", stale_snapshot)
+        dynamic["snapshot_freshness_status"] = self.metadata("stale", stale_snapshot)
+
+        decision = persist_probe_symbol(
+            family=self.family, account=self.account, symbol_result=result,
+        )
+
+        reasons = decision.candidates.get().exclusion_reasons
+        self.assertIn("quote_delay", reasons)
+        self.assertIn("quote_freshness", reasons)
+        self.assertIn("quote_age_expired", reasons)
 
     @override_settings(OPTION_WHEEL_EXECUTION_ENABLED=False)
     def test_premarket_global_state_blocks_candidate(self):

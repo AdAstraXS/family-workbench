@@ -989,7 +989,7 @@ def _expiration_detail(raw_value, probe_dt):
         }
 
 
-def _quote_time_quality(raw_value, probe_dt, max_age_seconds=120):
+def _quote_time_quality(raw_value, probe_dt, max_age_seconds=600):
     """Classify US quote timestamps documented by Futu as New York time."""
     if not raw_value:
         return "unknown", "unknown"
