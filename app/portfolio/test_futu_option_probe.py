@@ -1506,9 +1506,9 @@ class ProbeFlowSafetyTest(SimpleTestCase):
         first, second = result["expirations"]
         self.assertEqual(first["dte"], 6)
         self.assertEqual(first["weekday"], "Wednesday")
-        self.assertTrue(first["is_4_to_9_dte"])
+        self.assertFalse(first["is_7_to_30_dte"])
         self.assertEqual(second["dte"], 10)
-        self.assertFalse(second["is_4_to_9_dte"])
+        self.assertTrue(second["is_7_to_30_dte"])
 
     def test_invalid_expiration_is_visible_and_partial(self):
         class InvalidExpirationContext(DynamicContext):

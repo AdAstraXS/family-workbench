@@ -217,24 +217,24 @@ class WheelPolicy(TimestampedModel):
         "最低权利金",
         max_digits=20,
         decimal_places=4,
-        default=Decimal("200"),
+        default=Decimal("90"),
         validators=[MinValueValidator(Decimal("0"))],
     )
     preferred_premium_max = models.DecimalField(
         "最高权利金",
         max_digits=20,
         decimal_places=4,
-        default=Decimal("400"),
+        default=Decimal("500"),
         validators=[MinValueValidator(Decimal("0"))],
     )
     preferred_dte_min = models.PositiveIntegerField(
         "最短到期天数",
-        default=4,
+        default=7,
         validators=[MinValueValidator(1)],
     )
     preferred_dte_max = models.PositiveIntegerField(
         "最长到期天数",
-        default=9,
+        default=30,
         validators=[MinValueValidator(1)],
     )
     max_underlying_nav_ratio = models.DecimalField(
@@ -251,7 +251,7 @@ class WheelPolicy(TimestampedModel):
         "最大买卖价差比例",
         max_digits=10,
         decimal_places=6,
-        default=Decimal("0.15"),
+        default=Decimal("1"),
         validators=[
             MinValueValidator(Decimal("0")),
             MaxValueValidator(Decimal("1")),
@@ -259,13 +259,13 @@ class WheelPolicy(TimestampedModel):
     )
     min_open_interest = models.PositiveIntegerField(
         "最小未平仓量",
-        default=100,
-        validators=[MinValueValidator(1)],
+        default=0,
+        validators=[MinValueValidator(0)],
     )
     min_volume = models.PositiveIntegerField(
         "最小成交量",
-        default=10,
-        validators=[MinValueValidator(1)],
+        default=0,
+        validators=[MinValueValidator(0)],
     )
     account_snapshot_max_age_minutes = models.PositiveIntegerField(
         "账户快照最大年龄（分钟）",
@@ -280,7 +280,7 @@ class WheelPolicy(TimestampedModel):
     ruleset_version = models.CharField(
         "规则集版本",
         max_length=30,
-        default="m1-v2",
+        default="decision-v1",
     )
 
     class Meta:
@@ -1253,6 +1253,11 @@ class WheelCandidate(AppendOnlyEvidenceMixin, TimestampedModel):
         default=list,
         blank=True,
     )
+    warning_reasons = models.JSONField(
+        "风险提示",
+        default=list,
+        blank=True,
+    )
     calculation_details = models.JSONField(
         "计算详情",
         default=dict,
@@ -1420,24 +1425,15 @@ class WheelCandidate(AppendOnlyEvidenceMixin, TimestampedModel):
                     and quote.bid > 0
                     and _finite_decimal(quote.ask)
                     and quote.ask >= quote.bid
-                    and quote.open_interest is not None
                     and policy is not None
-                    and quote.open_interest >= policy.min_open_interest
-                    and quote.volume is not None
-                    and quote.volume >= policy.min_volume
                     and _finite_decimal(quote.assignment_probability)
                     and Decimal("0")
                     <= quote.assignment_probability
                     <= Decimal("100")
                 )
-                if quote_values_ok:
-                    midpoint = (quote.bid + quote.ask) / Decimal("2")
-                    spread_ratio = (quote.ask - quote.bid) / midpoint
-                    if spread_ratio > policy.max_spread_ratio:
-                        quote_values_ok = False
                 if not quote_values_ok:
                     errors["option_quote"] = (
-                        "可执行候选要求有效报价、流动性和指派概率。"
+                        "可执行候选要求有效报价和指派概率。"
                     )
 
                 dte = (

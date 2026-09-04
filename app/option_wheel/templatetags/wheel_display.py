@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from django import template
 
 register = template.Library()
@@ -22,12 +24,15 @@ REASONS = {
     "quote_delay": "报价实时性未通过", "quote_freshness": "报价新鲜度未通过",
     "quote_age_invalid": "报价时间无效", "quote_age_future": "报价时间在未来",
     "quote_age_expired": "报价超过允许时效", "quote_session": "未核实为正常交易时段",
-    "quote_bid": "买价无效", "quote_ask": "卖价无效", "quote_spread": "买卖价差超过上限",
-    "quote_open_interest": "未平仓合约数不足", "quote_volume": "成交量不足",
+    "quote_bid": "买价无效", "quote_ask": "卖价无效", "quote_spread": "买卖价差较宽，成交价格需复核",
+    "quote_open_interest": "未平仓合约数偏低，流动性需复核", "quote_volume": "当日成交量偏低，流动性需复核",
     "quote_probability_missing": "行权模型概率缺失", "quote_probability_range": "行权模型概率数值无效",
     "event": "财报或除息门控未通过", "technical": "技术证据不完整",
-    "cash_insufficient": "可用现金不足以全额担保", "nav_ratio": "标的敞口超过账户净值上限",
-    "execution_gate_closed": "执行闸门关闭，仅供分析",
+    "cash_insufficient": "现金不足以全额担保；如选择该合约需在券商端复核保证金与剩余流动性",
+    "nav_ratio": "指派后标的名义敞口超过账户净值上限",
+    "premium_preference_mismatch": "权利金不在当前偏好区间",
+    "dte_preference_mismatch": "到期天数不在当前偏好区间",
+    "execution_gate_closed": "仅供筛选与决策参考，系统不下单",
     "covered_shares_insufficient": "可用于备兑的正股不足 100 股",
     "covered_call_cost_basis_missing": "备兑正股成本证据缺失",
     "covered_call_strike_below_cost": "看涨期权行权价低于正股成本",
@@ -38,7 +43,7 @@ REASONS = {
 
 @register.filter
 def wheel_reason(value):
-    return REASONS.get(str(value), "其他规则阻断：" + str(value))
+    return REASONS.get(str(value), "其他规则提示：" + str(value))
 
 
 @register.filter
@@ -46,3 +51,20 @@ def wheel_reasons(values):
     if not values:
         return "无"
     return "；".join(wheel_reason(v) for v in (values if isinstance(values, list) else [values]))
+
+
+@register.filter
+def wheel_status(value):
+    return {
+        "investigation": "可比较",
+        "blocked": "已排除",
+        "executable": "可比较",
+    }.get(str(value), str(value))
+
+
+@register.filter
+def wheel_percent(value):
+    try:
+        return Decimal(str(value)) * Decimal("100")
+    except (InvalidOperation, TypeError, ValueError):
+        return None

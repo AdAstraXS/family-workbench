@@ -78,7 +78,7 @@ class JobTests(TestCase):
         self.assertEqual(WheelDecision.objects.count(), 1)
         self.assertEqual(job.decision_ids, [WheelDecision.objects.get().pk])
         self.assertFalse(WheelDecision.objects.get().execution_gate_open)
-        fetch.assert_called_once()
+        fetch.assert_called_once_with(["TSLA"], covered_call_symbols=set())
         data = self.client.get(reverse("option_wheel:job_status", args=[job.pk])).json()
         self.assertEqual(data["results"][0]["url"], reverse("option_wheel:decision_detail", args=job.decision_ids))
 
@@ -99,7 +99,7 @@ class JobTests(TestCase):
     @patch("option_wheel.jobs.fetch_probe")
     def test_capacity_and_policy_rechecked_after_query(self, fetch):
         job = self.create_job()
-        def changed(_):
+        def changed(*args, **kwargs):
             WheelPolicy.objects.filter(pk=self.policy.pk).update(enabled=False)
             return [self.probe_result()]
         fetch.side_effect = changed
@@ -170,6 +170,10 @@ class JobTests(TestCase):
         result = {"status": "success", "symbols": [{"symbol": "US.TSLA"}]}
         run.return_value = SimpleNamespace(returncode=0, stdout="log\nWHEEL_LIVE:" + json.dumps(result))
         self.assertEqual(fetch_probe(["TSLA"]), result["symbols"])
+        command = run.call_args.args[0]
+        self.assertNotIn("--calls-for=TSLA", command)
+        self.assertEqual(fetch_probe(["TSLA"], {"TSLA"}), result["symbols"])
+        self.assertIn("--calls-for=TSLA", run.call_args.args[0])
         result["symbols"] = []
         run.return_value.stdout = "WHEEL_LIVE:" + json.dumps(result)
         with self.assertRaises(WheelAnalysisError): fetch_probe(["TSLA"])
@@ -180,7 +184,7 @@ class JobTests(TestCase):
         with self.assertRaisesMessage(WheelAnalysisError, "订阅清理状态需核对"): fetch_probe(["TSLA"])
 
     def test_chinese_reason_and_model_probability_disclaimer(self):
-        self.assertEqual(wheel_reason("cash_insufficient"), "可用现金不足以全额担保")
+        self.assertIn("券商端复核保证金", wheel_reason("cash_insufficient"))
         self.assertIn("备兑", wheel_reason("covered_shares_insufficient"))
         self.assertIn("报价", wheel_reasons(["quote_age_expired"]))
         response = self.client.get(reverse("option_wheel:index"))
@@ -221,7 +225,7 @@ class JobTests(TestCase):
     def test_superseded_worker_and_revoked_admin_never_commit(self, fetch):
         for condition in ("interrupted", "revoked"):
             job = self.create_job()
-            def changed(_):
+            def changed(*args, **kwargs):
                 if condition == "interrupted":
                     WheelAnalysisJob.objects.filter(pk=job.pk).update(status="interrupted")
                 else:

@@ -142,6 +142,7 @@ class EvaluationContext:
 class EvaluationResult:
     status: str
     reason_codes: tuple[str, ...]
+    warning_codes: tuple[str, ...]
     required_cash: Decimal | None
     premium_total: Decimal | None
     break_even: Decimal | None
@@ -226,6 +227,7 @@ def evaluate_sell_put(
     contract_count: object = 1,
 ) -> EvaluationResult:
     reasons: list[str] = []
+    warnings: list[str] = []
 
     if not isinstance(policy.enabled, bool) or policy.enabled is not True:
         reasons.append(POLICY_DISABLED)
@@ -271,9 +273,9 @@ def evaluate_sell_put(
         config_ok = False
     elif not (Decimal(0) <= spread_limit <= Decimal(1)):
         config_ok = False
-    if not _is_strict_int(min_oi) or min_oi < 1:
+    if not _is_strict_int(min_oi) or min_oi < 0:
         config_ok = False
-    if not _is_strict_int(min_vol) or min_vol < 1:
+    if not _is_strict_int(min_vol) or min_vol < 0:
         config_ok = False
     if not _is_strict_int(acct_age_min) or acct_age_min <= 0:
         config_ok = False
@@ -309,15 +311,15 @@ def evaluate_sell_put(
         reasons.append(ACCOUNT_AGE_EXPIRED)
 
     if not isinstance(account.uses_margin, bool):
-        reasons.append(ACCOUNT_MARGIN_STATUS_UNKNOWN)
+        warnings.append(ACCOUNT_MARGIN_STATUS_UNKNOWN)
     elif account.uses_margin is True:
-        reasons.append(ACCOUNT_MARGIN_ACTIVE)
+        warnings.append(ACCOUNT_MARGIN_ACTIVE)
 
     margin_known = _is_decimal(account.margin_loan_balance)
     if not margin_known:
-        reasons.append(ACCOUNT_MARGIN_BALANCE_UNKNOWN)
+        warnings.append(ACCOUNT_MARGIN_BALANCE_UNKNOWN)
     elif account.margin_loan_balance != Decimal(0):
-        reasons.append(ACCOUNT_MARGIN_ACTIVE)
+        warnings.append(ACCOUNT_MARGIN_ACTIVE)
 
     nav_known = _is_decimal(account.nav)
     if not nav_known:
@@ -327,17 +329,17 @@ def evaluate_sell_put(
 
     cash_known = _is_decimal(account.settled_cash)
     if not cash_known:
-        reasons.append(ACCOUNT_CASH_MISSING)
+        warnings.append(ACCOUNT_CASH_MISSING)
     elif account.settled_cash < Decimal(0):
-        reasons.append(ACCOUNT_CASH_NEGATIVE)
+        warnings.append(ACCOUNT_CASH_NEGATIVE)
 
     reserved_known = _is_decimal(account.reserved_cash)
     if not reserved_known:
-        reasons.append(ACCOUNT_RESERVED_MISSING)
+        warnings.append(ACCOUNT_RESERVED_MISSING)
     elif account.reserved_cash < Decimal(0):
-        reasons.append(ACCOUNT_RESERVED_NEGATIVE)
+        warnings.append(ACCOUNT_RESERVED_NEGATIVE)
     elif cash_known and account.reserved_cash > account.settled_cash:
-        reasons.append(ACCOUNT_RESERVED_EXCEEDS)
+        warnings.append(ACCOUNT_RESERVED_EXCEEDS)
 
     exposure_known = _is_decimal(account.already_exposed_notional)
     if not exposure_known:
@@ -477,27 +479,21 @@ def evaluate_sell_put(
         midpoint = (quote.ask + quote.bid) / Decimal(2)
         if midpoint > Decimal(0):
             observed_spread = (quote.ask - quote.bid) / midpoint
-            if observed_spread > spread_limit:
-                reasons.append(QUOTE_SPREAD)
 
     oi_ok = (
         _is_strict_int(quote.open_interest)
         and quote.open_interest >= 0
     )
     if not oi_ok:
-        reasons.append(QUOTE_OI)
-    elif config_ok and quote.open_interest < min_oi:
-        reasons.append(QUOTE_OI)
+        warnings.append(QUOTE_OI)
 
     volume_ok = _is_strict_int(quote.volume) and quote.volume >= 0
     if not volume_ok:
-        reasons.append(QUOTE_VOLUME)
-    elif config_ok and quote.volume < min_vol:
-        reasons.append(QUOTE_VOLUME)
+        warnings.append(QUOTE_VOLUME)
 
     probability_valid = _is_decimal(quote.assignment_probability)
     if not probability_valid:
-        reasons.append(QUOTE_PROBABILITY_MISSING)
+        warnings.append(QUOTE_PROBABILITY_MISSING)
     elif not (
         Decimal(0)
         <= quote.assignment_probability
@@ -509,7 +505,7 @@ def evaluate_sell_put(
     if _normalize_enum(context.event_status) != "CLEAR":
         reasons.append(EVENT)
     if _normalize_enum(context.technical_status) != "COMPLETE":
-        reasons.append(TECHNICAL)
+        warnings.append(TECHNICAL)
 
     calculation_ready = (
         count_ok
@@ -549,7 +545,7 @@ def evaluate_sell_put(
             and required_cash is not None
             and required_cash > unreserved_cash
         ):
-            reasons.append(CASH_INSUFFICIENT)
+            warnings.append(CASH_INSUFFICIENT)
 
     if exposure_known and required_cash is not None:
         assignment_exposure = (
@@ -574,13 +570,14 @@ def evaluate_sell_put(
         dte_preference_match = dte_min <= quote.dte <= dte_max
 
     reasons = list(dict.fromkeys(reasons))
+    warnings = list(dict.fromkeys(warnings))
     if reasons:
         status = "blocked"
     elif (
         not isinstance(context.execution_gate_open, bool)
         or context.execution_gate_open is not True
     ):
-        reasons.append(EXECUTION_GATE_CLOSED)
+        warnings.append(EXECUTION_GATE_CLOSED)
         status = "investigation"
     else:
         status = "executable"
@@ -606,6 +603,7 @@ def evaluate_sell_put(
     return EvaluationResult(
         status=status,
         reason_codes=tuple(reasons),
+        warning_codes=tuple(warnings),
         required_cash=required_cash,
         premium_total=premium_total,
         break_even=break_even,

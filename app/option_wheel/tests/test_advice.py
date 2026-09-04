@@ -31,6 +31,7 @@ class AdviceContractTests(SimpleTestCase):
             implied_volatility=Decimal("40"), volume=500, open_interest=1000, contract_multiplier=100)
         self.candidate = Obj(candidate_key="US.INTC_TEST_P", status="investigation",
             exclusion_reasons=["execution_gate_closed"], assignment_probability=Decimal("18.5"),
+            warning_reasons=[], premium_preference_match=True, dte_preference_match=True,
             premium_total=Decimal("41"), option_quote=quote, strategy="sell_put")
 
     def packet(self, candidates=None):
@@ -57,9 +58,10 @@ class AdviceContractTests(SimpleTestCase):
         self.decision.blockers = ["event unknown"]
         self.assertEqual(self.packet()["candidates"], [])
 
-    def test_missing_probability_or_bid_is_not_low_risk(self):
+    def test_missing_probability_is_compared_with_warning_but_bid_is_required(self):
         self.candidate.assignment_probability = None
-        self.assertEqual(self.packet()["candidates"], [])
+        self.candidate.warning_reasons = ["quote_probability_missing"]
+        self.assertEqual(len(self.packet()["candidates"]), 1)
         self.candidate.assignment_probability = Decimal("18")
         self.candidate.option_quote.bid = None
         self.assertEqual(self.packet()["candidates"], [])

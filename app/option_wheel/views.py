@@ -365,8 +365,6 @@ def index(request):
             decision_blockers.append("最近决策的行情尚未完成实时新鲜度核验")
         if latest_decision.event_status != EventStatus.CLEAR:
             decision_blockers.append("最近决策的综合事件门控尚未通过")
-        if latest_decision.technical_status != TechnicalStatus.COMPLETE:
-            decision_blockers.append("最近决策的技术证据尚不完整")
 
     family_underlying_ids = {
         policy.underlying_id for policy in policies
@@ -431,6 +429,13 @@ def index(request):
             candidate.display_exclusion_reasons = []
         else:
             candidate.display_exclusion_reasons = [reasons]
+        warnings = candidate.warning_reasons
+        if isinstance(warnings, list):
+            candidate.display_warning_reasons = warnings
+        elif warnings in (None, ""):
+            candidate.display_warning_reasons = []
+        else:
+            candidate.display_warning_reasons = [warnings]
 
     readiness_blockers = account_blockers + decision_blockers
     data_ready = not readiness_blockers

@@ -111,7 +111,8 @@ class SellPutRulesTest(TestCase):
             context=self.context(execution_gate_open=False)
         )
         self.assertEqual(result.status, "investigation")
-        self.assertEqual(result.reason_codes, ("execution_gate_closed",))
+        self.assertEqual(result.reason_codes, ())
+        self.assertEqual(result.warning_codes, ("execution_gate_closed",))
 
     def test_decimal_calculations_use_conservative_bid(self):
         result = self.evaluate()
@@ -153,8 +154,8 @@ class SellPutRulesTest(TestCase):
             reserved_cash=Decimal("3000"),
         )
         result = self.evaluate(context=self.context(account=account))
-        self.assertEqual(result.status, "blocked")
-        self.assertIn("cash_insufficient", result.reason_codes)
+        self.assertEqual(result.status, "executable")
+        self.assertIn("cash_insufficient", result.warning_codes)
         self.assertEqual(result.calculation_details["unreserved_cash"], "9000")
 
     def test_nav_limit_includes_existing_exposure(self):

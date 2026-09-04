@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static wheel_display %}
 {% block title %}AI 策略建议 · {{ decision.underlying.symbol }}{% endblock %}
 {% block content %}
 <div class="option-wheel-page">
@@ -7,7 +7,7 @@
     <div><span class="option-wheel-eyebrow">只读 · 冻结样本对比</span><h1>{{ decision.underlying.symbol }} AI 策略建议</h1>
       <p>{{ decision.account.account_name }} · 证据时间 {{ decision.decision_time|date:"Y-m-d H:i:s T" }}</p>
       <a href="{% url 'option_wheel:decision_detail' decision.pk %}">返回完整证据</a></div>
-    <div class="option-wheel-analysis-only"><strong>仅分析，不下单</strong><span>AI 只能解释证据，不能改变规则资格；旧分析不是当前交易许可。</span></div>
+    <div class="option-wheel-analysis-only"><strong>仅分析，不下单</strong><span>AI 比较候选与风险提示，最终选择和券商保证金复核均由你完成。</span></div>
   </section>
   <section class="option-wheel-section" id="ai-result" {% if ai_state == 'pending' %}data-ai-pending="true"{% endif %}>
     <h2>AI 结论与理由</h2>
@@ -35,12 +35,12 @@
     {% endif %}
   </section>
   <section class="option-wheel-section"><h2>先看是否值得进一步比较</h2>
-    {% if selected %}<p>采集时有 {{ eligible_count }} 个样本通过基础分析规则，展示其中行权模型概率较低的最多三个。不是当前可交易清单，不代表全链最优。</p>
-    {% else %}<p>本份证据没有可进入对比的候选：保持观望。不会要求 AI 绕过现金、报价或财报规则补出推荐。</p>{% endif %}
-    <p>下面所有金额均由已有规则计算，AI 不得修改。不同候选是替代方案，不能将它们的权利金相加。正式使用前必须重新核对实时行情与账户容量。</p>
-    <div class="option-wheel-table-wrap"><table class="option-wheel-table"><thead><tr><th>合约</th><th>策略</th><th>权利金</th><th>所需现金</th><th>盈亏平衡</th><th>行权模型概率</th></tr></thead>
-      <tbody>{% for c in selected %}<tr><td>{{ c.candidate_key }}</td><td>{{ c.get_strategy_display }}</td><td>{{ c.premium_total|floatformat:2 }} USD</td><td>{{ c.required_cash|floatformat:2|default:"—" }}</td><td>{{ c.break_even|floatformat:2|default:"—" }}</td><td>{{ c.assignment_probability|floatformat:2 }}%</td></tr>
-      {% empty %}<tr><td colspan="6">无可比较样本；排除原因请查看完整证据。</td></tr>{% endfor %}</tbody></table></div>
+    {% if selected %}<p>采集时有 {{ eligible_count }} 个样本没有触发硬排除，展示排序靠前的最多三个。带风险提示的候选仍会进入比较；这不是当前可交易清单，也不代表全链最优。</p>
+    {% else %}<p>本份证据没有可进入对比的候选：保持观望。AI 不会绕过无效报价、跨财报或净值敞口等硬边界补出推荐。</p>{% endif %}
+    <p>下面金额由规则计算，AI 不得修改。Sell Put 的“指派名义金额”不是券商保证金要求；正式下单前必须在券商端核对初始保证金、维持保证金和剩余流动性。</p>
+    <div class="option-wheel-table-wrap"><table class="option-wheel-table"><thead><tr><th>合约</th><th>策略</th><th>权利金</th><th>指派名义金额</th><th>盈亏平衡</th><th>行权模型概率</th><th>偏好匹配</th><th>风险提示</th></tr></thead>
+      <tbody>{% for c in selected %}<tr><td>{{ c.candidate_key }}</td><td>{{ c.get_strategy_display }}</td><td>{{ c.premium_total|floatformat:2 }} USD</td><td>{{ c.required_cash|floatformat:2|default:"—" }}</td><td>{{ c.break_even|floatformat:2|default:"—" }}</td><td>{{ c.assignment_probability|floatformat:2|default:"—" }}%</td><td>DTE {% if c.dte_preference_match %}符合{% else %}不符合{% endif %} / 权利金 {% if c.premium_preference_match %}符合{% else %}不符合{% endif %}</td><td>{{ c.warning_reasons|wheel_reasons }}</td></tr>
+      {% empty %}<tr><td colspan="8">无可比较样本；硬排除原因请查看完整证据。</td></tr>{% endfor %}</tbody></table></div>
   </section>
   <section class="option-wheel-section"><h2>AI 将解释什么</h2>
     <p>权利金与行权风险的取舍、期限差异、技术位置及已提供的财报/除息风险；也可以建议不做。</p>

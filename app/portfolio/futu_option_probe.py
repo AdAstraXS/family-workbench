@@ -975,7 +975,7 @@ def _expiration_detail(raw_value, probe_dt):
             "date": expiration_date.isoformat(),
             "weekday": expiration_date.strftime("%A"),
             "dte": dte,
-            "is_4_to_9_dte": 4 <= dte <= 9,
+            "is_7_to_30_dte": 7 <= dte <= 30,
             "status": "ok",
         }
     except (TypeError, ValueError, OverflowError):
@@ -984,7 +984,7 @@ def _expiration_detail(raw_value, probe_dt):
             "date": None,
             "weekday": None,
             "dte": None,
-            "is_4_to_9_dte": None,
+            "is_7_to_30_dte": None,
             "status": "parse_error",
         }
 
@@ -1024,6 +1024,7 @@ def probe_symbol(
     event_calendar_cache=None,
     subscription_started_at=None,
     monotonic=None,
+    include_covered_call=True,
 ):
     """Probe one underlying while isolating provider failures from other symbols."""
     ret_ok = getattr(futu_module, "RET_OK", 0)
@@ -1114,8 +1115,8 @@ def probe_symbol(
                 eligible_details.append(detail)
 
         if config.get("profile") == "m1-gate":
-            preferred = [item for item in eligible_details if item["is_4_to_9_dte"]]
-            other_future = [item for item in eligible_details if item["dte"] > 0 and not item["is_4_to_9_dte"]]
+            preferred = [item for item in eligible_details if item["is_7_to_30_dte"]]
+            other_future = [item for item in eligible_details if item["dte"] > 0 and not item["is_7_to_30_dte"]]
             eligible_details = preferred + other_future
         expiration_details = eligible_details[:max_expirations]
         expirations = [
@@ -1183,7 +1184,11 @@ def probe_symbol(
             partial = True
 
         remaining = list(put_rows)
-        include_call = config.get("profile") == "m1-gate" and max_contracts_per_expiration > 1
+        include_call = (
+            config.get("profile") == "m1-gate"
+            and max_contracts_per_expiration > 1
+            and include_covered_call
+        )
         put_limit = max_contracts_per_expiration - 1 if include_call else max_contracts_per_expiration
         for _ in range(put_limit):
             selected, metadata = select_representative_put(remaining, spot)
@@ -1721,6 +1726,7 @@ def run_probe(
     lock_factory=None,
     monotonic=None,
     sleeper=None,
+    covered_call_symbols=None,
 ):
     """Run one isolated capability probe and return a JSON-safe result."""
     probe_now = datetime.now(timezone.utc)
@@ -1751,6 +1757,16 @@ def run_probe(
 
     try:
         normalized_symbols = validate_symbols(symbols)
+        if covered_call_symbols is None:
+            normalized_covered_call_symbols = set(normalized_symbols)
+        elif covered_call_symbols:
+            normalized_covered_call_symbols = set(
+                validate_symbols(covered_call_symbols)
+            )
+        else:
+            normalized_covered_call_symbols = set()
+        if not normalized_covered_call_symbols.issubset(set(normalized_symbols)):
+            raise ValueError("covered call symbols must be a subset of symbols")
         if len(normalized_symbols) > MAX_SYMBOLS:
             raise ValueError(
                 f"symbols count exceeds MAX_SYMBOLS={MAX_SYMBOLS}"
@@ -1993,6 +2009,7 @@ def run_probe(
                         event_calendar_cache=event_calendar_cache,
                         subscription_started_at=subscription_started_at,
                         monotonic=monotonic,
+                        include_covered_call=(symbol in normalized_covered_call_symbols),
                     )
                 except Exception:
                     symbol_result = {

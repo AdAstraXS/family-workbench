@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from family_core.models import Family
 from portfolio.models import InvestmentAccount
-from .analysis_service import WheelAnalysisError, persist_probe_symbol
+from .analysis_service import WheelAnalysisError, covered_position, persist_probe_symbol
 from .models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelPolicy
 from .probe_diagnostics import probe_failure_summary
 
@@ -92,10 +92,15 @@ def enqueue(family, user, key, selection):
     return job
 
 
-def fetch_probe(symbols):
+def fetch_probe(symbols, covered_call_symbols=None):
+    covered_call_symbols = sorted(set(covered_call_symbols or []))
+    command = [sys.executable, "-m", "option_wheel.live_probe"]
+    if covered_call_symbols:
+        command.append("--calls-for=" + ",".join(covered_call_symbols))
+    command.extend("US." + symbol for symbol in symbols)
     try:
         completed = subprocess.run(
-            [sys.executable, "-m", "option_wheel.live_probe", *["US." + s for s in symbols]],
+            command,
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=PROBE_SECONDS, check=False,
         )
@@ -119,6 +124,22 @@ def fetch_probe(symbols):
         raise WheelAnalysisError("行情查询进程或响应异常，未保存分析；订阅清理状态需核对。") from None
 
 
+def covered_call_symbols(family, accounts, symbols):
+    """Return symbols with an unencumbered round lot in any selected account."""
+    eligible = set()
+    for account in accounts:
+        snapshot = WheelBrokerAccountSnapshot.objects.filter(
+            family=family, account=account,
+        ).order_by("-source_as_of", "-pk").first()
+        if snapshot is None:
+            continue
+        for symbol in symbols:
+            available_shares, _ = covered_position(snapshot, symbol)
+            if available_shares >= 100:
+                eligible.add(symbol)
+    return eligible
+
+
 def run_job(job_id):
     now = timezone.now()
     if not WheelAnalysisJob.objects.filter(pk=job_id, status="queued", expires_at__gt=now).update(status="running", started_at=now):
@@ -127,8 +148,13 @@ def run_job(job_id):
         job = WheelAnalysisJob.objects.select_related("family", "requested_by").get(pk=job_id)
         if not job.requested_by.is_active or not job.requested_by.is_superuser:
             raise WheelAnalysisError("申请人的管理员权限已失效，未保存分析。")
-        validate_selection(job.family, job.selection)
-        rows = fetch_probe(job.selection["symbols"])
+        accounts = validate_selection(job.family, job.selection)
+        call_symbols = covered_call_symbols(
+            job.family, accounts, job.selection["symbols"]
+        )
+        rows = fetch_probe(
+            job.selection["symbols"], covered_call_symbols=call_symbols
+        )
         with transaction.atomic():
             job = WheelAnalysisJob.objects.select_for_update().get(pk=job_id)
             if job.status != "running" or job.expires_at <= timezone.now():

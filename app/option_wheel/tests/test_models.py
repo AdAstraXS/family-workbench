@@ -134,7 +134,7 @@ class WheelModelTest(TestCase):
             underlying=self.tsla,
         )
         self.assertEqual(policy.quote_max_age_seconds, 600)
-        self.assertEqual(policy.ruleset_version, "m1-v2")
+        self.assertEqual(policy.ruleset_version, "decision-v1")
 
     def test_lifecycle_rejects_covered_call_below_assigned_cost(self):
         policy = self.policy()
@@ -346,9 +346,10 @@ class WheelModelTest(TestCase):
         policy = self.policy()
 
         self.assertTrue(policy.enabled)
-        self.assertEqual(policy.preferred_premium_min, Decimal("200"))
-        self.assertEqual(policy.preferred_premium_max, Decimal("400"))
-        self.assertEqual((policy.preferred_dte_min, policy.preferred_dte_max), (4, 9))
+        self.assertEqual(policy.preferred_premium_min, Decimal("90"))
+        self.assertEqual(policy.preferred_premium_max, Decimal("500"))
+        self.assertEqual((policy.preferred_dte_min, policy.preferred_dte_max), (7, 30))
+        self.assertEqual((policy.min_open_interest, policy.min_volume), (0, 0))
         self.assertEqual(policy.max_underlying_nav_ratio, Decimal("1"))
         policy.full_clean()
 

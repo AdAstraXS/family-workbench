@@ -111,8 +111,6 @@ class FailClosedRulesTest(TestCase):
             {"preferred_dte_max": None},
             {"min_open_interest": 1.0},
             {"min_volume": True},
-            {"min_open_interest": 0},
-            {"min_volume": 0},
             {"account_snapshot_max_age_minutes": None},
             {"quote_max_age_seconds": 300.0},
             {"ruleset_version": 1},
@@ -149,7 +147,7 @@ class FailClosedRulesTest(TestCase):
                 self.assertEqual(result.status, "blocked")
                 self.assertIn(code, result.reason_codes)
 
-    def test_margin_use_or_unknown_margin_data_blocks(self):
+    def test_margin_use_or_unknown_margin_data_warns(self):
         cases = [
             ({"uses_margin": "yes"}, "account_margin_status_unknown"),
             ({"uses_margin": True}, "account_margin_active"),
@@ -161,18 +159,13 @@ class FailClosedRulesTest(TestCase):
                 result = self.evaluate(
                     context=self.context(account=self.account(**overrides))
                 )
-                self.assertEqual(result.status, "blocked")
-                self.assertIn(code, result.reason_codes)
+                self.assertEqual(result.status, "executable")
+                self.assertIn(code, result.warning_codes)
 
-    def test_unknown_or_invalid_account_balances_block(self):
+    def test_unknown_or_invalid_nav_and_exposure_block(self):
         cases = [
             ({"nav": None}, "account_nav_missing"),
             ({"nav": Decimal("-1")}, "account_nav_nonpositive"),
-            ({"settled_cash": None}, "account_cash_missing"),
-            ({"settled_cash": Decimal("-5")}, "account_cash_negative"),
-            ({"reserved_cash": None}, "account_reserved_missing"),
-            ({"reserved_cash": Decimal("-1")}, "account_reserved_negative"),
-            ({"reserved_cash": Decimal("60000")}, "account_reserved_exceeds"),
             ({"already_exposed_notional": None}, "account_exposure_missing"),
             (
                 {"already_exposed_notional": Decimal("-1")},
@@ -186,6 +179,22 @@ class FailClosedRulesTest(TestCase):
                 )
                 self.assertEqual(result.status, "blocked")
                 self.assertIn(code, result.reason_codes)
+
+    def test_cash_fields_are_margin_review_warnings(self):
+        cases = [
+            ({"settled_cash": None}, "account_cash_missing"),
+            ({"settled_cash": Decimal("-5")}, "account_cash_negative"),
+            ({"reserved_cash": None}, "account_reserved_missing"),
+            ({"reserved_cash": Decimal("-1")}, "account_reserved_negative"),
+            ({"reserved_cash": Decimal("60000")}, "account_reserved_exceeds"),
+        ]
+        for overrides, code in cases:
+            with self.subTest(overrides=overrides):
+                result = self.evaluate(
+                    context=self.context(account=self.account(**overrides))
+                )
+                self.assertEqual(result.status, "executable")
+                self.assertIn(code, result.warning_codes)
 
     def test_contract_count_requires_strict_positive_integer(self):
         for count in (True, 0, -1, "1", 1.0):
@@ -274,28 +283,6 @@ class FailClosedRulesTest(TestCase):
             ({"bid": Decimal("0")}, "quote_bid", self.policy()),
             ({"ask": Decimal("4")}, "quote_ask", self.policy()),
             ({"ask": 5.5}, "quote_ask", self.policy()),
-            ({"ask": Decimal("7")}, "quote_spread", self.policy()),
-            (
-                {"open_interest": 500.0},
-                "quote_open_interest",
-                self.policy(),
-            ),
-            (
-                {"open_interest": 0},
-                "quote_open_interest",
-                self.policy(min_open_interest=1),
-            ),
-            ({"volume": 1000.0}, "quote_volume", self.policy()),
-            (
-                {"volume": 0},
-                "quote_volume",
-                self.policy(min_volume=1),
-            ),
-            (
-                {"assignment_probability": None},
-                "quote_probability_missing",
-                self.policy(),
-            ),
             (
                 {"assignment_probability": Decimal("101")},
                 "quote_probability_range",
@@ -304,11 +291,6 @@ class FailClosedRulesTest(TestCase):
             (
                 {"assignment_probability": Decimal("-1")},
                 "quote_probability_range",
-                self.policy(),
-            ),
-            (
-                {"assignment_probability": 50.0},
-                "quote_probability_missing",
                 self.policy(),
             ),
         ]
@@ -320,16 +302,35 @@ class FailClosedRulesTest(TestCase):
                 self.assertEqual(result.status, "blocked")
                 self.assertIn(code, result.reason_codes)
 
-    def test_unknown_event_or_technical_analysis_blocks(self):
+    def test_liquidity_thresholds_do_not_block_or_warn(self):
+        result = self.evaluate(quote=self.quote(
+            ask=Decimal("7"), open_interest=0, volume=0,
+        ))
+        self.assertEqual(result.status, "executable")
+        self.assertNotIn("quote_spread", result.warning_codes)
+        self.assertNotIn("quote_open_interest", result.warning_codes)
+        self.assertNotIn("quote_volume", result.warning_codes)
+
+    def test_missing_liquidity_or_probability_fields_warn(self):
         cases = [
-            ({"event_status": "ELEVATED"}, "event"),
-            ({"technical_status": "PARTIAL"}, "technical"),
+            ({"open_interest": 500.0}, "quote_open_interest"),
+            ({"volume": 1000.0}, "quote_volume"),
+            ({"assignment_probability": None}, "quote_probability_missing"),
+            ({"assignment_probability": 50.0}, "quote_probability_missing"),
         ]
         for overrides, code in cases:
             with self.subTest(overrides=overrides):
-                result = self.evaluate(context=self.context(**overrides))
-                self.assertEqual(result.status, "blocked")
-                self.assertIn(code, result.reason_codes)
+                result = self.evaluate(quote=self.quote(**overrides))
+                self.assertEqual(result.status, "executable")
+                self.assertIn(code, result.warning_codes)
+
+    def test_unknown_event_blocks_but_technical_analysis_warns(self):
+        event = self.evaluate(context=self.context(event_status="ELEVATED"))
+        self.assertEqual(event.status, "blocked")
+        self.assertIn("event", event.reason_codes)
+        technical = self.evaluate(context=self.context(technical_status="PARTIAL"))
+        self.assertEqual(technical.status, "executable")
+        self.assertIn("technical", technical.warning_codes)
 
     def test_malformed_values_do_not_raise_and_reasons_are_unique(self):
         result = self.evaluate(
@@ -359,8 +360,6 @@ class FailClosedRulesTest(TestCase):
             "account_status",
             "account_currency",
             "account_nav_missing",
-            "account_cash_missing",
-            "account_reserved_missing",
             "account_exposure_missing",
             "option_type",
             "strike",
@@ -371,6 +370,8 @@ class FailClosedRulesTest(TestCase):
             "multiplier",
         }
         self.assertTrue(expected.issubset(result.reason_codes))
+        self.assertIn("account_cash_missing", result.warning_codes)
+        self.assertIn("account_reserved_missing", result.warning_codes)
         self.assertEqual(len(result.reason_codes), len(set(result.reason_codes)))
 
     def test_non_finite_decimals_fail_closed_without_raising(self):
@@ -395,12 +396,6 @@ class FailClosedRulesTest(TestCase):
             ),
             (
                 self.context(),
-                self.quote(assignment_probability=Decimal("NaN")),
-                self.policy(),
-                "quote_probability_missing",
-            ),
-            (
-                self.context(),
                 self.quote(),
                 self.policy(max_underlying_nav_ratio=Decimal("Infinity")),
                 "config_invalid",
@@ -421,3 +416,9 @@ class FailClosedRulesTest(TestCase):
                 )
                 self.assertEqual(result.status, "blocked")
                 self.assertIn(code, result.reason_codes)
+
+        probability = self.evaluate(
+            quote=self.quote(assignment_probability=Decimal("NaN"))
+        )
+        self.assertEqual(probability.status, "executable")
+        self.assertIn("quote_probability_missing", probability.warning_codes)

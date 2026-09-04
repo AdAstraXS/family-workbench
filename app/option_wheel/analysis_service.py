@@ -125,7 +125,7 @@ def _existing_exposure(snapshot, symbol):
     return total
 
 
-def _covered_position(snapshot, symbol):
+def covered_position(snapshot, symbol):
     quantity = Decimal("0")
     cost_basis = None
     summary = snapshot.positions_summary if isinstance(snapshot.positions_summary, dict) else {}
@@ -257,8 +257,6 @@ def persist_probe_symbol(*, family, account, symbol_result, shared_quotes=None):
     blockers.extend(f"策略已暂停：{pause.reason}" for pause in active_pauses)
     if not regular:
         blockers.append("行情未通过正常交易时段实时新鲜度核验")
-    if technical.status != TechnicalStatus.COMPLETE:
-        blockers.append("技术指标证据不完整")
     if event_status != EventStatus.CLEAR:
         blockers.append("财报或除息事件状态未通过")
     exposure = _existing_exposure(account_snapshot, symbol)
@@ -303,6 +301,15 @@ def persist_probe_symbol(*, family, account, symbol_result, shared_quotes=None):
     )
     candidates = []
     for item in symbol_result.get("representative_contracts", []):
+        raw_option_type = str(item.get("option_type", "")).upper()
+        available_shares = cost_basis = None
+        if raw_option_type == "CALL":
+            available_shares, cost_basis = covered_position(account_snapshot, symbol)
+            # Covered calls are relevant only when this account has an
+            # unencumbered round lot.  Do not manufacture a blocked Call row
+            # for an account that cannot use the strategy.
+            if available_shares < Decimal("100"):
+                continue
         dynamic = item.get("dynamic_quote", {})
         # Bid/ask values come from get_market_snapshot, so their source time and
         # quality—not the last-trade time from get_stock_quote—govern whether
@@ -313,7 +320,7 @@ def persist_probe_symbol(*, family, account, symbol_result, shared_quotes=None):
         standard = str(item.get("option_standard_type", "")).upper() in {"STANDARD", "NORMAL"}
         option_type = (
             WheelOptionQuoteSnapshot.CALL
-            if str(item.get("option_type", "")).upper() == "CALL"
+            if raw_option_type == "CALL"
             else WheelOptionQuoteSnapshot.PUT
         )
         option_snapshot = WheelOptionQuoteSnapshot(
@@ -387,50 +394,67 @@ def persist_probe_symbol(*, family, account, symbol_result, shared_quotes=None):
                 "premium_preference_match": result.premium_preference_match,
                 "dte_preference_match": result.dte_preference_match,
                 "exclusion_reasons": sell_put_reasons,
+                "warning_reasons": list(result.warning_codes),
                 "calculation_details": result.calculation_details,
             }
         else:
-            available_shares, cost_basis = _covered_position(account_snapshot, symbol)
             dte = (expiration - now.astimezone(NY).date()).days
             reasons = list(blockers)
-            if available_shares < Decimal("100"):
-                reasons.append("covered_shares_insufficient")
+            warnings = []
             if cost_basis is None:
-                reasons.append("covered_call_cost_basis_missing")
+                warnings.append("covered_call_cost_basis_missing")
             elif option_snapshot.strike < cost_basis:
-                reasons.append("covered_call_strike_below_cost")
+                warnings.append("covered_call_strike_below_cost")
             if option_snapshot.data_quality != DataStatus.COMPLETE:
                 reasons.append("quote_quality")
             if option_snapshot.delay_status != DelayStatus.REAL_TIME or option_snapshot.freshness_status != Freshness.FRESH:
                 reasons.append("quote_not_realtime_fresh")
             if option_snapshot.bid is None or option_snapshot.bid <= 0 or option_snapshot.ask is None or option_snapshot.ask < option_snapshot.bid:
                 reasons.append("quote_bid_ask")
-            if option_snapshot.open_interest is None or option_snapshot.open_interest < policy.min_open_interest:
-                reasons.append("quote_open_interest")
-            if option_snapshot.volume is None or option_snapshot.volume < policy.min_volume:
-                reasons.append("quote_volume")
+            if option_snapshot.open_interest is None:
+                warnings.append("quote_open_interest")
+            if option_snapshot.volume is None:
+                warnings.append("quote_volume")
             if option_snapshot.assignment_probability is None:
-                reasons.append("quote_probability_missing")
+                warnings.append("quote_probability_missing")
             if dte <= 0:
                 reasons.append("dte")
             premium = option_snapshot.bid * Decimal("100") if option_snapshot.bid is not None else None
+            spread_ratio = None
+            if (
+                option_snapshot.bid is not None
+                and option_snapshot.ask is not None
+                and option_snapshot.ask >= option_snapshot.bid
+            ):
+                midpoint = (option_snapshot.ask + option_snapshot.bid) / Decimal("2")
+                if midpoint > 0:
+                    spread_ratio = (option_snapshot.ask - option_snapshot.bid) / midpoint
             annualized = (
                 premium / (cost_basis * Decimal("100")) * Decimal("365") / Decimal(dte)
                 if premium is not None and cost_basis and dte > 0 else None
             )
-            if not reasons:
-                reasons.append("execution_gate_closed")
+            premium_match = premium is not None and policy.preferred_premium_min <= premium <= policy.preferred_premium_max
+            dte_match = policy.preferred_dte_min <= dte <= policy.preferred_dte_max
+            if technical.status != TechnicalStatus.COMPLETE:
+                warnings.append("technical")
+            warnings.append("execution_gate_closed")
             candidate_values = {
                 "strategy": "covered_call",
-                "status": OverallStatus.BLOCKED if reasons != ["execution_gate_closed"] else OverallStatus.INVESTIGATION,
+                "status": OverallStatus.BLOCKED if reasons else OverallStatus.INVESTIGATION,
                 "required_cash": None, "premium_total": _quantized(premium, FOUR_DP),
                 "break_even": _quantized(max(cost_basis - option_snapshot.bid, Decimal("0")), SIX_DP) if cost_basis is not None and option_snapshot.bid is not None else None,
                 "annualized_premium_rate": _quantized(annualized, EIGHT_DP),
                 "assignment_probability": option_snapshot.assignment_probability,
-                "premium_preference_match": premium is not None and policy.preferred_premium_min <= premium <= policy.preferred_premium_max,
-                "dte_preference_match": policy.preferred_dte_min <= dte <= policy.preferred_dte_max,
+                "premium_preference_match": premium_match,
+                "dte_preference_match": dte_match,
                 "exclusion_reasons": list(dict.fromkeys(reasons)),
-                "calculation_details": {"covered_shares_available": str(available_shares), "cost_basis": str(cost_basis) if cost_basis is not None else None, "dte": dte},
+                "warning_reasons": list(dict.fromkeys(warnings)),
+                "calculation_details": {
+                    "covered_shares_available": str(available_shares),
+                    "cost_basis": str(cost_basis) if cost_basis is not None else None,
+                    "dte": dte,
+                    "spread_ratio": str(spread_ratio) if spread_ratio is not None else None,
+                },
             }
         candidates.append(WheelCandidate.objects.create(
             decision=decision, option_quote=option_snapshot,

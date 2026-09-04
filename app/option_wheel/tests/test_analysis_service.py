@@ -104,7 +104,8 @@ class WheelAnalysisServiceTests(TestCase):
         self.assertEqual(WheelOptionQuoteSnapshot.objects.count(), 1)
         candidate = WheelCandidate.objects.get()
         self.assertEqual(candidate.status, OverallStatus.INVESTIGATION)
-        self.assertIn("execution_gate_closed", candidate.exclusion_reasons)
+        self.assertEqual(candidate.exclusion_reasons, [])
+        self.assertIn("execution_gate_closed", candidate.warning_reasons)
         self.assertEqual(candidate.assignment_probability, Decimal("18.5"))
 
     @override_settings(OPTION_WHEEL_EXECUTION_ENABLED=False)
@@ -233,6 +234,37 @@ class WheelAnalysisServiceTests(TestCase):
         self.assertEqual(candidate.status, OverallStatus.INVESTIGATION)
         self.assertEqual(candidate.premium_total, Decimal("300.0000"))
         self.assertEqual(candidate.calculation_details["cost_basis"], "300")
+
+    @override_settings(OPTION_WHEEL_EXECUTION_ENABLED=False)
+    def test_covered_call_is_not_a_candidate_without_round_lot(self):
+        WheelPolicy.objects.create(
+            family=self.family, account=self.account, underlying=self.stock
+        )
+        WheelBrokerAccountSnapshot.objects.create(
+            family=self.family, account=self.account,
+            source_kind=WheelBrokerAccountSnapshot.SOURCE_PORTFOLIO_READONLY,
+            source_reference="portfolio:no-covered-lot", currency="USD",
+            settled_cash=Decimal("20000"), unsettled_cash=Decimal("0"),
+            nav=Decimal("120000"), reserved_cash=Decimal("0"),
+            margin_loan_balance=Decimal("0"), uses_margin=False,
+            positions_summary={"items": [], "complete": True},
+            open_obligations={"items": [], "complete": True},
+            source_as_of=timezone.now(), data_status=DataStatus.COMPLETE,
+        )
+        result = self.probe_result()
+        result["representative_contracts"][0].update({
+            "code": "US.TSLA_TEST_C", "option_type": "CALL",
+            "strike_price": "310",
+        })
+
+        decision = persist_probe_symbol(
+            family=self.family, account=self.account, symbol_result=result
+        )
+
+        candidate = decision.candidates.get()
+        self.assertEqual(candidate.strategy, "wait")
+        self.assertEqual(candidate.exclusion_reasons, ["no_valid_contract"])
+        self.assertFalse(WheelOptionQuoteSnapshot.objects.exists())
 
     def test_active_pause_blocks_new_candidate(self):
         WheelPolicy.objects.create(family=self.family, account=self.account, underlying=self.stock)
