@@ -373,6 +373,13 @@
   迁移无新增项；部署前后账户 35、持仓 468、流水 1051、快照 1472、快照明细 9066，
   最新快照日均为 `2026-09-04`，每日估值运行均为 48；数据库与 OpenD 未重启，生产 `.env`
   指纹未变化。
+  任务 `6369fb9f-ee5b-4897-9f37-e7be0e9e4f29` 暴露的三标的批次提前校验缺陷已修复：
+  `MAX_DYNAMIC_CANDIDATES` 由 12 调整为 27（3 标的 × 3 到期日 × 3 合约），并补充安全诊断与
+  回归测试；修复提交 `7da67e650cd68abb4bb3aa27a9094c31999d38d2` 已部署并标记为运行版本。
+  本次修复部署前数据库备份为
+  `/volume1/docker/family-workbench/backups/family-workbench-fix-dynamic-candidate-limit-20260904.dump`
+  （SHA-256 `a28344482bd801db0bf9640878943255e2b5d5a911ec26ad697c9441e9e20714`），回滚包为
+  `source-predeploy-610d8473e3e117061f95240eec2dfdb79627cacb-20260904-235103.tar.gz`。
 
 #### AI 情报 / 关键人物动态
 
