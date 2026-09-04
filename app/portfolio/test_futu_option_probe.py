@@ -2174,10 +2174,10 @@ class FinalFlowGuardTest(SimpleTestCase):
                 contexts = []
                 locks = []
                 result = run_probe(
-                    self._symbols(13),
+                    self._symbols(10),
                     profile=profile,
                     subscribe_quotes=profile == "static",
-                    max_expirations=1,
+                    max_expirations=3,
                     max_contracts_per_expiration=1,
                     futu_module=FakeFutu(),
                     context_factory=lambda: contexts.append(True),
@@ -2190,6 +2190,24 @@ class FinalFlowGuardTest(SimpleTestCase):
                 )
                 self.assertEqual(contexts, [])
                 self.assertEqual(locks, [])
+
+    def test_three_symbol_live_batch_fits_dynamic_candidate_limit(self):
+        context = DynamicContext()
+        lock = FakeLock()
+        result = run_probe(
+            ["US.TSLA", "US.MSFT", "US.NVDA"],
+            profile="m1-gate",
+            max_expirations=3,
+            max_contracts_per_expiration=3,
+            futu_module=FakeFutu(),
+            context_factory=lambda: context,
+            lock_factory=lambda: lock,
+        )
+
+        self.assertNotIn("dynamic candidate limit exceeded", result["errors"])
+        self.assertTrue(context.calls)
+        self.assertTrue(context.closed)
+        self.assertTrue(lock.released)
 
     def test_static_probe_is_not_subject_to_dynamic_candidate_limit(self):
         context = FakeContext()

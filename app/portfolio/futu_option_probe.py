@@ -17,7 +17,9 @@ SUCCESS = "success"
 PARTIAL = "partial"
 FAILED = "failed"
 MAX_SYMBOLS = 20
-MAX_DYNAMIC_CANDIDATES = 12
+# A live batch contains at most three symbols.  Each symbol samples up to
+# three expirations and three representative contracts per expiration.
+MAX_DYNAMIC_CANDIDATES = 27
 MAX_EXPIRATION_SCAN = 50
 MAX_DIVIDEND_CALENDAR_PAGES = 7
 DIVIDEND_CALENDAR_PAGE_SIZE = 200

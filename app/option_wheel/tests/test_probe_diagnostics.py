@@ -46,6 +46,16 @@ class ProbeDiagnosticTests(SimpleTestCase):
         self.assertIn("TSLA：历史价格：SDK 参数不兼容", text)
         self.assertIn("TSLA：概率数据：SDK 不支持接口", text)
 
+    def test_dynamic_candidate_limit_has_safe_diagnostic(self):
+        result = {
+            "errors": ["dynamic candidate limit exceeded: 30>27"],
+            "market_state": {},
+            "subscription": {},
+        }
+        text = probe_failure_summary(result, {"TSLA"})
+        self.assertIn("本批候选数量超过系统上限", text)
+        self.assertNotIn("30>27", text)
+
     def test_fallback_and_bounded_output(self):
         self.assertIn("未返回可分类的失败项", probe_failure_summary({}, {"TSLA"}))
         result = {"errors": ["unknown"] * 100, "symbols": []}

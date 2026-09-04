@@ -71,6 +71,8 @@ def _issue_text(issue):
             methods = issue.split(":", 1)[1].split(",")
             names = [STEPS.get(method, "其他必要接口") for method in methods[:8]]
             return "SDK 不支持：" + "、".join(names)
+        if issue.startswith("dynamic candidate limit exceeded:"):
+            return "本批候选数量超过系统上限"
         if issue.startswith("subscription_cleanup:"):
             return "临时订阅未完全恢复"
         return "未分类错误（原始内容已隐藏）"
