@@ -11,13 +11,21 @@
   const labels = {queued: '等待启动', running: '分析与订阅清理中', saved: '分析已保存', failed: '本次未保存分析', interrupted: '任务超时或中断，需核对'};
   let submitted = false;
   let attempts = 0;
+  const maxSymbols = 9;
   const safePath = (url) => typeof url === 'string' && /^\/option-wheel\/(jobs\/[0-9a-f-]+\/(status\/)?|decisions\/[0-9]+\/)$/.test(url);
   async function request(url, options = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
       const response = await fetch(url, {...options, credentials: 'same-origin', headers: {Accept: 'application/json'}, signal: controller.signal});
-      if (response.redirected || !response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('unconfirmed');
+      if (response.redirected) throw new Error('unconfirmed');
+      if (!response.ok) {
+        const body = await response.text();
+        const error = new Error(body && !body.includes('<') ? body.slice(0, 500) : '服务器拒绝了本次提交，请核对选择和账户状态。');
+        error.rejected = true;
+        throw error;
+      }
+      if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('unconfirmed');
       const job = await response.json();
       if (job.kind !== 'option-wheel-job-v1' || !labels[job.status] || !safePath(job.status_url) || !safePath(job.detail_url)) throw new Error('invalid');
       return job;
@@ -52,7 +60,7 @@
       detail.textContent = '后台任务不会因此取消。仅重试读取状态，不会重复提交分析；也可稍后重新打开任务记录。';
       check.hidden = false;
     }
-    if (again && attempts < 100) setTimeout(() => poll(url), 3000);
+    if (again && attempts < 260) setTimeout(() => poll(url), 3000);
     else if (again) detail.textContent = '本页暂停自动查询，请重新打开任务记录核对结果；不会重新提交分析。';
   }
   if (page) poll(page.getAttribute('data-status-url'));
@@ -64,6 +72,9 @@
     if (!body.getAll('account_ids').length || !body.getAll('symbols').length) {
       status.textContent = '尚未提交'; detail.textContent = '请至少选择一个账户和一个标的。'; return;
     }
+    if (body.getAll('symbols').length > maxSymbols) {
+      status.textContent = '尚未提交'; detail.textContent = '每次最多选择 9 个标的。'; return;
+    }
     submitted = true;
     for (const control of form.elements) control.disabled = true;
     form.setAttribute('aria-busy', 'true');
@@ -71,7 +82,16 @@
     try {
       const job = await request(form.action, {method: 'POST', body});
       if (display(job)) setTimeout(() => poll(job.status_url), 1500);
-    } catch (_) {
+    } catch (error) {
+      if (error.rejected) {
+        status.textContent = '无法提交分析';
+        detail.textContent = error.message;
+        submitted = false;
+        for (const control of form.elements) control.disabled = false;
+        form.setAttribute('aria-busy', 'false');
+        check.hidden = false;
+        return;
+      }
       status.textContent = '任务受理结果尚未确认';
       detail.textContent = '请重新读取首页的最近分析任务，按标的和提交时间核对；系统不会自动重复提交。';
       form.setAttribute('aria-busy', 'false'); check.hidden = false;

@@ -6,7 +6,7 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../../static/js/option_wheel_jobs.js'), 'utf8');
 const url = '/option-wheel/jobs/1234-5678/status/';
 function job(status='running') { return {kind:'option-wheel-job-v1', id:'1234-5678', status, message:'当前任务 TSLA', created_at:'2026-09-03T13:00:00Z', status_url:url, detail_url:'/option-wheel/jobs/1234-5678/', results: status==='saved' ? [{id:1,url:'/option-wheel/decisions/1/'}]:[]}; }
-const response = data => ({ok:true, redirected:false, headers:{get:()=> 'application/json'}, json:async()=>data});
+const response = data => ({ok:true, redirected:false, headers:{get:()=> 'application/json'}, json:async()=>data, text:async()=>''});
 function setup(fetcher, restore=false) {
   const nodes = {};
   function node(id) { return nodes[id] ||= {hidden:true,textContent:'',children:[],attrs:{},
@@ -64,4 +64,11 @@ test('interrupted job ends polling, external links never rendered',async()=>{
 test('login redirects never treated as saved',async()=>{
   const app=setup(async()=>({redirected:true}),true);await app.flush();
   assert.match(app.nodes['wheel-analysis-status'].textContent,/无法读取/);
+});
+test('definite validation rejection displays the reason and does not poll',async()=>{
+  const app=setup(async()=>({ok:false,redirected:false,status:400,headers:{get:()=> 'text/html'},text:async()=> '每次最多选择 9 个标的。'}));
+  await app.submit(); await app.flush();
+  assert.equal(app.nodes['wheel-analysis-status'].textContent,'无法提交分析');
+  assert.equal(app.nodes['wheel-analysis-detail'].textContent,'每次最多选择 9 个标的。');
+  assert.equal(app.calls.length,1);
 });

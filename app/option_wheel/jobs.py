@@ -17,8 +17,10 @@ from .models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelPolicy
 from .probe_diagnostics import probe_failure_summary
 
 ACTIVE = ("queued", "running")
-JOB_SECONDS = 240
+JOB_SECONDS = 720
 PROBE_SECONDS = 180
+MAX_SYMBOLS = 9
+PROBE_BATCH_SIZE = 3
 INTERRUPTED = "运行超时或中断，未取得完成确认。不会自动重试；行情订阅清理状态需核对。"
 
 
@@ -26,8 +28,8 @@ def validate_selection(family, selection):
     from .views import PARTICIPATING_ACCOUNTS, _snapshot_is_ready
     from .account_capacity import capacity_snapshot_stale_reasons
     ids, symbols = selection.get("account_ids", []), selection.get("symbols", [])
-    if not ids or not symbols or len(ids) > 2 or len(symbols) > 3:
-        raise WheelAnalysisError("每次请选择 1–2 个账户和 1–3 个已配置标的。")
+    if not ids or not symbols or len(ids) > 2 or len(symbols) > MAX_SYMBOLS:
+        raise WheelAnalysisError("每次请选择 1–2 个账户和 1–9 个已配置标的。")
     accounts = list(InvestmentAccount.objects.filter(
         pk__in=ids, bank_account__family=family, bank_account__is_active=True,
         bank_account__supports_investment=True,
@@ -92,8 +94,8 @@ def enqueue(family, user, key, selection):
     return job
 
 
-def fetch_probe(symbols, covered_call_symbols=None):
-    covered_call_symbols = sorted(set(covered_call_symbols or []))
+def _fetch_probe_batch(symbols, covered_call_symbols):
+    covered_call_symbols = sorted(set(symbols) & set(covered_call_symbols))
     command = [sys.executable, "-m", "option_wheel.live_probe"]
     if covered_call_symbols:
         command.append("--calls-for=" + ",".join(covered_call_symbols))
@@ -122,6 +124,16 @@ def fetch_probe(symbols, covered_call_symbols=None):
         if isinstance(exc, WheelAnalysisError):
             raise
         raise WheelAnalysisError("行情查询进程或响应异常，未保存分析；订阅清理状态需核对。") from None
+
+
+def fetch_probe(symbols, covered_call_symbols=None):
+    """Probe at most three symbols per process so Futu subscriptions stay bounded."""
+    covered_call_symbols = set(covered_call_symbols or [])
+    rows = []
+    for offset in range(0, len(symbols), PROBE_BATCH_SIZE):
+        batch = symbols[offset:offset + PROBE_BATCH_SIZE]
+        rows.extend(_fetch_probe_batch(batch, covered_call_symbols))
+    return rows
 
 
 def covered_call_symbols(family, accounts, symbols):

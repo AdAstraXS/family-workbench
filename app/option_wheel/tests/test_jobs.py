@@ -16,7 +16,7 @@ from family_core.models import Family, FamilyMember
 from ledger.models import BankAccount
 from portfolio.models import InvestmentAccount, Security
 from option_wheel.analysis_service import WheelAnalysisError, persist_probe_symbol
-from option_wheel.jobs import enqueue, fetch_probe, job_payload, launch_job, run_job
+from option_wheel.jobs import enqueue, fetch_probe, job_payload, launch_job, run_job, validate_selection
 from option_wheel.models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelPolicy, WheelDecision, WheelMarketSnapshot, WheelOptionQuoteSnapshot
 from option_wheel.tests.test_analysis_service import WheelAnalysisServiceTests
 from option_wheel.templatetags.wheel_display import wheel_reason, wheel_reasons
@@ -182,6 +182,42 @@ class JobTests(TestCase):
         self.assertNotIn("do-not-publish", str(error.exception))
         run.side_effect = subprocess.TimeoutExpired("secret", 180)
         with self.assertRaisesMessage(WheelAnalysisError, "订阅清理状态需核对"): fetch_probe(["TSLA"])
+
+    @patch("option_wheel.jobs.subprocess.run")
+    def test_nine_symbols_are_probed_in_three_bounded_batches(self, run):
+        symbols = [f"TEST{number}" for number in range(9)]
+        def result(command, **kwargs):
+            batch = [value for value in command if value.startswith("US.")]
+            payload = {"status": "success", "symbols": [{"symbol": value} for value in batch]}
+            return SimpleNamespace(returncode=0, stdout="WHEEL_LIVE:" + json.dumps(payload))
+        run.side_effect = result
+
+        rows = fetch_probe(symbols, {"TEST1", "TEST7"})
+
+        self.assertEqual([row["symbol"] for row in rows], [f"US.{symbol}" for symbol in symbols])
+        self.assertEqual(run.call_count, 3)
+        self.assertTrue(all(len([value for value in call.args[0] if value.startswith("US.")]) <= 3 for call in run.call_args_list))
+        self.assertIn("--calls-for=TEST1", run.call_args_list[0].args[0])
+        self.assertIn("--calls-for=TEST7", run.call_args_list[2].args[0])
+
+    def test_selection_accepts_nine_symbols_and_rejects_ten(self):
+        symbols = []
+        for number in range(9):
+            security = Security.objects.create(
+                symbol=f"TEST{number}", name=f"Test {number}", market="US",
+                currency="USD", asset_type=Security.TYPE_STOCK,
+            )
+            WheelPolicy.objects.create(family=self.family, account=self.account, underlying=security)
+            symbols.append(security.symbol)
+
+        self.assertEqual(validate_selection(
+            self.family, {"account_ids": [self.account.pk], "symbols": symbols}
+        ), [self.account])
+        with self.assertRaisesMessage(WheelAnalysisError, "1–9"):
+            validate_selection(
+                self.family,
+                {"account_ids": [self.account.pk], "symbols": symbols + ["TEST9"]},
+            )
 
     def test_chinese_reason_and_model_probability_disclaimer(self):
         self.assertIn("券商端复核保证金", wheel_reason("cash_insufficient"))
