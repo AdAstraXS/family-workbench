@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import close_views, job_views, views
+from . import advice_views, close_views, job_views, views
 
 
 app_name = "option_wheel"
@@ -16,4 +16,6 @@ urlpatterns = [
     path("holdings/", views.holdings, name="holdings"),
     path("underlying/<str:symbol>/", views.underlying_detail, name="underlying_detail"),
     path("decisions/<int:pk>/", views.decision_detail, name="decision_detail"),
+    path("decisions/<int:pk>/advice/", advice_views.preview, name="advice_preview"),
+    path("decisions/<int:pk>/advice/generate/", advice_views.generate, name="advice_generate"),
 ]

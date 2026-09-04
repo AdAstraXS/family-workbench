@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}AI 策略建议 · {{ decision.underlying.symbol }}{% endblock %}
+{% block content %}
+<div class="option-wheel-page">
+  <section class="option-wheel-hero">
+    <div><span class="option-wheel-eyebrow">只读 · 冻结样本对比</span><h1>{{ decision.underlying.symbol }} AI 策略建议</h1>
+      <p>{{ decision.account.account_name }} · 证据时间 {{ decision.decision_time|date:"Y-m-d H:i:s T" }}</p>
+      <a href="{% url 'option_wheel:decision_detail' decision.pk %}">返回完整证据</a></div>
+    <div class="option-wheel-analysis-only"><strong>仅分析，不下单</strong><span>AI 只能解释证据，不能改变规则资格；旧分析不是当前交易许可。</span></div>
+  </section>
+  <section class="option-wheel-section" id="ai-result" {% if ai_state == 'pending' %}data-ai-pending="true"{% endif %}>
+    <h2>AI 结论与理由</h2>
+    {% if ai_result %}
+      <p><strong>{% if ai_result.result_json.outcome == 'no_trade' %}本份证据下暂不操作{% else %}可进一步比较的替代方案{% endif %}</strong></p>
+      <p>{{ ai_result.result_text }}</p>
+      {% for row in comparisons %}<article class="panel"><h3>{{ row.candidate.contract }}</h3><p>理由：{{ row.reason }}</p><p>风险：{{ row.caution }}</p><p>冻结每张参考权利金 {{ row.candidate.premium_per_contract }} USD · 行权模型概率 {{ row.candidate.probability_percent }}%</p></article>{% endfor %}
+      <h3>模型指出的局限</h3><ul>{% for text in ai_result.result_json.limitations %}<li>{{ text }}</li>{% endfor %}</ul>
+      <p>模型 {{ analysis.scope.config.model }} · 请求 #{{ analysis.pk }} · {{ ai_result.created_at|date:"Y-m-d H:i:s T" }} · Token：{{ ai_result.tokens_used|default_if_none:"未返回" }} · 费用估算：{% if ai_result.cost_estimate != None %}${{ ai_result.cost_estimate }}{% else %}未返回（不等于免费）{% endif %}</p>
+      <p>文字是 AI 观点，不是已核实事实；结构与候选引用经过校验，仍可能存在解释错误。</p>
+    {% elif ai_state == 'pending' %}
+      <p role="status">DeepSeek 正在分析，页面会自动回显；请勿重复提交。刷新或离开后回到此页可继续查看。</p>
+    {% elif ai_state == 'interrupted' %}
+      <p role="status">任务超时或中断，结果未采纳。可能已产生费用，不会自动重试。</p>
+    {% elif analysis %}<p role="status">{{ analysis.error_message }}</p>
+    {% else %}<p>尚未生成 AI 解释。浏览本页不会调用模型。</p>{% endif %}
+    {% if configuration_error %}<p>AI 尚未配置就绪：{{ configuration_error }}</p>
+    {% elif request.user.is_superuser and ai_state != 'pending' and not ai_result %}
+      <form method="post" action="{% url 'option_wheel:advice_generate' decision.pk %}">{% csrf_token %}
+        <input type="hidden" name="consent_token" value="{{ consent_token }}">
+        <p>{{ provider.name }} / {{ ai_config.model }} · 本次保守费用估算 ${{ estimated_cost }}，上限 ${{ ai_config.max_cost }}；每家庭每天最多 10 次，失败也计入。</p>
+        <label><input type="checkbox" name="confirm_public_ai" value="yes" required> 我同意将下方公开输入发送给 DeepSeek，并接受本次费用上限；不发送账户余额或持仓，不下单</label>
+        <p><button type="submit">{% if analysis %}明确重试一次 AI 解释{% else %}生成 DeepSeek 解释{% endif %}</button></p>
+      </form>
+    {% endif %}
+  </section>
+  <section class="option-wheel-section"><h2>先看是否值得进一步比较</h2>
+    {% if selected %}<p>采集时有 {{ eligible_count }} 个样本通过基础分析规则，展示其中行权模型概率较低的最多三个。不是当前可交易清单，不代表全链最优。</p>
+    {% else %}<p>本份证据没有可进入对比的候选：保持观望。不会要求 AI 绕过现金、报价或财报规则补出推荐。</p>{% endif %}
+    <p>下面所有金额均由已有规则计算，AI 不得修改。不同候选是替代方案，不能将它们的权利金相加。正式使用前必须重新核对实时行情与账户容量。</p>
+    <div class="option-wheel-table-wrap"><table class="option-wheel-table"><thead><tr><th>合约</th><th>策略</th><th>权利金</th><th>所需现金</th><th>盈亏平衡</th><th>行权模型概率</th></tr></thead>
+      <tbody>{% for c in selected %}<tr><td>{{ c.candidate_key }}</td><td>{{ c.get_strategy_display }}</td><td>{{ c.premium_total|floatformat:2 }} USD</td><td>{{ c.required_cash|floatformat:2|default:"—" }}</td><td>{{ c.break_even|floatformat:2|default:"—" }}</td><td>{{ c.assignment_probability|floatformat:2 }}%</td></tr>
+      {% empty %}<tr><td colspan="6">无可比较样本；排除原因请查看完整证据。</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+  <section class="option-wheel-section"><h2>AI 将解释什么</h2>
+    <p>权利金与行权风险的取舍、期限差异、技术位置及已提供的财报/除息风险；也可以建议不做。</p>
+    <p>当前未提供新闻与宏观日程，不构成完整的事件风险研究。供应商模型概率不等于真实提前指派概率，权利金不保证成交；本模块始终不下单。</p>
+    <details><summary>核对公开输入{% if not analysis %}（尚未发送）{% endif %}</summary><p>不含账户名称、余额、总资产、持仓、原始日志或凭证。仅发送本页样本的公开行情和技术/事件证据；样本选择本身会透露关注标的。</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ public_input }}</pre></details>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}{% if ai_state == 'pending' %}<script src="{% static 'js/option_wheel_advice.js' %}" defer></script>{% endif %}{% endblock %}

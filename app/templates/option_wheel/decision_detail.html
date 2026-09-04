@@ -3,6 +3,7 @@
 {% block title %}决策证据 · {{ decision.underlying.symbol }}{% endblock %}
 {% block content %}
 <div class="option-wheel-page">
+  <p><a href="{% url 'option_wheel:advice_preview' decision.pk %}">查看 AI 策略建议 · 候选对比与风险理由</a></p>
   <p>这是采集时冻结的分析，不是当前实时行情。行权模型概率由供应商提供，不等同于真实提前指派概率或结果保证；权利金仅为当时参考，不承诺当前可成交。</p>
   <section class="option-wheel-hero"><div><span class="option-wheel-eyebrow">冻结决策证据</span><h1>{{ decision.underlying.symbol }} · {{ decision.decision_time|date:"Y-m-d H:i:s T" }}</h1><p><a href="{% url 'option_wheel:underlying_detail' decision.underlying.symbol %}">返回标的分析</a></p></div><div class="option-wheel-analysis-only"><strong>仅分析，不下单</strong><span>决策和候选创建后不可修改。</span></div></section>
   <section class="option-wheel-status-grid"><article class="option-wheel-status-card"><span>账户</span><strong>{{ decision.account.account_name }}</strong><p>容量时点 {{ decision.account_snapshot.source_as_of|date:"m-d H:i:s" }}</p></article><article class="option-wheel-status-card"><span>结论</span><strong>{{ decision.get_overall_status_display }}</strong><p>{{ decision.ruleset_version }}</p></article><article class="option-wheel-status-card"><span>行情</span><strong>{{ decision.market_snapshot.last_price|floatformat:2 }}</strong><p>报价来源时间 {{ decision.market_snapshot.source_as_of|date:"Y-m-d H:i:s T" }} · 采集时 {{ decision.market_snapshot.get_delay_status_display }} · {{ decision.market_snapshot.get_freshness_status_display }}</p></article></section>

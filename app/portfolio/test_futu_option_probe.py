@@ -4,7 +4,7 @@ import io
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -27,6 +27,11 @@ from portfolio.futu_option_probe import (
     subscription_summary,
     validate_symbols,
 )
+
+
+# Keep the dynamic-flow fixture ahead of the wall clock. A fixed 2026-09-04
+# silently stopped exercising subscription and analytics once that date arrived.
+DYNAMIC_EXPIRY = (datetime.now(timezone.utc).date() + timedelta(days=7)).isoformat()
 from portfolio.management.commands.probe_futu_option_capabilities import (
     format_json,
     format_table,
@@ -880,7 +885,7 @@ class DynamicContext:
 
     def get_option_expiration_date(self, symbol):
         self.calls.append(("get_option_expiration_date", symbol))
-        return 0, [{"strike_time": "2026-09-04"}]
+        return 0, [{"strike_time": DYNAMIC_EXPIRY}]
 
     def get_option_chain(self, symbol, start=None, end=None, option_type=None):
         self.calls.append(("get_option_chain", symbol))
@@ -1028,7 +1033,7 @@ class DynamicProbeTest(SimpleTestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(
             result["subscription"]["owned_codes"],
-            ["US.TSLA-2026-09-04-P1"],
+            [f"US.TSLA-{DYNAMIC_EXPIRY}-P1"],
         )
         self.assertEqual(
             result["subscription"]["cleanup_status"], "restored"
@@ -1095,14 +1100,14 @@ class DynamicProbeTest(SimpleTestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual(
             result["subscription"]["owned_codes"],
-            ["US.TSLA-2026-09-04-P1"],
+            [f"US.TSLA-{DYNAMIC_EXPIRY}-P1"],
         )
         self.assertIn("unsubscribe", [call[0] for call in context.calls])
 
     def test_existing_code_is_not_subscribed_owned_or_unsubscribed(self):
         result, context, _ = self._run(
             context_options={
-                "existing_codes": ["US.TSLA-2026-09-04-P1"]
+                "existing_codes": [f"US.TSLA-{DYNAMIC_EXPIRY}-P1"]
             }
         )
         self.assertEqual(result["status"], "partial")
@@ -2061,7 +2066,7 @@ class ProbeFlowSafetyTest(SimpleTestCase):
         return self._run_dynamic(AfterStateContext())
 
     def test_residual_candidate_fails_cleanup_verification(self):
-        code = "US.TSLA-2026-09-04-P1"
+        code = f"US.TSLA-{DYNAMIC_EXPIRY}-P1"
         result, context, lock = self._run_after_state(after_codes=[code])
         verification = result["subscription"]["verification"]
         self.assertEqual(result["subscription"]["cleanup_status"], "failed")
@@ -2281,7 +2286,7 @@ class FinalFlowGuardTest(SimpleTestCase):
             lock_factory=lambda: lock,
         )
 
-        candidate = "US.TSLA-2026-09-04-P1"
+        candidate = f"US.TSLA-{DYNAMIC_EXPIRY}-P1"
         subscription = result["subscription"]
         self.assertIn(candidate, subscription["owned_codes"])
         self.assertEqual(subscription["cleanup_call_status"], "restored")
