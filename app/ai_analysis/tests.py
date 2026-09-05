@@ -6,12 +6,22 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from family_core.models import AccountType, AssetCategory, Family, FamilyMember
+from knowledge.models import (
+    KnowledgeDocument,
+    KnowledgeRevision,
+    KnowledgeSearchEntry,
+    KnowledgeSource,
+    KnowledgeVisibility,
+)
+from knowledge.search import index_document
 from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot, BankAccount
 from portfolio.models import InvestmentAccount, PortfolioSnapshot, PortfolioSnapshotPositionLine
 
 from .read_tools import (
     GlobalAiReadError,
     SCOPE_FAMILY,
+    knowledge_revision,
+    knowledge_search,
     ledger_asset_snapshot,
     portfolio_account_snapshot,
 )
@@ -212,4 +222,194 @@ class GlobalAiReadToolsTests(TestCase):
         with self.assertRaises(GlobalAiReadError):
             portfolio_account_snapshot(
                 outsider, account_id=self.alice_investment.pk, scope=SCOPE_FAMILY
+            )
+
+
+class GlobalAiKnowledgeReadTests(TestCase):
+    def setUp(self):
+        self.family = Family.objects.create(name="虚构家庭", base_currency="CNY")
+        self.other_family = Family.objects.create(name="其他家庭", base_currency="CNY")
+        self.alice = FamilyMember.objects.create(
+            family=self.family,
+            user=get_user_model().objects.create_user(username="knowledge-ai-alice"),
+            display_name="Alice",
+        )
+        self.bob = FamilyMember.objects.create(
+            family=self.family,
+            user=get_user_model().objects.create_user(username="knowledge-ai-bob"),
+            display_name="Bob",
+        )
+        self.family_source = KnowledgeSource.objects.create(
+            family=self.family,
+            owner=self.alice,
+            key="family-notes",
+            kind=KnowledgeSource.KIND_INTERNAL_NOTES,
+            name="家庭笔记",
+            visibility=KnowledgeVisibility.FAMILY,
+        )
+        self.private_source = KnowledgeSource.objects.create(
+            family=self.family,
+            owner=self.bob,
+            key="bob-private",
+            kind=KnowledgeSource.KIND_INTERNAL_NOTES,
+            name="Bob 私人笔记",
+            visibility=KnowledgeVisibility.PRIVATE,
+        )
+        self.shared = self._document(
+            source=self.family_source,
+            owner=self.alice,
+            external_id="shared",
+            title="家庭保险复核",
+            body="九月复核医疗保险保障范围。",
+            visibility=KnowledgeVisibility.FAMILY,
+        )
+        self.private = self._document(
+            source=self.private_source,
+            owner=self.bob,
+            external_id="private",
+            title="私人保险记录",
+            body="Bob 私人保险备忘。",
+            visibility=KnowledgeVisibility.PRIVATE,
+        )
+
+    def _document(
+        self,
+        *,
+        source,
+        owner,
+        external_id,
+        title,
+        body,
+        visibility,
+        knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+    ):
+        document = KnowledgeDocument.objects.create(
+            family=source.family,
+            source=source,
+            owner=owner,
+            external_id=external_id,
+            title=title,
+            visibility=visibility,
+            knowledge_status=knowledge_status,
+        )
+        revision = KnowledgeRevision.objects.create(
+            document=document,
+            revision_number=1,
+            content_hash=(external_id + "0" * 64)[:64],
+            raw_file="",
+            plain_text=body,
+        )
+        document.current_revision = revision
+        document.save(update_fields=["current_revision", "updated_at"])
+        index_document(document)
+        return document
+
+    def test_search_intersects_source_and_document_permissions(self):
+        result = knowledge_search(self.alice, query="保险")
+        self.assertEqual([row["document_id"] for row in result["results"]], [self.shared.pk])
+        bob_result = knowledge_search(self.bob, query="保险")
+        self.assertEqual(
+            {row["document_id"] for row in bob_result["results"]},
+            {self.shared.pk, self.private.pk},
+        )
+
+    def test_stale_projection_cannot_bypass_revoked_document_access(self):
+        self.shared.visibility = KnowledgeVisibility.PRIVATE
+        self.shared.owner = self.bob
+        self.shared.save(update_fields=["visibility", "owner", "updated_at"])
+        result = knowledge_search(self.alice, query="保险")
+        self.assertEqual(result["results"], [])
+        with self.assertRaises(GlobalAiReadError):
+            knowledge_revision(
+                self.alice,
+                document_id=self.shared.pk,
+                revision_id=self.shared.current_revision_id,
+            )
+
+    def test_stale_projection_cannot_bypass_revoked_source_access(self):
+        self.family_source.visibility = KnowledgeVisibility.PRIVATE
+        self.family_source.owner = self.bob
+        self.family_source.save(update_fields=["visibility", "owner", "updated_at"])
+        result = knowledge_search(self.alice, query="保险")
+        self.assertEqual(result["results"], [])
+
+    def test_stale_projection_text_is_rechecked_against_current_revision(self):
+        revision = KnowledgeRevision.objects.create(
+            document=self.shared,
+            revision_number=2,
+            content_hash="new" + "0" * 61,
+            raw_file="",
+            plain_text="九月复核家庭应急预案。",
+        )
+        self.shared.current_revision = revision
+        self.shared.save(update_fields=["current_revision", "updated_at"])
+        self.assertEqual(knowledge_search(self.alice, query="医疗")["results"], [])
+
+    def test_exact_old_revision_reference_remains_stable(self):
+        old_revision = self.shared.current_revision
+        revision = KnowledgeRevision.objects.create(
+            document=self.shared,
+            revision_number=2,
+            content_hash="next" + "0" * 60,
+            raw_file="",
+            plain_text="新版家庭保险复核内容。",
+        )
+        self.shared.current_revision = revision
+        self.shared.save(update_fields=["current_revision", "updated_at"])
+        result = knowledge_revision(
+            self.alice,
+            document_id=self.shared.pk,
+            revision_id=old_revision.pk,
+        )
+        self.assertEqual(result["plain_text"], "九月复核医疗保险保障范围。")
+        self.assertFalse(result["is_current_revision"])
+
+    def test_pending_documents_require_explicit_inclusion(self):
+        pending = self._document(
+            source=self.family_source,
+            owner=self.alice,
+            external_id="pending",
+            title="待整理保险资料",
+            body="保险条款仍在待整理区。",
+            visibility=KnowledgeVisibility.FAMILY,
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
+        )
+        default_ids = {
+            row["document_id"] for row in knowledge_search(self.alice, query="保险")["results"]
+        }
+        included_ids = {
+            row["document_id"]
+            for row in knowledge_search(
+                self.alice, query="保险", include_pending=True
+            )["results"]
+        }
+        self.assertNotIn(pending.pk, default_ids)
+        self.assertIn(pending.pk, included_ids)
+
+    def test_empty_query_returns_no_documents_and_limits_are_validated(self):
+        self.assertEqual(knowledge_search(self.alice, query="  ")["results"], [])
+        with self.assertRaises(GlobalAiReadError):
+            knowledge_search(self.alice, query="保险", limit=0)
+        with self.assertRaises(GlobalAiReadError):
+            knowledge_search(self.alice, query=None)
+
+    def test_other_family_cannot_discover_or_read_document(self):
+        outsider = FamilyMember.objects.create(
+            family=self.other_family,
+            display_name="Outsider",
+        )
+        self.assertEqual(knowledge_search(outsider, query="保险")["results"], [])
+        with self.assertRaises(GlobalAiReadError):
+            knowledge_revision(
+                outsider,
+                document_id=self.shared.pk,
+                revision_id=self.shared.current_revision_id,
+            )
+
+    def test_revision_must_belong_to_requested_accessible_document(self):
+        with self.assertRaises(GlobalAiReadError):
+            knowledge_revision(
+                self.alice,
+                document_id=self.shared.pk,
+                revision_id=self.private.current_revision_id,
             )

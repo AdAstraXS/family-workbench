@@ -3,6 +3,15 @@
 from collections import defaultdict
 from decimal import Decimal
 
+from django.db.models import Q
+
+from knowledge.models import (
+    KnowledgeDocument,
+    KnowledgeRevision,
+    KnowledgeSearchEntry,
+    KnowledgeVisibility,
+)
+from knowledge.permissions import accessible_documents
 from ledger.models import AssetBalanceSnapshot
 from portfolio.models import InvestmentAccount, PortfolioSnapshot
 
@@ -26,6 +35,160 @@ def _validate_context(actor, scope):
 
 def _decimal(value):
     return str(value if value is not None else ZERO)
+
+
+def _knowledge_statuses(include_pending):
+    statuses = [KnowledgeDocument.KNOWLEDGE_INCLUDED]
+    if include_pending:
+        statuses.append(KnowledgeDocument.KNOWLEDGE_PENDING)
+    return statuses
+
+
+def _knowledge_reference(document_id, revision_id):
+    return f"knowledge:{document_id}:revision:{revision_id}"
+
+
+def _ai_accessible_documents(actor):
+    # The knowledge UI treats an owned document as sufficient. AI reads require
+    # both the document and its source to remain visible to the current member.
+    return accessible_documents(actor).filter(
+        Q(source__owner=actor) | Q(source__visibility=KnowledgeVisibility.FAMILY)
+    )
+
+
+def _knowledge_document(actor, document_id, *, include_pending=False):
+    document = (
+        _ai_accessible_documents(actor)
+        .filter(
+            pk=document_id,
+            knowledge_status__in=_knowledge_statuses(include_pending),
+        )
+        .first()
+    )
+    if document is None:
+        raise GlobalAiReadError("知识资料不可用。")
+    return document
+
+
+def _matches_knowledge_query(document, revision, terms):
+    text = " ".join(
+        [
+            document.title,
+            document.author,
+            document.section_name,
+            document.confirmed_summary,
+            document.category,
+            " ".join(str(tag) for tag in (document.tags or [])),
+            revision.plain_text,
+        ]
+    ).casefold()
+    return all(term.casefold() in text for term in terms)
+
+
+def _knowledge_excerpt(text, terms, *, length=240):
+    compact = " ".join((text or "").split())
+    if not compact:
+        return ""
+    positions = [compact.casefold().find(term.casefold()) for term in terms]
+    positions = [position for position in positions if position >= 0]
+    start = max(0, (min(positions) if positions else 0) - 60)
+    excerpt = compact[start : start + length]
+    if start:
+        excerpt = "…" + excerpt
+    if start + length < len(compact):
+        excerpt += "…"
+    return excerpt
+
+
+def knowledge_search(actor, *, query, include_pending=False, limit=10):
+    """Find current document revisions while rechecking live source/document access."""
+
+    _validate_context(actor, SCOPE_PERSONAL)
+    if not isinstance(query, str):
+        raise GlobalAiReadError("知识检索词必须是文本。")
+    terms = [term for term in query.split() if term]
+    if not terms:
+        return {"module": "knowledge", "query": "", "results": []}
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
+        raise GlobalAiReadError("知识检索条数必须在 1 到 50 之间。")
+
+    candidates = KnowledgeSearchEntry.objects.filter(
+        family=actor.family,
+        item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
+        document__isnull=False,
+    )
+    for term in terms:
+        candidates = candidates.filter(
+            Q(searchable_text__icontains=term)
+            | Q(title__icontains=term)
+            | Q(body__icontains=term)
+            | Q(summary__icontains=term)
+        )
+    candidate_ids = candidates.values_list("document_id", flat=True)
+    documents = (
+        _ai_accessible_documents(actor)
+        .filter(
+            pk__in=candidate_ids,
+            current_revision__isnull=False,
+            knowledge_status__in=_knowledge_statuses(include_pending),
+        )
+        .order_by("-content_modified_at", "-updated_at", "-pk")
+    )
+
+    results = []
+    for document in documents.iterator():
+        revision = document.current_revision
+        # The projection can lag behind a revision or permission change. Never return
+        # copied projection content unless the live document still matches.
+        if not _matches_knowledge_query(document, revision, terms):
+            continue
+        results.append(
+            {
+                "reference": _knowledge_reference(document.pk, revision.pk),
+                "document_id": document.pk,
+                "revision_id": revision.pk,
+                "revision_number": revision.revision_number,
+                "title": document.title,
+                "source_name": document.source.name,
+                "knowledge_status": document.knowledge_status,
+                "excerpt": _knowledge_excerpt(revision.plain_text, terms),
+            }
+        )
+        if len(results) >= limit:
+            break
+    return {
+        "module": "knowledge",
+        "query": " ".join(terms),
+        "include_pending": include_pending,
+        "results": results,
+    }
+
+
+def knowledge_revision(actor, *, document_id, revision_id, include_pending=False):
+    """Read an exact immutable revision after rechecking current document access."""
+
+    _validate_context(actor, SCOPE_PERSONAL)
+    document = _knowledge_document(actor, document_id, include_pending=include_pending)
+    revision = KnowledgeRevision.objects.filter(
+        pk=revision_id,
+        document=document,
+    ).first()
+    if revision is None:
+        raise GlobalAiReadError("知识资料不可用。")
+    return {
+        "module": "knowledge",
+        "reference": _knowledge_reference(document.pk, revision.pk),
+        "document_id": document.pk,
+        "revision_id": revision.pk,
+        "revision_number": revision.revision_number,
+        "is_current_revision": document.current_revision_id == revision.pk,
+        "title": document.title,
+        "source_name": document.source.name,
+        "source_url": document.source_url,
+        "knowledge_status": document.knowledge_status,
+        "content_hash": revision.content_hash,
+        "plain_text": revision.plain_text,
+    }
 
 
 def _ledger_rate_available(snapshot, currency):

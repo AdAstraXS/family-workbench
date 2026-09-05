@@ -1,6 +1,7 @@
 # 全局 AI 第一版功能设计
 
-日期：2026-09-05。状态：设计仍待整体评审；模块级只读服务基础已开始实现，页面、对话和模型调用未实施。
+日期：2026-09-05。状态：设计仍待整体评审；账本快照、投资账户快照、知识检索与精确版本读取的
+模块级只读服务已建立，页面、对话和模型调用未实施。
 依据：[知识产品原则](family-knowledge-product-principles.md)、[知识架构](family-knowledge-base-architecture.md)、
 [系统基线](architecture-baseline.md)、[调研](global-ai-reference-research.md)、[原型结果](global-ai-spike-results.md)。
 验收配套：[评测方案](global-ai-v1-evaluation-plan.md)。
@@ -148,8 +149,9 @@
 
 - calculate_base_amount 在未命中已支持汇率时直接返回原金额；不能因为已有 base_amount 就认定估值完整。
   AI 读取层要核对币种、汇率、日期与来源，发现缺汇率返回原币及缺口；不在本次设计中修写历史数据。
-- accessible_documents 检查资料和来源共享状态；accessible_search_entries 的基础查询仅按投影共享状态。
-  AI 检索必须与实际来源/资料读取权限求交集，不能只依赖投影。尚未审计全部现有调用链，不据此断言线上泄露。
+- accessible_documents 的所有者分支不强制来源共享，accessible_search_entries 的基础查询仅按投影共享状态。
+  全局 AI 读取层已经额外要求来源和资料同时对当前成员可见，并在搜索结果与精确版本读取时重新校验；
+  索引只用于生成候选，不作为正文或权限事实。此结论只描述新增 AI 服务，不据此断言其他线上调用链存在泄露。
 - 缺价、过期手工价、汇率缺失或估值错误要从快照审计字段携带；不存在字段不等于检查通过。
 - “有正式快照”与“足够评估配置风险”是两层要求；仅一张快照无法给出最大回撤符合性的结论。
 
