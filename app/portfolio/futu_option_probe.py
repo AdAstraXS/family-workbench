@@ -17,9 +17,10 @@ SUCCESS = "success"
 PARTIAL = "partial"
 FAILED = "failed"
 MAX_SYMBOLS = 20
-# A live batch contains at most three symbols.  Each symbol samples up to
-# three expirations and three representative contracts per expiration.
-MAX_DYNAMIC_CANDIDATES = 27
+# A live batch contains at most three symbols. Each symbol samples the nearest
+# three actual expirations, with one put per expiration and (when covered) one
+# additional call across the whole window.
+MAX_DYNAMIC_CANDIDATES = 12
 MAX_EXPIRATION_SCAN = 50
 MAX_DIVIDEND_CALENDAR_PAGES = 7
 DIVIDEND_CALENDAR_PAGE_SIZE = 200
@@ -579,6 +580,24 @@ def sdk_call(context, method, ret_ok, *args, **kwargs):
     }
 
 
+def _is_timeout_response(response):
+    if response.get("status") == "ok":
+        return False
+    message = str(response.get("error") or "").lower()
+    return any(marker in message for marker in ("timeout", "timed out", "超时"))
+
+
+def sdk_call_with_timeout_retry(
+    context, method, ret_ok, *args, sleeper=None, retry_delay=1.0, **kwargs
+):
+    """Retry one read-only provider call once, and only for explicit timeouts."""
+    response = sdk_call(context, method, ret_ok, *args, **kwargs)
+    if not _is_timeout_response(response):
+        return response
+    (sleeper or time.sleep)(retry_delay)
+    return sdk_call(context, method, ret_ok, *args, **kwargs)
+
+
 def method_capabilities(context, methods):
     result = {}
     for method in methods:
@@ -1026,6 +1045,7 @@ def probe_symbol(
     event_calendar_cache=None,
     subscription_started_at=None,
     monotonic=None,
+    sleeper=None,
     include_covered_call=True,
 ):
     """Probe one underlying while isolating provider failures from other symbols."""
@@ -1046,6 +1066,7 @@ def probe_symbol(
         else {}
     )
     monotonic = monotonic or time.monotonic
+    sleeper = sleeper or time.sleep
     market_state = market_state or {
         "status": "not_requested",
         "market_us": None,
@@ -1116,10 +1137,6 @@ def probe_symbol(
             else:
                 eligible_details.append(detail)
 
-        if config.get("profile") == "m1-gate":
-            preferred = [item for item in eligible_details if item["is_7_to_30_dte"]]
-            other_future = [item for item in eligible_details if item["dte"] > 0 and not item["is_7_to_30_dte"]]
-            eligible_details = preferred + other_future
         expiration_details = eligible_details[:max_expirations]
         expirations = [
             detail["strike_time"] for detail in expiration_details
@@ -1133,23 +1150,46 @@ def probe_symbol(
 
     chain_summary = {}
     representatives = []
+    chain_available = False
     option_type = getattr(futu_module, "OptionType", None)
     all_options = getattr(option_type, "ALL", "ALL")
-    for expiration in expirations:
-        chain_response = sdk_call(
+    chain_rows_by_expiration = {expiration: [] for expiration in expirations}
+    if config.get("profile") == "m1-gate" and expirations:
+        chain_ranges = [(expirations[0], expirations[-1])]
+    else:
+        chain_ranges = [(expiration, expiration) for expiration in expirations]
+    for range_start, range_end in chain_ranges:
+        chain_response = sdk_call_with_timeout_retry(
             context,
             "get_option_chain",
             ret_ok,
             symbol,
-            start=expiration,
-            end=expiration,
+            start=range_start,
+            end=range_end,
             option_type=all_options,
+            sleeper=sleeper,
         )
         if chain_response["status"] != "ok":
             partial = True
-            errors.append(_sdk_issue(f"chain_{expiration}", chain_response))
-            continue
-        chain_rows = records_from(chain_response["data"])
+            source = (
+                "option_chain"
+                if config.get("profile") == "m1-gate"
+                else f"chain_{range_start}"
+            )
+            errors.append(_sdk_issue(source, chain_response))
+        else:
+            chain_available = True
+            for row in records_from(chain_response["data"]):
+                expiration = str(
+                    row.get("strike_time") or row.get("expiration_date") or ""
+                )[:10]
+                if expiration in chain_rows_by_expiration:
+                    chain_rows_by_expiration[expiration].append(row)
+
+    put_candidates = []
+    call_candidates = []
+    for expiration in expirations:
+        chain_rows = chain_rows_by_expiration[expiration]
         put_rows = [
             row
             for row in chain_rows
@@ -1186,66 +1226,51 @@ def probe_symbol(
             partial = True
 
         remaining = list(put_rows)
-        include_call = (
-            config.get("profile") == "m1-gate"
-            and max_contracts_per_expiration > 1
-            and include_covered_call
+        put_limit = (
+            1
+            if config.get("profile") == "m1-gate"
+            else max_contracts_per_expiration
         )
-        put_limit = max_contracts_per_expiration - 1 if include_call else max_contracts_per_expiration
         for _ in range(put_limit):
             selected, metadata = select_representative_put(remaining, spot)
             if selected is None:
                 break
-            settlement_mode = selected.get("option_settlement_mode")
-            identity_unknown_fields = [
-                "deliverable_shares",
-                "exercise_style",
-            ]
-            if str(settlement_mode).strip().upper() != "PHYSICAL":
-                identity_unknown_fields.append("option_settlement_mode")
-            representatives.append(
-                {
-                    "code": selected.get("code"),
-                    "option_type": selected.get("option_type"),
-                    "stock_owner": selected.get("stock_owner"),
-                    "strike_time": selected.get("strike_time"),
-                    "expiration_date": selected.get("expiration_date"),
-                    "strike_price": selected.get("strike_price"),
-                    "option_standard_type": selected.get(
-                        "option_standard_type"
-                    ),
-                    "lot_size": selected.get("lot_size"),
-                    "option_settlement_mode": settlement_mode,
-                    "settlement_evidence": "unknown",
-                    "index_option_type": selected.get("index_option_type"),
-                    "deliverable_shares": None,
-                    "exercise_style": None,
-                    "contract_identity_status": "partial",
-                    "identity_unknown_fields": identity_unknown_fields,
-                    "degradation": metadata.get("degradation"),
-                }
-            )
+            put_candidates.append((selected, metadata))
             remaining.remove(selected)
-        if include_call:
+        if config.get("profile") == "m1-gate" and include_covered_call:
             selected, metadata = select_representative_call(call_rows, spot)
             if selected is not None:
-                settlement_mode = selected.get("option_settlement_mode")
-                identity_unknown_fields = ["deliverable_shares", "exercise_style"]
-                if str(settlement_mode).strip().upper() != "PHYSICAL":
-                    identity_unknown_fields.append("option_settlement_mode")
-                representatives.append(
-                    {
-                        "code": selected.get("code"), "option_type": selected.get("option_type"),
-                        "stock_owner": selected.get("stock_owner"), "strike_time": selected.get("strike_time"),
-                        "expiration_date": selected.get("expiration_date"), "strike_price": selected.get("strike_price"),
-                        "option_standard_type": selected.get("option_standard_type"), "lot_size": selected.get("lot_size"),
-                        "option_settlement_mode": settlement_mode, "settlement_evidence": "unknown",
-                        "index_option_type": selected.get("index_option_type"), "deliverable_shares": None,
-                        "exercise_style": None, "contract_identity_status": "partial",
-                        "identity_unknown_fields": identity_unknown_fields, "degradation": metadata.get("degradation"),
-                    }
-                )
-    if expirations and not representatives:
+                call_candidates.append((selected, metadata))
+
+    selected_candidates = list(put_candidates)
+    if call_candidates:
+        selected_candidates.append(call_candidates[0])
+    for selected, metadata in selected_candidates:
+        settlement_mode = selected.get("option_settlement_mode")
+        identity_unknown_fields = ["deliverable_shares", "exercise_style"]
+        if str(settlement_mode).strip().upper() != "PHYSICAL":
+            identity_unknown_fields.append("option_settlement_mode")
+        representatives.append(
+            {
+                "code": selected.get("code"),
+                "option_type": selected.get("option_type"),
+                "stock_owner": selected.get("stock_owner"),
+                "strike_time": selected.get("strike_time"),
+                "expiration_date": selected.get("expiration_date"),
+                "strike_price": selected.get("strike_price"),
+                "option_standard_type": selected.get("option_standard_type"),
+                "lot_size": selected.get("lot_size"),
+                "option_settlement_mode": settlement_mode,
+                "settlement_evidence": "unknown",
+                "index_option_type": selected.get("index_option_type"),
+                "deliverable_shares": None,
+                "exercise_style": None,
+                "contract_identity_status": "partial",
+                "identity_unknown_fields": identity_unknown_fields,
+                "degradation": metadata.get("degradation"),
+            }
+        )
+    if expirations and chain_available and not representatives:
         partial = True
         errors.append("representative_contract:no_standard_put")
 
@@ -1546,7 +1571,7 @@ def probe_symbol(
             history = {"status": "unsupported", "sample_count": 0}
             partial = True
         else:
-            response = sdk_call(
+            response = sdk_call_with_timeout_retry(
                 context,
                 "request_history_kline",
                 ret_ok,
@@ -1554,6 +1579,7 @@ def probe_symbol(
                 ktype=k_day,
                 autype=qfq,
                 max_count=250,
+                sleeper=sleeper,
             )
             rows = (
                 records_from(response["data"])
@@ -1601,13 +1627,14 @@ def probe_symbol(
                 str(event_end_date),
             )
             if earnings_cache_key not in event_calendar_cache:
-                response = sdk_call(
+                response = sdk_call_with_timeout_retry(
                     context,
                     "get_earnings_calendar",
                     ret_ok,
                     market_us,
                     begin_date=str(event_date),
                     end_date=str(event_end_date),
+                    sleeper=sleeper,
                 )
                 rows = (
                     records_from(response["data"])
@@ -1787,10 +1814,10 @@ def run_probe(
             include_earnings,
             allow_partial,
         )
-        worst_case_candidates = (
-            len(normalized_symbols)
-            * max_expirations
-            * max_contracts_per_expiration
+        worst_case_candidates = len(normalized_symbols) * (
+            max_expirations + 1
+            if config["profile"] == "m1-gate"
+            else max_expirations * max_contracts_per_expiration
         )
         if (
             config["subscribe_quotes"]
@@ -2011,6 +2038,7 @@ def run_probe(
                         event_calendar_cache=event_calendar_cache,
                         subscription_started_at=subscription_started_at,
                         monotonic=monotonic,
+                        sleeper=sleeper,
                         include_covered_call=(symbol in normalized_covered_call_symbols),
                     )
                 except Exception:

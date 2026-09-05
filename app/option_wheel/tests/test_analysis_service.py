@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.test import TestCase, override_settings
@@ -79,7 +80,15 @@ class WheelAnalysisServiceTests(TestCase):
         }
 
     @override_settings(OPTION_WHEEL_EXECUTION_ENABLED=False)
-    def test_persists_complete_frozen_analysis_without_enabling_execution(self):
+    @patch(
+        "option_wheel.analysis_service.timezone.now",
+        return_value=datetime(
+            2026, 9, 4, 15, 0, tzinfo=ZoneInfo("America/New_York")
+        ),
+    )
+    def test_persists_complete_frozen_analysis_without_enabling_execution(
+        self, mocked_now
+    ):
         WheelPolicy.objects.create(family=self.family, account=self.account, underlying=self.stock)
         WheelBrokerAccountSnapshot.objects.create(
             family=self.family, account=self.account,
@@ -211,7 +220,15 @@ class WheelAnalysisServiceTests(TestCase):
         )
 
     @override_settings(OPTION_WHEEL_EXECUTION_ENABLED=False)
-    def test_covered_call_requires_and_uses_same_account_stock_basis(self):
+    @patch(
+        "option_wheel.analysis_service.timezone.now",
+        return_value=datetime(
+            2026, 9, 4, 15, 0, tzinfo=ZoneInfo("America/New_York")
+        ),
+    )
+    def test_covered_call_requires_and_uses_same_account_stock_basis(
+        self, mocked_now
+    ):
         WheelPolicy.objects.create(family=self.family, account=self.account, underlying=self.stock)
         WheelBrokerAccountSnapshot.objects.create(
             family=self.family, account=self.account,

@@ -23,6 +23,7 @@ from portfolio.futu_option_probe import (
     run_probe,
     sanitize_for_output,
     sdk_call,
+    sdk_call_with_timeout_retry,
     select_representative_call,
     select_representative_put,
     subscription_summary,
@@ -86,6 +87,49 @@ class QuoteTimeQualityTest(SimpleTestCase):
             ("delayed", "stale"),
         )
 
+
+class TimeoutRetryTest(SimpleTestCase):
+    def test_retries_one_explicit_timeout_then_returns_success(self):
+        calls = []
+        sleeps = []
+
+        class Context:
+            def get_option_chain(self, *args, **kwargs):
+                calls.append((args, kwargs))
+                if len(calls) == 1:
+                    return 1, "request timeout"
+                return 0, [{"code": "US.TEST"}]
+
+        result = sdk_call_with_timeout_retry(
+            Context(),
+            "get_option_chain",
+            0,
+            "US.TEST",
+            sleeper=sleeps.append,
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(sleeps, [1.0])
+
+    def test_does_not_retry_non_timeout_provider_error(self):
+        calls = []
+
+        class Context:
+            def get_option_chain(self, *args, **kwargs):
+                calls.append((args, kwargs))
+                return 1, "no permission"
+
+        result = sdk_call_with_timeout_retry(
+            Context(),
+            "get_option_chain",
+            0,
+            "US.TEST",
+            sleeper=lambda seconds: self.fail("must not sleep"),
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(len(calls), 1)
 
 class ResolveProfileTest(SimpleTestCase):
     def test_static_preserves_switches(self):
@@ -2208,6 +2252,97 @@ class FinalFlowGuardTest(SimpleTestCase):
         self.assertTrue(context.calls)
         self.assertTrue(context.closed)
         self.assertTrue(lock.released)
+
+    def test_live_probe_fetches_one_range_for_nearest_three_expirations(self):
+        probe_date = datetime.now(timezone.utc).date()
+        expirations = [
+            (probe_date + timedelta(days=offset)).isoformat()
+            for offset in (0, 3, 10, 17)
+        ]
+
+        class RangeContext(DynamicContext):
+            def get_option_expiration_date(self, symbol):
+                self.calls.append(("get_option_expiration_date", symbol))
+                return 0, [
+                    {"strike_time": expiration}
+                    for expiration in expirations
+                ]
+
+            def get_option_chain(
+                self, symbol, start=None, end=None, option_type=None
+            ):
+                self.calls.append(
+                    ("get_option_chain", symbol, start, end, option_type)
+                )
+                rows = []
+                for expiration in expirations:
+                    rows.extend(
+                        [
+                            {
+                                "code": f"{symbol}-{expiration}-P",
+                                "option_type": "PUT",
+                                "strike_price": 190,
+                                "option_standard_type": "STANDARD",
+                                "strike_time": expiration,
+                                "expiration_date": expiration,
+                                "lot_size": 100,
+                                "stock_owner": symbol,
+                                "option_settlement_mode": "PHYSICAL",
+                            },
+                            {
+                                "code": f"{symbol}-{expiration}-C",
+                                "option_type": "CALL",
+                                "strike_price": 210,
+                                "option_standard_type": "STANDARD",
+                                "strike_time": expiration,
+                                "expiration_date": expiration,
+                                "lot_size": 100,
+                                "stock_owner": symbol,
+                                "option_settlement_mode": "PHYSICAL",
+                            },
+                        ]
+                    )
+                return 0, rows
+
+        context = RangeContext()
+        config = resolve_profile("m1-gate", False, False, False, False, False)
+        result = probe_symbol(
+            context,
+            FakeFutu(),
+            "US.TSLA",
+            config,
+            3,
+            1,
+            set(),
+            [],
+            probe_dt=datetime.combine(
+                probe_date, datetime.min.time(), tzinfo=timezone.utc
+            ),
+            sleeper=lambda seconds: None,
+        )
+
+        chain_calls = [
+            call for call in context.calls if call[0] == "get_option_chain"
+        ]
+        self.assertEqual(len(chain_calls), 1)
+        self.assertEqual(chain_calls[0][2:4], (expirations[0], expirations[2]))
+        self.assertEqual(
+            [item["strike_time"] for item in result["expirations"]],
+            expirations[:3],
+        )
+        representatives = result["representative_contracts"]
+        self.assertEqual(
+            sum(item["option_type"] == "PUT" for item in representatives),
+            3,
+        )
+        self.assertEqual(
+            sum(item["option_type"] == "CALL" for item in representatives),
+            1,
+        )
+        self.assertNotIn(
+            expirations[3],
+            {item["strike_time"] for item in representatives},
+        )
 
     def test_static_probe_is_not_subject_to_dynamic_candidate_limit(self):
         context = FakeContext()

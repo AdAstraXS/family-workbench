@@ -380,6 +380,14 @@
   `/volume1/docker/family-workbench/backups/family-workbench-fix-dynamic-candidate-limit-20260904.dump`
   （SHA-256 `a28344482bd801db0bf9640878943255e2b5d5a911ec26ad697c9441e9e20714`），回滚包为
   `source-predeploy-610d8473e3e117061f95240eec2dfdb79627cacb-20260904-235103.tar.gz`。
+- [x] 2026-09-05 已针对三标的任务 `61a5a9a5-0e0c-4312-b967-835d3d6984fd` 暴露的 Futu
+  超时完成本地降载修复：实时分析不再固定优先 7–30 DTE，而是按分析日起实际可用顺序取最近
+  三个到期日（含当日），每个标的以一次起止日期区间请求期权链；每个到期日只取一张代表 Put，
+  对具备可用整手正股的标的再在整个窗口追加一张代表 Call，因此三标的批次最多 12 个临时订阅。
+  期权链、历史价格和财报日历仅在供应商明确返回超时时短暂等待并重试一次，权限、额度及其他
+  错误不重试；期权链请求失败不再连带显示“没有标准 Put”。369 项 `portfolio`/`option_wheel`
+  和 270 项 `ipo`/`portfolio` 回归通过，Django 检查及差异检查通过。无迁移或依赖变化，尚未提交、
+  推送或部署 NAS；生产仍运行 `7da67e650cd68abb4bb3aa27a9094c31999d38d2`。
 
 #### AI 情报 / 关键人物动态
 

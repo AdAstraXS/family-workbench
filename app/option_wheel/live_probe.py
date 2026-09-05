@@ -20,7 +20,7 @@ if __name__ == "__main__":
             }
         result = run_probe(
             arguments, profile="m1-gate", max_expirations=3,
-            max_contracts_per_expiration=3,
+            max_contracts_per_expiration=1,
             covered_call_symbols=calls_for,
         )
         # run_probe closes the SDK context and verifies subscriptions before returning.
