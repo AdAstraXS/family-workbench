@@ -2,10 +2,13 @@
 
 from datetime import date
 from decimal import Decimal
+import json
+import threading
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.db import close_old_connections, connection
+from django.test import TransactionTestCase
 
 from family_core.models import AccountType, AssetCategory, Family, FamilyMember
 from knowledge.models import (
@@ -18,6 +21,30 @@ from knowledge.search import index_document
 from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot, BankAccount
 from portfolio.models import InvestmentAccount, PortfolioSnapshot, PortfolioSnapshotPositionLine
 
+from .global_ai_services import (
+    GlobalAiServiceError,
+    append_conversation_message,
+    cancel_global_ai_request,
+    claim_global_ai_request,
+    complete_global_ai_request,
+    confirmed_memory_context,
+    confirm_memory,
+    create_conversation,
+    delete_memory,
+    mark_global_ai_request_unknown,
+    global_ai_request_state,
+    prepare_conversation_context,
+    propose_memory,
+    revise_memory,
+    submit_global_ai_request,
+)
+from .models import (
+    AiAnalysisRequest,
+    AiConversationMessage,
+    AiMemory,
+    AiOutboundAuthorization,
+    AiProvider,
+)
 from .read_tools import (
     GlobalAiReadError,
     SCOPE_FAMILY,
@@ -28,7 +55,7 @@ from .read_tools import (
 )
 
 
-class GlobalAiV1DeterministicEvaluation(TestCase):
+class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
     """The executable F01–F06 and K01–K05 portion of the frozen 20-case plan."""
 
     def setUp(self):
@@ -383,3 +410,272 @@ class GlobalAiV1DeterministicEvaluation(TestCase):
                 revision_id=self.bob_note.current_revision_id,
             )
         self.assertEqual(AssetBalanceEntry.objects.count(), ledger_count)
+
+    def test_M01_memory_requires_confirmation_and_preserves_versions_on_change(self):
+        candidate = propose_memory(
+            self.alice,
+            content="可能换房",
+            source_note="会话中由成员表达为可能性",
+        )
+        self.assertEqual(confirmed_memory_context(self.alice), [])
+        confirm_memory(self.alice, memory_id=candidate.pk)
+        self.assertEqual(confirmed_memory_context(self.alice)[0]["content"], "可能换房")
+        replacement = revise_memory(
+            self.alice,
+            memory_id=candidate.pk,
+            content="未来两年可能换房，尚未确定",
+        )
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.status, AiMemory.STATUS_SUPERSEDED)
+        self.assertEqual(replacement.version, 2)
+        self.assertEqual(replacement.supersedes_id, candidate.pk)
+        delete_memory(self.alice, memory_id=replacement.pk)
+        self.assertEqual(confirmed_memory_context(self.alice), [])
+
+    def test_M02_personal_memories_and_family_records_do_not_mix_owners(self):
+        alice_private = confirm_memory(
+            self.alice,
+            memory_id=propose_memory(self.alice, content="ALICE_PRIVATE_MEMORY").pk,
+        )
+        bob_private = confirm_memory(
+            self.bob,
+            memory_id=propose_memory(self.bob, content="BOB_PRIVATE_MEMORY").pk,
+        )
+        shared = confirm_memory(
+            self.alice,
+            memory_id=propose_memory(
+                self.alice,
+                content="家庭共同保留六个月应急资金",
+                visibility=AiMemory.VISIBILITY_FAMILY,
+            ).pk,
+        )
+        alice_text = json.dumps(confirmed_memory_context(self.alice), ensure_ascii=False)
+        bob_text = json.dumps(confirmed_memory_context(self.bob), ensure_ascii=False)
+        self.assertIn(alice_private.content, alice_text)
+        self.assertNotIn(bob_private.content, alice_text)
+        self.assertIn(bob_private.content, bob_text)
+        self.assertNotIn(alice_private.content, bob_text)
+        revised = revise_memory(self.bob, memory_id=shared.pk, content="家庭共同保留九个月应急资金")
+        self.assertEqual(revised.created_by_id, self.bob.pk)
+        self.assertIn(revised.content, json.dumps(confirmed_memory_context(self.alice), ensure_ascii=False))
+
+    def test_M03_cloud_switch_rechecks_full_history_grants_and_source_consent(self):
+        local = AiProvider.objects.create(
+            name="本地虚构模型",
+            provider_type="local-test",
+            execution_location=AiProvider.LOCATION_LOCAL,
+        )
+        cloud = AiProvider.objects.create(
+            name="云端虚构模型",
+            provider_type="cloud-test",
+            execution_location=AiProvider.LOCATION_CLOUD,
+        )
+        conversation = create_conversation(self.alice)
+        append_conversation_message(
+            self.alice,
+            conversation_id=conversation.pk,
+            role=AiConversationMessage.ROLE_SUMMARY,
+            content="依据家庭资产配置原则形成的本地摘要",
+            data_types=[AiOutboundAuthorization.DATA_KNOWLEDGE],
+            evidence_refs=[{
+                "kind": "knowledge",
+                "document_id": self.shared.pk,
+                "revision_id": self.shared.current_revision_id,
+            }],
+        )
+        self.assertEqual(
+            prepare_conversation_context(
+                self.alice, conversation_id=conversation.pk, provider=local
+            )["execution_location"],
+            AiProvider.LOCATION_LOCAL,
+        )
+        with self.assertRaises(GlobalAiServiceError):
+            prepare_conversation_context(
+                self.alice, conversation_id=conversation.pk, provider=cloud
+            )
+        for data_type in (
+            AiOutboundAuthorization.DATA_CONVERSATION,
+            AiOutboundAuthorization.DATA_KNOWLEDGE,
+        ):
+            AiOutboundAuthorization.objects.create(
+                family=self.family,
+                member=self.alice,
+                provider=cloud,
+                data_type=data_type,
+                is_allowed=True,
+            )
+        with self.assertRaisesRegex(GlobalAiServiceError, "知识来源未允许"):
+            prepare_conversation_context(
+                self.alice, conversation_id=conversation.pk, provider=cloud
+            )
+        self.shared_source.allow_cloud_ai = True
+        self.shared_source.save(update_fields=["allow_cloud_ai", "updated_at"])
+        payload = prepare_conversation_context(
+            self.alice, conversation_id=conversation.pk, provider=cloud
+        )
+        self.assertEqual(payload["messages"][0]["role"], AiConversationMessage.ROLE_SUMMARY)
+
+    def test_L01_idempotent_submission_survives_repeated_service_calls(self):
+        conversation = create_conversation(self.alice)
+        if connection.vendor == "postgresql":
+            barrier = threading.Barrier(3)
+            outcomes = []
+            errors = []
+
+            def submit_once():
+                close_old_connections()
+                try:
+                    actor = FamilyMember.objects.get(pk=self.alice.pk)
+                    barrier.wait(timeout=5)
+                    request, created = submit_global_ai_request(
+                        actor,
+                        conversation_id=conversation.pk,
+                        idempotency_key="same-logical-request",
+                        prompt="概括我的资产",
+                    )
+                    outcomes.append((request.pk, created))
+                except Exception as exc:  # pragma: no cover - asserted in parent thread
+                    errors.append(exc)
+                finally:
+                    close_old_connections()
+
+            threads = [threading.Thread(target=submit_once) for _index in range(2)]
+            for thread in threads:
+                thread.start()
+            barrier.wait(timeout=5)
+            for thread in threads:
+                thread.join(timeout=10)
+            self.assertEqual(errors, [])
+            self.assertEqual(len(outcomes), 2)
+            self.assertEqual({pk for pk, _created in outcomes}, {outcomes[0][0]})
+            self.assertEqual(sorted(created for _pk, created in outcomes), [False, True])
+            first = AiAnalysisRequest.objects.get(pk=outcomes[0][0])
+            created = True
+        else:
+            first, created = submit_global_ai_request(
+                self.alice,
+                conversation_id=conversation.pk,
+                idempotency_key="same-logical-request",
+                prompt="概括我的资产",
+            )
+        repeated, repeated_created = submit_global_ai_request(
+            self.alice,
+            conversation_id=conversation.pk,
+            idempotency_key="same-logical-request",
+            prompt="概括我的资产",
+        )
+        self.assertTrue(created)
+        self.assertFalse(repeated_created)
+        self.assertEqual(first.pk, repeated.pk)
+        claim_global_ai_request(request_id=first.pk)
+        after_refresh, created_after_refresh = submit_global_ai_request(
+            self.alice,
+            conversation_id=conversation.pk,
+            idempotency_key="same-logical-request",
+            prompt="概括我的资产",
+        )
+        self.assertFalse(created_after_refresh)
+        self.assertEqual(after_refresh.status, AiAnalysisRequest.STATUS_RUNNING)
+        with self.assertRaises(GlobalAiServiceError):
+            submit_global_ai_request(
+                self.alice,
+                conversation_id=conversation.pk,
+                idempotency_key="same-logical-request",
+                prompt="不同的问题",
+            )
+        with self.assertRaises(GlobalAiServiceError):
+            submit_global_ai_request(
+                self.bob,
+                conversation_id=conversation.pk,
+                idempotency_key="cross-member",
+                prompt="读取Alice会话",
+            )
+        with self.assertRaises(GlobalAiServiceError):
+            submit_global_ai_request(
+                self.alice,
+                conversation_id=conversation.pk,
+                idempotency_key="override-scope",
+                prompt="覆盖范围",
+                scope={"member_id": self.bob.pk},
+            )
+
+    def test_L02_cancel_late_results_unknown_usage_and_limits_are_explicit(self):
+        provider = AiProvider.objects.create(
+            name="限额虚构模型",
+            provider_type="local-test",
+            execution_location=AiProvider.LOCATION_LOCAL,
+            extra_data={"global_ai_daily_request_limit": 3},
+        )
+        conversation = create_conversation(self.alice)
+        request, _ = submit_global_ai_request(
+            self.alice,
+            conversation_id=conversation.pk,
+            idempotency_key="cancelled",
+            prompt="第一项",
+            provider=provider,
+        )
+        token = claim_global_ai_request(request_id=request.pk)
+        with self.assertRaises(GlobalAiServiceError):
+            cancel_global_ai_request(self.bob, request_id=request.pk)
+        with self.assertRaises(GlobalAiServiceError):
+            global_ai_request_state(self.bob, request_id=request.pk)
+        cancel_global_ai_request(self.alice, request_id=request.pk)
+        with self.assertRaisesRegex(GlobalAiServiceError, "迟到结果未采纳"):
+            complete_global_ai_request(
+                request_id=request.pk,
+                execution_token=token,
+                result_text="不应保存",
+            )
+        request.refresh_from_db()
+        self.assertEqual(request.status, AiAnalysisRequest.STATUS_CANCELLED)
+        self.assertFalse(hasattr(request, "result"))
+        self.assertEqual(
+            global_ai_request_state(self.alice, request_id=request.pk)["status"],
+            AiAnalysisRequest.STATUS_CANCELLED,
+        )
+
+        unknown, _ = submit_global_ai_request(
+            self.alice,
+            conversation_id=conversation.pk,
+            idempotency_key="unknown",
+            prompt="第二项",
+            provider=provider,
+        )
+        unknown_token = claim_global_ai_request(request_id=unknown.pk)
+        mark_global_ai_request_unknown(request_id=unknown.pk, execution_token=unknown_token)
+        repeated, created = submit_global_ai_request(
+            self.alice,
+            conversation_id=conversation.pk,
+            idempotency_key="unknown",
+            prompt="第二项",
+            provider=provider,
+        )
+        self.assertFalse(created)
+        self.assertEqual(repeated.status, AiAnalysisRequest.STATUS_UNKNOWN)
+
+        success, _ = submit_global_ai_request(
+            self.alice,
+            conversation_id=conversation.pk,
+            idempotency_key="unknown-usage",
+            prompt="第三项",
+            provider=provider,
+        )
+        success_token = claim_global_ai_request(request_id=success.pk)
+        complete_global_ai_request(
+            request_id=success.pk,
+            execution_token=success_token,
+            result_text="完成",
+            tokens_used=None,
+            cost_estimate=None,
+        )
+        success.refresh_from_db()
+        self.assertIsNone(success.result.tokens_used)
+        self.assertIsNone(success.result.cost_estimate)
+        with self.assertRaisesRegex(GlobalAiServiceError, "达到上限"):
+            submit_global_ai_request(
+                self.alice,
+                conversation_id=conversation.pk,
+                idempotency_key="over-limit",
+                prompt="第四项",
+                provider=provider,
+            )

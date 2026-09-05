@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 
 from family_core.models import AccountType, AssetCategory, Family, FamilyMember
 from knowledge.models import (
@@ -25,6 +26,7 @@ from .read_tools import (
     ledger_asset_snapshot,
     portfolio_account_snapshot,
 )
+from .models import AiAnalysisRequest
 
 
 class GlobalAiReadToolsTests(TestCase):
@@ -413,3 +415,29 @@ class GlobalAiKnowledgeReadTests(TestCase):
                 document_id=self.shared.pk,
                 revision_id=self.private.current_revision_id,
             )
+
+
+class GlobalAiLegacyIndexPrivacyTests(TestCase):
+    def test_legacy_family_request_list_excludes_private_global_ai_requests(self):
+        family = Family.objects.create(name="列表隔离家庭", base_currency="CNY")
+        user = get_user_model().objects.create_user(username="global-ai-list-owner")
+        member = FamilyMember.objects.create(family=family, user=user, display_name="成员")
+        global_request = AiAnalysisRequest.objects.create(
+            family=family,
+            member=member,
+            module="global_ai",
+            analysis_type="chat_v1",
+            prompt="私人会话",
+        )
+        shared_request = AiAnalysisRequest.objects.create(
+            family=family,
+            member=member,
+            module="intelligence",
+            analysis_type="event_enrichment",
+            prompt="家庭模块请求",
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("ai_analysis:index"))
+        ids = {request.pk for request in response.context["recent_requests"]}
+        self.assertNotIn(global_request.pk, ids)
+        self.assertIn(shared_request.pk, ids)

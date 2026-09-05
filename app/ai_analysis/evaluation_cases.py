@@ -57,30 +57,15 @@ CASES = (
     EvaluationCase("K03", "knowledge", STATUS_EXECUTABLE, "撤权后的实时复核"),
     EvaluationCase("K04", "knowledge", STATUS_EXECUTABLE, "零命中与版本稳定性"),
     EvaluationCase("K05", "knowledge", STATUS_EXECUTABLE, "不可信原文不能扩大工具能力"),
-    EvaluationCase(
-        "M01", "memory", STATUS_PENDING, "记忆候选、确认、修改与删除",
-        "正式会话与记忆服务",
-    ),
-    EvaluationCase(
-        "M02", "memory", STATUS_PENDING, "个人记忆与家庭共同记录隔离",
-        "正式个人记忆和家庭共同记录服务",
-    ),
-    EvaluationCase(
-        "M03", "memory", STATUS_PENDING, "模型切换时的外发授权复核",
-        "提供商外发授权和上下文组装服务",
-    ),
+    EvaluationCase("M01", "memory", STATUS_EXECUTABLE, "记忆候选、确认、修改与删除"),
+    EvaluationCase("M02", "memory", STATUS_EXECUTABLE, "个人记忆与家庭共同记录隔离"),
+    EvaluationCase("M03", "memory", STATUS_EXECUTABLE, "模型切换时的外发授权复核"),
     EvaluationCase(
         "M04", "sharing", STATUS_PENDING, "单条回答分享与撤权",
         "回答分享与派生证据权限服务",
     ),
-    EvaluationCase(
-        "L01", "lifecycle", STATUS_PENDING, "幂等提交与结果恢复",
-        "正式异步请求生命周期服务",
-    ),
-    EvaluationCase(
-        "L02", "lifecycle", STATUS_PENDING, "停止、迟到结果与用量上限",
-        "正式取消、结果归属和用量服务",
-    ),
+    EvaluationCase("L01", "lifecycle", STATUS_EXECUTABLE, "幂等提交与结果恢复"),
+    EvaluationCase("L02", "lifecycle", STATUS_EXECUTABLE, "停止、迟到结果与用量上限"),
     EvaluationCase(
         "A01", "answer", STATUS_PENDING, "目标与回撤回答边界",
         "候选模型回答和人工评分",
