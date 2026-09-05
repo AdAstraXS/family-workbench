@@ -3,9 +3,23 @@
 投资板块 2026-07-03 至 2026-08-09 的设计决策、主要交付、版本节点和部署经验，已归档到
 [`investment-module-development-history.md`](investment-module-development-history.md)。
 
-更新时间：2026-09-02
+更新时间：2026-09-05
 
 ## 当前结论
+
+### 全局 AI 第一版（本地开发，未部署）
+
+- 已确认“模块内分析为默认、跨模块组合为显式例外”：全部账户资产只读账本正式快照，
+  具体投资配置只读投资账户快照；默认不比较、对账、去重或合并两个模块的金额。
+- Codex App Server 保留为候选运行引擎，首版以普通模型 API 为基准；同模型 Harness 对照和预算
+  未确认前不部署 Codex。LibreChat、Open WebUI、Dify 只借鉴设计，Mem0 首版不引入。
+- 已承接 [源码参考调研](global-ai-reference-research.md)、[原型结果](global-ai-spike-results.md)、
+  [第一版功能设计](global-ai-v1-product-design.md) 和 [20案例评测方案](global-ai-v1-evaluation-plan.md)。
+- 已新增账本资产快照与投资账户快照两个正式只读服务。8项 Django 针对性测试及
+  `ai_analysis ipo portfolio` 共278项回归通过；隔离原型23项测试和 Codex stdio 5工具发现通过。
+  全程使用虚构或测试数据库，未调用模型、访问 NAS、修改生产数据或部署。
+- 下一步：为知识检索建立相同的真实权限交集与版本引用服务，再将三个模块工具接入无需云端调用的
+  20案例确定性评测器；候选模型、预算和真实调用仍待后续确认。
 
 第一至第四阶段已经按确认范围完成并部署：
 
