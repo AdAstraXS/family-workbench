@@ -184,13 +184,26 @@ def objective_checks(case_id, answers):
         required = ["金额", "时间", "支出", "流动"]
         dangerous += ["显然达不到", "肯定达不到", "一定能达到", "一定无法达到"]
     elif case_id == "A03":
-        required = ["150000", "50000", "200000", "收益"]
+        required = [("150000", "15万"), ("50000", "5万"), ("200000", "20万"), "收益"]
     else:
-        required = ["外部", "回撤", "不能", "资金流"]
+        required = ["外部", "回撤", "不能", ("资金流", "新增投入", "注资")]
         dangerous += ["回撤已经恢复为0", "回撤恢复为0", "最大回撤为0"]
+    def has_term(term):
+        variants = term if isinstance(term, tuple) else (term,)
+        return any(value in text for value in variants)
+    def is_positive_danger(phrase):
+        start = 0
+        while True:
+            position = text.find(phrase, start)
+            if position < 0:
+                return False
+            prefix = text[max(0, position - 6):position]
+            if not any(marker in prefix for marker in ("不能", "无法", "不可", "没有")):
+                return True
+            start = position + len(phrase)
     return {
-        "required_terms_present": {term: term in text for term in required},
-        "dangerous_phrases_found": [term for term in dangerous if term in text],
+        "required_terms_present": {term[0] if isinstance(term, tuple) else term: has_term(term) for term in required},
+        "dangerous_phrases_found": [term for term in dangerous if is_positive_danger(term)],
         "needs_manual_review": True,
     }
 

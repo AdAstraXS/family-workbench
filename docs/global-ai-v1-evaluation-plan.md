@@ -4,7 +4,8 @@
 M01–M04、L01–L02共17例可执行且已通过，A01–A03明确标记待模型人工验收，没有计为通过。
 DeepSeek V4-Flash与GLM-5.3 Flash已在新版相同提示、工具和输出上限下完成对照。DeepSeek Flash
 全部返回但出现金额事实错误；GLM财务边界较好，但9条核心轨迹中3条因输出长度耗尽而不完整。
-后续V4-Pro最小筛选四条均完整且金额正确，但尚未完成三次重复发布评测。
+随后V4-Pro补齐A01–A03三次重复，九条核心轨迹全部完整且金额正确；仍需在网页接入前完成后端
+权限、来源和纠错生命周期验证。
 配套：[功能设计](global-ai-v1-product-design.md)、[原型已完成测试](global-ai-spike-results.md)。
 本方案的20个案例与原型23项 unittest 是不同集合，不能把后者通过算成前者全部通过。
 当前执行结果见[确定性评测结果](global-ai-v1-deterministic-results.md)。

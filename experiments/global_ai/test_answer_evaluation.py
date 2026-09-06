@@ -88,6 +88,11 @@ class AnswerEvaluationTests(unittest.TestCase):
         checks = evaluation.objective_checks("A04", ["转入资金后最大回撤为0。"])
         self.assertIn("最大回撤为0", checks["dangerous_phrases_found"])
 
+    def test_objective_checks_accept_chinese_amounts_and_negated_claims(self):
+        checks = evaluation.objective_checks("A03", ["15万投入、5万收益，期末多20万；不能保证回撤。"])
+        self.assertTrue(all(checks["required_terms_present"].values()))
+        self.assertNotIn("保证回撤", checks["dangerous_phrases_found"])
+
 
 if __name__ == "__main__":
     unittest.main()
