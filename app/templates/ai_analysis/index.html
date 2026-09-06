@@ -48,7 +48,13 @@
       </header>
       <section class="global-ai-transcript" aria-label="对话内容">
         {% for message in conversation_messages %}
-          <article class="global-ai-message role-{{ message.role }}"><span>{{ message.get_role_display }}</span><p>{{ message.content|linebreaksbr }}</p></article>
+          <article class="global-ai-message role-{{ message.role }}"><span>{{ message.get_role_display }}</span><p>{{ message.content|linebreaksbr }}</p>
+            {% if message.role == 'assistant' %}<div class="global-ai-message-actions">
+              {% if message.current_share.status == 'active' %}<a href="{% url 'ai_analysis:answer_share_detail' message.current_share.pk %}">查看家庭分享</a>
+              {% elif message.current_share %}<a href="{% url 'ai_analysis:answer_share_preview' message.current_share.pk %}">{% if message.current_share.status == 'paused' %}查看暂停原因{% else %}继续预览{% endif %}</a>
+              {% else %}<form method="post" action="{% url 'ai_analysis:answer_share_preview_create' message.pk %}">{% csrf_token %}<button class="global-ai-text-button" type="submit">分享这一条回答</button></form>{% endif %}
+            </div>{% endif %}
+          </article>
         {% empty %}
           <div class="global-ai-empty-chat"><span aria-hidden="true">✦</span><h3>这段对话还没有内容</h3><p>模型接入后，可以在这里查询真实资料。系统会按问题选择所属模块，不会默认合并账本与投资账户。</p>
             <div class="global-ai-example-grid"><div><strong>查看我的资产配置</strong><span>使用最新正式账本资产快照</span></div><div><strong>解释本月收支</strong><span>使用家庭账本所选期间</span></div><div><strong>在资料中找答案</strong><span>只检索当前账号有权内容</span></div></div>

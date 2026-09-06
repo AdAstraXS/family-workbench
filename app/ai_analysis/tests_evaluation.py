@@ -29,17 +29,22 @@ from .global_ai_services import (
     complete_global_ai_request,
     confirmed_memory_context,
     confirm_memory,
+    create_answer_share_preview,
     create_conversation,
     delete_memory,
     mark_global_ai_request_unknown,
     global_ai_request_state,
     prepare_conversation_context,
+    publish_answer_share,
     propose_memory,
     revise_memory,
+    refresh_answer_share_state,
+    shared_answer_payload,
     submit_global_ai_request,
 )
 from .models import (
     AiAnalysisRequest,
+    AiAnswerShare,
     AiConversationMessage,
     AiMemory,
     AiOutboundAuthorization,
@@ -514,6 +519,52 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
             self.alice, conversation_id=conversation.pk, provider=cloud
         )
         self.assertEqual(payload["messages"][0]["role"], AiConversationMessage.ROLE_SUMMARY)
+
+    def test_M04_single_answer_share_rechecks_family_evidence_after_revocation(self):
+        conversation = create_conversation(self.alice, title="私人家庭资产讨论")
+        append_conversation_message(
+            self.alice,
+            conversation_id=conversation.pk,
+            role=AiConversationMessage.ROLE_USER,
+            content="私人问题不应出现在分享副本中",
+        )
+        answer = append_conversation_message(
+            self.alice,
+            conversation_id=conversation.pk,
+            role=AiConversationMessage.ROLE_ASSISTANT,
+            content="家庭资产配置应结合用途与流动性。",
+            data_types=[AiOutboundAuthorization.DATA_KNOWLEDGE],
+            evidence_refs=[{
+                "kind": "knowledge",
+                "document_id": self.shared.pk,
+                "revision_id": self.shared.current_revision_id,
+            }],
+        )
+        share, created = create_answer_share_preview(self.alice, message_id=answer.pk)
+        self.assertTrue(created)
+        self.assertEqual(share.status, AiAnswerShare.STATUS_DRAFT)
+        repeated, repeated_created = create_answer_share_preview(
+            self.alice, message_id=answer.pk
+        )
+        self.assertFalse(repeated_created)
+        self.assertEqual(repeated.pk, share.pk)
+        with self.assertRaises(GlobalAiServiceError):
+            shared_answer_payload(self.bob, share_id=share.pk)
+
+        publish_answer_share(self.alice, share_id=share.pk)
+        payload = shared_answer_payload(self.bob, share_id=share.pk)
+        self.assertEqual(payload["answer_text"], answer.content)
+        self.assertNotIn("私人问题", payload["answer_text"])
+        self.assertNotIn("messages", payload)
+        self.assertEqual(payload["evidence"][0]["revision_id"], self.shared.current_revision_id)
+
+        self.shared_source.visibility = KnowledgeVisibility.PRIVATE
+        self.shared_source.save(update_fields=["visibility", "updated_at"])
+        with self.assertRaisesRegex(GlobalAiServiceError, "暂停展示"):
+            shared_answer_payload(self.bob, share_id=share.pk)
+        refresh_answer_share_state(self.alice, share_id=share.pk)
+        share.refresh_from_db()
+        self.assertEqual(share.status, AiAnswerShare.STATUS_PAUSED)
 
     def test_L01_idempotent_submission_survives_repeated_service_calls(self):
         conversation = create_conversation(self.alice)

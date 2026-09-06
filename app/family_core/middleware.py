@@ -8,7 +8,7 @@ from .models import FamilyMember
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 EXEMPT_PATH_PREFIXES = ("/accounts/", "/static/", "/media/")
 VIEWER_AI_WRITE_PATH = re.compile(
-    r"^/ai/(?:conversations/(?:new|\d+/archive)/|memories/(?:new|\d+/(?:confirm|revise|delete))/)$"
+    r"^/ai/(?:conversations/(?:new|\d+/archive)/|memories/(?:new|\d+/(?:confirm|revise|delete))/|messages/\d+/share-preview/|shares/\d+/(?:publish|refresh|withdraw)/)$"
 )
 
 

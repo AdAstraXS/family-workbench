@@ -13,13 +13,18 @@ from .forms import ConversationCreateForm, MemoryCreateForm, MemoryRevisionForm
 from .global_ai_services import (
     GlobalAiServiceError,
     confirm_memory,
+    create_answer_share_preview,
     create_conversation,
     delete_memory,
+    publish_answer_share,
     propose_memory,
+    refresh_answer_share_state,
     revise_memory,
     set_conversation_archived,
+    shared_answer_payload,
+    withdraw_answer_share,
 )
-from .models import AiAnalysisRequest, AiConversation, AiMemory, AiProvider
+from .models import AiAnalysisRequest, AiAnswerShare, AiConversation, AiMemory, AiProvider
 
 
 def _membership_required_response(request):
@@ -63,7 +68,21 @@ def _workbench_context(member, *, active_conversation=None):
     conversation_messages = []
     conversation_requests = []
     if active_conversation:
-        conversation_messages = active_conversation.messages.all()
+        conversation_messages = list(active_conversation.messages.all())
+        shares = {
+            share.source_message_id: share
+            for share in AiAnswerShare.objects.filter(
+                owner=member,
+                source_message__conversation=active_conversation,
+                status__in=[
+                    AiAnswerShare.STATUS_DRAFT,
+                    AiAnswerShare.STATUS_ACTIVE,
+                    AiAnswerShare.STATUS_PAUSED,
+                ],
+            )
+        }
+        for item in conversation_messages:
+            item.current_share = shares.get(item.pk)
         conversation_requests = active_conversation.requests.filter(
             member=member, module="global_ai"
         ).select_related("provider", "result").order_by("-created_at")[:10]
@@ -216,3 +235,106 @@ def memory_delete(request, memory_id):
     if succeeded:
         messages.success(request, "记录已删除，后续对话不再使用。")
     return response
+
+
+@login_required
+@require_POST
+def answer_share_preview_create(request, message_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    try:
+        share, created = create_answer_share_preview(member, message_id=message_id)
+    except GlobalAiServiceError as exc:
+        messages.error(request, str(exc))
+        return redirect("ai_analysis:index")
+    if created:
+        messages.success(request, "已生成站内预览，请核对后再分享给家人。")
+    return redirect("ai_analysis:answer_share_preview", share_id=share.pk)
+
+
+@login_required
+def answer_share_preview(request, share_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    share = AiAnswerShare.objects.select_related("owner", "source_message").filter(
+        pk=share_id, family=member.family, owner=member
+    ).first()
+    if share is None:
+        raise Http404
+    return render(request, "ai_analysis/share_preview.html", {"share": share})
+
+
+@login_required
+@require_POST
+def answer_share_publish(request, share_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    try:
+        share = publish_answer_share(member, share_id=share_id)
+    except GlobalAiServiceError as exc:
+        messages.error(request, str(exc))
+        return redirect("ai_analysis:answer_share_preview", share_id=share_id)
+    messages.success(request, "这条回答已在家庭工作台内分享。")
+    return redirect("ai_analysis:answer_share_detail", share_id=share.pk)
+
+
+@login_required
+def answer_share_detail(request, share_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    share = AiAnswerShare.objects.filter(pk=share_id, family=member.family).first()
+    if share is None:
+        raise Http404
+    if share.status != AiAnswerShare.STATUS_ACTIVE and share.owner_id != member.pk:
+        raise Http404
+    try:
+        payload = shared_answer_payload(member, share_id=share_id)
+    except GlobalAiServiceError:
+        return render(
+            request,
+            "ai_analysis/share_unavailable.html",
+            {"share": share, "is_owner": share.owner_id == member.pk},
+            status=410,
+        )
+    return render(
+        request,
+        "ai_analysis/share_detail.html",
+        {"share": share, "shared_answer": payload, "is_owner": share.owner_id == member.pk},
+    )
+
+
+@login_required
+@require_POST
+def answer_share_refresh(request, share_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    try:
+        share = refresh_answer_share_state(member, share_id=share_id)
+    except GlobalAiServiceError as exc:
+        messages.error(request, str(exc))
+    else:
+        if share.status == AiAnswerShare.STATUS_PAUSED:
+            messages.warning(request, "依据已变化，这条分享已暂停。请重新生成预览。")
+        else:
+            messages.success(request, "依据仍可由家庭成员查看。")
+    return redirect("ai_analysis:answer_share_preview", share_id=share_id)
+
+
+@login_required
+@require_POST
+def answer_share_withdraw(request, share_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    try:
+        share = withdraw_answer_share(member, share_id=share_id)
+    except GlobalAiServiceError as exc:
+        messages.error(request, str(exc))
+        return redirect("ai_analysis:index")
+    messages.success(request, "这条回答已撤回。")
+    return redirect(_conversation_url(share.source_message.conversation))

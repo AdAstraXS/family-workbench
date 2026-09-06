@@ -3,12 +3,25 @@ from django.contrib import admin
 from .models import (
     AiAnalysisRequest,
     AiAnalysisResult,
+    AiAnswerShare,
     AiConversation,
     AiConversationMessage,
     AiMemory,
     AiOutboundAuthorization,
     AiProvider,
 )
+
+
+@admin.register(AiAnswerShare)
+class AiAnswerShareAdmin(admin.ModelAdmin):
+    list_display = ("title", "owner", "status", "source_message", "published_at", "created_at")
+    list_filter = ("family", "status", "published_at")
+    search_fields = ("title", "answer_text_snapshot", "owner__display_name")
+    readonly_fields = (
+        "family", "owner", "source_message", "answer_text_snapshot",
+        "evidence_snapshot", "source_message_hash", "published_at",
+        "paused_at", "pause_reason", "withdrawn_at", "created_at", "updated_at",
+    )
 
 
 @admin.register(AiProvider)

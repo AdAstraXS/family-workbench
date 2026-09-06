@@ -10,11 +10,12 @@ from django.db.models import Q
 from django.utils import timezone
 
 from family_core.models import FamilyMember
-from knowledge.models import KnowledgeDocument
+from knowledge.models import KnowledgeDocument, KnowledgeVisibility
 
 from .models import (
     AiAnalysisRequest,
     AiAnalysisResult,
+    AiAnswerShare,
     AiConversation,
     AiConversationMessage,
     AiMemory,
@@ -234,6 +235,229 @@ def confirmed_memory_context(actor):
         }
         for memory in memories.order_by("visibility", "pk")
     ]
+
+
+def _answer_message_hash(message):
+    payload = {
+        "message_id": message.pk,
+        "role": message.role,
+        "content": message.content,
+        "data_types": message.data_types or [],
+        "evidence_refs": message.evidence_refs or [],
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _shareable_answer(actor, message_id):
+    _validate_actor(actor)
+    message = AiConversationMessage.objects.select_related("conversation").filter(
+        pk=message_id,
+        conversation__family=actor.family,
+        conversation__member=actor,
+        role=AiConversationMessage.ROLE_ASSISTANT,
+    ).first()
+    if message is None:
+        raise GlobalAiServiceError("可分享回答不可用。")
+
+    declared_types = set(message.data_types or [])
+    if any(data_type not in VALID_DATA_TYPES for data_type in declared_types):
+        raise GlobalAiServiceError("回答包含不支持的数据类型。")
+
+    evidence_snapshot = []
+    reference_types = set()
+    for reference in message.evidence_refs or []:
+        if not isinstance(reference, dict):
+            raise GlobalAiServiceError("回答依据不可用。")
+        kind = reference.get("kind")
+        if kind == "knowledge":
+            reference_types.add(AiOutboundAuthorization.DATA_KNOWLEDGE)
+            document = KnowledgeDocument.objects.select_related("source").filter(
+                pk=reference.get("document_id"),
+                family=actor.family,
+                visibility=KnowledgeVisibility.FAMILY,
+                source__visibility=KnowledgeVisibility.FAMILY,
+            ).first()
+            if document is None:
+                raise GlobalAiServiceError("回答含有不能与家庭共享的知识依据。")
+            revision = document.revisions.filter(pk=reference.get("revision_id")).first()
+            if revision is None:
+                raise GlobalAiServiceError("回答知识依据的版本不可用。")
+            evidence_snapshot.append(
+                {
+                    "kind": "knowledge",
+                    "document_id": document.pk,
+                    "revision_id": revision.pk,
+                    "title": document.title,
+                    "revision_number": revision.revision_number,
+                }
+            )
+        elif kind == "memory":
+            reference_types.add(AiOutboundAuthorization.DATA_MEMORY)
+            memory = AiMemory.objects.filter(
+                pk=reference.get("memory_id"),
+                family=actor.family,
+                visibility=AiMemory.VISIBILITY_FAMILY,
+                status=AiMemory.STATUS_CONFIRMED,
+            ).first()
+            if memory is None:
+                raise GlobalAiServiceError("回答含有不能与家庭共享的个人背景。")
+            evidence_snapshot.append(
+                {
+                    "kind": "memory",
+                    "memory_id": memory.pk,
+                    "version": memory.version,
+                    "content": memory.content,
+                }
+            )
+        else:
+            raise GlobalAiServiceError("回答依据不可用。")
+
+    declared_reference_types = declared_types & {
+        AiOutboundAuthorization.DATA_KNOWLEDGE,
+        AiOutboundAuthorization.DATA_MEMORY,
+    }
+    if declared_reference_types != reference_types:
+        raise GlobalAiServiceError("回答的知识或记忆缺少可复核的版本依据。")
+    return message, evidence_snapshot
+
+
+def _answer_share_for_owner(actor, share_id, *, for_update=False):
+    _validate_actor(actor)
+    queryset = AiAnswerShare.objects.filter(
+        pk=share_id, family=actor.family, owner=actor
+    ).select_related("source_message", "source_message__conversation")
+    if for_update:
+        queryset = queryset.select_for_update()
+    share = queryset.first()
+    if share is None:
+        raise GlobalAiServiceError("回答分享不可用。")
+    return share
+
+
+def create_answer_share_preview(actor, *, message_id, title=""):
+    with transaction.atomic():
+        message, evidence_snapshot = _shareable_answer(actor, message_id)
+        existing = AiAnswerShare.objects.select_for_update().filter(
+            source_message=message,
+            status__in=[
+                AiAnswerShare.STATUS_DRAFT,
+                AiAnswerShare.STATUS_ACTIVE,
+                AiAnswerShare.STATUS_PAUSED,
+            ],
+        ).first()
+        if existing and existing.status != AiAnswerShare.STATUS_PAUSED:
+            return existing, False
+        if existing:
+            existing.status = AiAnswerShare.STATUS_WITHDRAWN
+            existing.withdrawn_at = timezone.now()
+            existing.save(update_fields=["status", "withdrawn_at", "updated_at"])
+        try:
+            with transaction.atomic():
+                share = AiAnswerShare.objects.create(
+                    family=actor.family,
+                    owner=actor,
+                    source_message=message,
+                    title=(title or "分享的回答")[:200],
+                    answer_text_snapshot=message.content,
+                    evidence_snapshot=evidence_snapshot,
+                    source_message_hash=_answer_message_hash(message),
+                )
+        except IntegrityError:
+            share = AiAnswerShare.objects.filter(
+                source_message=message,
+                status__in=[
+                    AiAnswerShare.STATUS_DRAFT,
+                    AiAnswerShare.STATUS_ACTIVE,
+                    AiAnswerShare.STATUS_PAUSED,
+                ],
+            ).first()
+            if share is None:
+                raise
+            return share, False
+    return share, True
+
+
+def publish_answer_share(actor, *, share_id):
+    with transaction.atomic():
+        share = _answer_share_for_owner(actor, share_id, for_update=True)
+        if share.status != AiAnswerShare.STATUS_DRAFT:
+            raise GlobalAiServiceError("只有等待预览的回答可以发布。")
+        message, evidence_snapshot = _shareable_answer(actor, share.source_message_id)
+        if (
+            share.source_message_hash != _answer_message_hash(message)
+            or share.answer_text_snapshot != message.content
+            or share.evidence_snapshot != evidence_snapshot
+        ):
+            raise GlobalAiServiceError("回答或依据已变化，请重新生成分享预览。")
+        share.status = AiAnswerShare.STATUS_ACTIVE
+        share.published_at = timezone.now()
+        share.pause_reason = ""
+        share.paused_at = None
+        share.save(
+            update_fields=[
+                "status", "published_at", "pause_reason", "paused_at", "updated_at"
+            ]
+        )
+    return share
+
+
+def shared_answer_payload(actor, *, share_id):
+    _validate_actor(actor)
+    share = AiAnswerShare.objects.select_related(
+        "owner", "source_message", "source_message__conversation"
+    ).filter(pk=share_id, family=actor.family).first()
+    if share is None or share.status != AiAnswerShare.STATUS_ACTIVE:
+        raise GlobalAiServiceError("分享回答不可用。")
+    try:
+        message, _evidence_snapshot = _shareable_answer(
+            share.owner, share.source_message_id
+        )
+    except GlobalAiServiceError as exc:
+        raise GlobalAiServiceError("分享回答已因依据权限变化暂停展示。") from exc
+    if share.source_message_hash != _answer_message_hash(message):
+        raise GlobalAiServiceError("分享回答已因来源变化暂停展示。")
+    return {
+        "share_id": share.pk,
+        "title": share.title,
+        "answer_text": share.answer_text_snapshot,
+        "evidence": share.evidence_snapshot,
+        "owner_name": share.owner.display_name,
+        "published_at": share.published_at,
+    }
+
+
+def refresh_answer_share_state(actor, *, share_id):
+    with transaction.atomic():
+        share = _answer_share_for_owner(actor, share_id, for_update=True)
+        if share.status not in {AiAnswerShare.STATUS_ACTIVE, AiAnswerShare.STATUS_PAUSED}:
+            raise GlobalAiServiceError("当前分享不需要复核。")
+        try:
+            message, _evidence_snapshot = _shareable_answer(
+                actor, share.source_message_id
+            )
+            valid = share.source_message_hash == _answer_message_hash(message)
+        except GlobalAiServiceError:
+            valid = False
+        if not valid:
+            share.status = AiAnswerShare.STATUS_PAUSED
+            share.paused_at = timezone.now()
+            share.pause_reason = "依据权限或来源状态已经变化，需要重新预览。"
+            share.save(
+                update_fields=["status", "paused_at", "pause_reason", "updated_at"]
+            )
+    return share
+
+
+def withdraw_answer_share(actor, *, share_id):
+    with transaction.atomic():
+        share = _answer_share_for_owner(actor, share_id, for_update=True)
+        if share.status == AiAnswerShare.STATUS_WITHDRAWN:
+            return share
+        share.status = AiAnswerShare.STATUS_WITHDRAWN
+        share.withdrawn_at = timezone.now()
+        share.save(update_fields=["status", "withdrawn_at", "updated_at"])
+    return share
 
 
 def _require_cloud_grants(actor, provider, data_types):

@@ -60,10 +60,7 @@ CASES = (
     EvaluationCase("M01", "memory", STATUS_EXECUTABLE, "记忆候选、确认、修改与删除"),
     EvaluationCase("M02", "memory", STATUS_EXECUTABLE, "个人记忆与家庭共同记录隔离"),
     EvaluationCase("M03", "memory", STATUS_EXECUTABLE, "模型切换时的外发授权复核"),
-    EvaluationCase(
-        "M04", "sharing", STATUS_PENDING, "单条回答分享与撤权",
-        "回答分享与派生证据权限服务",
-    ),
+    EvaluationCase("M04", "sharing", STATUS_EXECUTABLE, "单条回答分享与撤权"),
     EvaluationCase("L01", "lifecycle", STATUS_EXECUTABLE, "幂等提交与结果恢复"),
     EvaluationCase("L02", "lifecycle", STATUS_EXECUTABLE, "停止、迟到结果与用量上限"),
     EvaluationCase(

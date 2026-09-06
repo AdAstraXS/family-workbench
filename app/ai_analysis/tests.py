@@ -18,6 +18,12 @@ from knowledge.search import index_document
 from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot, BankAccount
 from portfolio.models import InvestmentAccount, PortfolioSnapshot, PortfolioSnapshotPositionLine
 
+from .global_ai_services import (
+    GlobalAiServiceError,
+    append_conversation_message,
+    create_answer_share_preview,
+    publish_answer_share,
+)
 from .read_tools import (
     GlobalAiReadError,
     SCOPE_FAMILY,
@@ -28,6 +34,7 @@ from .read_tools import (
 )
 from .models import (
     AiAnalysisRequest,
+    AiAnswerShare,
     AiConversation,
     AiConversationMessage,
     AiMemory,
@@ -620,3 +627,111 @@ class GlobalAiWorkbenchTests(TestCase):
         self.assertContains(response, "结果未确认，用量与费用保持未知")
         self.assertContains(response, request_record.get_status_display())
         self.assertContains(response, "当前不会调用模型，也不会生成示例答案")
+
+    def _family_knowledge_answer(self):
+        source = KnowledgeSource.objects.create(
+            family=self.family,
+            owner=self.alice,
+            key="share-test-source",
+            kind=KnowledgeSource.KIND_INTERNAL_NOTES,
+            name="家庭共享资料",
+            visibility=KnowledgeVisibility.FAMILY,
+        )
+        document = KnowledgeDocument.objects.create(
+            family=self.family,
+            source=source,
+            owner=self.alice,
+            external_id="share-test-document",
+            title="家庭资产原则",
+            visibility=KnowledgeVisibility.FAMILY,
+            knowledge_status=KnowledgeDocument.KNOWLEDGE_INCLUDED,
+        )
+        revision = KnowledgeRevision.objects.create(
+            document=document,
+            revision_number=1,
+            content_hash="share-test" + "0" * 54,
+            plain_text="保留充足流动性。",
+        )
+        document.current_revision = revision
+        document.save(update_fields=["current_revision", "updated_at"])
+        message = append_conversation_message(
+            self.alice,
+            conversation_id=self.alice_conversation.pk,
+            role=AiConversationMessage.ROLE_ASSISTANT,
+            content="建议先保留家庭应急资金，再安排长期投资。",
+            data_types=["knowledge"],
+            evidence_refs=[{
+                "kind": "knowledge",
+                "document_id": document.pk,
+                "revision_id": revision.pk,
+            }],
+        )
+        return source, message
+
+    def test_single_answer_share_requires_preview_and_never_exposes_conversation(self):
+        _source, answer = self._family_knowledge_answer()
+        append_conversation_message(
+            self.alice,
+            conversation_id=self.alice_conversation.pk,
+            role=AiConversationMessage.ROLE_USER,
+            content="这是不能出现在分享页的私人问题",
+        )
+        self.client.force_login(self.alice_user)
+        response = self.client.post(
+            reverse("ai_analysis:answer_share_preview_create", args=[answer.pk])
+        )
+        share = AiAnswerShare.objects.get(source_message=answer)
+        self.assertRedirects(
+            response, reverse("ai_analysis:answer_share_preview", args=[share.pk])
+        )
+        self.assertEqual(share.status, AiAnswerShare.STATUS_DRAFT)
+
+        self.client.force_login(self.bob_user)
+        self.assertEqual(
+            self.client.get(reverse("ai_analysis:answer_share_detail", args=[share.pk])).status_code,
+            404,
+        )
+        self.client.force_login(self.alice_user)
+        self.client.post(reverse("ai_analysis:answer_share_publish", args=[share.pk]))
+
+        self.client.force_login(self.bob_user)
+        detail = self.client.get(reverse("ai_analysis:answer_share_detail", args=[share.pk]))
+        self.assertContains(detail, answer.content)
+        self.assertContains(detail, "家庭资产原则")
+        self.assertNotContains(detail, "这是不能出现在分享页的私人问题")
+        self.assertNotContains(detail, "Alice 私人资产回顾")
+
+    def test_revoked_evidence_stops_display_without_get_writing_state(self):
+        source, answer = self._family_knowledge_answer()
+        share, _created = create_answer_share_preview(self.alice, message_id=answer.pk)
+        publish_answer_share(self.alice, share_id=share.pk)
+        source.visibility = KnowledgeVisibility.PRIVATE
+        source.save(update_fields=["visibility", "updated_at"])
+
+        self.client.force_login(self.bob_user)
+        updated_at = AiAnswerShare.objects.get(pk=share.pk).updated_at
+        detail = self.client.get(reverse("ai_analysis:answer_share_detail", args=[share.pk]))
+        self.assertEqual(detail.status_code, 410)
+        self.assertNotContains(detail, answer.content, status_code=410)
+        share.refresh_from_db()
+        self.assertEqual(share.status, AiAnswerShare.STATUS_ACTIVE)
+        self.assertEqual(share.updated_at, updated_at)
+
+        self.client.force_login(self.alice_user)
+        self.client.post(reverse("ai_analysis:answer_share_refresh", args=[share.pk]))
+        share.refresh_from_db()
+        self.assertEqual(share.status, AiAnswerShare.STATUS_PAUSED)
+
+    def test_personal_memory_and_another_members_answer_cannot_be_shared(self):
+        answer = append_conversation_message(
+            self.alice,
+            conversation_id=self.alice_conversation.pk,
+            role=AiConversationMessage.ROLE_ASSISTANT,
+            content="使用了个人背景的回答",
+            data_types=["memory"],
+            evidence_refs=[{"kind": "memory", "memory_id": self.alice_memory.pk}],
+        )
+        with self.assertRaisesRegex(GlobalAiServiceError, "个人背景"):
+            create_answer_share_preview(self.alice, message_id=answer.pk)
+        with self.assertRaises(GlobalAiServiceError):
+            create_answer_share_preview(self.bob, message_id=answer.pk)

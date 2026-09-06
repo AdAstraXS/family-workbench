@@ -242,6 +242,64 @@ class AiConversationMessage(models.Model):
         ]
 
 
+class AiAnswerShare(TimestampedModel):
+    STATUS_DRAFT = "draft"
+    STATUS_ACTIVE = "active"
+    STATUS_PAUSED = "paused"
+    STATUS_WITHDRAWN = "withdrawn"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "等待预览"),
+        (STATUS_ACTIVE, "家庭可见"),
+        (STATUS_PAUSED, "已暂停"),
+        (STATUS_WITHDRAWN, "已撤回"),
+    ]
+
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="ai_answer_shares",
+    )
+    owner = models.ForeignKey(
+        FamilyMember,
+        verbose_name="分享成员",
+        on_delete=models.CASCADE,
+        related_name="ai_answer_shares",
+    )
+    source_message = models.ForeignKey(
+        AiConversationMessage,
+        verbose_name="来源回答",
+        on_delete=models.CASCADE,
+        related_name="answer_shares",
+    )
+    title = models.CharField("分享标题", max_length=200, blank=True)
+    status = models.CharField(
+        "状态", max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT
+    )
+    answer_text_snapshot = models.TextField("回答副本")
+    evidence_snapshot = models.JSONField("依据副本", default=list, blank=True)
+    source_message_hash = models.CharField("来源回答校验值", max_length=64)
+    published_at = models.DateTimeField("发布时间", null=True, blank=True)
+    paused_at = models.DateTimeField("暂停时间", null=True, blank=True)
+    pause_reason = models.CharField("暂停原因", max_length=300, blank=True)
+    withdrawn_at = models.DateTimeField("撤回时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "全局 AI 单条回答分享"
+        verbose_name_plural = "全局 AI 单条回答分享"
+        ordering = ["-created_at", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_message"],
+                condition=Q(status__in=["draft", "active", "paused"]),
+                name="unique_open_ai_answer_share",
+            )
+        ]
+
+    def __str__(self):
+        return self.title or f"回答分享 #{self.pk}"
+
+
 class AiAnalysisRequest(TimestampedModel):
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
