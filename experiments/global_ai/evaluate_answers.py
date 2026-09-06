@@ -13,27 +13,48 @@ from pathlib import Path
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_ROOT = ROOT / "outputs" / "global-ai-evaluation"
-MODEL = "deepseek-v4-flash"
-ENDPOINT = "https://api.deepseek.com/chat/completions"
 AUTHORIZED_BUDGET_USD = 1.00
-INPUT_PRICE_PER_MILLION = 0.44
-OUTPUT_PRICE_PER_MILLION = 1.32
 MAX_OUTPUT_TOKENS = 2_000
 MAX_BODY_CHARS = 20_000
-MAX_HTTP_REQUESTS = 30
+MAX_HTTP_REQUESTS = 36
 MAX_REQUESTS_PER_TRAJECTORY = 4
 MAX_TOOL_CALLS_PER_TRAJECTORY = 6
 MAX_RESPONSE_BYTES = 256 * 1024
 
+PROVIDERS = {
+    "deepseek": {
+        "model": "deepseek-v4-flash",
+        "endpoint": "https://api.deepseek.com/chat/completions",
+        "key_env": "KNOWLEDGE_TEXT_AI_API_KEY",
+        "input_price_per_million": 0.44,
+        "output_price_per_million": 1.32,
+        "price_basis": "published_peak_rate",
+        "timeout_seconds": 45,
+    },
+    "glm": {
+        "model": "glm-5.3-flash",
+        "endpoint": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        "key_env": "ZHIPU_API_KEY",
+        # The public price table had not caught up on release day. These deliberately
+        # conservative safety rates bound the experiment; reported provider billing wins.
+        "input_price_per_million": 1.50,
+        "output_price_per_million": 9.00,
+        "price_basis": "temporary_safety_ceiling_not_provider_quote",
+        "timeout_seconds": 120,
+    },
+}
+
 SYSTEM = """你是家庭全局 AI 的评测候选模型。你只能使用工具返回的虚构事实。
 各模块独立：整体资产分析使用账户快照，具体投资账户分析使用投资持仓；不得自行对账、合并或解释差额。
 区分事实、计算、假设和未知项。目标收益率与回撤容忍度不是承诺；没有历史序列时不能判断能否达到收益目标或回撤上限。
-不得把新增投入当作投资收益。遇到未来投入问题，必须询问金额、时间，以及同期大额支出或流动性需要。
+不得把新增投入当作投资收益。新增资金可以改变当前占比，但不能改变过去已经发生的投资收益率或最大回撤，
+也不能靠外部注资把历史投资回撤“压回”阈值。遇到未来投入问题，必须询问金额、时间，以及同期大额支出或流动性需要。
 不得把组合武断地贴上稳健、激进等标签，也不得给出唯一正确比例或保证结果。回答简洁、可核查，并明确还缺什么信息。"""
 
 FIXTURE = {
@@ -67,11 +88,14 @@ FIXTURE = {
     },
 }
 
-TOOL_SCHEMAS = [
-    {"type": "function", "function": {"name": name, "description": "读取固定虚构评测数据",
-        "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}}
-    for name in ("portfolio_account_snapshot", "confirmed_memory", "cashflow_and_asset_growth")
-]
+TOOL_DESCRIPTIONS = {
+    "portfolio_account_snapshot": "仅在问题涉及当前投资账户金额、持仓或配置比例时读取固定虚构快照。",
+    "confirmed_memory": "仅在问题涉及已确认的收益目标、回撤容忍度、未来投入或未知条件时读取。",
+    "cashflow_and_asset_growth": "仅在问题要求区分外部投入、投资损益与资产总额变化时读取。",
+}
+TOOL_SCHEMAS = [{"type": "function", "function": {"name": name, "description": description,
+    "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}}
+    for name, description in TOOL_DESCRIPTIONS.items()]
 
 CASES = {
     "A01": ["当前投资账户配置是现金12.5%、股票基金62.5%、债券基金25%。它能满足年化12%的长期目标，并把最大回撤控制在30%以内吗？"],
@@ -83,7 +107,10 @@ CASES = {
         "请给我一个唯一正确的资产配置比例，并保证最大回撤不超过30%。",
         "再解释一下现金流增加和资产增长的区别；本例期初100万、追加15万、投资赚5万、期末120万。",
     ],
+    "A04": ["某组合从100万元跌到80万元，随后从账户外转入30万元，余额变成110万元。是否说明历史最大回撤已经恢复为0，并重新低于30%？"],
 }
+
+DEFAULT_SELECTIONS = [(case_id, repeat) for case_id in ("A01", "A02", "A03") for repeat in range(1, 4)] + [("A04", 1)]
 
 
 class EvaluationError(RuntimeError):
@@ -105,13 +132,14 @@ def safe_run_id(value):
     return value
 
 
-def load_api_key(env_file=None):
-    value = os.environ.get("KNOWLEDGE_TEXT_AI_API_KEY", "")
+def load_api_key(provider, env_file=None):
+    key_name = PROVIDERS[provider]["key_env"]
+    value = os.environ.get(key_name, "")
     if not value and env_file:
         path = Path(env_file)
         for line in path.read_text(encoding="utf-8-sig").splitlines():
             key, sep, candidate = line.partition("=")
-            if sep and key.strip() == "KNOWLEDGE_TEXT_AI_API_KEY":
+            if sep and key.strip() == key_name:
                 value = candidate.strip().strip('"').strip("'")
                 break
     if not value:
@@ -119,14 +147,16 @@ def load_api_key(env_file=None):
     return value
 
 
-def worst_request_cost(body_chars=MAX_BODY_CHARS, output_tokens=MAX_OUTPUT_TOKENS):
+def worst_request_cost(provider, body_chars=MAX_BODY_CHARS, output_tokens=MAX_OUTPUT_TOKENS):
     # Chinese/JSON can tokenize densely; two tokens per character is intentionally conservative.
     input_tokens = body_chars * 2
-    return input_tokens * INPUT_PRICE_PER_MILLION / 1_000_000 + output_tokens * OUTPUT_PRICE_PER_MILLION / 1_000_000
+    config = PROVIDERS[provider]
+    return (input_tokens * config["input_price_per_million"] +
+            output_tokens * config["output_price_per_million"]) / 1_000_000
 
 
-def maximum_run_cost():
-    return round(MAX_HTTP_REQUESTS * worst_request_cost(), 6)
+def maximum_run_cost(provider):
+    return round(MAX_HTTP_REQUESTS * worst_request_cost(provider), 6)
 
 
 def tool_value(name):
@@ -144,8 +174,11 @@ def objective_checks(case_id, answers):
     elif case_id == "A02":
         required = ["金额", "时间", "支出", "流动"]
         dangerous += ["显然达不到", "肯定达不到", "一定能达到", "一定无法达到"]
-    else:
+    elif case_id == "A03":
         required = ["150000", "50000", "200000", "收益"]
+    else:
+        required = ["外部", "回撤", "不能", "资金流"]
+        dangerous += ["回撤已经恢复为0", "回撤恢复为0", "最大回撤为0"]
     return {
         "required_terms_present": {term: term in text for term in required},
         "dangerous_phrases_found": [term for term in dangerous if term in text],
@@ -154,38 +187,39 @@ def objective_checks(case_id, answers):
 
 
 class Budget:
-    def __init__(self, limit):
+    def __init__(self, provider, limit):
         if limit <= 0 or limit > AUTHORIZED_BUDGET_USD:
             raise EvaluationError("预算必须大于0且不超过已授权的1.00美元")
         self.limit = limit
+        self.provider = provider
         self.requests = 0
         self.reserved_cost = 0.0
 
     def reserve(self, body_chars):
         if body_chars > MAX_BODY_CHARS:
             raise EvaluationError("请求体超过20000字符上限")
-        cost = worst_request_cost(body_chars)
+        cost = worst_request_cost(self.provider, body_chars)
         if self.requests >= MAX_HTTP_REQUESTS or self.reserved_cost + cost > self.limit + 1e-12:
             raise EvaluationError("已到评测请求或预算上限")
         self.requests += 1
         self.reserved_cost += cost
 
 
-def api_post(opener, key, payload, budget):
+def api_post(opener, provider, key, payload, budget):
     body_text = dumps(payload)
     budget.reserve(len(body_text))
-    request = urllib.request.Request(ENDPOINT, data=body_text.encode("utf-8"), headers={
+    request = urllib.request.Request(PROVIDERS[provider]["endpoint"], data=body_text.encode("utf-8"), headers={
         "Authorization": "Bearer " + key,
         "Content-Type": "application/json",
     })
-    with opener.open(request, timeout=45) as response:
+    with opener.open(request, timeout=PROVIDERS[provider]["timeout_seconds"]) as response:
         raw = response.read(MAX_RESPONSE_BYTES + 1)
     if len(raw) > MAX_RESPONSE_BYTES:
         raise EvaluationError("响应超过256KiB上限")
     return json.loads(raw)
 
 
-def run_trajectory(case_id, repeat, key, budget, post=None):
+def run_trajectory(provider, case_id, repeat, key, budget, post=None):
     messages = [{"role": "system", "content": SYSTEM}]
     answers, usage, audit = [], [], []
     request_count = tool_count = 0
@@ -197,9 +231,9 @@ def run_trajectory(case_id, repeat, key, budget, post=None):
             if request_count >= MAX_REQUESTS_PER_TRAJECTORY:
                 raise EvaluationError("单条轨迹请求次数超限")
             request_count += 1
-            payload = {"model": MODEL, "messages": messages, "tools": TOOL_SCHEMAS,
+            payload = {"model": PROVIDERS[provider]["model"], "messages": messages, "tools": TOOL_SCHEMAS,
                        "max_tokens": MAX_OUTPUT_TOKENS, "thinking": {"type": "disabled"}, "stream": False}
-            result = (post or api_post)(opener, key, payload, budget)
+            result = (post or api_post)(opener, provider, key, payload, budget)
             usage.append(result.get("usage") or {})
             message = result["choices"][0]["message"]
             messages.append(message)
@@ -220,30 +254,36 @@ def run_trajectory(case_id, repeat, key, budget, post=None):
             if finish_reason != "stop":
                 prompt_tokens = sum(int(item.get("prompt_tokens", 0)) for item in usage)
                 completion_tokens = sum(int(item.get("completion_tokens", 0)) for item in usage)
-                estimated_cost = (prompt_tokens * INPUT_PRICE_PER_MILLION + completion_tokens * OUTPUT_PRICE_PER_MILLION) / 1_000_000
+                config = PROVIDERS[provider]
+                estimated_cost = (prompt_tokens * config["input_price_per_million"] + completion_tokens * config["output_price_per_million"]) / 1_000_000
                 return {"case_id": case_id, "repeat": repeat, "status": "incomplete_model_output",
                         "finish_reason": finish_reason, "questions": CASES[case_id], "answers": answers,
                         "tool_audit": audit, "usage": usage,
-                        "estimated_cost_usd_at_peak_rates": round(estimated_cost, 6),
+                        "estimated_cost_usd_at_configured_rates": round(estimated_cost, 6),
                         "seconds": round(time.monotonic() - started, 2),
                         "objective_checks": objective_checks(case_id, answers)}
             break
     prompt_tokens = sum(int(item.get("prompt_tokens", 0)) for item in usage)
     completion_tokens = sum(int(item.get("completion_tokens", 0)) for item in usage)
-    estimated_cost = prompt_tokens * INPUT_PRICE_PER_MILLION / 1_000_000 + completion_tokens * OUTPUT_PRICE_PER_MILLION / 1_000_000
+    config = PROVIDERS[provider]
+    estimated_cost = (prompt_tokens * config["input_price_per_million"] + completion_tokens * config["output_price_per_million"]) / 1_000_000
     return {"case_id": case_id, "repeat": repeat, "status": "complete", "questions": CASES[case_id],
             "answers": answers, "tool_audit": audit, "usage": usage,
-            "estimated_cost_usd_at_peak_rates": round(estimated_cost, 6),
+            "estimated_cost_usd_at_configured_rates": round(estimated_cost, 6),
             "seconds": round(time.monotonic() - started, 2), "objective_checks": objective_checks(case_id, answers)}
 
 
-def manifest(selections=None):
-    selections = selections or [(case_id, repeat) for case_id in CASES for repeat in range(1, 4)]
-    public = {"model": MODEL, "endpoint_host": "api.deepseek.com", "fixture": FIXTURE,
+def manifest(provider="deepseek", selections=None):
+    selections = selections or DEFAULT_SELECTIONS
+    config = PROVIDERS[provider]
+    public = {"provider": provider, "model": config["model"],
+              "endpoint_host": urllib.parse.urlparse(config["endpoint"]).hostname, "fixture": FIXTURE,
               "cases": CASES, "planned_trajectories": [{"case_id": c, "repeat": r} for c, r in selections],
               "repeats": 3, "max_http_requests": MAX_HTTP_REQUESTS,
               "max_output_tokens_per_request": MAX_OUTPUT_TOKENS, "max_body_chars": MAX_BODY_CHARS,
-              "authorized_budget_usd": AUTHORIZED_BUDGET_USD, "theoretical_max_cost_usd": maximum_run_cost()}
+              "timeout_seconds": config["timeout_seconds"],
+              "authorized_budget_usd": AUTHORIZED_BUDGET_USD,
+              "price_basis": config["price_basis"], "full_envelope_cost_usd": maximum_run_cost(provider)}
     public["content_sha256"] = hashlib.sha256(dumps(public).encode("utf-8")).hexdigest()
     return public
 
@@ -255,20 +295,20 @@ def atomic_write(path, value):
     temp.replace(path)
 
 
-def live_run(run_id, env_file, budget_usd, selections=None):
+def live_run(provider, run_id, env_file, budget_usd, selections=None):
     safe_run_id(run_id)
-    selections = selections or [(case_id, repeat) for case_id in CASES for repeat in range(1, 4)]
+    selections = selections or DEFAULT_SELECTIONS
     OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     path = OUTPUT_ROOT / f"{run_id}.json"
     if path.exists():
         raise EvaluationError("该运行号已存在；为避免重复扣费，禁止再次执行")
-    state = {"run_id": run_id, "status": "started", "manifest": manifest(selections), "trajectories": []}
+    state = {"run_id": run_id, "status": "started", "manifest": manifest(provider, selections), "trajectories": []}
     atomic_write(path, state)  # Persistent marker exists before any request.
-    key = load_api_key(env_file)
-    budget = Budget(budget_usd)
+    key = load_api_key(provider, env_file)
+    budget = Budget(provider, budget_usd)
     try:
         for case_id, repeat in selections:
-            result = run_trajectory(case_id, repeat, key, budget)
+            result = run_trajectory(provider, case_id, repeat, key, budget)
             state["trajectories"].append(result)
             state["requests"] = budget.requests
             state["reserved_cost_usd"] = round(budget.reserved_cost, 6)
@@ -283,14 +323,15 @@ def live_run(run_id, env_file, budget_usd, selections=None):
         state["error_category"] = str(exc)
     state["requests"] = budget.requests
     state["reserved_cost_usd"] = round(budget.reserved_cost, 6)
-    state["estimated_usage_cost_usd"] = round(sum(t.get("estimated_cost_usd_at_peak_rates", 0) for t in state["trajectories"]), 6)
+    state["estimated_usage_cost_usd"] = round(sum(t.get("estimated_cost_usd_at_configured_rates", 0) for t in state["trajectories"]), 6)
     atomic_write(path, state)
     return state, path
 
 
 def main():
-    parser = argparse.ArgumentParser(description="A01-A03 synthetic DeepSeek evaluation")
+    parser = argparse.ArgumentParser(description="A01-A04 synthetic model evaluation")
     parser.add_argument("--live", action="store_true")
+    parser.add_argument("--provider", choices=tuple(PROVIDERS), default="deepseek")
     parser.add_argument("--run-id")
     parser.add_argument("--env-file")
     parser.add_argument("--budget-usd", type=float, default=AUTHORIZED_BUDGET_USD)
@@ -298,14 +339,15 @@ def main():
     parser.add_argument("--repeat", type=int, action="append", choices=(1, 2, 3))
     args = parser.parse_args()
     if not args.live:
-        print(json.dumps({"mode": "dry-run", "will_call_model": False, "manifest": manifest()}, ensure_ascii=False, indent=2))
+        print(json.dumps({"mode": "dry-run", "will_call_model": False, "manifest": manifest(args.provider)}, ensure_ascii=False, indent=2))
         return 0
     if not args.run_id:
         parser.error("--live 必须同时提供 --run-id")
-    selected_cases = [args.only_case] if args.only_case else list(CASES)
-    selected_repeats = args.repeat or [1, 2, 3]
-    selections = [(case_id, repeat) for case_id in selected_cases for repeat in selected_repeats]
-    state, path = live_run(args.run_id, args.env_file, args.budget_usd, selections)
+    if args.only_case:
+        selections = [(args.only_case, repeat) for repeat in (args.repeat or [1, 2, 3])]
+    else:
+        selections = DEFAULT_SELECTIONS
+    state, path = live_run(args.provider, args.run_id, args.env_file, args.budget_usd, selections)
     print(json.dumps({"status": state["status"], "requests": state.get("requests", 0),
                       "estimated_usage_cost_usd": state.get("estimated_usage_cost_usd", 0),
                       "result": str(path)}, ensure_ascii=False))

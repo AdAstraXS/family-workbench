@@ -52,19 +52,22 @@ SQLite 的 run 标记只保证本地重复提交被拒绝，不代表供应商�
 
 ## A01–A03 模型评测
 
-`evaluate_answers.py` 用固定虚构数据评测三个必须调用模型的案例，每个案例独立运行三次。
+`evaluate_answers.py` 用固定虚构数据评测三个必须调用模型的案例，每个案例独立运行三次，另带一条
+“外部注资不能清除历史回撤”的留出案例。它支持DeepSeek与GLM两个OpenAI兼容供应商。
 它不导入 Django、不读取网站或生产数据库，也不比较账本快照与投资账户余额。先检查发送清单：
 
 ```powershell
-python -m experiments.global_ai.evaluate_answers
+python -m experiments.global_ai.evaluate_answers --provider glm
 ```
 
 确认清单后才能显式运行；运行号会在第一次请求前落盘，同一运行号不能重用：
 
 ```powershell
-python -m experiments.global_ai.evaluate_answers --live --run-id deepseek-v4-flash-YYYYMMDD-r1 --env-file <本地.env路径> --budget-usd 1.00
+python -m experiments.global_ai.evaluate_answers --provider glm --live --run-id glm-5-3-flash-YYYYMMDD-r1 --env-file <本地.env路径> --budget-usd 1.00
 ```
 
-正式运行最多 30 次 HTTP 请求，每次请求体不超过 20,000 字符、输出不超过 2,000 token，
-按当前峰值单价和保守输入 token 估算，理论上限为 0.6072 美元。请求不重试、不跟随重定向；
-网络结果不明时保留运行记录并停止。程序只做客观风险词检查，最终是否通过仍需人工审阅九条轨迹。
+正式运行最多 36 次 HTTP 请求，每次请求体不超过 20,000 字符、输出不超过 2,000 token。
+DeepSeek按公开峰值单价估算；GLM-5.3 Flash发布日的公开价格表尚未同步，暂用每百万输入1.5美元、
+输出9美元的安全单价控制实验，不能把该数值当作智谱报价。请求不重试、不跟随重定向；
+网络结果不明时保留运行记录并停止。程序只做客观风险词检查，最终是否通过仍需人工审阅九条核心
+轨迹及留出案例。
