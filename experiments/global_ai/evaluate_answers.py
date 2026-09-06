@@ -1,4 +1,4 @@
-"""Bounded DeepSeek evaluation for the three model-dependent global-AI cases.
+"""Bounded provider evaluation for the model-dependent global-AI cases.
 
 The runner is deliberately independent from Django and uses synthetic facts only.
 Live runs are explicit, single-use, non-retrying, and capped at USD 1.00.
@@ -36,6 +36,15 @@ PROVIDERS = {
         "output_price_per_million": 1.32,
         "price_basis": "published_peak_rate",
         "timeout_seconds": 45,
+    },
+    "deepseek_pro": {
+        "model": "deepseek-v4-pro",
+        "endpoint": "https://api.deepseek.com/chat/completions",
+        "key_env": "KNOWLEDGE_TEXT_AI_API_KEY",
+        "input_price_per_million": 1.32,
+        "output_price_per_million": 3.96,
+        "price_basis": "published_peak_rate",
+        "timeout_seconds": 90,
     },
     "glm": {
         "model": "glm-5.3-flash",

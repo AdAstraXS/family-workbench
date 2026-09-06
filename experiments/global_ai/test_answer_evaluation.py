@@ -73,6 +73,12 @@ class AnswerEvaluationTests(unittest.TestCase):
         self.assertEqual(data["price_basis"], "temporary_safety_ceiling_not_provider_quote")
         self.assertEqual(data["timeout_seconds"], 120)
 
+    def test_deepseek_pro_manifest_uses_current_pro_model(self):
+        data = evaluation.manifest("deepseek_pro")
+        self.assertEqual(data["model"], "deepseek-v4-pro")
+        self.assertEqual(data["endpoint_host"], "api.deepseek.com")
+        self.assertEqual(data["price_basis"], "published_peak_rate")
+
     def test_objective_checks_always_require_human_review(self):
         checks = evaluation.objective_checks("A02", ["还需确认投入金额、时间、大额支出和流动性需要。"])
         self.assertTrue(checks["needs_manual_review"])

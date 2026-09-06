@@ -53,7 +53,8 @@ SQLite 的 run 标记只保证本地重复提交被拒绝，不代表供应商�
 ## A01–A03 模型评测
 
 `evaluate_answers.py` 用固定虚构数据评测三个必须调用模型的案例，每个案例独立运行三次，另带一条
-“外部注资不能清除历史回撤”的留出案例。它支持DeepSeek与GLM两个OpenAI兼容供应商。
+“外部注资不能清除历史回撤”的留出案例。它支持DeepSeek Flash、DeepSeek Pro与GLM三个
+OpenAI兼容候选。
 它不导入 Django、不读取网站或生产数据库，也不比较账本快照与投资账户余额。先检查发送清单：
 
 ```powershell
