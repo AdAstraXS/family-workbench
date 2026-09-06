@@ -21,6 +21,7 @@ import_asset_snapshot_*.json
 /outputs/**/*.docx
 /outputs/**/*.pdf
 /outputs/**/~$*
+/outputs/global-ai-evaluation/
 
 # Futu OpenD proprietary runtime and local state
 /opend/runtime/*

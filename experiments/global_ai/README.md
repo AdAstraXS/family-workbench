@@ -49,3 +49,22 @@ SQLite 的 run 标记只保证本地重复提交被拒绝，不代表供应商�
 
 本轮模型建议两次均未通过人工质量验收，禁止把运行状态 complete 理解为建议合格。
 详见 [原型结果](../../docs/global-ai-spike-results.md)。
+
+## A01–A03 模型评测
+
+`evaluate_answers.py` 用固定虚构数据评测三个必须调用模型的案例，每个案例独立运行三次。
+它不导入 Django、不读取网站或生产数据库，也不比较账本快照与投资账户余额。先检查发送清单：
+
+```powershell
+python -m experiments.global_ai.evaluate_answers
+```
+
+确认清单后才能显式运行；运行号会在第一次请求前落盘，同一运行号不能重用：
+
+```powershell
+python -m experiments.global_ai.evaluate_answers --live --run-id deepseek-v4-flash-YYYYMMDD-r1 --env-file <本地.env路径> --budget-usd 1.00
+```
+
+正式运行最多 30 次 HTTP 请求，每次请求体不超过 20,000 字符、输出不超过 2,000 token，
+按当前峰值单价和保守输入 token 估算，理论上限为 0.6072 美元。请求不重试、不跟随重定向；
+网络结果不明时保留运行记录并停止。程序只做客观风险词检查，最终是否通过仍需人工审阅九条轨迹。
