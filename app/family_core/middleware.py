@@ -1,3 +1,5 @@
+import re
+
 from django.http import HttpResponseForbidden
 
 from .models import FamilyMember
@@ -5,6 +7,9 @@ from .models import FamilyMember
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 EXEMPT_PATH_PREFIXES = ("/accounts/", "/static/", "/media/")
+VIEWER_AI_WRITE_PATH = re.compile(
+    r"^/ai/(?:conversations/(?:new|\d+/archive)/|memories/(?:new|\d+/(?:confirm|revise|delete))/)$"
+)
 
 
 class ActiveHouseholdMemberMiddleware:
@@ -29,7 +34,12 @@ class ActiveHouseholdMemberMiddleware:
                 return HttpResponseForbidden("当前账户尚未绑定家庭成员，或成员已停用。")
         else:
             request.family_member = member
-            if member.role == FamilyMember.ROLE_VIEWER and request.method not in SAFE_METHODS:
+            viewer_personal_ai_action = bool(VIEWER_AI_WRITE_PATH.fullmatch(request.path))
+            if (
+                member.role == FamilyMember.ROLE_VIEWER
+                and request.method not in SAFE_METHODS
+                and not viewer_personal_ai_action
+            ):
                 return HttpResponseForbidden("当前家庭成员是只读角色，不能修改数据。")
 
         return self.get_response(request)

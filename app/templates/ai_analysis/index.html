@@ -1,23 +1,83 @@
 {% extends "base.html" %}
+{% load static %}
 
-{% block title %}AI 分析{% endblock %}
+{% block title %}AI 助手{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/global_ai.css' %}?v=20260906-1">{% endblock %}
 
 {% block content %}
-<section class="headline">
-  <h1>AI 分析</h1>
-  <p>第一阶段先保存分析请求和结果，后续再接入具体 AI API。</p>
+<section class="global-ai-hero">
+  <div><span class="global-ai-eyebrow">FAMILY ASSISTANT</span><h1>AI 助手</h1><p>按各模块自己的资料整理、总结和回答。对话与个人背景仅自己可见。</p></div>
+  <div class="global-ai-privacy"><span aria-hidden="true">●</span> {{ current_member.display_name }}的私人空间</div>
 </section>
-<section class="panel">
-  <h2>最近分析请求</h2>
-  <table>
-    <thead><tr><th>时间</th><th>成员</th><th>模块</th><th>类型</th><th>服务商</th><th>状态</th></tr></thead>
-    <tbody>
-      {% for item in recent_requests %}
-        <tr><td>{{ item.created_at }}</td><td>{{ item.member }}</td><td>{{ item.module }}</td><td>{{ item.analysis_type }}</td><td>{{ item.provider }}</td><td>{{ item.get_status_display }}</td></tr>
-      {% empty %}
-        <tr><td colspan="6">暂无数据，请先到后台录入分析请求。</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+
+<section class="global-ai-readiness{% if model_ready %} is-ready{% endif %}" aria-label="AI 助手准备状态">
+  <div class="global-ai-readiness-icon" aria-hidden="true">{% if model_ready %}✓{% else %}○{% endif %}</div>
+  <div>
+    {% if model_ready %}<strong>AI 助手已准备好</strong><p>当前使用 {{ global_provider.name }}{% if global_provider.model_name %} · {{ global_provider.model_name }}{% endif %}。</p>
+    {% elif global_provider %}<strong>模型连接尚未开放</strong><p>已选择 {{ global_provider.name }}，请求执行器仍在验收。现在可以先建立私人对话和整理个人背景。</p>
+    {% else %}<strong>模型尚未配置</strong><p>现在可以先建立私人对话和整理个人背景；提问入口会在模型与费用范围确认后开放。</p>{% endif %}
+  </div>
 </section>
+
+<div class="global-ai-workspace">
+  <aside class="global-ai-conversations panel">
+    <div class="global-ai-section-head"><div><span>我的空间</span><h2>私人对话</h2></div><strong>{{ conversations|length }}</strong></div>
+    <details class="global-ai-create"{% if not conversations %} open{% endif %}>
+      <summary>＋ 新建对话</summary>
+      <form method="post" action="{% url 'ai_analysis:conversation_create' %}">
+        {% csrf_token %}
+        <label>{{ conversation_form.title.label }}{{ conversation_form.title }}</label>
+        <fieldset><legend>{{ conversation_form.financial_scope.label }}</legend>
+          {% for value, label in conversation_form.financial_scope.field.choices %}<label class="global-ai-radio"><input type="radio" name="financial_scope" value="{{ value }}"{% if value == 'personal' %} checked{% endif %}> <span>{{ label }}</span></label>{% endfor %}
+        </fieldset>
+        <p>范围建立后固定；如需切换，请新建对话。</p><button type="submit">建立私人对话</button>
+      </form>
+    </details>
+    <nav class="global-ai-conversation-list" aria-label="私人对话列表">
+      {% for conversation in conversations %}
+        <a href="{% url 'ai_analysis:conversation' conversation.pk %}"{% if active_conversation.pk == conversation.pk %} class="active" aria-current="page"{% endif %}><strong>{{ conversation.title|default:"未命名对话" }}</strong><span>{{ conversation.get_financial_scope_display }} · {{ conversation.updated_at|date:"m-d H:i" }}</span></a>
+      {% empty %}<div class="global-ai-empty-small">还没有对话。建立对话不会调用模型或产生费用。</div>{% endfor %}
+    </nav>
+  </aside>
+
+  <main class="global-ai-chat panel">
+    {% if active_conversation %}
+      <header class="global-ai-chat-head">
+        <div><span>仅自己可见</span><h2>{{ active_conversation.title|default:"未命名对话" }}</h2><p>财务范围：{{ active_conversation.get_financial_scope_display }}；知识仍按当前账号权限读取。</p></div>
+        {% if not active_conversation.is_archived %}<form method="post" action="{% url 'ai_analysis:conversation_archive' active_conversation.pk %}">{% csrf_token %}<button class="global-ai-text-button" type="submit">归档对话</button></form>{% endif %}
+      </header>
+      <section class="global-ai-transcript" aria-label="对话内容">
+        {% for message in conversation_messages %}
+          <article class="global-ai-message role-{{ message.role }}"><span>{{ message.get_role_display }}</span><p>{{ message.content|linebreaksbr }}</p></article>
+        {% empty %}
+          <div class="global-ai-empty-chat"><span aria-hidden="true">✦</span><h3>这段对话还没有内容</h3><p>模型接入后，可以在这里查询真实资料。系统会按问题选择所属模块，不会默认合并账本与投资账户。</p>
+            <div class="global-ai-example-grid"><div><strong>查看我的资产配置</strong><span>使用最新正式账本资产快照</span></div><div><strong>解释本月收支</strong><span>使用家庭账本所选期间</span></div><div><strong>在资料中找答案</strong><span>只检索当前账号有权内容</span></div></div>
+          </div>
+        {% endfor %}
+      </section>
+      {% if conversation_requests %}<details class="global-ai-request-history"><summary>本对话运行记录（{{ conversation_requests|length }}）</summary><div>
+        {% for item in conversation_requests %}<article><span class="global-ai-status status-{{ item.status }}">{{ item.get_status_display }}</span><strong>{{ item.created_at|date:"Y-m-d H:i" }}</strong><p>{{ item.prompt|truncatechars:100 }}</p>{% if item.status == 'unknown' %}<small>结果未确认，用量与费用保持未知。</small>{% endif %}{% if item.error_message %}<small>{{ item.error_message }}</small>{% endif %}</article>{% endfor %}
+      </div></details>{% endif %}
+      <form class="global-ai-composer" aria-label="提问入口"><textarea disabled placeholder="模型配置完成后即可提问"></textarea><button type="button" disabled>发送</button></form>
+      <p class="global-ai-composer-note">当前不会调用模型，也不会生成示例答案。</p>
+    {% else %}
+      <div class="global-ai-empty-chat global-ai-start"><span aria-hidden="true">✦</span><h2>选择或建立一段私人对话</h2><p>每段对话单独固定“我的财务”或“全家财务”范围。此范围只影响财务查询，不改变知识资料的可见权限。</p></div>
+    {% endif %}
+  </main>
+
+  <aside class="global-ai-memory panel">
+    <div class="global-ai-section-head"><div><span>可核对的背景</span><h2>AI 记忆</h2></div></div>
+    <p class="global-ai-section-intro">只有“已确认”的记录才会用于后续对话。余额、行情和收支会实时查业务模块，不保存在这里。</p>
+    <details class="global-ai-memory-create"><summary>＋ 添加一条背景</summary><form method="post" action="{% url 'ai_analysis:memory_create' %}">{% csrf_token %}<label>{{ memory_form.content.label }}{{ memory_form.content }}</label><label>{{ memory_form.visibility.label }}{{ memory_form.visibility }}</label><button type="submit">加入待确认</button></form></details>
+    {% if candidate_memories %}<section class="global-ai-memory-group"><h3>待确认 <span>{{ candidate_memories|length }}</span></h3>
+      {% for memory in candidate_memories %}<article class="global-ai-memory-card candidate"><div><span class="global-ai-memory-scope">{{ memory.get_visibility_display }}</span><small>{{ memory.created_by.display_name }}添加</small></div><p>{{ memory.content }}</p><div class="global-ai-inline-actions"><form method="post" action="{% url 'ai_analysis:memory_confirm' memory.pk %}">{% csrf_token %}<button type="submit">确认使用</button></form><form method="post" action="{% url 'ai_analysis:memory_delete' memory.pk %}">{% csrf_token %}<button class="global-ai-text-button danger" type="submit">不保留</button></form></div></article>{% endfor %}
+    </section>{% endif %}
+    <section class="global-ai-memory-group"><h3>已确认 <span>{{ confirmed_memories|length }}</span></h3>
+      {% for memory in confirmed_memories %}<article class="global-ai-memory-card"><div><span class="global-ai-memory-scope">{{ memory.get_visibility_display }}</span><small>版本 {{ memory.version }} · {{ memory.updated_at|date:"m-d" }}</small></div><p>{{ memory.content }}</p><details><summary>修改或删除</summary><form method="post" action="{% url 'ai_analysis:memory_revise' memory.pk %}">{% csrf_token %}<textarea name="content" maxlength="2000" required>{{ memory.content }}</textarea><button type="submit">保存新版本</button></form><form method="post" action="{% url 'ai_analysis:memory_delete' memory.pk %}">{% csrf_token %}<button class="global-ai-text-button danger" type="submit">删除这条记录</button></form></details></article>
+      {% empty %}<div class="global-ai-empty-small">暂无已确认背景。</div>{% endfor %}
+    </section>
+  </aside>
+</div>
+
+{% if legacy_requests %}<details class="panel global-ai-module-history"><summary>其他模块的 AI 运行记录（{{ legacy_requests|length }}）</summary><div class="global-ai-module-history-list">{% for item in legacy_requests %}<article><span>{{ item.created_at|date:"m-d H:i" }}</span><strong>{{ item.module }} · {{ item.analysis_type }}</strong><em>{{ item.get_status_display }}</em></article>{% endfor %}</div></details>{% endif %}
 {% endblock %}

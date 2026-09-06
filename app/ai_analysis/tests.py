@@ -26,7 +26,12 @@ from .read_tools import (
     ledger_asset_snapshot,
     portfolio_account_snapshot,
 )
-from .models import AiAnalysisRequest
+from .models import (
+    AiAnalysisRequest,
+    AiConversation,
+    AiConversationMessage,
+    AiMemory,
+)
 
 
 class GlobalAiReadToolsTests(TestCase):
@@ -441,3 +446,177 @@ class GlobalAiLegacyIndexPrivacyTests(TestCase):
         ids = {request.pk for request in response.context["recent_requests"]}
         self.assertNotIn(global_request.pk, ids)
         self.assertIn(shared_request.pk, ids)
+
+
+class GlobalAiWorkbenchTests(TestCase):
+    def setUp(self):
+        self.family = Family.objects.create(name="页面测试家庭", base_currency="CNY")
+        self.alice_user = get_user_model().objects.create_user(username="workbench-alice")
+        self.bob_user = get_user_model().objects.create_user(username="workbench-bob")
+        self.viewer_user = get_user_model().objects.create_user(username="workbench-viewer")
+        self.alice = FamilyMember.objects.create(
+            family=self.family, user=self.alice_user, display_name="Alice"
+        )
+        self.bob = FamilyMember.objects.create(
+            family=self.family, user=self.bob_user, display_name="Bob"
+        )
+        self.viewer = FamilyMember.objects.create(
+            family=self.family,
+            user=self.viewer_user,
+            display_name="访客",
+            role=FamilyMember.ROLE_VIEWER,
+        )
+        self.alice_conversation = AiConversation.objects.create(
+            family=self.family,
+            member=self.alice,
+            title="Alice 私人资产回顾",
+            financial_scope=AiConversation.SCOPE_PERSONAL,
+        )
+        self.bob_conversation = AiConversation.objects.create(
+            family=self.family,
+            member=self.bob,
+            title="Bob 私人对话",
+        )
+        self.alice_memory = AiMemory.objects.create(
+            family=self.family,
+            owner=self.alice,
+            created_by=self.alice,
+            confirmed_by=self.alice,
+            visibility=AiMemory.VISIBILITY_PERSONAL,
+            status=AiMemory.STATUS_CONFIRMED,
+            content="Alice 的长期目标",
+        )
+        self.bob_memory = AiMemory.objects.create(
+            family=self.family,
+            owner=self.bob,
+            created_by=self.bob,
+            confirmed_by=self.bob,
+            visibility=AiMemory.VISIBILITY_PERSONAL,
+            status=AiMemory.STATUS_CONFIRMED,
+            content="Bob 的私人目标",
+        )
+        self.family_memory = AiMemory.objects.create(
+            family=self.family,
+            owner=None,
+            created_by=self.alice,
+            confirmed_by=self.alice,
+            visibility=AiMemory.VISIBILITY_FAMILY,
+            status=AiMemory.STATUS_CONFIRMED,
+            content="家庭共同保留应急金",
+        )
+
+    def test_get_is_read_only_and_hides_other_members_private_data(self):
+        self.client.force_login(self.alice_user)
+        counts_before = (
+            AiConversation.objects.count(),
+            AiConversationMessage.objects.count(),
+            AiMemory.objects.count(),
+            AiAnalysisRequest.objects.count(),
+        )
+        response = self.client.get(reverse("ai_analysis:index"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "模型尚未配置")
+        self.assertNotContains(response, "页面快捷导航")
+        self.assertContains(response, "Alice 私人资产回顾")
+        self.assertContains(response, "Alice 的长期目标")
+        self.assertContains(response, "家庭共同保留应急金")
+        self.assertNotContains(response, "Bob 私人对话")
+        self.assertNotContains(response, "Bob 的私人目标")
+        self.assertEqual(
+            counts_before,
+            (
+                AiConversation.objects.count(),
+                AiConversationMessage.objects.count(),
+                AiMemory.objects.count(),
+                AiAnalysisRequest.objects.count(),
+            ),
+        )
+
+    def test_member_cannot_open_another_members_conversation(self):
+        self.client.force_login(self.alice_user)
+        response = self.client.get(
+            reverse("ai_analysis:conversation", args=[self.bob_conversation.pk])
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_create_conversation_keeps_explicit_scope_and_archive_is_owner_only(self):
+        self.client.force_login(self.alice_user)
+        response = self.client.post(
+            reverse("ai_analysis:conversation_create"),
+            {"title": "全家年度回顾", "financial_scope": AiConversation.SCOPE_FAMILY},
+        )
+        created = AiConversation.objects.get(title="全家年度回顾")
+        self.assertRedirects(
+            response, reverse("ai_analysis:conversation", args=[created.pk])
+        )
+        self.assertEqual(created.member, self.alice)
+        self.assertEqual(created.financial_scope, AiConversation.SCOPE_FAMILY)
+        denied = self.client.post(
+            reverse("ai_analysis:conversation_archive", args=[self.bob_conversation.pk])
+        )
+        self.assertRedirects(denied, reverse("ai_analysis:index"))
+        self.bob_conversation.refresh_from_db()
+        self.assertFalse(self.bob_conversation.is_archived)
+
+    def test_memory_candidate_confirm_revise_and_delete_keeps_history(self):
+        self.client.force_login(self.alice_user)
+        self.client.post(
+            reverse("ai_analysis:memory_create"),
+            {"content": "避免短期追涨", "visibility": AiMemory.VISIBILITY_PERSONAL},
+        )
+        candidate = AiMemory.objects.get(content="避免短期追涨")
+        self.assertEqual(candidate.status, AiMemory.STATUS_CANDIDATE)
+        self.client.post(reverse("ai_analysis:memory_confirm", args=[candidate.pk]))
+        candidate.refresh_from_db()
+        self.assertEqual(candidate.status, AiMemory.STATUS_CONFIRMED)
+        self.client.post(
+            reverse("ai_analysis:memory_revise", args=[candidate.pk]),
+            {"content": "长期配置优先，避免短期追涨"},
+        )
+        candidate.refresh_from_db()
+        replacement = AiMemory.objects.get(supersedes=candidate)
+        self.assertEqual(candidate.status, AiMemory.STATUS_SUPERSEDED)
+        self.assertEqual(replacement.version, 2)
+        self.client.post(reverse("ai_analysis:memory_delete", args=[replacement.pk]))
+        replacement.refresh_from_db()
+        self.assertEqual(replacement.status, AiMemory.STATUS_DELETED)
+
+    def test_viewer_can_manage_personal_items_but_not_family_memory(self):
+        self.client.force_login(self.viewer_user)
+        personal_response = self.client.post(
+            reverse("ai_analysis:memory_create"),
+            {"content": "访客自己的背景", "visibility": AiMemory.VISIBILITY_PERSONAL},
+        )
+        self.assertRedirects(personal_response, reverse("ai_analysis:index"))
+        self.assertTrue(
+            AiMemory.objects.filter(owner=self.viewer, content="访客自己的背景").exists()
+        )
+        family_response = self.client.post(
+            reverse("ai_analysis:memory_create"),
+            {"content": "试图新增共同记录", "visibility": AiMemory.VISIBILITY_FAMILY},
+        )
+        self.assertRedirects(family_response, reverse("ai_analysis:index"))
+        self.assertFalse(AiMemory.objects.filter(content="试图新增共同记录").exists())
+        self.client.post(
+            reverse("ai_analysis:memory_delete", args=[self.family_memory.pk])
+        )
+        self.family_memory.refresh_from_db()
+        self.assertEqual(self.family_memory.status, AiMemory.STATUS_CONFIRMED)
+
+    def test_conversation_page_displays_request_state_without_fake_answer(self):
+        request_record = AiAnalysisRequest.objects.create(
+            family=self.family,
+            member=self.alice,
+            conversation=self.alice_conversation,
+            module="global_ai",
+            analysis_type="chat_v1",
+            prompt="查看本月资产",
+            status=AiAnalysisRequest.STATUS_UNKNOWN,
+        )
+        self.client.force_login(self.alice_user)
+        response = self.client.get(
+            reverse("ai_analysis:conversation", args=[self.alice_conversation.pk])
+        )
+        self.assertContains(response, "结果未确认，用量与费用保持未知")
+        self.assertContains(response, request_record.get_status_display())
+        self.assertContains(response, "当前不会调用模型，也不会生成示例答案")

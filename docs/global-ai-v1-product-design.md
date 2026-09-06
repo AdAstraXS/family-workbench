@@ -1,7 +1,8 @@
 # 全局 AI 第一版功能设计
 
-日期：2026-09-06。状态：设计仍待整体评审；模块级只读服务、私人会话、版本化记忆、外发授权及
-请求生命周期基础已建立，20案例评测器的16项当前可执行检查已通过；正式页面和模型调用未实施。
+日期：2026-09-06。状态：设计仍待整体评审；模块级只读服务、私人会话、版本化记忆、外发授权、
+请求生命周期和不调用模型的首个网页工作台已建立，20案例评测器的16项当前可执行检查已通过；
+模型调用未实施。
 依据：[知识产品原则](family-knowledge-product-principles.md)、[知识架构](family-knowledge-base-architecture.md)、
 [系统基线](architecture-baseline.md)、[调研](global-ai-reference-research.md)、[原型结果](global-ai-spike-results.md)。
 验收配套：[评测方案](global-ai-v1-evaluation-plan.md)。

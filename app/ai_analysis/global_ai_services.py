@@ -66,6 +66,14 @@ def create_conversation(actor, *, financial_scope=AiConversation.SCOPE_PERSONAL,
     )
 
 
+def set_conversation_archived(actor, *, conversation_id, archived=True):
+    with transaction.atomic():
+        conversation = _conversation_for(actor, conversation_id, for_update=True)
+        conversation.is_archived = bool(archived)
+        conversation.save(update_fields=["is_archived", "updated_at"])
+    return conversation
+
+
 def append_conversation_message(
     actor,
     *,
@@ -122,6 +130,11 @@ def propose_memory(
     _validate_actor(actor)
     if visibility not in dict(AiMemory.VISIBILITY_CHOICES):
         raise GlobalAiServiceError("不支持的记忆范围。")
+    if (
+        visibility == AiMemory.VISIBILITY_FAMILY
+        and actor.role == FamilyMember.ROLE_VIEWER
+    ):
+        raise GlobalAiServiceError("查看者只能维护自己的个人背景。")
     if not isinstance(content, str) or not content.strip():
         raise GlobalAiServiceError("记忆内容不能为空。")
     return AiMemory.objects.create(
@@ -137,6 +150,11 @@ def propose_memory(
 def confirm_memory(actor, *, memory_id):
     with transaction.atomic():
         memory = _memory_for(actor, memory_id, for_update=True)
+        if (
+            memory.visibility == AiMemory.VISIBILITY_FAMILY
+            and actor.role == FamilyMember.ROLE_VIEWER
+        ):
+            raise GlobalAiServiceError("查看者不能修改家庭共同记录。")
         if memory.status != AiMemory.STATUS_CANDIDATE:
             raise GlobalAiServiceError("只有待确认记忆可以确认。")
         memory.status = AiMemory.STATUS_CONFIRMED
@@ -151,6 +169,11 @@ def revise_memory(actor, *, memory_id, content):
         raise GlobalAiServiceError("记忆内容不能为空。")
     with transaction.atomic():
         memory = _memory_for(actor, memory_id, for_update=True)
+        if (
+            memory.visibility == AiMemory.VISIBILITY_FAMILY
+            and actor.role == FamilyMember.ROLE_VIEWER
+        ):
+            raise GlobalAiServiceError("查看者不能修改家庭共同记录。")
         if memory.status != AiMemory.STATUS_CONFIRMED:
             raise GlobalAiServiceError("只有已确认记忆可以修改。")
         replacement = AiMemory.objects.create(
@@ -174,6 +197,11 @@ def revise_memory(actor, *, memory_id, content):
 def delete_memory(actor, *, memory_id):
     with transaction.atomic():
         memory = _memory_for(actor, memory_id, for_update=True)
+        if (
+            memory.visibility == AiMemory.VISIBILITY_FAMILY
+            and actor.role == FamilyMember.ROLE_VIEWER
+        ):
+            raise GlobalAiServiceError("查看者不能修改家庭共同记录。")
         if memory.status not in {AiMemory.STATUS_CANDIDATE, AiMemory.STATUS_CONFIRMED}:
             raise GlobalAiServiceError("记忆已经不可删除。")
         memory.status = AiMemory.STATUS_DELETED
