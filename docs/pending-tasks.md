@@ -89,6 +89,12 @@
   迁移、静态文件和 Gunicorn 重启成功，内部登录跳转与外部 HTTPS 登录页均返回正常。部署前后
   投资账户、持仓、流水、组合快照、快照明细和最新日期基线完全一致，`.env` 哈希未变，NAS 当前
   运行提交为 `c65d3d6e063ff067a95cbf15dcbbb13cdcbebe12`。生产页面尚未执行真实模型提问。
+- 首次生产只读提问已完成：DeepSeek V4-Pro 成功返回账本正式快照，页面旧标签页因没有自动刷新而继续显示“等待中”，
+  后台管理页实际状态为“成功”。已增加待处理请求每 3 秒自动刷新页面的前端行为，并以提交
+  `09f5ebfb5e6537298c5b6e01f51084f7b16c8819` 部署；部署前备份
+  `/volume1/docker/family-workbench/backups/family-workbench-pre-global-ai-refresh-09f5ebf.dump`
+  的 SHA-256 为 `be26e5d097af6b1cc02babf4cb4fa6c8524fc2ce4d1ea7ecfe9406a05434c879`，数据库基线和 `.env`
+  哈希保持不变。隔离容器中的 3 项页面测试通过。
 
 第一至第四阶段已经按确认范围完成并部署：
 
