@@ -142,10 +142,18 @@ class GlobalAiExecutionTests(TestCase):
             result_text="你好。",
             tokens_used=2,
             cost_estimate="0.000001",
+            message_data_types=["financial"],
+            evidence_refs=[{"kind": "ledger_snapshot", "snapshot_id": 7}],
         )
         answer = self.conversation.messages.get(role="assistant")
         self.assertEqual(answer.content, "你好。")
         self.assertEqual(request.result.result_json["message_id"], answer.pk)
+        self.client.force_login(self.user)
+        response = self.client.get(
+            reverse("ai_analysis:conversation", args=[self.conversation.pk])
+        )
+        self.assertContains(response, "查看回答依据（1）")
+        self.assertContains(response, "账本正式资产快照 #7")
 
 
 class GlobalAiAskViewTests(TestCase):

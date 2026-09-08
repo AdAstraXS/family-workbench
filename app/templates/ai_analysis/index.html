@@ -50,6 +50,7 @@
       <section class="global-ai-transcript" aria-label="对话内容">
         {% for message in conversation_messages %}
           <article class="global-ai-message role-{{ message.role }}"><span>{{ message.get_role_display }}</span><p>{{ message.content|linebreaksbr }}</p>
+            {% if message.role == 'assistant' and message.evidence_refs %}<details class="global-ai-evidence"><summary>查看回答依据（{{ message.evidence_refs|length }}）</summary><ul>{% for reference in message.evidence_refs %}<li>{% if reference.kind == 'ledger_snapshot' %}账本正式资产快照 #{{ reference.snapshot_id }}{% elif reference.kind == 'portfolio_snapshot' %}投资账户 #{{ reference.account_id }} · 持仓快照 #{{ reference.snapshot_id }}{% elif reference.kind == 'portfolio_account' %}投资账户 #{{ reference.account_id }}{% elif reference.kind == 'knowledge' %}知识资料 #{{ reference.document_id }} · 版本 #{{ reference.revision_id }}{% elif reference.kind == 'memory' %}已确认背景 #{{ reference.memory_id }} · 版本 {{ reference.version }}{% else %}已保存的只读资料依据{% endif %}</li>{% endfor %}</ul></details>{% endif %}
             {% if message.role == 'assistant' %}<div class="global-ai-message-actions">
               {% if message.current_share.status == 'active' %}<a href="{% url 'ai_analysis:answer_share_detail' message.current_share.pk %}">查看家庭分享</a>
               {% elif message.current_share %}<a href="{% url 'ai_analysis:answer_share_preview' message.current_share.pk %}">{% if message.current_share.status == 'paused' %}查看暂停原因{% else %}继续预览{% endif %}</a>
@@ -57,7 +58,7 @@
             </div>{% endif %}
           </article>
         {% empty %}
-          <div class="global-ai-empty-chat"><span aria-hidden="true">✦</span><h3>这段对话还没有内容</h3><p>模型接入后，可以在这里查询真实资料。系统会按问题选择所属模块，不会默认合并账本与投资账户。</p>
+          <div class="global-ai-empty-chat"><span aria-hidden="true">✦</span><h3>这段对话还没有内容</h3><p>可以在这里查询各模块的真实资料。系统会按问题选择所属模块，不会默认合并账本与投资账户。</p>
             <div class="global-ai-example-grid"><div><strong>查看我的资产配置</strong><span>使用最新正式账本资产快照</span></div><div><strong>解释本月收支</strong><span>使用家庭账本所选期间</span></div><div><strong>在资料中找答案</strong><span>只检索当前账号有权内容</span></div></div>
           </div>
         {% endfor %}
