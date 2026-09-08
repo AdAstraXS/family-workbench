@@ -522,7 +522,7 @@ class GlobalAiWorkbenchTests(TestCase):
         )
         response = self.client.get(reverse("ai_analysis:index"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "模型尚未配置")
+        self.assertContains(response, "请先确认云端资料授权")
         self.assertNotContains(response, "页面快捷导航")
         self.assertContains(response, "Alice 私人资产回顾")
         self.assertContains(response, "Alice 的长期目标")

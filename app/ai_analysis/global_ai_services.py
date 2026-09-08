@@ -701,6 +701,18 @@ def submit_global_ai_request(
                     raise GlobalAiServiceError("该幂等键已用于不同请求。")
                 return existing, False
             if provider:
+                if AiAnalysisRequest.objects.filter(
+                    family=actor.family,
+                    member=actor,
+                    provider=provider,
+                    module=GLOBAL_AI_MODULE,
+                    status__in=[
+                        AiAnalysisRequest.STATUS_PENDING,
+                        AiAnalysisRequest.STATUS_RUNNING,
+                        AiAnalysisRequest.STATUS_CANCEL_REQUESTED,
+                    ],
+                ).exists():
+                    raise GlobalAiServiceError("已有一条问题正在处理，请等待完成或先停止。")
                 raw_limit = (provider.extra_data or {}).get("global_ai_daily_request_limit")
                 if raw_limit is not None:
                     if not isinstance(raw_limit, int) or isinstance(raw_limit, bool) or raw_limit < 1:
@@ -844,8 +856,16 @@ def complete_global_ai_request(
     result_json=None,
     tokens_used=None,
     cost_estimate=None,
+    message_data_types=None,
+    evidence_refs=None,
 ):
     tokens_used, cost_estimate = _validated_usage(tokens_used, cost_estimate)
+    if not isinstance(result_text, str) or not result_text.strip():
+        raise GlobalAiServiceError("AI 回答不能为空。")
+    message_data_types = sorted(set(message_data_types or []))
+    if any(item not in VALID_DATA_TYPES for item in message_data_types):
+        raise GlobalAiServiceError("回答包含不支持的数据类型。")
+    evidence_refs = list(evidence_refs or [])
     late_result = False
     with transaction.atomic():
         request = AiAnalysisRequest.objects.select_for_update().filter(
@@ -863,10 +883,29 @@ def complete_global_ai_request(
         elif request.status != AiAnalysisRequest.STATUS_RUNNING:
             raise GlobalAiServiceError("执行结果不可用。")
         else:
+            conversation = AiConversation.objects.select_for_update().filter(
+                pk=request.conversation_id,
+                family=request.family,
+                member=request.member,
+                is_archived=False,
+            ).first()
+            if conversation is None:
+                raise GlobalAiServiceError("会话已不可用，结果未采纳。")
+            last_sequence = conversation.messages.order_by("-sequence").values_list(
+                "sequence", flat=True
+            ).first()
+            answer = AiConversationMessage.objects.create(
+                conversation=conversation,
+                sequence=(last_sequence or 0) + 1,
+                role=AiConversationMessage.ROLE_ASSISTANT,
+                content=result_text.strip(),
+                data_types=message_data_types,
+                evidence_refs=evidence_refs,
+            )
             AiAnalysisResult.objects.create(
                 request=request,
-                result_text=result_text or "",
-                result_json=dict(result_json or {}),
+                result_text=result_text.strip(),
+                result_json={**dict(result_json or {}), "message_id": answer.pk},
                 tokens_used=tokens_used,
                 cost_estimate=cost_estimate,
             )
@@ -875,6 +914,25 @@ def complete_global_ai_request(
             request.save(update_fields=["status", "finished_at", "updated_at"])
     if late_result:
         raise GlobalAiServiceError("任务已停止，迟到结果未采纳。")
+    return request
+
+
+def fail_global_ai_request(*, request_id, execution_token, error_message):
+    """Finish a claimed request without adding an assistant message."""
+    with transaction.atomic():
+        request = AiAnalysisRequest.objects.select_for_update().filter(
+            pk=request_id,
+            module=GLOBAL_AI_MODULE,
+            analysis_type=GLOBAL_AI_ANALYSIS_TYPE,
+            status=AiAnalysisRequest.STATUS_RUNNING,
+            execution_token=execution_token,
+        ).first()
+        if request is None:
+            raise GlobalAiServiceError("请求不可用。")
+        request.status = AiAnalysisRequest.STATUS_FAILED
+        request.finished_at = timezone.now()
+        request.error_message = (error_message or "AI 请求未完成。").strip()[:1000]
+        request.save(update_fields=["status", "finished_at", "error_message", "updated_at"])
     return request
 
 

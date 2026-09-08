@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import AiConversation, AiMemory
+from .models import AiConversation, AiMemory, AiOutboundAuthorization
 
 
 class ConversationCreateForm(forms.Form):
@@ -41,3 +41,21 @@ class MemoryCreateForm(forms.Form):
 
 class MemoryRevisionForm(forms.Form):
     content = forms.CharField(label="修改后的内容", max_length=2000)
+
+
+class GlobalAiPromptForm(forms.Form):
+    content = forms.CharField(
+        label="问题",
+        max_length=4000,
+        widget=forms.Textarea(attrs={"rows": 3, "placeholder": "输入问题；需要资料时，AI 会调用已授权的只读工具。"}),
+    )
+    idempotency_key = forms.CharField(max_length=100, widget=forms.HiddenInput())
+
+
+class OutboundAuthorizationForm(forms.Form):
+    allowed_data_types = forms.MultipleChoiceField(
+        label="允许发送给云端 AI 的资料",
+        choices=AiOutboundAuthorization.DATA_TYPE_CHOICES,
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+    )

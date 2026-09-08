@@ -1,5 +1,8 @@
+from uuid import uuid4
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import redirect, render
@@ -9,7 +12,18 @@ from django.views.decorators.http import require_POST
 from family_core.models import FamilyMember
 from knowledge.permissions import current_member
 
-from .forms import ConversationCreateForm, MemoryCreateForm, MemoryRevisionForm
+from .forms import (
+    ConversationCreateForm,
+    GlobalAiPromptForm,
+    MemoryCreateForm,
+    MemoryRevisionForm,
+    OutboundAuthorizationForm,
+)
+from .global_ai_jobs import (
+    GlobalAiJobError,
+    launch_global_ai_request,
+    provider_configuration,
+)
 from .global_ai_services import (
     GlobalAiServiceError,
     confirm_memory,
@@ -22,9 +36,20 @@ from .global_ai_services import (
     revise_memory,
     set_conversation_archived,
     shared_answer_payload,
+    submit_global_ai_request,
+    append_conversation_message,
+    cancel_global_ai_request,
     withdraw_answer_share,
 )
-from .models import AiAnalysisRequest, AiAnswerShare, AiConversation, AiMemory, AiProvider
+from .models import (
+    AiAnalysisRequest,
+    AiAnswerShare,
+    AiConversation,
+    AiConversationMessage,
+    AiMemory,
+    AiOutboundAuthorization,
+    AiProvider,
+)
 
 
 def _membership_required_response(request):
@@ -65,8 +90,26 @@ def _workbench_context(member, *, active_conversation=None):
     ).select_related("created_by").order_by("visibility", "-created_at")
 
     global_provider = _global_provider()
+    provider_ready = False
+    provider_error = ""
+    if global_provider:
+        try:
+            provider_configuration(global_provider)
+            provider_ready = True
+        except GlobalAiJobError as exc:
+            provider_error = str(exc)
+    grants = set()
+    if global_provider:
+        grants = set(AiOutboundAuthorization.objects.filter(
+            family=member.family,
+            member=member,
+            provider=global_provider,
+            is_allowed=True,
+        ).values_list("data_type", flat=True))
+    conversation_allowed = AiOutboundAuthorization.DATA_CONVERSATION in grants
     conversation_messages = []
     conversation_requests = []
+    request_in_flight = False
     if active_conversation:
         conversation_messages = list(active_conversation.messages.all())
         shares = {
@@ -83,9 +126,17 @@ def _workbench_context(member, *, active_conversation=None):
         }
         for item in conversation_messages:
             item.current_share = shares.get(item.pk)
-        conversation_requests = active_conversation.requests.filter(
+        request_queryset = active_conversation.requests.filter(
             member=member, module="global_ai"
-        ).select_related("provider", "result").order_by("-created_at")[:10]
+        )
+        request_in_flight = request_queryset.filter(status__in=[
+            AiAnalysisRequest.STATUS_PENDING,
+            AiAnalysisRequest.STATUS_RUNNING,
+            AiAnalysisRequest.STATUS_CANCEL_REQUESTED,
+        ]).exists()
+        conversation_requests = request_queryset.select_related(
+            "provider", "result"
+        ).order_by("-created_at")[:10]
 
     legacy_requests = AiAnalysisRequest.objects.filter(
         family=member.family
@@ -97,14 +148,21 @@ def _workbench_context(member, *, active_conversation=None):
         "active_conversation": active_conversation,
         "conversation_messages": conversation_messages,
         "conversation_requests": conversation_requests,
+        "request_in_flight": request_in_flight,
         "confirmed_memories": confirmed_memories,
         "candidate_memories": candidate_memories,
         "conversation_form": ConversationCreateForm(),
         "memory_form": MemoryCreateForm(
             allow_family=member.role != FamilyMember.ROLE_VIEWER
         ),
+        "prompt_form": GlobalAiPromptForm(initial={"idempotency_key": uuid4().hex}),
+        "authorization_form": OutboundAuthorizationForm(initial={"allowed_data_types": sorted(grants)}),
+        "authorization_labels": AiOutboundAuthorization.DATA_TYPE_CHOICES,
+        "allowed_data_types": grants,
         "global_provider": global_provider,
-        "model_ready": False,
+        "provider_ready": provider_ready,
+        "provider_error": provider_error,
+        "model_ready": provider_ready and conversation_allowed,
         "legacy_requests": legacy_requests,
         "recent_requests": legacy_requests,
     }
@@ -150,7 +208,7 @@ def conversation_create(request):
     except GlobalAiServiceError as exc:
         messages.error(request, str(exc))
         return redirect("ai_analysis:index")
-    messages.success(request, "私人对话已建立。模型接入后，可以从这里开始提问。")
+    messages.success(request, "私人对话已建立。")
     return redirect(_conversation_url(conversation))
 
 
@@ -167,6 +225,94 @@ def conversation_archive(request, conversation_id):
     else:
         messages.success(request, "对话已归档。")
     return redirect("ai_analysis:index")
+
+
+@login_required
+@require_POST
+def outbound_authorization_update(request):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    provider = _global_provider()
+    if provider is None:
+        messages.error(request, "全局 AI 服务商尚未配置。")
+        return redirect("ai_analysis:index")
+    form = OutboundAuthorizationForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "外发授权设置不可用。")
+        return redirect("ai_analysis:index")
+    allowed = set(form.cleaned_data["allowed_data_types"])
+    with transaction.atomic():
+        for data_type, _label in AiOutboundAuthorization.DATA_TYPE_CHOICES:
+            AiOutboundAuthorization.objects.update_or_create(
+                family=member.family,
+                member=member,
+                provider=provider,
+                data_type=data_type,
+                defaults={"is_allowed": data_type in allowed},
+            )
+    messages.success(request, "云端 AI 资料授权已更新。")
+    return redirect("ai_analysis:index")
+
+
+@login_required
+@require_POST
+def conversation_ask(request, conversation_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    conversation = AiConversation.objects.filter(
+        pk=conversation_id, family=member.family, member=member
+    ).first()
+    if conversation is None:
+        raise Http404
+    form = GlobalAiPromptForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "问题不能为空，且不能超过 4000 字。")
+        return redirect(_conversation_url(conversation))
+    try:
+        provider, config = provider_configuration()
+        with transaction.atomic():
+            analysis_request, created = submit_global_ai_request(
+                member,
+                conversation_id=conversation.pk,
+                idempotency_key=form.cleaned_data["idempotency_key"],
+                prompt=form.cleaned_data["content"],
+                provider=provider,
+                scope={"config_fingerprint": config["fingerprint"]},
+            )
+            if created:
+                append_conversation_message(
+                    member,
+                    conversation_id=conversation.pk,
+                    role=AiConversationMessage.ROLE_USER,
+                    content=form.cleaned_data["content"],
+                )
+                transaction.on_commit(lambda: launch_global_ai_request(analysis_request.pk))
+    except (GlobalAiJobError, GlobalAiServiceError) as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "问题已提交，回答完成后会显示在这段对话中。" if created else "这条问题已经提交过了。")
+    return redirect(_conversation_url(conversation))
+
+
+@login_required
+@require_POST
+def request_cancel(request, request_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    conversation_id = AiAnalysisRequest.objects.filter(
+        pk=request_id, member=member, family=member.family, module="global_ai"
+    ).values_list("conversation_id", flat=True).first()
+    try:
+        cancel_global_ai_request(member, request_id=request_id)
+    except GlobalAiServiceError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "已提交停止请求。")
+    conversation = AiConversation.objects.filter(pk=conversation_id, member=member).first()
+    return redirect(_conversation_url(conversation))
 
 
 @login_required
