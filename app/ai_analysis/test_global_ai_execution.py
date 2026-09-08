@@ -206,3 +206,20 @@ class GlobalAiAskViewTests(TestCase):
         own = set(AiOutboundAuthorization.objects.filter(member=self.member, is_allowed=True).values_list("data_type", flat=True))
         self.assertEqual(own, {"conversation", "knowledge"})
         self.assertTrue(AiOutboundAuthorization.objects.get(member=other, data_type="financial").is_allowed)
+
+    def test_pending_request_page_refreshes_until_completion(self):
+        AiAnalysisRequest.objects.create(
+            family=self.family,
+            member=self.member,
+            conversation=self.conversation,
+            provider=self.provider,
+            module="global_ai",
+            analysis_type="chat_v1",
+            prompt="请读取账本快照",
+            status=AiAnalysisRequest.STATUS_PENDING,
+        )
+        response = self.client.get(
+            reverse("ai_analysis:conversation", args=[self.conversation.pk])
+        )
+        self.assertContains(response, "window.location.reload")
+        self.assertContains(response, "3000")

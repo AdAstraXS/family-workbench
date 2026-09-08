@@ -92,3 +92,13 @@
 
 {% if legacy_requests %}<details class="panel global-ai-module-history"><summary>其他模块的 AI 运行记录（{{ legacy_requests|length }}）</summary><div class="global-ai-module-history-list">{% for item in legacy_requests %}<article><span>{{ item.created_at|date:"m-d H:i" }}</span><strong>{{ item.module }} · {{ item.analysis_type }}</strong><em>{{ item.get_status_display }}</em></article>{% endfor %}</div></details>{% endif %}
 {% endblock %}
+
+{% block scripts %}
+  {% if request_in_flight %}
+    <script>
+      window.setTimeout(function () {
+        window.location.reload();
+      }, 3000);
+    </script>
+  {% endif %}
+{% endblock %}
