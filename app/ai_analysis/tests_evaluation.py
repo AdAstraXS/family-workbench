@@ -42,6 +42,7 @@ from .global_ai_services import (
     shared_answer_payload,
     submit_global_ai_request,
 )
+from .global_ai_runtime import GlobalAiRuntimeError, dispatch_read_tool
 from .models import (
     AiAnalysisRequest,
     AiAnswerShare,
@@ -288,6 +289,164 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
         self.assertEqual(portfolio["total_asset"], "798000.0000")
         self.assertEqual(sum(map(Decimal, portfolio["amounts_by_asset_type"].values())), Decimal("798000"))
         self.assertNotIn("ledger", portfolio)
+
+    def test_read_tool_registry_derives_scope_from_conversation(self):
+        provider = AiProvider.objects.create(
+            name="本地测试模型",
+            provider_type="local-test",
+            execution_location=AiProvider.LOCATION_LOCAL,
+        )
+        conversation = create_conversation(self.alice)
+        with patch("ai_analysis.read_tools.AssetBalanceSnapshot.objects.filter") as ledger:
+            listed = dispatch_read_tool(
+                self.alice,
+                conversation=conversation,
+                provider=provider,
+                name="portfolio_accounts",
+                arguments={},
+            )
+        ledger.assert_not_called()
+        self.assertEqual(
+            [item["account_id"] for item in listed["result"]["accounts"]],
+            [self.alice_investment.pk],
+        )
+        with self.assertRaisesRegex(GlobalAiRuntimeError, "不能指定成员"):
+            dispatch_read_tool(
+                self.alice,
+                conversation=conversation,
+                provider=provider,
+                name="ledger_asset_snapshot",
+                arguments={"scope": SCOPE_FAMILY},
+            )
+        with self.assertRaisesRegex(GlobalAiRuntimeError, "检索条数"):
+            dispatch_read_tool(
+                self.alice,
+                conversation=conversation,
+                provider=provider,
+                name="knowledge_search",
+                arguments={"query": "资产", "limit": 11},
+            )
+
+    def test_family_financial_tool_requires_each_members_cloud_grant(self):
+        provider = AiProvider.objects.create(
+            name="云端测试模型",
+            provider_type="openai_compatible",
+            execution_location=AiProvider.LOCATION_CLOUD,
+        )
+        conversation = create_conversation(self.alice, financial_scope=SCOPE_FAMILY)
+        AiOutboundAuthorization.objects.create(
+            family=self.family,
+            member=self.alice,
+            provider=provider,
+            data_type=AiOutboundAuthorization.DATA_FINANCIAL,
+            is_allowed=True,
+        )
+        AiOutboundAuthorization.objects.create(
+            family=self.family,
+            member=self.alice,
+            provider=provider,
+            data_type=AiOutboundAuthorization.DATA_CONVERSATION,
+            is_allowed=True,
+        )
+        with self.assertRaisesRegex(GlobalAiRuntimeError, "相关成员尚未授权"):
+            dispatch_read_tool(
+                self.alice,
+                conversation=conversation,
+                provider=provider,
+                name="ledger_asset_snapshot",
+                arguments={},
+            )
+        AiOutboundAuthorization.objects.create(
+            family=self.family,
+            member=self.bob,
+            provider=provider,
+            data_type=AiOutboundAuthorization.DATA_FINANCIAL,
+            is_allowed=True,
+        )
+        result = dispatch_read_tool(
+            self.alice,
+            conversation=conversation,
+            provider=provider,
+            name="ledger_asset_snapshot",
+            arguments={},
+        )
+        self.assertEqual(result["result"]["total_base_amount"], "1400000.0000")
+        self.assertEqual(result["evidence_refs"][0]["kind"], "ledger_snapshot")
+
+    def test_cloud_knowledge_tool_only_returns_sources_allowed_for_cloud(self):
+        provider = AiProvider.objects.create(
+            name="云端知识测试模型",
+            provider_type="openai_compatible",
+            execution_location=AiProvider.LOCATION_CLOUD,
+        )
+        conversation = create_conversation(self.alice)
+        AiOutboundAuthorization.objects.create(
+            family=self.family,
+            member=self.alice,
+            provider=provider,
+            data_type=AiOutboundAuthorization.DATA_KNOWLEDGE,
+            is_allowed=True,
+        )
+        AiOutboundAuthorization.objects.create(
+            family=self.family,
+            member=self.alice,
+            provider=provider,
+            data_type=AiOutboundAuthorization.DATA_CONVERSATION,
+            is_allowed=True,
+        )
+        self.shared_source.allow_cloud_ai = True
+        self.shared_source.save(update_fields=["allow_cloud_ai", "updated_at"])
+        result = dispatch_read_tool(
+            self.alice,
+            conversation=conversation,
+            provider=provider,
+            name="knowledge_search",
+            arguments={"query": "资产配置"},
+        )
+        self.assertEqual(
+            [item["document_id"] for item in result["result"]["results"]],
+            [self.shared.pk],
+        )
+
+    def test_financial_evidence_is_rechecked_before_history_leaves_host(self):
+        provider = AiProvider.objects.create(
+            name="云端历史测试模型",
+            provider_type="openai_compatible",
+            execution_location=AiProvider.LOCATION_CLOUD,
+        )
+        conversation = create_conversation(self.alice, financial_scope=SCOPE_FAMILY)
+        append_conversation_message(
+            self.alice,
+            conversation_id=conversation.pk,
+            role=AiConversationMessage.ROLE_ASSISTANT,
+            content="家庭正式资产快照摘要。",
+            data_types=[AiOutboundAuthorization.DATA_FINANCIAL],
+            evidence_refs=[{"kind": "ledger_snapshot", "snapshot_id": self.formal.pk}],
+        )
+        for member in (self.alice, self.bob):
+            for data_type in (
+                AiOutboundAuthorization.DATA_CONVERSATION,
+                AiOutboundAuthorization.DATA_FINANCIAL,
+            ):
+                AiOutboundAuthorization.objects.create(
+                    family=self.family,
+                    member=member,
+                    provider=provider,
+                    data_type=data_type,
+                    is_allowed=True,
+                )
+        prepare_conversation_context(
+            self.alice, conversation_id=conversation.pk, provider=provider
+        )
+        AiOutboundAuthorization.objects.filter(
+            member=self.bob,
+            provider=provider,
+            data_type=AiOutboundAuthorization.DATA_FINANCIAL,
+        ).update(is_allowed=False)
+        with self.assertRaisesRegex(GlobalAiServiceError, "家庭成员资料"):
+            prepare_conversation_context(
+                self.alice, conversation_id=conversation.pk, provider=provider
+            )
 
     def test_F04_draft_history_and_empty_personal_slice_are_explicit(self):
         result = ledger_asset_snapshot(self.alice)

@@ -275,6 +275,33 @@ def ledger_asset_snapshot(actor, *, scope=SCOPE_PERSONAL, snapshot_id=None):
     }
 
 
+def portfolio_accounts(actor, *, scope=SCOPE_PERSONAL):
+    """List accessible investment accounts without reading ledger balances."""
+
+    _validate_context(actor, scope)
+    accounts = InvestmentAccount.objects.select_related(
+        "bank_account__member",
+        "bank_account__family",
+    ).filter(bank_account__family=actor.family)
+    if scope == SCOPE_PERSONAL:
+        accounts = accounts.filter(bank_account__member=actor)
+    return {
+        "module": "portfolio",
+        "scope": scope,
+        "accounts": [
+            {
+                "account_id": account.pk,
+                "account_name": account.account_name,
+                "member_id": account.member_id,
+                "member_name": account.member.display_name,
+            }
+            for account in accounts.order_by(
+                "bank_account__member__display_order", "bank_account__account_name", "pk"
+            )
+        ],
+    }
+
+
 def portfolio_account_snapshot(
     actor,
     *,

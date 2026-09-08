@@ -22,7 +22,13 @@ from .models import (
     AiOutboundAuthorization,
     AiProvider,
 )
-from .read_tools import GlobalAiReadError, knowledge_revision
+from .read_tools import (
+    GlobalAiReadError,
+    knowledge_revision,
+    ledger_asset_snapshot,
+    portfolio_account_snapshot,
+    portfolio_accounts,
+)
 
 
 GLOBAL_AI_MODULE = "global_ai"
@@ -489,6 +495,8 @@ def prepare_conversation_context(actor, *, conversation_id, provider):
     if any(data_type not in VALID_DATA_TYPES for data_type in all_types):
         raise GlobalAiServiceError("历史消息包含不支持的数据类型。")
     validated_refs = []
+    financial_member_ids = set()
+    memory_member_ids = set()
     for message in messages:
         refs = message.evidence_refs or []
         ref_types = set()
@@ -510,21 +518,95 @@ def prepare_conversation_context(actor, *, conversation_id, provider):
             elif kind == "memory":
                 ref_types.add(AiOutboundAuthorization.DATA_MEMORY)
                 memory = _memory_for(actor, reference.get("memory_id"))
-                if memory.status != AiMemory.STATUS_CONFIRMED:
+                if (
+                    memory.status != AiMemory.STATUS_CONFIRMED
+                    or not isinstance(reference.get("version"), int)
+                    or isinstance(reference.get("version"), bool)
+                    or memory.version != reference["version"]
+                ):
                     raise GlobalAiServiceError("历史记忆已经不可用。")
+                memory_member_ids.add(memory.created_by_id)
+            elif kind == "ledger_snapshot":
+                ref_types.add(AiOutboundAuthorization.DATA_FINANCIAL)
+                if not isinstance(reference.get("snapshot_id"), int) or isinstance(
+                    reference.get("snapshot_id"), bool
+                ):
+                    raise GlobalAiServiceError("历史账本快照依据已经不可用。")
+                try:
+                    evidence = ledger_asset_snapshot(
+                        actor,
+                        scope=conversation.financial_scope,
+                        snapshot_id=reference.get("snapshot_id"),
+                    )
+                except GlobalAiReadError as exc:
+                    raise GlobalAiServiceError("历史账本快照依据已经不可用。") from exc
+                financial_member_ids.update(
+                    item["member_id"] for item in evidence["accounts"]
+                )
+            elif kind == "portfolio_account":
+                ref_types.add(AiOutboundAuthorization.DATA_FINANCIAL)
+                if not isinstance(reference.get("account_id"), int) or isinstance(
+                    reference.get("account_id"), bool
+                ):
+                    raise GlobalAiServiceError("历史投资账户依据已经不可用。")
+                accounts = portfolio_accounts(actor, scope=conversation.financial_scope)["accounts"]
+                account = next(
+                    (item for item in accounts if item["account_id"] == reference.get("account_id")),
+                    None,
+                )
+                if account is None:
+                    raise GlobalAiServiceError("历史投资账户依据已经不可用。")
+                financial_member_ids.add(account["member_id"])
+            elif kind == "portfolio_snapshot":
+                ref_types.add(AiOutboundAuthorization.DATA_FINANCIAL)
+                if (
+                    not isinstance(reference.get("account_id"), int)
+                    or isinstance(reference.get("account_id"), bool)
+                    or not isinstance(reference.get("snapshot_id"), int)
+                    or isinstance(reference.get("snapshot_id"), bool)
+                ):
+                    raise GlobalAiServiceError("历史投资快照依据已经不可用。")
+                try:
+                    evidence = portfolio_account_snapshot(
+                        actor,
+                        scope=conversation.financial_scope,
+                        account_id=reference.get("account_id"),
+                        snapshot_id=reference.get("snapshot_id"),
+                    )
+                except GlobalAiReadError as exc:
+                    raise GlobalAiServiceError("历史投资快照依据已经不可用。") from exc
+                financial_member_ids.add(evidence["member_id"])
             else:
                 raise GlobalAiServiceError("证据引用不可用。")
         declared_ref_types = set(message.data_types or {}) & {
             AiOutboundAuthorization.DATA_KNOWLEDGE,
             AiOutboundAuthorization.DATA_MEMORY,
+            AiOutboundAuthorization.DATA_FINANCIAL,
         }
         if declared_ref_types != ref_types:
-            raise GlobalAiServiceError("知识或记忆上下文缺少可复核的版本引用。")
+            raise GlobalAiServiceError("历史上下文缺少可复核的来源引用。")
         all_types.update(ref_types)
         validated_refs.append((message, refs))
 
     if provider.execution_location == AiProvider.LOCATION_CLOUD:
         _require_cloud_grants(actor, provider, all_types)
+        for data_type, member_ids in (
+            (AiOutboundAuthorization.DATA_FINANCIAL, financial_member_ids),
+            (AiOutboundAuthorization.DATA_MEMORY, memory_member_ids),
+        ):
+            if not member_ids:
+                continue
+            allowed = set(
+                AiOutboundAuthorization.objects.filter(
+                    family=actor.family,
+                    member_id__in=member_ids,
+                    provider=provider,
+                    data_type=data_type,
+                    is_allowed=True,
+                ).values_list("member_id", flat=True)
+            )
+            if allowed != member_ids:
+                raise GlobalAiServiceError("历史上下文涉及尚未授权外发的家庭成员资料。")
 
     payload = []
     for message, refs in validated_refs:
