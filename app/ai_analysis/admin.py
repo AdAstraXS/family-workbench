@@ -6,6 +6,7 @@ from .models import (
     AiAnswerShare,
     AiConversation,
     AiConversationMessage,
+    AiFamilyOutboundAuthorization,
     AiMemory,
     AiOutboundAuthorization,
     AiProvider,
@@ -71,3 +72,10 @@ class AiMemoryAdmin(admin.ModelAdmin):
 class AiOutboundAuthorizationAdmin(admin.ModelAdmin):
     list_display = ("member", "provider", "data_type", "is_allowed", "updated_at")
     list_filter = ("family", "member", "provider", "data_type", "is_allowed")
+
+
+@admin.register(AiFamilyOutboundAuthorization)
+class AiFamilyOutboundAuthorizationAdmin(admin.ModelAdmin):
+    list_display = ("family", "provider", "data_type", "is_allowed", "changed_by", "updated_at")
+    list_filter = ("family", "provider", "is_allowed")
+    readonly_fields = ("created_at", "updated_at")

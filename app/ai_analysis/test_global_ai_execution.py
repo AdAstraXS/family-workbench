@@ -13,6 +13,7 @@ from .models import (
     AiAnalysisRequest,
     AiConversation,
     AiConversationMessage,
+    AiFamilyOutboundAuthorization,
     AiOutboundAuthorization,
     AiProvider,
 )
@@ -161,7 +162,10 @@ class GlobalAiAskViewTests(TestCase):
         self.family = Family.objects.create(name="网页测试家庭", base_currency="CNY")
         self.user = get_user_model().objects.create_user(username="global-web-user")
         self.member = FamilyMember.objects.create(
-            family=self.family, user=self.user, display_name="网页成员"
+            family=self.family,
+            user=self.user,
+            display_name="网页成员",
+            role=FamilyMember.ROLE_ADMIN,
         )
         self.conversation = AiConversation.objects.create(
             family=self.family, member=self.member, title="网页对话"
@@ -206,6 +210,58 @@ class GlobalAiAskViewTests(TestCase):
         own = set(AiOutboundAuthorization.objects.filter(member=self.member, is_allowed=True).values_list("data_type", flat=True))
         self.assertEqual(own, {"conversation", "knowledge"})
         self.assertTrue(AiOutboundAuthorization.objects.get(member=other, data_type="financial").is_allowed)
+
+    def test_only_admin_can_change_family_financial_authorization(self):
+        url = reverse("ai_analysis:family_financial_authorization_update")
+        response = self.client.post(url, {"is_allowed": "on"})
+        self.assertRedirects(response, reverse("ai_analysis:index"))
+        authorization = AiFamilyOutboundAuthorization.objects.get(
+            family=self.family, provider=self.provider
+        )
+        self.assertTrue(authorization.is_allowed)
+        self.assertEqual(authorization.changed_by, self.member)
+
+        ordinary_user = get_user_model().objects.create_user(username="global-family-member")
+        ordinary = FamilyMember.objects.create(
+            family=self.family,
+            user=ordinary_user,
+            display_name="普通成员",
+            role=FamilyMember.ROLE_MEMBER,
+        )
+        self.client.force_login(ordinary_user)
+        denied = self.client.post(url, {})
+        self.assertEqual(denied.status_code, 403)
+        authorization.refresh_from_db()
+        self.assertTrue(authorization.is_allowed)
+        self.assertEqual(authorization.changed_by, self.member)
+        status_page = self.client.get(reverse("ai_analysis:index"))
+        self.assertContains(status_page, "当前状态：")
+        self.assertContains(status_page, "已允许")
+        self.assertContains(status_page, "只有家庭管理员可以修改此设置")
+        self.assertNotContains(status_page, "保存家庭授权")
+
+    @patch("ai_analysis.views.provider_configuration")
+    def test_family_conversation_uses_family_authorization_without_personal_financial_grant(
+        self, configuration
+    ):
+        configuration.return_value = (self.provider, {"fingerprint": "config-1"})
+        self.conversation.financial_scope = AiConversation.SCOPE_FAMILY
+        self.conversation.save(update_fields=["financial_scope", "updated_at"])
+        url = reverse("ai_analysis:conversation", args=[self.conversation.pk])
+
+        blocked = self.client.get(url)
+        self.assertContains(blocked, "全家财务尚未获得家庭授权")
+        self.assertContains(blocked, "需要家庭管理员先在右侧允许")
+
+        AiFamilyOutboundAuthorization.objects.create(
+            family=self.family,
+            provider=self.provider,
+            changed_by=self.member,
+            is_allowed=True,
+        )
+        ready = self.client.get(url)
+        self.assertContains(ready, "AI 助手已准备好")
+        self.assertContains(ready, "发送")
 
     def test_pending_request_page_refreshes_until_completion(self):
         AiAnalysisRequest.objects.create(

@@ -2,7 +2,7 @@
 
 from knowledge.models import KnowledgeDocument
 
-from .models import AiOutboundAuthorization, AiProvider
+from .models import AiConversation, AiFamilyOutboundAuthorization, AiOutboundAuthorization, AiProvider
 from .read_tools import (
     GlobalAiReadError,
     knowledge_search,
@@ -130,9 +130,25 @@ def _validate_arguments(name, arguments):
             raise GlobalAiRuntimeError("知识检索条数不可用。")
 
 
-def _require_cloud_grants(provider, *, family_id, member_ids, data_type):
+def _require_cloud_grants(
+    provider,
+    *,
+    family_id,
+    member_ids,
+    data_type,
+    family_financial_scope=False,
+):
     if provider.execution_location != AiProvider.LOCATION_CLOUD:
         return
+    if data_type == AiOutboundAuthorization.DATA_FINANCIAL and family_financial_scope:
+        if AiFamilyOutboundAuthorization.objects.filter(
+            family_id=family_id,
+            provider=provider,
+            data_type=AiFamilyOutboundAuthorization.DATA_FINANCIAL,
+            is_allowed=True,
+        ).exists():
+            return
+        raise GlobalAiRuntimeError("家庭管理员尚未允许向当前云端模型发送全家财务资料。")
     member_ids = set(member_ids)
     allowed = set(
         AiOutboundAuthorization.objects.filter(
@@ -177,6 +193,7 @@ def dispatch_read_tool(actor, *, conversation, provider, name, arguments):
         data_type=AiOutboundAuthorization.DATA_CONVERSATION,
     )
     scope = conversation.financial_scope
+    family_financial_scope = scope == AiConversation.SCOPE_FAMILY
     try:
         if name == "ledger_asset_snapshot":
             result = ledger_asset_snapshot(actor, scope=scope, **arguments)
@@ -186,6 +203,7 @@ def dispatch_read_tool(actor, *, conversation, provider, name, arguments):
                 family_id=actor.family_id,
                 member_ids=member_ids,
                 data_type=AiOutboundAuthorization.DATA_FINANCIAL,
+                family_financial_scope=family_financial_scope,
             )
             references = [{"kind": "ledger_snapshot", "snapshot_id": result["snapshot_id"]}]
             data_type = AiOutboundAuthorization.DATA_FINANCIAL
@@ -197,6 +215,7 @@ def dispatch_read_tool(actor, *, conversation, provider, name, arguments):
                 family_id=actor.family_id,
                 member_ids=member_ids,
                 data_type=AiOutboundAuthorization.DATA_FINANCIAL,
+                family_financial_scope=family_financial_scope,
             )
             references = [
                 {"kind": "portfolio_account", "account_id": item["account_id"]}
@@ -210,6 +229,7 @@ def dispatch_read_tool(actor, *, conversation, provider, name, arguments):
                 family_id=actor.family_id,
                 member_ids={result["member_id"]},
                 data_type=AiOutboundAuthorization.DATA_FINANCIAL,
+                family_financial_scope=family_financial_scope,
             )
             references = [{
                 "kind": "portfolio_snapshot",

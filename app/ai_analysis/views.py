@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Q
-from django.http import Http404
+from django.http import Http404, HttpResponseForbidden
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
@@ -14,6 +14,7 @@ from knowledge.permissions import current_member
 
 from .forms import (
     ConversationCreateForm,
+    FamilyFinancialAuthorizationForm,
     GlobalAiPromptForm,
     MemoryCreateForm,
     MemoryRevisionForm,
@@ -34,6 +35,7 @@ from .global_ai_services import (
     propose_memory,
     refresh_answer_share_state,
     revise_memory,
+    set_family_financial_cloud_authorization,
     set_conversation_archived,
     shared_answer_payload,
     submit_global_ai_request,
@@ -46,6 +48,7 @@ from .models import (
     AiAnswerShare,
     AiConversation,
     AiConversationMessage,
+    AiFamilyOutboundAuthorization,
     AiMemory,
     AiOutboundAuthorization,
     AiProvider,
@@ -107,6 +110,18 @@ def _workbench_context(member, *, active_conversation=None):
             is_allowed=True,
         ).values_list("data_type", flat=True))
     conversation_allowed = AiOutboundAuthorization.DATA_CONVERSATION in grants
+    family_financial_allowed = False
+    if global_provider:
+        family_financial_allowed = AiFamilyOutboundAuthorization.objects.filter(
+            family=member.family,
+            provider=global_provider,
+            data_type=AiFamilyOutboundAuthorization.DATA_FINANCIAL,
+            is_allowed=True,
+        ).exists()
+    active_family_scope = bool(
+        active_conversation
+        and active_conversation.financial_scope == AiConversation.SCOPE_FAMILY
+    )
     conversation_messages = []
     conversation_requests = []
     request_in_flight = False
@@ -151,7 +166,9 @@ def _workbench_context(member, *, active_conversation=None):
         "request_in_flight": request_in_flight,
         "confirmed_memories": confirmed_memories,
         "candidate_memories": candidate_memories,
-        "conversation_form": ConversationCreateForm(),
+        "conversation_form": ConversationCreateForm(
+            allow_family=member.role != FamilyMember.ROLE_VIEWER
+        ),
         "memory_form": MemoryCreateForm(
             allow_family=member.role != FamilyMember.ROLE_VIEWER
         ),
@@ -162,7 +179,17 @@ def _workbench_context(member, *, active_conversation=None):
         "global_provider": global_provider,
         "provider_ready": provider_ready,
         "provider_error": provider_error,
-        "model_ready": provider_ready and conversation_allowed,
+        "family_financial_allowed": family_financial_allowed,
+        "can_manage_family_financial_authorization": member.role == FamilyMember.ROLE_ADMIN,
+        "family_financial_authorization_form": FamilyFinancialAuthorizationForm(
+            initial={"is_allowed": family_financial_allowed}
+        ),
+        "active_family_scope": active_family_scope,
+        "model_ready": (
+            provider_ready
+            and conversation_allowed
+            and (not active_family_scope or family_financial_allowed)
+        ),
         "legacy_requests": legacy_requests,
         "recent_requests": legacy_requests,
     }
@@ -252,6 +279,40 @@ def outbound_authorization_update(request):
                 defaults={"is_allowed": data_type in allowed},
             )
     messages.success(request, "云端 AI 资料授权已更新。")
+    return redirect("ai_analysis:index")
+
+
+@login_required
+@require_POST
+def family_financial_authorization_update(request):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    if member.role != FamilyMember.ROLE_ADMIN:
+        return HttpResponseForbidden("只有家庭管理员可以修改全家财务云端授权。")
+    provider = _global_provider()
+    if provider is None:
+        messages.error(request, "全局 AI 服务商尚未配置。")
+        return redirect("ai_analysis:index")
+    form = FamilyFinancialAuthorizationForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "全家财务云端授权设置不可用。")
+        return redirect("ai_analysis:index")
+    try:
+        authorization = set_family_financial_cloud_authorization(
+            member,
+            provider=provider,
+            is_allowed=form.cleaned_data["is_allowed"],
+        )
+    except GlobalAiServiceError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            "已允许家庭成员使用全家财务咨询云端 AI。"
+            if authorization.is_allowed
+            else "已停止向云端 AI 发送全家财务资料。",
+        )
     return redirect("ai_analysis:index")
 
 

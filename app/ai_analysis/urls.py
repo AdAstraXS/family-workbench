@@ -13,6 +13,7 @@ urlpatterns = [
     path("conversations/<int:conversation_id>/ask/", views.conversation_ask, name="conversation_ask"),
     path("requests/<int:request_id>/cancel/", views.request_cancel, name="request_cancel"),
     path("outbound-authorization/", views.outbound_authorization_update, name="outbound_authorization_update"),
+    path("family-financial-authorization/", views.family_financial_authorization_update, name="family_financial_authorization_update"),
     path("memories/new/", views.memory_create, name="memory_create"),
     path("memories/<int:memory_id>/confirm/", views.memory_confirm, name="memory_confirm"),
     path("memories/<int:memory_id>/revise/", views.memory_revise, name="memory_revise"),

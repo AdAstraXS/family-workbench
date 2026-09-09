@@ -47,6 +47,7 @@ from .models import (
     AiAnalysisRequest,
     AiAnswerShare,
     AiConversationMessage,
+    AiFamilyOutboundAuthorization,
     AiMemory,
     AiOutboundAuthorization,
     AiProvider,
@@ -71,6 +72,7 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
             user=get_user_model().objects.create_user(username="eval-alice"),
             display_name="Alice",
             display_order=1,
+            role=FamilyMember.ROLE_ADMIN,
         )
         self.bob = FamilyMember.objects.create(
             family=self.family,
@@ -327,7 +329,7 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
                 arguments={"query": "资产", "limit": 11},
             )
 
-    def test_family_financial_tool_requires_each_members_cloud_grant(self):
+    def test_family_financial_tool_uses_admin_family_grant(self):
         provider = AiProvider.objects.create(
             name="云端测试模型",
             provider_type="openai_compatible",
@@ -338,17 +340,10 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
             family=self.family,
             member=self.alice,
             provider=provider,
-            data_type=AiOutboundAuthorization.DATA_FINANCIAL,
-            is_allowed=True,
-        )
-        AiOutboundAuthorization.objects.create(
-            family=self.family,
-            member=self.alice,
-            provider=provider,
             data_type=AiOutboundAuthorization.DATA_CONVERSATION,
             is_allowed=True,
         )
-        with self.assertRaisesRegex(GlobalAiRuntimeError, "相关成员尚未授权"):
+        with self.assertRaisesRegex(GlobalAiRuntimeError, "家庭管理员尚未允许"):
             dispatch_read_tool(
                 self.alice,
                 conversation=conversation,
@@ -356,11 +351,10 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
                 name="ledger_asset_snapshot",
                 arguments={},
             )
-        AiOutboundAuthorization.objects.create(
+        AiFamilyOutboundAuthorization.objects.create(
             family=self.family,
-            member=self.bob,
             provider=provider,
-            data_type=AiOutboundAuthorization.DATA_FINANCIAL,
+            changed_by=self.alice,
             is_allowed=True,
         )
         result = dispatch_read_tool(
@@ -372,6 +366,35 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
         )
         self.assertEqual(result["result"]["total_base_amount"], "1400000.0000")
         self.assertEqual(result["evidence_refs"][0]["kind"], "ledger_snapshot")
+
+    def test_family_grant_does_not_replace_personal_financial_grant(self):
+        provider = AiProvider.objects.create(
+            name="个人范围云端测试模型",
+            provider_type="openai_compatible",
+            execution_location=AiProvider.LOCATION_CLOUD,
+        )
+        conversation = create_conversation(self.alice)
+        AiOutboundAuthorization.objects.create(
+            family=self.family,
+            member=self.alice,
+            provider=provider,
+            data_type=AiOutboundAuthorization.DATA_CONVERSATION,
+            is_allowed=True,
+        )
+        AiFamilyOutboundAuthorization.objects.create(
+            family=self.family,
+            provider=provider,
+            changed_by=self.alice,
+            is_allowed=True,
+        )
+        with self.assertRaisesRegex(GlobalAiRuntimeError, "相关成员尚未授权"):
+            dispatch_read_tool(
+                self.alice,
+                conversation=conversation,
+                provider=provider,
+                name="ledger_asset_snapshot",
+                arguments={},
+            )
 
     def test_cloud_knowledge_tool_only_returns_sources_allowed_for_cloud(self):
         provider = AiProvider.objects.create(
@@ -423,27 +446,25 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
             data_types=[AiOutboundAuthorization.DATA_FINANCIAL],
             evidence_refs=[{"kind": "ledger_snapshot", "snapshot_id": self.formal.pk}],
         )
-        for member in (self.alice, self.bob):
-            for data_type in (
-                AiOutboundAuthorization.DATA_CONVERSATION,
-                AiOutboundAuthorization.DATA_FINANCIAL,
-            ):
-                AiOutboundAuthorization.objects.create(
-                    family=self.family,
-                    member=member,
-                    provider=provider,
-                    data_type=data_type,
-                    is_allowed=True,
-                )
+        AiOutboundAuthorization.objects.create(
+            family=self.family,
+            member=self.alice,
+            provider=provider,
+            data_type=AiOutboundAuthorization.DATA_CONVERSATION,
+            is_allowed=True,
+        )
+        family_grant = AiFamilyOutboundAuthorization.objects.create(
+            family=self.family,
+            provider=provider,
+            changed_by=self.alice,
+            is_allowed=True,
+        )
         prepare_conversation_context(
             self.alice, conversation_id=conversation.pk, provider=provider
         )
-        AiOutboundAuthorization.objects.filter(
-            member=self.bob,
-            provider=provider,
-            data_type=AiOutboundAuthorization.DATA_FINANCIAL,
-        ).update(is_allowed=False)
-        with self.assertRaisesRegex(GlobalAiServiceError, "家庭成员资料"):
+        family_grant.is_allowed = False
+        family_grant.save(update_fields=["is_allowed", "updated_at"])
+        with self.assertRaisesRegex(GlobalAiServiceError, "家庭管理员尚未允许"):
             prepare_conversation_context(
                 self.alice, conversation_id=conversation.pk, provider=provider
             )

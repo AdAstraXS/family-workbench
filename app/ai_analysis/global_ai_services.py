@@ -18,6 +18,7 @@ from .models import (
     AiAnswerShare,
     AiConversation,
     AiConversationMessage,
+    AiFamilyOutboundAuthorization,
     AiMemory,
     AiOutboundAuthorization,
     AiProvider,
@@ -65,6 +66,11 @@ def create_conversation(actor, *, financial_scope=AiConversation.SCOPE_PERSONAL,
     _validate_actor(actor)
     if financial_scope not in dict(AiConversation.SCOPE_CHOICES):
         raise GlobalAiServiceError("不支持的财务范围。")
+    if (
+        financial_scope == AiConversation.SCOPE_FAMILY
+        and actor.role == FamilyMember.ROLE_VIEWER
+    ):
+        raise GlobalAiServiceError("查看者不能建立全家财务对话。")
     return AiConversation.objects.create(
         family=actor.family,
         member=actor,
@@ -466,8 +472,51 @@ def withdraw_answer_share(actor, *, share_id):
     return share
 
 
-def _require_cloud_grants(actor, provider, data_types):
+def family_financial_cloud_authorized(family_id, provider):
+    return AiFamilyOutboundAuthorization.objects.filter(
+        family_id=family_id,
+        provider=provider,
+        data_type=AiFamilyOutboundAuthorization.DATA_FINANCIAL,
+        is_allowed=True,
+    ).exists()
+
+
+def set_family_financial_cloud_authorization(actor, *, provider, is_allowed):
+    _validate_actor(actor)
+    if actor.role != FamilyMember.ROLE_ADMIN:
+        raise GlobalAiServiceError("只有家庭管理员可以修改全家财务云端授权。")
+    if (
+        not provider
+        or not provider.pk
+        or not provider.is_active
+        or provider.execution_location != AiProvider.LOCATION_CLOUD
+    ):
+        raise GlobalAiServiceError("当前云端服务商不可用。")
+    with transaction.atomic():
+        authorization, _created = AiFamilyOutboundAuthorization.objects.update_or_create(
+            family=actor.family,
+            provider=provider,
+            data_type=AiFamilyOutboundAuthorization.DATA_FINANCIAL,
+            defaults={"is_allowed": bool(is_allowed), "changed_by": actor},
+        )
+    return authorization
+
+
+def _require_cloud_grants(
+    actor,
+    provider,
+    data_types,
+    *,
+    financial_scope=AiConversation.SCOPE_PERSONAL,
+):
     required = set(data_types) | {AiOutboundAuthorization.DATA_CONVERSATION}
+    if (
+        AiOutboundAuthorization.DATA_FINANCIAL in required
+        and financial_scope == AiConversation.SCOPE_FAMILY
+    ):
+        if not family_financial_cloud_authorized(actor.family_id, provider):
+            raise GlobalAiServiceError("家庭管理员尚未允许向当前云端模型发送全家财务资料。")
+        required.remove(AiOutboundAuthorization.DATA_FINANCIAL)
     allowed = set(
         AiOutboundAuthorization.objects.filter(
             family=actor.family,
@@ -492,6 +541,8 @@ def prepare_conversation_context(actor, *, conversation_id, provider):
         for message in messages
         for data_type in (message.data_types or [])
     }
+    if conversation.financial_scope == AiConversation.SCOPE_FAMILY:
+        all_types.add(AiOutboundAuthorization.DATA_FINANCIAL)
     if any(data_type not in VALID_DATA_TYPES for data_type in all_types):
         raise GlobalAiServiceError("历史消息包含不支持的数据类型。")
     validated_refs = []
@@ -589,12 +640,22 @@ def prepare_conversation_context(actor, *, conversation_id, provider):
         validated_refs.append((message, refs))
 
     if provider.execution_location == AiProvider.LOCATION_CLOUD:
-        _require_cloud_grants(actor, provider, all_types)
+        _require_cloud_grants(
+            actor,
+            provider,
+            all_types,
+            financial_scope=conversation.financial_scope,
+        )
         for data_type, member_ids in (
             (AiOutboundAuthorization.DATA_FINANCIAL, financial_member_ids),
             (AiOutboundAuthorization.DATA_MEMORY, memory_member_ids),
         ):
             if not member_ids:
+                continue
+            if (
+                data_type == AiOutboundAuthorization.DATA_FINANCIAL
+                and conversation.financial_scope == AiConversation.SCOPE_FAMILY
+            ):
                 continue
             allowed = set(
                 AiOutboundAuthorization.objects.filter(

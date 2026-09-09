@@ -16,6 +16,13 @@ class ConversationCreateForm(forms.Form):
         initial=AiConversation.SCOPE_PERSONAL,
     )
 
+    def __init__(self, *args, allow_family=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not allow_family:
+            self.fields["financial_scope"].choices = [
+                (AiConversation.SCOPE_PERSONAL, "我的财务")
+            ]
+
 
 class MemoryCreateForm(forms.Form):
     content = forms.CharField(
@@ -58,4 +65,11 @@ class OutboundAuthorizationForm(forms.Form):
         choices=AiOutboundAuthorization.DATA_TYPE_CHOICES,
         required=False,
         widget=forms.CheckboxSelectMultiple,
+    )
+
+
+class FamilyFinancialAuthorizationForm(forms.Form):
+    is_allowed = forms.BooleanField(
+        label="允许家庭成员在“全家财务”对话中把家庭财务资料发送给当前云端模型",
+        required=False,
     )

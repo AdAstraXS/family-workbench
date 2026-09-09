@@ -3,7 +3,7 @@
 投资板块 2026-07-03 至 2026-08-09 的设计决策、主要交付、版本节点和部署经验，已归档到
 [`investment-module-development-history.md`](investment-module-development-history.md)。
 
-更新时间：2026-09-08
+更新时间：2026-09-09
 
 ## 当前结论
 
@@ -95,6 +95,11 @@
   `/volume1/docker/family-workbench/backups/family-workbench-pre-global-ai-refresh-09f5ebf.dump`
   的 SHA-256 为 `be26e5d097af6b1cc02babf4cb4fa6c8524fc2ce4d1ea7ecfe9406a05434c879`，数据库基线和 `.env`
   哈希保持不变。隔离容器中的 3 项页面测试通过。
+- 已按确认方案在本地增加“全家财务云端使用”家庭级授权：仅家庭管理员可为当前云端服务商启用或
+  撤销，普通成员在自己的私人对话中可使用已获家庭授权的全家财务；查看者不能建立全家财务对话。
+  每位成员仍须自行允许发送自己的对话，个人财务、个人记忆和私人知识授权不被家庭授权替代；撤销
+  后，包含全家财务依据的历史上下文也会在离开主机前被拦截。新增迁移 `ai_analysis.0008`，本地
+  AI 模块 58 项及 `ai_analysis ipo portfolio` 328 项回归测试通过；尚未部署 NAS 或修改生产数据库。
 
 第一至第四阶段已经按确认范围完成并部署：
 

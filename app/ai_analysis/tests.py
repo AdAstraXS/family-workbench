@@ -462,7 +462,10 @@ class GlobalAiWorkbenchTests(TestCase):
         self.bob_user = get_user_model().objects.create_user(username="workbench-bob")
         self.viewer_user = get_user_model().objects.create_user(username="workbench-viewer")
         self.alice = FamilyMember.objects.create(
-            family=self.family, user=self.alice_user, display_name="Alice"
+            family=self.family,
+            user=self.alice_user,
+            display_name="Alice",
+            role=FamilyMember.ROLE_ADMIN,
         )
         self.bob = FamilyMember.objects.create(
             family=self.family, user=self.bob_user, display_name="Bob"
@@ -522,7 +525,7 @@ class GlobalAiWorkbenchTests(TestCase):
         )
         response = self.client.get(reverse("ai_analysis:index"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "请先确认云端资料授权")
+        self.assertContains(response, "全家财务云端使用")
         self.assertNotContains(response, "页面快捷导航")
         self.assertContains(response, "Alice 私人资产回顾")
         self.assertContains(response, "Alice 的长期目标")
@@ -609,6 +612,15 @@ class GlobalAiWorkbenchTests(TestCase):
         )
         self.family_memory.refresh_from_db()
         self.assertEqual(self.family_memory.status, AiMemory.STATUS_CONFIRMED)
+
+    def test_viewer_cannot_create_family_financial_conversation(self):
+        self.client.force_login(self.viewer_user)
+        response = self.client.post(
+            reverse("ai_analysis:conversation_create"),
+            {"title": "查看全家财务", "financial_scope": AiConversation.SCOPE_FAMILY},
+        )
+        self.assertRedirects(response, reverse("ai_analysis:index"))
+        self.assertFalse(AiConversation.objects.filter(title="查看全家财务").exists())
 
     def test_conversation_page_displays_request_state_without_fake_answer(self):
         request_record = AiAnalysisRequest.objects.create(

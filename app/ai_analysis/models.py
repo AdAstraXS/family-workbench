@@ -208,6 +208,51 @@ class AiOutboundAuthorization(TimestampedModel):
         ]
 
 
+class AiFamilyOutboundAuthorization(TimestampedModel):
+    DATA_FINANCIAL = "financial"
+    DATA_TYPE_CHOICES = [(DATA_FINANCIAL, "全家财务数据")]
+
+    family = models.ForeignKey(
+        Family,
+        verbose_name="所属家庭",
+        on_delete=models.CASCADE,
+        related_name="ai_family_outbound_authorizations",
+    )
+    provider = models.ForeignKey(
+        AiProvider,
+        verbose_name="服务商",
+        on_delete=models.CASCADE,
+        related_name="family_outbound_authorizations",
+    )
+    data_type = models.CharField(
+        "数据类型",
+        max_length=30,
+        choices=DATA_TYPE_CHOICES,
+        default=DATA_FINANCIAL,
+    )
+    is_allowed = models.BooleanField("允许发送", default=False)
+    changed_by = models.ForeignKey(
+        FamilyMember,
+        verbose_name="最近操作成员",
+        on_delete=models.PROTECT,
+        related_name="changed_ai_family_outbound_authorizations",
+    )
+
+    class Meta:
+        verbose_name = "全局 AI 家庭外发授权"
+        verbose_name_plural = "全局 AI 家庭外发授权"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["family", "provider", "data_type"],
+                name="unique_ai_family_outbound_authorization",
+            ),
+            models.CheckConstraint(
+                condition=Q(data_type="financial"),
+                name="ai_family_outbound_financial_only",
+            ),
+        ]
+
+
 class AiConversationMessage(models.Model):
     ROLE_USER = "user"
     ROLE_ASSISTANT = "assistant"
