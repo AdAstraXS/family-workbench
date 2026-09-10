@@ -3,7 +3,7 @@
 投资板块 2026-07-03 至 2026-08-09 的设计决策、主要交付、版本节点和部署经验，已归档到
 [`investment-module-development-history.md`](investment-module-development-history.md)。
 
-更新时间：2026-09-09
+更新时间：2026-09-10
 
 ## 当前结论
 
@@ -118,7 +118,16 @@
   全年差额和按天均匀摊分的进度参考。非本位币按原币单列，晚于截至日的记录不计入实际值，工具不读取
   资产快照或投资模块，也不向模型发送逐笔商户和备注。全家云端外发继续要求家庭管理员授权；历史回答
   再次发送前会按原截至日重算指纹，账本或预算变化后拒绝沿用旧依据。页面会显示“账本 YYYY 年收支与
-  预算”依据。`ai_analysis ledger ipo portfolio` 371 项联合回归通过，迁移检查无变化；尚未部署 NAS。
+  预算”依据。`ai_analysis ledger ipo portfolio` 371 项联合回归通过，迁移检查无变化。2026-09-10 已推送并部署
+  提交 `86fb9a3742d49d241af528b288faad8a256ce8a6` 到 NAS；部署前 PostgreSQL 备份为
+  `family-workbench-pre-global-ai-cashflow-86fb9a3.dump`（SHA-256：
+  `4ee2d4043434c04628453d65cefe6a94c1b6d55692f3ec2c8bdc2f48a5d8b03c`），新源码归档为
+  `family-workbench-86fb9a3.tar.gz`（SHA-256：
+  `092d7e9c93a4682e8ff459158b0e6bdcbad77e6b395b853baa3b0dc25396737e`），旧源码回滚包为
+  `source-predeploy-f98276983d985613d6e3005dee348edb2a547536-20260910-213656.tar.gz`（SHA-256：
+  `048970a6c6a1e2e9291eeaa12d98155e9c41af355fe49b49964f40da620d58fc`）。部署后服务健康、迁移无变化、
+  内部 HTTP 登录跳转和外部 HTTPS 登录页均正常；投资账户 35、持仓 469、流水 1054、组合快照 1646、
+  快照明细 10152、最新快照日期 2026-09-10、估值运行 55 及 `.env` 哈希均未变化，未修改生产业务数据。
 
 第一至第四阶段已经按确认范围完成并部署：
 
