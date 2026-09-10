@@ -15,7 +15,17 @@ from knowledge.models import (
     KnowledgeVisibility,
 )
 from knowledge.search import index_document
-from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot, BankAccount
+from ledger.models import (
+    AnnualBudget,
+    AnnualBudgetLine,
+    AssetBalanceEntry,
+    AssetBalanceSnapshot,
+    BankAccount,
+    ExpenseCategory,
+    ExpenseRecord,
+    IncomeCategory,
+    IncomeRecord,
+)
 from portfolio.models import InvestmentAccount, PortfolioSnapshot, PortfolioSnapshotPositionLine
 
 from .global_ai_services import (
@@ -30,6 +40,7 @@ from .read_tools import (
     knowledge_revision,
     knowledge_search,
     ledger_asset_snapshot,
+    ledger_cashflow_budget,
     portfolio_account_snapshot,
 )
 from .models import (
@@ -178,6 +189,118 @@ class GlobalAiReadToolsTests(TestCase):
         self.assertFalse(result["complete"])
         self.assertIsNone(result["total_base_amount"])
         self.assertEqual(result["missing_exchange_rates"], ["USD"])
+
+    def test_cashflow_budget_respects_scope_currency_and_as_of_date(self):
+        salary = IncomeCategory.objects.create(family=self.family, name="工资")
+        recurring = ExpenseCategory.objects.create(family=self.family, name="经常性")
+        dining = ExpenseCategory.objects.create(
+            family=self.family,
+            name="餐饮",
+            parent=recurring,
+        )
+        education = ExpenseCategory.objects.create(family=self.family, name="教育")
+        IncomeRecord.objects.create(
+            family=self.family,
+            member=self.alice,
+            category=salary,
+            income_date=date(2026, 1, 31),
+            amount=Decimal("1000"),
+            currency="CNY",
+        )
+        IncomeRecord.objects.create(
+            family=self.family,
+            member=self.bob,
+            category=salary,
+            income_date=date(2026, 1, 31),
+            amount=Decimal("500"),
+            currency="CNY",
+        )
+        ExpenseRecord.objects.create(
+            family=self.family,
+            member=self.alice,
+            category=dining,
+            expense_date=date(2026, 1, 15),
+            amount=Decimal("300"),
+            currency="CNY",
+        )
+        ExpenseRecord.objects.create(
+            family=self.family,
+            member=self.bob,
+            category=education,
+            expense_date=date(2026, 2, 10),
+            amount=Decimal("200"),
+            currency="CNY",
+        )
+        ExpenseRecord.objects.create(
+            family=self.family,
+            member=self.alice,
+            category=dining,
+            expense_date=date(2026, 3, 10),
+            amount=Decimal("10"),
+            currency="USD",
+        )
+        ExpenseRecord.objects.create(
+            family=self.family,
+            member=self.alice,
+            category=dining,
+            expense_date=date(2026, 12, 10),
+            amount=Decimal("999"),
+            currency="CNY",
+        )
+        budget = AnnualBudget.objects.create(family=self.family, year=2026)
+        AnnualBudgetLine.objects.create(
+            budget=budget,
+            line_type=AnnualBudgetLine.LINE_TYPE_INCOME,
+            income_category=salary,
+            annual_amount=Decimal("18000"),
+        )
+        AnnualBudgetLine.objects.create(
+            budget=budget,
+            line_type=AnnualBudgetLine.LINE_TYPE_EXPENSE,
+            expense_category=recurring,
+            annual_amount=Decimal("1200"),
+        )
+
+        personal = ledger_cashflow_budget(
+            self.alice,
+            year=2026,
+            as_of_date=date(2026, 6, 30),
+        )
+        self.assertEqual(personal["totals"]["income"], "1000.0000")
+        self.assertEqual(personal["totals"]["expense"], "300.0000")
+        self.assertIsNone(personal["budget"])
+        self.assertEqual(personal["member_ids"], [self.alice.pk])
+
+        with patch("ai_analysis.read_tools.PortfolioSnapshot.objects.filter") as portfolio:
+            family = ledger_cashflow_budget(
+                self.alice,
+                year=2026,
+                scope=SCOPE_FAMILY,
+                as_of_date=date(2026, 6, 30),
+            )
+        portfolio.assert_not_called()
+        self.assertEqual(family["totals"], {
+            "income": "1500.0000",
+            "expense": "500.0000",
+            "net_cashflow": "1000.0000",
+            "savings_rate_percent": "66.67",
+        })
+        self.assertEqual(family["monthly"][0]["expense"], "300.0000")
+        self.assertEqual(family["monthly"][1]["expense"], "200.0000")
+        self.assertEqual(family["coverage"]["future_record_count"], 1)
+        self.assertEqual(family["other_currency_totals"][0]["currency"], "USD")
+        self.assertEqual(family["other_currency_totals"][0]["expense"], "10.0000")
+        self.assertEqual(family["budget"]["summary"]["expense_actual_to_date"], "500.0000")
+        self.assertEqual(
+            family["budget"]["summary"]["expense_linear_budget_to_date"],
+            "595.0685",
+        )
+        expense_line = next(
+            row for row in family["budget"]["lines"] if row["line_type"] == "expense"
+        )
+        self.assertEqual(expense_line["category"], "经常性")
+        self.assertEqual(expense_line["actual_to_date"], "300.0000")
+        self.assertEqual(len(family["evidence_fingerprint"]), 64)
 
     def test_portfolio_account_is_independent_and_preserves_asset_types(self):
         with patch("ai_analysis.read_tools.AssetBalanceSnapshot.objects.filter") as ledger_filter:

@@ -7,6 +7,7 @@ from .read_tools import (
     GlobalAiReadError,
     knowledge_search,
     ledger_asset_snapshot,
+    ledger_cashflow_budget,
     portfolio_account_snapshot,
     portfolio_accounts,
 )
@@ -25,6 +26,24 @@ TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {"snapshot_id": {"type": "integer", "minimum": 1}},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ledger_cashflow_budget",
+            "description": (
+                "读取账本中的年度收入、支出、月度与分类汇总；全家财务范围同时返回家庭年度预算执行情况。"
+                "不读取资产快照或投资模块。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "year": {"type": "integer", "minimum": 2000, "maximum": 2100},
+                },
+                "required": ["year"],
                 "additionalProperties": False,
             },
         },
@@ -82,6 +101,7 @@ TOOL_SCHEMAS = [
 
 _ALLOWED_ARGUMENTS = {
     "ledger_asset_snapshot": {"snapshot_id"},
+    "ledger_cashflow_budget": {"year"},
     "portfolio_accounts": set(),
     "portfolio_account_snapshot": {"account_id", "snapshot_id"},
     "knowledge_search": {"query", "limit"},
@@ -120,6 +140,12 @@ def _validate_arguments(name, arguments):
             or arguments[key] < 1
         ):
             raise GlobalAiRuntimeError("工具参数不可用。")
+    if name == "ledger_cashflow_budget" and (
+        not isinstance(arguments.get("year"), int)
+        or isinstance(arguments.get("year"), bool)
+        or not 2000 <= arguments["year"] <= 2100
+    ):
+        raise GlobalAiRuntimeError("收支分析年份不可用。")
     if name == "portfolio_account_snapshot" and "account_id" not in arguments:
         raise GlobalAiRuntimeError("投资账户参数不能为空。")
     if name == "knowledge_search":
@@ -206,6 +232,22 @@ def dispatch_read_tool(actor, *, conversation, provider, name, arguments):
                 family_financial_scope=family_financial_scope,
             )
             references = [{"kind": "ledger_snapshot", "snapshot_id": result["snapshot_id"]}]
+            data_type = AiOutboundAuthorization.DATA_FINANCIAL
+        elif name == "ledger_cashflow_budget":
+            result = ledger_cashflow_budget(actor, scope=scope, **arguments)
+            _require_cloud_grants(
+                provider,
+                family_id=actor.family_id,
+                member_ids=set(result["member_ids"]),
+                data_type=AiOutboundAuthorization.DATA_FINANCIAL,
+                family_financial_scope=family_financial_scope,
+            )
+            references = [{
+                "kind": "ledger_cashflow_budget",
+                "year": result["year"],
+                "as_of_date": result["as_of_date"],
+                "fingerprint": result["evidence_fingerprint"],
+            }]
             data_type = AiOutboundAuthorization.DATA_FINANCIAL
         elif name == "portfolio_accounts":
             result = portfolio_accounts(actor, scope=scope)

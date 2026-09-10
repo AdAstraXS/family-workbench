@@ -18,7 +18,13 @@ from knowledge.models import (
     KnowledgeVisibility,
 )
 from knowledge.search import index_document
-from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot, BankAccount
+from ledger.models import (
+    AssetBalanceEntry,
+    AssetBalanceSnapshot,
+    BankAccount,
+    ExpenseCategory,
+    ExpenseRecord,
+)
 from portfolio.models import InvestmentAccount, PortfolioSnapshot, PortfolioSnapshotPositionLine
 
 from .global_ai_services import (
@@ -328,6 +334,14 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
                 name="knowledge_search",
                 arguments={"query": "资产", "limit": 11},
             )
+        with self.assertRaisesRegex(GlobalAiRuntimeError, "年份"):
+            dispatch_read_tool(
+                self.alice,
+                conversation=conversation,
+                provider=provider,
+                name="ledger_cashflow_budget",
+                arguments={"year": 1999},
+            )
 
     def test_family_financial_tool_uses_admin_family_grant(self):
         provider = AiProvider.objects.create(
@@ -366,6 +380,18 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
         )
         self.assertEqual(result["result"]["total_base_amount"], "1400000.0000")
         self.assertEqual(result["evidence_refs"][0]["kind"], "ledger_snapshot")
+        cashflow = dispatch_read_tool(
+            self.alice,
+            conversation=conversation,
+            provider=provider,
+            name="ledger_cashflow_budget",
+            arguments={"year": 2026},
+        )
+        self.assertEqual(cashflow["result"]["scope"], SCOPE_FAMILY)
+        self.assertEqual(
+            cashflow["evidence_refs"][0]["kind"],
+            "ledger_cashflow_budget",
+        )
 
     def test_family_grant_does_not_replace_personal_financial_grant(self):
         provider = AiProvider.objects.create(
@@ -467,6 +493,64 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
         with self.assertRaisesRegex(GlobalAiServiceError, "家庭管理员尚未允许"):
             prepare_conversation_context(
                 self.alice, conversation_id=conversation.pk, provider=provider
+            )
+
+    def test_cashflow_budget_history_is_invalidated_when_ledger_changes(self):
+        provider = AiProvider.objects.create(
+            name="云端收支历史测试模型",
+            provider_type="openai_compatible",
+            execution_location=AiProvider.LOCATION_CLOUD,
+        )
+        conversation = create_conversation(self.alice, financial_scope=SCOPE_FAMILY)
+        AiOutboundAuthorization.objects.create(
+            family=self.family,
+            member=self.alice,
+            provider=provider,
+            data_type=AiOutboundAuthorization.DATA_CONVERSATION,
+            is_allowed=True,
+        )
+        AiFamilyOutboundAuthorization.objects.create(
+            family=self.family,
+            provider=provider,
+            changed_by=self.alice,
+            is_allowed=True,
+        )
+        category = ExpenseCategory.objects.create(family=self.family, name="生活")
+        expense = ExpenseRecord.objects.create(
+            family=self.family,
+            member=self.alice,
+            category=category,
+            expense_date=date(2026, 3, 1),
+            amount=Decimal("100"),
+            currency="CNY",
+        )
+        tool_result = dispatch_read_tool(
+            self.alice,
+            conversation=conversation,
+            provider=provider,
+            name="ledger_cashflow_budget",
+            arguments={"year": 2026},
+        )
+        append_conversation_message(
+            self.alice,
+            conversation_id=conversation.pk,
+            role=AiConversationMessage.ROLE_ASSISTANT,
+            content="截至目前家庭支出为 100 元。",
+            data_types=[AiOutboundAuthorization.DATA_FINANCIAL],
+            evidence_refs=tool_result["evidence_refs"],
+        )
+        prepare_conversation_context(
+            self.alice,
+            conversation_id=conversation.pk,
+            provider=provider,
+        )
+        expense.amount = Decimal("120")
+        expense.save(update_fields=["amount", "updated_at"])
+        with self.assertRaisesRegex(GlobalAiServiceError, "已经发生变化"):
+            prepare_conversation_context(
+                self.alice,
+                conversation_id=conversation.pk,
+                provider=provider,
             )
 
     def test_F04_draft_history_and_empty_personal_slice_are_explicit(self):

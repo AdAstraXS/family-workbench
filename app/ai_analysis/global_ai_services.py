@@ -1,5 +1,6 @@
 """Permission-safe conversation, memory, outbound, and request lifecycle services."""
 
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
@@ -27,6 +28,7 @@ from .read_tools import (
     GlobalAiReadError,
     knowledge_revision,
     ledger_asset_snapshot,
+    ledger_cashflow_budget,
     portfolio_account_snapshot,
     portfolio_accounts,
 )
@@ -594,6 +596,35 @@ def prepare_conversation_context(actor, *, conversation_id, provider):
                 financial_member_ids.update(
                     item["member_id"] for item in evidence["accounts"]
                 )
+            elif kind == "ledger_cashflow_budget":
+                ref_types.add(AiOutboundAuthorization.DATA_FINANCIAL)
+                year = reference.get("year")
+                fingerprint = reference.get("fingerprint")
+                try:
+                    as_of_date = date.fromisoformat(reference.get("as_of_date", ""))
+                except (TypeError, ValueError):
+                    raise GlobalAiServiceError("历史收支与预算依据已经不可用。") from None
+                if (
+                    not isinstance(year, int)
+                    or isinstance(year, bool)
+                    or not 2000 <= year <= 2100
+                    or not isinstance(fingerprint, str)
+                    or len(fingerprint) != 64
+                    or any(character not in "0123456789abcdef" for character in fingerprint)
+                ):
+                    raise GlobalAiServiceError("历史收支与预算依据已经不可用。")
+                try:
+                    evidence = ledger_cashflow_budget(
+                        actor,
+                        scope=conversation.financial_scope,
+                        year=year,
+                        as_of_date=as_of_date,
+                    )
+                except GlobalAiReadError as exc:
+                    raise GlobalAiServiceError("历史收支与预算依据已经不可用。") from exc
+                if evidence["evidence_fingerprint"] != fingerprint:
+                    raise GlobalAiServiceError("历史收支与预算依据已经发生变化。")
+                financial_member_ids.update(evidence["member_ids"])
             elif kind == "portfolio_account":
                 ref_types.add(AiOutboundAuthorization.DATA_FINANCIAL)
                 if not isinstance(reference.get("account_id"), int) or isinstance(

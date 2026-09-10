@@ -762,7 +762,7 @@ def get_latest_budget_line_initial():
     return initial_rows or [{} for _ in range(8)]
 
 
-def get_budget_actual_records(budget):
+def get_budget_actual_records(budget, *, currency=None, through_date=None):
     income_records = IncomeRecord.objects.filter(family=budget.family).select_related("member", "category", "category__parent")
     expense_records = ExpenseRecord.objects.filter(family=budget.family).select_related("member", "category", "category__parent")
     income_records = income_records.filter(
@@ -771,6 +771,18 @@ def get_budget_actual_records(budget):
     expense_records = expense_records.filter(
         Q(period_start__year=budget.year) | Q(period_start__isnull=True, expense_date__year=budget.year)
     )
+    if currency:
+        income_records = income_records.filter(currency__iexact=currency)
+        expense_records = expense_records.filter(currency__iexact=currency)
+    if through_date:
+        income_records = income_records.filter(
+            Q(period_start__lte=through_date)
+            | Q(period_start__isnull=True, income_date__lte=through_date)
+        )
+        expense_records = expense_records.filter(
+            Q(period_start__lte=through_date)
+            | Q(period_start__isnull=True, expense_date__lte=through_date)
+        )
     return income_records, expense_records
 
 
@@ -791,7 +803,7 @@ def budget_category_record_ids(category, categories, aliases=None, fallback_path
     }
 
 
-def build_budget_report(budget):
+def build_budget_report(budget, *, currency=None, through_date=None):
     lines = list(
         budget.lines.select_related(
             "income_category",
@@ -800,7 +812,11 @@ def build_budget_report(budget):
             "expense_category__parent",
         )
     )
-    income_records, expense_records = get_budget_actual_records(budget)
+    income_records, expense_records = get_budget_actual_records(
+        budget,
+        currency=currency,
+        through_date=through_date,
+    )
     income_records = list(income_records)
     expense_records = list(expense_records)
     income_categories = list(
