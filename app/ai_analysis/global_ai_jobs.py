@@ -1,4 +1,4 @@
-"""Time- and cost-guarded DeepSeek execution loop for the private global AI workbench."""
+"""DeepSeek execution loop for the private global AI workbench."""
 
 from decimal import Decimal, InvalidOperation, ROUND_UP
 from hashlib import sha256
@@ -74,27 +74,22 @@ def provider_configuration(provider=None):
     try:
         input_price = Decimal(str(extra["global_ai_input_usd_per_million"]))
         output_price = Decimal(str(extra["global_ai_output_usd_per_million"]))
-        max_cost = Decimal(str(extra["global_ai_max_estimated_usd"]))
-        max_input = int(extra["global_ai_max_input_characters"])
         timeout = int(extra.get("global_ai_timeout_seconds", 45))
         loop_timeout = int(extra.get("global_ai_loop_timeout_seconds", 180))
         if (
-            any(not item.is_finite() or item <= 0 for item in (input_price, output_price, max_cost))
-            or not 1000 <= max_input <= 50000
+            any(not item.is_finite() or item <= 0 for item in (input_price, output_price))
             or not 10 <= timeout <= 60
             or not 30 <= loop_timeout <= 600
         ):
             raise ValueError
     except (KeyError, TypeError, ValueError, InvalidOperation):
-        raise GlobalAiJobError("全局 AI 的费用、长度或超时配置不完整。") from None
+        raise GlobalAiJobError("全局 AI 的费用或超时配置不完整。") from None
     config = {
         "provider_id": provider.pk,
         "model": provider.model_name,
         "api_key_env_var": env_name,
         "input_price": str(input_price),
         "output_price": str(output_price),
-        "max_cost": str(min(max_cost, Decimal("1"))),
-        "max_input_characters": max_input,
         "timeout_seconds": timeout,
         "loop_timeout_seconds": loop_timeout,
         "prompt_hash": sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
@@ -111,13 +106,6 @@ def _cost(input_tokens, output_tokens, config):
         Decimal(input_tokens) * Decimal(config["input_price"])
         + Decimal(output_tokens) * Decimal(config["output_price"])
     ) / Decimal(1000000)).quantize(Decimal("0.000001"), rounding=ROUND_UP)
-
-
-def validate_preflight(messages, config):
-    content = SYSTEM_PROMPT + json.dumps(messages, ensure_ascii=False, separators=(",", ":"))
-    if len(content) > config["max_input_characters"]:
-        raise GlobalAiJobError("对话上下文过长，请新建对话后再试。")
-    return None
 
 
 def launch_global_ai_request(request_id):
@@ -182,7 +170,6 @@ def execute_model_loop(request, config, *, post_json=_post_json):
     for item in context["messages"]:
         role = item["role"] if item["role"] in {"user", "assistant"} else "assistant"
         messages.append({"role": role, "content": item["content"]})
-    validate_preflight(messages, config)
     evidence_refs, data_types = [], set()
     prompt_tokens = completion_tokens = 0
     http_requests = 0
@@ -212,8 +199,6 @@ def execute_model_loop(request, config, *, post_json=_post_json):
                 else: completion_tokens += value
         except (KeyError, IndexError, TypeError) as exc:
             raise GlobalAiJobError("AI 返回结构不可用。") from exc
-        if _cost(prompt_tokens, completion_tokens, config) > Decimal(config["max_cost"]):
-            raise GlobalAiJobError("本次请求实际费用达到单次上限。")
         tool_calls = message.get("tool_calls") or []
         if tool_calls:
             messages.append(message)
@@ -239,7 +224,6 @@ def execute_model_loop(request, config, *, post_json=_post_json):
                     "tool_call_id": call["id"],
                     "content": json.dumps(tool_result["result"], ensure_ascii=False, separators=(",", ":")),
                 })
-            validate_preflight(messages, config)
             continue
         content = message.get("content")
         if choice.get("finish_reason") != "stop" or not isinstance(content, str) or not content.strip():

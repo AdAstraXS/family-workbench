@@ -62,7 +62,7 @@ CASES = (
     EvaluationCase("M03", "memory", STATUS_EXECUTABLE, "模型切换时的外发授权复核"),
     EvaluationCase("M04", "sharing", STATUS_EXECUTABLE, "单条回答分享与撤权"),
     EvaluationCase("L01", "lifecycle", STATUS_EXECUTABLE, "幂等提交与结果恢复"),
-    EvaluationCase("L02", "lifecycle", STATUS_EXECUTABLE, "停止、迟到结果与用量上限"),
+    EvaluationCase("L02", "lifecycle", STATUS_EXECUTABLE, "停止、迟到结果与未知用量"),
     EvaluationCase(
         "A01", "answer", STATUS_PENDING, "目标与回撤回答边界",
         "候选模型回答和人工评分",

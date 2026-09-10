@@ -830,7 +830,7 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
                 scope={"member_id": self.bob.pk},
             )
 
-    def test_L02_cancel_late_results_unknown_usage_and_limits_are_explicit(self):
+    def test_L02_cancel_late_results_unknown_usage_and_no_daily_quota(self):
         provider = AiProvider.objects.create(
             name="限额虚构模型",
             provider_type="local-test",
@@ -902,11 +902,12 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
         success.refresh_from_db()
         self.assertIsNone(success.result.tokens_used)
         self.assertIsNone(success.result.cost_estimate)
-        with self.assertRaisesRegex(GlobalAiServiceError, "达到上限"):
-            submit_global_ai_request(
-                self.alice,
-                conversation_id=conversation.pk,
-                idempotency_key="over-limit",
-                prompt="第四项",
-                provider=provider,
-            )
+        fourth, created = submit_global_ai_request(
+            self.alice,
+            conversation_id=conversation.pk,
+            idempotency_key="over-limit",
+            prompt="第四项",
+            provider=provider,
+        )
+        self.assertTrue(created)
+        self.assertEqual(fourth.status, AiAnalysisRequest.STATUS_PENDING)

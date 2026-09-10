@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -9,6 +10,7 @@ from family_core.models import Family, FamilyMember
 
 from .global_ai_jobs import execute_model_loop, provider_configuration
 from .global_ai_services import claim_global_ai_request, complete_global_ai_request
+from .forms import GlobalAiPromptForm
 from .models import (
     AiAnalysisRequest,
     AiConversation,
@@ -33,10 +35,7 @@ def configured_provider():
         "api_key_env_var": "TEST_DEEPSEEK_KEY",
         "global_ai_input_usd_per_million": "1.32",
         "global_ai_output_usd_per_million": "3.96",
-        "global_ai_max_estimated_usd": "0.10",
-        "global_ai_max_input_characters": 20000,
         "global_ai_timeout_seconds": 45,
-        "global_ai_daily_request_limit": 20,
     }
     provider.save()
     return provider
@@ -69,8 +68,14 @@ class GlobalAiExecutionTests(TestCase):
         self.assertEqual(config["model"], "deepseek-v4-pro")
         self.assertNotIn("max_http_requests", config)
         self.assertNotIn("max_output_tokens", config)
+        self.assertNotIn("max_cost", config)
+        self.assertNotIn("max_input_characters", config)
         self.assertEqual(config["loop_timeout_seconds"], 180)
         self.assertNotIn("secret-for-test", str(config))
+
+    def test_prompt_form_has_no_product_length_cap(self):
+        form = GlobalAiPromptForm(data={"content": "问题" * 3000, "idempotency_key": "k"})
+        self.assertTrue(form.is_valid(), form.errors)
 
     def test_tool_loop_uses_host_dispatch_and_returns_auditable_evidence(self):
         AiConversationMessage.objects.create(
@@ -89,10 +94,8 @@ class GlobalAiExecutionTests(TestCase):
         )
         _provider, config = None, {
             "model": "deepseek-v4-pro",
-            "max_input_characters": 20000,
             "input_price": "1.32",
             "output_price": "3.96",
-            "max_cost": "0.10",
             "loop_timeout_seconds": 180,
         }
         replies = iter([
@@ -104,13 +107,13 @@ class GlobalAiExecutionTests(TestCase):
                         }
                     }]
                 }}],
-                "usage": {"prompt_tokens": 20, "completion_tokens": 8},
+                "usage": {"prompt_tokens": 100000, "completion_tokens": 80000},
             },
             {
                 "choices": [{"finish_reason": "stop", "message": {
                     "role": "assistant", "content": "账本正式快照显示整体资产为 100 元。"
                 }}],
-                "usage": {"prompt_tokens": 30, "completion_tokens": 12},
+                "usage": {"prompt_tokens": 100000, "completion_tokens": 120000},
             },
         ])
         tool_result = {
@@ -131,7 +134,8 @@ class GlobalAiExecutionTests(TestCase):
         self.assertNotIn("max_tokens", payloads[0])
         self.assertEqual(result["data_types"], ["financial"])
         self.assertEqual(result["evidence_refs"], tool_result["evidence_refs"])
-        self.assertEqual(result["tokens_used"], 70)
+        self.assertEqual(result["tokens_used"], 400000)
+        self.assertGreater(result["cost"], Decimal("0.10"))
 
     def test_completion_adds_one_assistant_message_and_rejects_late_cancelled_result(self):
         request = AiAnalysisRequest.objects.create(

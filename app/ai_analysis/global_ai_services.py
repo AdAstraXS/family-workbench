@@ -774,19 +774,6 @@ def submit_global_ai_request(
                     ],
                 ).exists():
                     raise GlobalAiServiceError("已有一条问题正在处理，请等待完成或先停止。")
-                raw_limit = (provider.extra_data or {}).get("global_ai_daily_request_limit")
-                if raw_limit is not None:
-                    if not isinstance(raw_limit, int) or isinstance(raw_limit, bool) or raw_limit < 1:
-                        raise GlobalAiServiceError("服务商用量上限配置不可用。")
-                    used = AiAnalysisRequest.objects.filter(
-                        family=actor.family,
-                        member=actor,
-                        provider=provider,
-                        module=GLOBAL_AI_MODULE,
-                        created_at__date=timezone.localdate(),
-                    ).count()
-                    if used >= raw_limit:
-                        raise GlobalAiServiceError("当前服务商今天的全局 AI 请求已达到上限。")
             request = AiAnalysisRequest.objects.create(
                 family=actor.family,
                 member=actor,
