@@ -35,8 +35,6 @@ def configured_provider():
         "global_ai_output_usd_per_million": "3.96",
         "global_ai_max_estimated_usd": "0.10",
         "global_ai_max_input_characters": 20000,
-        "global_ai_max_output_tokens": 1000,
-        "global_ai_max_http_requests": 4,
         "global_ai_timeout_seconds": 45,
         "global_ai_daily_request_limit": 20,
     }
@@ -69,6 +67,9 @@ class GlobalAiExecutionTests(TestCase):
             provider, config = provider_configuration(self.provider)
         self.assertEqual(provider, self.provider)
         self.assertEqual(config["model"], "deepseek-v4-pro")
+        self.assertNotIn("max_http_requests", config)
+        self.assertNotIn("max_output_tokens", config)
+        self.assertEqual(config["loop_timeout_seconds"], 180)
         self.assertNotIn("secret-for-test", str(config))
 
     def test_tool_loop_uses_host_dispatch_and_returns_auditable_evidence(self):
@@ -88,12 +89,11 @@ class GlobalAiExecutionTests(TestCase):
         )
         _provider, config = None, {
             "model": "deepseek-v4-pro",
-            "max_output_tokens": 1000,
-            "max_http_requests": 4,
             "max_input_characters": 20000,
             "input_price": "1.32",
             "output_price": "3.96",
             "max_cost": "0.10",
+            "loop_timeout_seconds": 180,
         }
         replies = iter([
             {
@@ -119,9 +119,16 @@ class GlobalAiExecutionTests(TestCase):
             "result": {"module": "ledger", "total_base_amount": "100.0000"},
             "evidence_refs": [{"kind": "ledger_snapshot", "snapshot_id": 7}],
         }
+        payloads = []
+
+        def post_json(payload, _config):
+            payloads.append(payload)
+            return next(replies)
+
         with patch("ai_analysis.global_ai_jobs.dispatch_read_tool", return_value=tool_result) as dispatch:
-            result = execute_model_loop(request, config, post_json=lambda payload, config: next(replies))
+            result = execute_model_loop(request, config, post_json=post_json)
         dispatch.assert_called_once()
+        self.assertNotIn("max_tokens", payloads[0])
         self.assertEqual(result["data_types"], ["financial"])
         self.assertEqual(result["evidence_refs"], tool_result["evidence_refs"])
         self.assertEqual(result["tokens_used"], 70)

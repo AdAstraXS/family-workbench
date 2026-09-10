@@ -1,4 +1,4 @@
-"""Bounded DeepSeek execution loop for the private global AI workbench."""
+"""Time- and cost-guarded DeepSeek execution loop for the private global AI workbench."""
 
 from decimal import Decimal, InvalidOperation, ROUND_UP
 from hashlib import sha256
@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -75,15 +76,13 @@ def provider_configuration(provider=None):
         output_price = Decimal(str(extra["global_ai_output_usd_per_million"]))
         max_cost = Decimal(str(extra["global_ai_max_estimated_usd"]))
         max_input = int(extra["global_ai_max_input_characters"])
-        max_output = int(extra["global_ai_max_output_tokens"])
-        max_http = int(extra.get("global_ai_max_http_requests", 4))
         timeout = int(extra.get("global_ai_timeout_seconds", 45))
+        loop_timeout = int(extra.get("global_ai_loop_timeout_seconds", 180))
         if (
             any(not item.is_finite() or item <= 0 for item in (input_price, output_price, max_cost))
             or not 1000 <= max_input <= 50000
-            or not 256 <= max_output <= 4096
-            or not 1 <= max_http <= 6
             or not 10 <= timeout <= 60
+            or not 30 <= loop_timeout <= 600
         ):
             raise ValueError
     except (KeyError, TypeError, ValueError, InvalidOperation):
@@ -96,9 +95,8 @@ def provider_configuration(provider=None):
         "output_price": str(output_price),
         "max_cost": str(min(max_cost, Decimal("1"))),
         "max_input_characters": max_input,
-        "max_output_tokens": max_output,
-        "max_http_requests": max_http,
         "timeout_seconds": timeout,
+        "loop_timeout_seconds": loop_timeout,
         "prompt_hash": sha256(SYSTEM_PROMPT.encode("utf-8")).hexdigest(),
         "data_scope": "conversation_tools_v1",
     }
@@ -119,14 +117,7 @@ def validate_preflight(messages, config):
     content = SYSTEM_PROMPT + json.dumps(messages, ensure_ascii=False, separators=(",", ":"))
     if len(content) > config["max_input_characters"]:
         raise GlobalAiJobError("对话上下文过长，请新建对话后再试。")
-    estimate = _cost(
-        (len(content.encode("utf-8")) + 2048) * config["max_http_requests"],
-        config["max_output_tokens"] * config["max_http_requests"],
-        config,
-    )
-    if estimate > Decimal(config["max_cost"]):
-        raise GlobalAiJobError("本次请求费用预估超过单次上限。")
-    return estimate
+    return None
 
 
 def launch_global_ai_request(request_id):
@@ -193,15 +184,18 @@ def execute_model_loop(request, config, *, post_json=_post_json):
         messages.append({"role": role, "content": item["content"]})
     validate_preflight(messages, config)
     evidence_refs, data_types = [], set()
-    tool_call_count = 0
     prompt_tokens = completion_tokens = 0
-    for _index in range(config["max_http_requests"]):
+    http_requests = 0
+    started_at = time.monotonic()
+    while True:
         if _cancel_requested(request.pk, request.execution_token):
             raise InterruptedError
+        if time.monotonic() - started_at >= config["loop_timeout_seconds"]:
+            raise GlobalAiJobError("AI 处理时间超过上限，请稍后新建对话重试。")
+        http_requests += 1
         reply = post_json({
             "model": config["model"],
             "thinking": {"type": "disabled"},
-            "max_tokens": config["max_output_tokens"],
             "messages": messages,
             "tools": TOOL_SCHEMAS,
             "tool_choice": "auto",
@@ -218,11 +212,10 @@ def execute_model_loop(request, config, *, post_json=_post_json):
                 else: completion_tokens += value
         except (KeyError, IndexError, TypeError) as exc:
             raise GlobalAiJobError("AI 返回结构不可用。") from exc
+        if _cost(prompt_tokens, completion_tokens, config) > Decimal(config["max_cost"]):
+            raise GlobalAiJobError("本次请求实际费用达到单次上限。")
         tool_calls = message.get("tool_calls") or []
         if tool_calls:
-            tool_call_count += len(tool_calls)
-            if tool_call_count > 6:
-                raise GlobalAiJobError("AI 一次请求了过多资料。")
             messages.append(message)
             for call in tool_calls:
                 try:
@@ -264,7 +257,7 @@ def execute_model_loop(request, config, *, post_json=_post_json):
             "evidence_refs": unique_refs,
             "tokens_used": prompt_tokens + completion_tokens,
             "cost": _cost(prompt_tokens, completion_tokens, config),
-            "http_requests": _index + 1,
+            "http_requests": http_requests,
         }
     raise GlobalAiJobError("AI 在限定步骤内没有形成最终回答。")
 
