@@ -2,3 +2,26 @@
 .global-ai-authorization{padding-bottom:16px;border-bottom:1px solid #dbe7e3}.global-ai-authorization>form{display:grid;gap:12px;padding:12px 18px 0}.global-ai-auth-options{display:grid;gap:8px}.global-ai-auth-options label{display:flex;align-items:flex-start;gap:8px;color:#536d66;font-size:12px;line-height:1.4}.global-ai-auth-options input{width:auto;min-height:0;margin-top:3px}.global-ai-auth-options span,.global-ai-auth-options strong{display:block}.global-ai-auth-options strong{color:#294b42;font-size:13px}
 .global-ai-readiness.is-ready{border-color:#bcded3;background:#f1faf7}.global-ai-readiness.is-ready .global-ai-readiness-icon{background:#d8f1e8;color:#1e745a}.global-ai-readiness.is-ready strong{color:#1c624f}.global-ai-readiness.is-ready p{color:#52756b}
 .global-ai-evidence{margin-top:7px;color:#657c76;font-size:11px}.global-ai-evidence summary{cursor:pointer;font-weight:700}.global-ai-evidence ul{margin:6px 0 0;padding-left:18px}.global-ai-evidence li+li{margin-top:3px}
+.global-ai-conversation-list{gap:5px}
+.global-ai-conversation-item{border-radius:9px}
+.global-ai-conversation-item:hover{background:#f1f7f5}
+.global-ai-conversation-item.active{background:#e7f4f0;color:#175f4d}
+.global-ai-conversation-list .global-ai-conversation-link{display:grid;gap:4px;padding:11px 11px 6px;border-radius:9px;color:#213c35}
+.global-ai-conversation-list .global-ai-conversation-link:hover{background:transparent;text-decoration:none}
+.global-ai-conversation-actions{display:flex;gap:10px;padding:0 11px 8px}
+.global-ai-conversation-actions details{color:#607a73;font-size:11px}
+.global-ai-conversation-actions summary{cursor:pointer;list-style:none}
+.global-ai-conversation-actions summary::-webkit-details-marker{display:none}
+.global-ai-conversation-actions details.danger summary{color:#a33b3b}
+.global-ai-conversation-actions form{display:grid;gap:6px;margin-top:6px}
+.global-ai-conversation-actions input{min-width:0;padding:6px 7px;font-size:11px}
+.global-ai-conversation-actions button{min-height:28px;padding:4px 8px;font-size:11px}
+.global-ai-conversation-actions details.danger p{margin:6px 0 0;color:#8b4b4b;line-height:1.4}
+.global-ai-conversation-actions details.danger button{background:#a33b3b}
+.global-ai-knowledge-scope{margin:0;padding:9px 10px;border-radius:8px;background:#f2f7f5;color:#607a73;font-size:11px;line-height:1.5}
+.global-ai-knowledge-scope p{margin:0}
+.global-ai-knowledge-scope strong{color:#245f50}
+.global-ai-knowledge-scope a{margin-left:4px}
+.global-ai-knowledge-source-list{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.global-ai-knowledge-source-list span{padding:2px 7px;border-radius:99px;background:#dfeee9;color:#315e52}
+.global-ai-knowledge-source-list em{color:#7d7167;font-style:normal}

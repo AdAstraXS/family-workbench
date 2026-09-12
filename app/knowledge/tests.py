@@ -1720,8 +1720,8 @@ class KnowledgeBaseTests(TestCase):
         )
 
         self.assertContains(response, "云端 AI 正文发送")
-        self.assertContains(response, "每次使用前确认")
-        self.assertContains(response, "今后允许将本来源正文发送给云端 AI 整理")
+        self.assertContains(response, "AI 助手不可用；AI 整理时逐次确认")
+        self.assertContains(response, "允许本来源正文用于云端 AI 整理和 AI 助手")
         self.assertContains(response, "查看待整理（1）")
         self.assertContains(response, f"source_id={source.pk}")
         self.assertNotContains(response, "为待整理资料创建 AI 任务")

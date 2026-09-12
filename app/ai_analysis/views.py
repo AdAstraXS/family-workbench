@@ -10,10 +10,12 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from family_core.models import FamilyMember
+from knowledge.models import KnowledgeSource, KnowledgeVisibility
 from knowledge.permissions import current_member
 
 from .forms import (
     ConversationCreateForm,
+    ConversationRenameForm,
     FamilyFinancialAuthorizationForm,
     GlobalAiPromptForm,
     MemoryCreateForm,
@@ -30,10 +32,12 @@ from .global_ai_services import (
     confirm_memory,
     create_answer_share_preview,
     create_conversation,
+    delete_conversation,
     delete_memory,
     publish_answer_share,
     propose_memory,
     refresh_answer_share_state,
+    rename_conversation,
     revise_memory,
     set_family_financial_cloud_authorization,
     set_conversation_archived,
@@ -110,6 +114,14 @@ def _workbench_context(member, *, active_conversation=None):
             is_allowed=True,
         ).values_list("data_type", flat=True))
     conversation_allowed = AiOutboundAuthorization.DATA_CONVERSATION in grants
+    knowledge_cloud_sources = list(
+        KnowledgeSource.objects.filter(
+            family=member.family,
+            allow_cloud_ai=True,
+        )
+        .filter(Q(owner=member) | Q(visibility=KnowledgeVisibility.FAMILY))
+        .order_by("name", "pk")
+    )
     family_financial_allowed = False
     if global_provider:
         family_financial_allowed = AiFamilyOutboundAuthorization.objects.filter(
@@ -176,6 +188,8 @@ def _workbench_context(member, *, active_conversation=None):
         "authorization_form": OutboundAuthorizationForm(initial={"allowed_data_types": sorted(grants)}),
         "authorization_labels": AiOutboundAuthorization.DATA_TYPE_CHOICES,
         "allowed_data_types": grants,
+        "knowledge_cloud_sources": knowledge_cloud_sources,
+        "knowledge_cloud_source_count": len(knowledge_cloud_sources),
         "global_provider": global_provider,
         "provider_ready": provider_ready,
         "provider_error": provider_error,
@@ -251,6 +265,47 @@ def conversation_archive(request, conversation_id):
         messages.error(request, str(exc))
     else:
         messages.success(request, "对话已归档。")
+    return redirect("ai_analysis:index")
+
+
+@login_required
+@require_POST
+def conversation_rename(request, conversation_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    form = ConversationRenameForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "请输入有效的对话标题。")
+        return redirect("ai_analysis:index")
+    try:
+        conversation = rename_conversation(
+            member,
+            conversation_id=conversation_id,
+            title=form.cleaned_data["title"],
+        )
+    except GlobalAiServiceError as exc:
+        messages.error(request, str(exc))
+        return redirect("ai_analysis:index")
+    messages.success(request, "对话标题已更新。")
+    return redirect(_conversation_url(conversation))
+
+
+@login_required
+@require_POST
+def conversation_delete(request, conversation_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    if request.POST.get("confirm_delete") != "yes":
+        messages.error(request, "请明确确认删除这段对话。")
+        return redirect("ai_analysis:index")
+    try:
+        delete_conversation(member, conversation_id=conversation_id)
+    except GlobalAiServiceError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "对话及其中的消息已删除。")
     return redirect("ai_analysis:index")
 
 

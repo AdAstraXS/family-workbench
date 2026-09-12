@@ -691,6 +691,131 @@ class GlobalAiWorkbenchTests(TestCase):
         self.bob_conversation.refresh_from_db()
         self.assertFalse(self.bob_conversation.is_archived)
 
+    def test_owner_can_rename_and_delete_conversation(self):
+        self.client.force_login(self.alice_user)
+        message = AiConversationMessage.objects.create(
+            conversation=self.alice_conversation,
+            sequence=1,
+            role=AiConversationMessage.ROLE_USER,
+            content="准备删除的消息",
+        )
+        audit_request = AiAnalysisRequest.objects.create(
+            family=self.family,
+            member=self.alice,
+            conversation=self.alice_conversation,
+            module="global_ai",
+            prompt="准备删除的请求",
+            status=AiAnalysisRequest.STATUS_SUCCESS,
+        )
+
+        renamed = self.client.post(
+            reverse(
+                "ai_analysis:conversation_rename",
+                args=[self.alice_conversation.pk],
+            ),
+            {"title": "新的对话标题"},
+        )
+        self.assertRedirects(
+            renamed,
+            reverse("ai_analysis:conversation", args=[self.alice_conversation.pk]),
+        )
+        self.alice_conversation.refresh_from_db()
+        self.assertEqual(self.alice_conversation.title, "新的对话标题")
+
+        deleted = self.client.post(
+            reverse(
+                "ai_analysis:conversation_delete",
+                args=[self.alice_conversation.pk],
+            ),
+            {"confirm_delete": "yes"},
+        )
+        self.assertRedirects(deleted, reverse("ai_analysis:index"))
+        self.assertFalse(
+            AiConversation.objects.filter(pk=self.alice_conversation.pk).exists()
+        )
+        self.assertFalse(AiConversationMessage.objects.filter(pk=message.pk).exists())
+        audit_request.refresh_from_db()
+        self.assertIsNone(audit_request.conversation_id)
+
+    def test_conversation_changes_are_owner_only_and_delete_requires_confirmation(self):
+        self.client.force_login(self.alice_user)
+        rename_denied = self.client.post(
+            reverse(
+                "ai_analysis:conversation_rename",
+                args=[self.bob_conversation.pk],
+            ),
+            {"title": "不应生效"},
+        )
+        self.assertRedirects(rename_denied, reverse("ai_analysis:index"))
+        delete_denied = self.client.post(
+            reverse(
+                "ai_analysis:conversation_delete",
+                args=[self.bob_conversation.pk],
+            ),
+            {"confirm_delete": "yes"},
+        )
+        self.assertRedirects(delete_denied, reverse("ai_analysis:index"))
+        missing_confirmation = self.client.post(
+            reverse(
+                "ai_analysis:conversation_delete",
+                args=[self.alice_conversation.pk],
+            )
+        )
+        self.assertRedirects(missing_confirmation, reverse("ai_analysis:index"))
+        self.bob_conversation.refresh_from_db()
+        self.alice_conversation.refresh_from_db()
+        self.assertEqual(self.bob_conversation.title, "Bob 私人对话")
+
+    def test_conversation_with_active_request_cannot_be_deleted(self):
+        self.client.force_login(self.alice_user)
+        AiAnalysisRequest.objects.create(
+            family=self.family,
+            member=self.alice,
+            conversation=self.alice_conversation,
+            module="global_ai",
+            prompt="仍在处理",
+            status=AiAnalysisRequest.STATUS_RUNNING,
+        )
+        response = self.client.post(
+            reverse(
+                "ai_analysis:conversation_delete",
+                args=[self.alice_conversation.pk],
+            ),
+            {"confirm_delete": "yes"},
+        )
+        self.assertRedirects(response, reverse("ai_analysis:index"))
+        self.assertTrue(
+            AiConversation.objects.filter(pk=self.alice_conversation.pk).exists()
+        )
+
+    def test_authorization_explains_and_counts_persistently_allowed_sources(self):
+        KnowledgeSource.objects.create(
+            family=self.family,
+            owner=self.alice,
+            key="alice-cloud-source",
+            kind=KnowledgeSource.KIND_INTERNAL_NOTES,
+            name="Alice 已授权来源",
+            visibility=KnowledgeVisibility.FAMILY,
+            allow_cloud_ai=True,
+        )
+        KnowledgeSource.objects.create(
+            family=self.family,
+            owner=self.bob,
+            key="bob-private-cloud-source",
+            kind=KnowledgeSource.KIND_INTERNAL_NOTES,
+            name="Bob 私人已授权来源",
+            visibility=KnowledgeVisibility.PRIVATE,
+            allow_cloud_ai=True,
+        )
+        self.client.force_login(self.alice_user)
+        response = self.client.get(reverse("ai_analysis:index"))
+        self.assertContains(response, "当前已持续授权来源：")
+        self.assertContains(response, "<strong>1</strong>", html=True)
+        self.assertContains(response, "本地检索命中的正式资料摘录")
+        self.assertContains(response, "Alice 已授权来源")
+        self.assertNotContains(response, "Bob 私人已授权来源")
+        self.assertContains(response, "管理知识来源")
+
     def test_memory_candidate_confirm_revise_and_delete_keeps_history(self):
         self.client.force_login(self.alice_user)
         self.client.post(

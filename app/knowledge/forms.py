@@ -22,7 +22,7 @@ class NotebookSelectionForm(forms.Form):
         initial=KnowledgeVisibility.FAMILY,
     )
     allow_cloud_ai = forms.BooleanField(
-        label="允许把这个笔记本的正文发送给已配置的云端 AI 进行整理",
+        label="允许这个笔记本的正文用于云端 AI 整理和 AI 助手",
         required=False,
         help_text="不勾选也可以同步、浏览和搜索，之后可再开启。",
     )

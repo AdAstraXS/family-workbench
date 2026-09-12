@@ -89,6 +89,31 @@ def set_conversation_archived(actor, *, conversation_id, archived=True):
     return conversation
 
 
+def rename_conversation(actor, *, conversation_id, title):
+    title = title.strip() if isinstance(title, str) else ""
+    if not title:
+        raise GlobalAiServiceError("对话标题不能为空。")
+    with transaction.atomic():
+        conversation = _conversation_for(actor, conversation_id, for_update=True)
+        conversation.title = title[:200]
+        conversation.save(update_fields=["title", "updated_at"])
+    return conversation
+
+
+def delete_conversation(actor, *, conversation_id):
+    with transaction.atomic():
+        conversation = _conversation_for(actor, conversation_id, for_update=True)
+        if conversation.requests.filter(
+            status__in=[
+                AiAnalysisRequest.STATUS_PENDING,
+                AiAnalysisRequest.STATUS_RUNNING,
+                AiAnalysisRequest.STATUS_CANCEL_REQUESTED,
+            ]
+        ).exists():
+            raise GlobalAiServiceError("这段对话仍有问题正在处理，请停止或等待完成后再删除。")
+        conversation.delete()
+
+
 def append_conversation_message(
     actor,
     *,

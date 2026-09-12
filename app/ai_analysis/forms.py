@@ -24,6 +24,15 @@ class ConversationCreateForm(forms.Form):
             ]
 
 
+class ConversationRenameForm(forms.Form):
+    title = forms.CharField(
+        label="新标题",
+        max_length=200,
+        strip=True,
+        widget=forms.TextInput(attrs={"placeholder": "输入新的对话标题"}),
+    )
+
+
 class MemoryCreateForm(forms.Form):
     content = forms.CharField(
         label="希望 AI 记住的内容",

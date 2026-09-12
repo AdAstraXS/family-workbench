@@ -23,7 +23,7 @@
       <div><dt>文档数量</dt><dd>{{ document_count }}</dd></div>
       <div><dt>最近同步</dt><dd>{{ source.last_sync_at|date:"Y-m-d H:i"|default:"尚未同步" }}</dd></div>
       <div><dt>最近完整对账</dt><dd>{{ source.last_reconciled_at|date:"Y-m-d H:i"|default:"尚未对账" }}</dd></div>
-      <div><dt>云端 AI 正文发送</dt><dd>{% if source.allow_cloud_ai %}已由所有者持续允许{% else %}每次使用前确认{% endif %}</dd></div>
+      <div><dt>云端 AI 正文发送</dt><dd>{% if source.allow_cloud_ai %}已持续允许；AI 助手可检索命中摘录{% else %}AI 助手不可用；AI 整理时逐次确认{% endif %}</dd></div>
     </dl>
     {% if source.last_error %}<div class="notice warning">{{ source.last_error }}</div>{% endif %}
     {% if pending_count and source.kind != "html_import" and source.kind != "markdown_import" %}
@@ -61,9 +61,9 @@
         </label>
         <label class="checkbox-label">
           <input type="checkbox" name="allow_cloud_ai"{% if source.allow_cloud_ai %} checked{% endif %}>
-          <span>今后允许将本来源正文发送给云端 AI 整理</span>
+          <span>允许本来源正文用于云端 AI 整理和 AI 助手</span>
         </label>
-        {% include "knowledge/_help_tip.html" with text="开启后仍需在“待整理”中主动选择文章，不会自动处理整个来源；关闭时，每次 AI 整理都会单独询问本次发送授权。" %}
+        {% include "knowledge/_help_tip.html" with text="AI 助手只发送本地检索命中的正式资料摘录，不会发送整个来源；AI 整理仍需在“待整理”中主动选择文章。关闭后，AI 助手不会使用本来源，单篇 AI 整理会逐次询问。" %}
         {% if source.kind == "onenote" %}
           <label>
             <span>新分区默认处理方式</span>
