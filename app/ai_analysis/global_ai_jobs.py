@@ -218,8 +218,10 @@ def execute_model_loop(request, config, *, post_json=_post_json):
                     )
                 except (KeyError, TypeError, json.JSONDecodeError, GlobalAiRuntimeError) as exc:
                     raise GlobalAiJobError(str(exc) or "AI 工具请求不可用。") from exc
-                data_types.add(tool_result["data_type"])
-                evidence_refs.extend(tool_result["evidence_refs"])
+                tool_evidence_refs = tool_result["evidence_refs"]
+                if tool_evidence_refs:
+                    data_types.add(tool_result["data_type"])
+                    evidence_refs.extend(tool_evidence_refs)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call["id"],

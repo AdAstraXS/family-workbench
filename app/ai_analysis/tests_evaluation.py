@@ -535,14 +535,27 @@ class GlobalAiV1DeterministicEvaluation(TransactionTestCase):
             self.alice,
             conversation_id=conversation.pk,
             role=AiConversationMessage.ROLE_ASSISTANT,
+            content="没有检索到相关知识。",
+            data_types=[AiOutboundAuthorization.DATA_KNOWLEDGE],
+            evidence_refs=[],
+        )
+        append_conversation_message(
+            self.alice,
+            conversation_id=conversation.pk,
+            role=AiConversationMessage.ROLE_ASSISTANT,
             content="截至目前家庭支出为 100 元。",
             data_types=[AiOutboundAuthorization.DATA_FINANCIAL],
             evidence_refs=tool_result["evidence_refs"],
         )
-        prepare_conversation_context(
+        context = prepare_conversation_context(
             self.alice,
             conversation_id=conversation.pk,
             provider=provider,
+        )
+        self.assertEqual(context["messages"][0]["data_types"], [])
+        self.assertEqual(
+            context["messages"][1]["data_types"],
+            [AiOutboundAuthorization.DATA_FINANCIAL],
         )
         expense.amount = Decimal("120")
         expense.save(update_fields=["amount", "updated_at"])

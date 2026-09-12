@@ -331,7 +331,7 @@ def _shareable_answer(actor, message_id):
         AiOutboundAuthorization.DATA_KNOWLEDGE,
         AiOutboundAuthorization.DATA_MEMORY,
     }
-    if declared_reference_types != reference_types:
+    if not reference_types.issubset(declared_reference_types):
         raise GlobalAiServiceError("回答的知识或记忆缺少可复核的版本依据。")
     return message, evidence_snapshot
 
@@ -538,19 +538,16 @@ def prepare_conversation_context(actor, *, conversation_id, provider):
     if not provider or not provider.pk or not provider.is_active:
         raise GlobalAiServiceError("AI 服务商不可用。")
     messages = list(conversation.messages.order_by("sequence", "pk"))
-    all_types = {
-        data_type
-        for message in messages
-        for data_type in (message.data_types or [])
-    }
+    all_types = set()
     if conversation.financial_scope == AiConversation.SCOPE_FAMILY:
         all_types.add(AiOutboundAuthorization.DATA_FINANCIAL)
-    if any(data_type not in VALID_DATA_TYPES for data_type in all_types):
-        raise GlobalAiServiceError("历史消息包含不支持的数据类型。")
     validated_refs = []
     financial_member_ids = set()
     memory_member_ids = set()
     for message in messages:
+        declared_types = set(message.data_types or [])
+        if any(data_type not in VALID_DATA_TYPES for data_type in declared_types):
+            raise GlobalAiServiceError("历史消息包含不支持的数据类型。")
         refs = message.evidence_refs or []
         ref_types = set()
         for reference in refs:
@@ -660,15 +657,15 @@ def prepare_conversation_context(actor, *, conversation_id, provider):
                 financial_member_ids.add(evidence["member_id"])
             else:
                 raise GlobalAiServiceError("证据引用不可用。")
-        declared_ref_types = set(message.data_types or {}) & {
+        declared_ref_types = declared_types & {
             AiOutboundAuthorization.DATA_KNOWLEDGE,
             AiOutboundAuthorization.DATA_MEMORY,
             AiOutboundAuthorization.DATA_FINANCIAL,
         }
-        if declared_ref_types != ref_types:
+        if not ref_types.issubset(declared_ref_types):
             raise GlobalAiServiceError("历史上下文缺少可复核的来源引用。")
         all_types.update(ref_types)
-        validated_refs.append((message, refs))
+        validated_refs.append((message, refs, ref_types))
 
     if provider.execution_location == AiProvider.LOCATION_CLOUD:
         _require_cloud_grants(
@@ -701,7 +698,7 @@ def prepare_conversation_context(actor, *, conversation_id, provider):
                 raise GlobalAiServiceError("历史上下文涉及尚未授权外发的家庭成员资料。")
 
     payload = []
-    for message, refs in validated_refs:
+    for message, refs, ref_types in validated_refs:
         if provider.execution_location == AiProvider.LOCATION_CLOUD:
             for reference in refs:
                 if reference.get("kind") != "knowledge":
@@ -717,7 +714,7 @@ def prepare_conversation_context(actor, *, conversation_id, provider):
                 "message_id": message.pk,
                 "role": message.role,
                 "content": message.content,
-                "data_types": message.data_types,
+                "data_types": sorted(ref_types),
                 "evidence_refs": refs,
             }
         )

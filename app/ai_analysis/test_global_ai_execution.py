@@ -9,7 +9,12 @@ from django.urls import reverse
 from family_core.models import Family, FamilyMember
 
 from .global_ai_jobs import execute_model_loop, provider_configuration
-from .global_ai_services import claim_global_ai_request, complete_global_ai_request
+from .global_ai_services import (
+    GlobalAiServiceError,
+    claim_global_ai_request,
+    complete_global_ai_request,
+    prepare_conversation_context,
+)
 from .forms import GlobalAiPromptForm
 from .models import (
     AiAnalysisRequest,
@@ -136,6 +141,104 @@ class GlobalAiExecutionTests(TestCase):
         self.assertEqual(result["evidence_refs"], tool_result["evidence_refs"])
         self.assertEqual(result["tokens_used"], 400000)
         self.assertGreater(result["cost"], Decimal("0.10"))
+
+    def test_empty_tool_result_is_not_marked_as_sourced_data(self):
+        AiConversationMessage.objects.create(
+            conversation=self.conversation,
+            sequence=1,
+            role="user",
+            content="查询不存在的知识",
+        )
+        request = AiAnalysisRequest.objects.create(
+            family=self.family,
+            member=self.member,
+            conversation=self.conversation,
+            provider=self.provider,
+            module="global_ai",
+            analysis_type="chat_v1",
+            prompt="查询不存在的知识",
+            status=AiAnalysisRequest.STATUS_RUNNING,
+            execution_token="token",
+        )
+        replies = iter([
+            {
+                "choices": [{"finish_reason": "tool_calls", "message": {
+                    "role": "assistant", "content": "", "tool_calls": [{
+                        "id": "call-1", "type": "function", "function": {
+                            "name": "knowledge_search",
+                            "arguments": '{"query":"不存在的知识"}',
+                        }
+                    }],
+                }}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+            {
+                "choices": [{"finish_reason": "stop", "message": {
+                    "role": "assistant", "content": "没有检索到相关资料。",
+                }}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+        ])
+        tool_result = {
+            "tool_name": "knowledge_search",
+            "data_type": "knowledge",
+            "result": {"module": "knowledge", "results": []},
+            "evidence_refs": [],
+        }
+
+        with patch(
+            "ai_analysis.global_ai_jobs.dispatch_read_tool",
+            return_value=tool_result,
+        ):
+            result = execute_model_loop(
+                request,
+                {
+                    "model": "deepseek-v4-pro",
+                    "input_price": "1.32",
+                    "output_price": "3.96",
+                    "loop_timeout_seconds": 180,
+                },
+                post_json=lambda _payload, _config: next(replies),
+            )
+
+        self.assertEqual(result["data_types"], [])
+        self.assertEqual(result["evidence_refs"], [])
+
+    def test_legacy_empty_tool_result_does_not_block_follow_up(self):
+        AiConversationMessage.objects.create(
+            conversation=self.conversation,
+            sequence=1,
+            role="assistant",
+            content="没有检索到相关资料。",
+            data_types=["knowledge"],
+            evidence_refs=[],
+        )
+
+        context = prepare_conversation_context(
+            self.member,
+            conversation_id=self.conversation.pk,
+            provider=self.provider,
+        )
+
+        self.assertEqual(context["messages"][0]["data_types"], [])
+        self.assertEqual(context["messages"][0]["evidence_refs"], [])
+
+    def test_unsupported_legacy_data_type_still_blocks_follow_up(self):
+        AiConversationMessage.objects.create(
+            conversation=self.conversation,
+            sequence=1,
+            role="assistant",
+            content="异常历史回答。",
+            data_types=["unsupported"],
+            evidence_refs=[],
+        )
+
+        with self.assertRaisesRegex(GlobalAiServiceError, "不支持的数据类型"):
+            prepare_conversation_context(
+                self.member,
+                conversation_id=self.conversation.pk,
+                provider=self.provider,
+            )
 
     def test_completion_adds_one_assistant_message_and_rejects_late_cancelled_result(self):
         request = AiAnalysisRequest.objects.create(

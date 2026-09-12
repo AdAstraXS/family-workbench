@@ -836,6 +836,21 @@ class GlobalAiWorkbenchTests(TestCase):
         self.assertNotContains(detail, "这是不能出现在分享页的私人问题")
         self.assertNotContains(detail, "Alice 私人资产回顾")
 
+    def test_legacy_empty_tool_result_answer_can_be_shared(self):
+        answer = append_conversation_message(
+            self.alice,
+            conversation_id=self.alice_conversation.pk,
+            role=AiConversationMessage.ROLE_ASSISTANT,
+            content="没有检索到相关资料。",
+            data_types=["knowledge"],
+            evidence_refs=[],
+        )
+
+        share, created = create_answer_share_preview(self.alice, message_id=answer.pk)
+
+        self.assertTrue(created)
+        self.assertEqual(share.evidence_snapshot, [])
+
     def test_revoked_evidence_stops_display_without_get_writing_state(self):
         source, answer = self._family_knowledge_answer()
         share, _created = create_answer_share_preview(self.alice, message_id=answer.pk)
