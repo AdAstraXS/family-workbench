@@ -204,6 +204,78 @@ class GlobalAiExecutionTests(TestCase):
         self.assertEqual(result["data_types"], [])
         self.assertEqual(result["evidence_refs"], [])
 
+    def test_explicit_knowledge_retrieval_must_search_in_current_turn(self):
+        prompt = "请重新检索已授权的正式知识资料，总结交易纪律。"
+        AiConversationMessage.objects.create(
+            conversation=self.conversation, sequence=1, role="user", content=prompt
+        )
+        request = AiAnalysisRequest.objects.create(
+            family=self.family,
+            member=self.member,
+            conversation=self.conversation,
+            provider=self.provider,
+            module="global_ai",
+            analysis_type="chat_v1",
+            prompt=prompt,
+            status=AiAnalysisRequest.STATUS_RUNNING,
+            execution_token="token",
+        )
+        replies = iter([
+            {
+                "choices": [{"finish_reason": "stop", "message": {
+                    "role": "assistant", "content": "我沿用前文直接回答。",
+                }}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+            {
+                "choices": [{"finish_reason": "tool_calls", "message": {
+                    "role": "assistant", "content": "", "tool_calls": [{
+                        "id": "knowledge-1", "type": "function", "function": {
+                            "name": "knowledge_search", "arguments": '{"query":"交易纪律"}',
+                        },
+                    }],
+                }}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+            {
+                "choices": [{"finish_reason": "stop", "message": {
+                    "role": "assistant", "content": "本轮检索结果显示应遵守交易纪律。",
+                }}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+        ])
+        tool_result = {
+            "tool_name": "knowledge_search",
+            "data_type": "knowledge",
+            "result": {"module": "knowledge", "results": []},
+            "evidence_refs": [{"kind": "knowledge", "document_id": 7, "revision_id": 8}],
+        }
+        payloads = []
+
+        def post_json(payload, _config):
+            payloads.append(payload)
+            return next(replies)
+
+        with patch("ai_analysis.global_ai_jobs.dispatch_read_tool", return_value=tool_result) as dispatch:
+            result = execute_model_loop(
+                request,
+                {
+                    "model": "deepseek-v4-pro",
+                    "input_price": "1.32",
+                    "output_price": "3.96",
+                    "loop_timeout_seconds": 180,
+                },
+                post_json=post_json,
+            )
+
+        dispatch.assert_called_once()
+        self.assertTrue(any(
+            "请先调用 knowledge_search" in item.get("content", "")
+            for item in payloads[1]["messages"]
+            if item.get("role") == "system"
+        ))
+        self.assertEqual(result["evidence_refs"], tool_result["evidence_refs"])
+
     def test_legacy_empty_tool_result_does_not_block_follow_up(self):
         AiConversationMessage.objects.create(
             conversation=self.conversation,

@@ -29,6 +29,7 @@ SYSTEM_PROMPT = """你是家庭工作台的私人 AI 助手。只依据对话和
 需要事实时调用工具；资料不足就明确说明。整体资产只查账本正式资产快照，具体投资账户只查投资模块，
 收入、支出和预算只查账本收支预算工具，不把资产变动当作收入或支出。不要自动核对、合并或解释账本与
 投资模块之间的差额。金额保持工具返回的精度，不承诺收益，不执行写入或交易。
+用户明确要求检索或重新检索知识资料时，本轮必须调用 knowledge_search，不能只沿用历史回答。
 用简洁中文回答，并清楚说明结论依据来自哪个模块。"""
 ENDPOINT = "https://api.deepseek.com/chat/completions"
 SECRET_FIELDS = {"api_key", "apikey", "secret_key", "token", "access_token"}
@@ -46,6 +47,14 @@ class GlobalAiNetworkUncertain(RuntimeError):
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         raise GlobalAiNetworkUncertain("AI 服务发生了未允许的跳转。")
+
+
+def _requires_current_knowledge_search(prompt):
+    return (
+        isinstance(prompt, str)
+        and ("检索" in prompt or "查找" in prompt)
+        and any(marker in prompt for marker in ("知识资料", "知识正文", "知识库"))
+    )
 
 
 def provider_configuration(provider=None):
@@ -197,6 +206,8 @@ def execute_model_loop(request, config, *, post_json=_post_json):
         role = item["role"] if item["role"] in {"user", "assistant"} else "assistant"
         messages.append({"role": role, "content": item["content"]})
     evidence_refs, data_types = [], set()
+    called_tools = set()
+    knowledge_search_reminded = False
     prompt_tokens = completion_tokens = 0
     http_requests = 0
     started_at = time.monotonic()
@@ -243,6 +254,7 @@ def execute_model_loop(request, config, *, post_json=_post_json):
                     )
                 except (KeyError, TypeError, json.JSONDecodeError, GlobalAiRuntimeError) as exc:
                     raise GlobalAiJobError(str(exc) or "AI 工具请求不可用。") from exc
+                called_tools.add(call["function"]["name"])
                 tool_evidence_refs = tool_result["evidence_refs"]
                 if tool_evidence_refs:
                     data_types.add(tool_result["data_type"])
@@ -256,6 +268,18 @@ def execute_model_loop(request, config, *, post_json=_post_json):
         content = message.get("content")
         if choice.get("finish_reason") != "stop" or not isinstance(content, str) or not content.strip():
             raise GlobalAiJobError("AI 回答未完整结束。")
+        if (
+            _requires_current_knowledge_search(request.prompt)
+            and "knowledge_search" not in called_tools
+        ):
+            if knowledge_search_reminded:
+                raise GlobalAiJobError("模型未按问题要求重新检索知识资料；本次回答未采纳。")
+            knowledge_search_reminded = True
+            messages.append({
+                "role": "system",
+                "content": "用户明确要求本轮重新检索知识资料。请先调用 knowledge_search，再依据本轮结果回答。",
+            })
+            continue
         unique_refs = []
         seen_refs = set()
         for reference in evidence_refs:
