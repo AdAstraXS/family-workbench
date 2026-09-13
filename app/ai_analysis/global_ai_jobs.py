@@ -129,6 +129,31 @@ def launch_global_ai_request(request_id):
         )
 
 
+def launch_global_ai_knowledge_evaluation(member_id):
+    platform = {"start_new_session": True} if os.name != "nt" else {
+        "creationflags": subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+    }
+    try:
+        subprocess.Popen(
+            [
+                sys.executable,
+                "manage.py",
+                "evaluate_global_ai_knowledge",
+                "--member-id",
+                str(member_id),
+                "--confirm-cloud-run",
+            ],
+            cwd=Path(__file__).resolve().parent.parent,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            **platform,
+        )
+    except OSError as exc:
+        raise GlobalAiJobError("知识验收后台任务未能启动。") from exc
+
+
 def _post_json(payload, config):
     request = Request(
         ENDPOINT,

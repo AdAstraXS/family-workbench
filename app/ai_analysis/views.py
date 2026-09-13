@@ -24,6 +24,7 @@ from .forms import (
 )
 from .global_ai_jobs import (
     GlobalAiJobError,
+    launch_global_ai_knowledge_evaluation,
     launch_global_ai_request,
     provider_configuration,
 )
@@ -201,6 +202,13 @@ def _workbench_context(member, *, active_conversation=None):
         "provider_error": provider_error,
         "family_financial_allowed": family_financial_allowed,
         "can_manage_family_financial_authorization": member.role == FamilyMember.ROLE_ADMIN,
+        "can_run_knowledge_evaluation": (
+            member.role == FamilyMember.ROLE_ADMIN
+            and provider_ready
+            and conversation_allowed
+            and AiOutboundAuthorization.DATA_KNOWLEDGE in grants
+            and bool(knowledge_cloud_sources)
+        ),
         "family_financial_authorization_form": FamilyFinancialAuthorizationForm(
             initial={"is_allowed": family_financial_allowed}
         ),
@@ -459,6 +467,59 @@ def request_recover(request, request_id):
         )
     conversation = AiConversation.objects.filter(pk=conversation_id, member=member).first()
     return redirect(_conversation_url(conversation))
+
+
+@login_required
+@require_POST
+def knowledge_evaluation_run(request):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    if member.role != FamilyMember.ROLE_ADMIN:
+        return HttpResponseForbidden("只有家庭管理员可以运行知识检索验收。")
+    provider = _global_provider()
+    try:
+        if provider is None:
+            raise GlobalAiJobError("全局 AI 服务商尚未配置。")
+        provider_configuration(provider)
+        grants = set(AiOutboundAuthorization.objects.filter(
+            family=member.family,
+            member=member,
+            provider=provider,
+            is_allowed=True,
+            data_type__in=[
+                AiOutboundAuthorization.DATA_CONVERSATION,
+                AiOutboundAuthorization.DATA_KNOWLEDGE,
+            ],
+        ).values_list("data_type", flat=True))
+        if grants != {
+            AiOutboundAuthorization.DATA_CONVERSATION,
+            AiOutboundAuthorization.DATA_KNOWLEDGE,
+        }:
+            raise GlobalAiServiceError("请先允许发送“对话”和“知识正文”。")
+        if not KnowledgeSource.objects.filter(
+            family=member.family,
+            allow_cloud_ai=True,
+        ).filter(Q(owner=member) | Q(visibility=KnowledgeVisibility.FAMILY)).exists():
+            raise GlobalAiServiceError("当前没有已授权给云端 AI 的知识来源。")
+        if AiAnalysisRequest.objects.filter(
+            family=member.family,
+            member=member,
+            provider=provider,
+            module="global_ai",
+            status__in=[
+                AiAnalysisRequest.STATUS_PENDING,
+                AiAnalysisRequest.STATUS_RUNNING,
+                AiAnalysisRequest.STATUS_CANCEL_REQUESTED,
+            ],
+        ).exists():
+            raise GlobalAiServiceError("已有一条问题正在处理，请等待完成后再运行验收。")
+        launch_global_ai_knowledge_evaluation(member.pk)
+    except (GlobalAiJobError, GlobalAiServiceError) as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "5 题知识验收已在后台启动；稍后会出现一段“知识检索验收”对话。")
+    return redirect("ai_analysis:index")
 
 
 @login_required

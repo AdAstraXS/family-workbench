@@ -52,6 +52,8 @@ from .models import (
     AiConversation,
     AiConversationMessage,
     AiMemory,
+    AiOutboundAuthorization,
+    AiProvider,
 )
 
 
@@ -983,6 +985,45 @@ class GlobalAiWorkbenchTests(TestCase):
         recovered = recover_global_ai_request(self.alice, request_id=request_record.pk, now=now)
 
         self.assertEqual(recovered.status, AiAnalysisRequest.STATUS_CANCELLED)
+
+    def test_admin_can_launch_knowledge_evaluation_after_preflight(self):
+        provider = AiProvider.objects.create(
+            name="DeepSeek V4-Pro",
+            provider_type="openai_compatible",
+            model_name="deepseek-v4-pro",
+            base_url="https://api.deepseek.com",
+            is_active=True,
+            extra_data={"global_ai_enabled": True},
+        )
+        for data_type in (
+            AiOutboundAuthorization.DATA_CONVERSATION,
+            AiOutboundAuthorization.DATA_KNOWLEDGE,
+        ):
+            AiOutboundAuthorization.objects.create(
+                family=self.family,
+                member=self.alice,
+                provider=provider,
+                data_type=data_type,
+                is_allowed=True,
+            )
+        KnowledgeSource.objects.create(
+            family=self.family,
+            owner=self.alice,
+            key="evaluation-launch-source",
+            kind=KnowledgeSource.KIND_INTERNAL_NOTES,
+            name="投资得失",
+            visibility=KnowledgeVisibility.FAMILY,
+            allow_cloud_ai=True,
+        )
+        self.client.force_login(self.alice_user)
+        with patch(
+            "ai_analysis.views.provider_configuration",
+            return_value=(provider, {"fingerprint": "f" * 64}),
+        ), patch("ai_analysis.views.launch_global_ai_knowledge_evaluation") as launch:
+            response = self.client.post(reverse("ai_analysis:knowledge_evaluation_run"))
+
+        self.assertRedirects(response, reverse("ai_analysis:index"))
+        launch.assert_called_once_with(self.alice.pk)
 
     def _family_knowledge_answer(self):
         source = KnowledgeSource.objects.create(
