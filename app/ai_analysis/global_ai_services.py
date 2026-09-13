@@ -1,6 +1,6 @@
 """Permission-safe conversation, memory, outbound, and request lifecycle services."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
@@ -38,6 +38,8 @@ GLOBAL_AI_MODULE = "global_ai"
 GLOBAL_AI_ANALYSIS_TYPE = "chat_v1"
 VALID_DATA_TYPES = {choice[0] for choice in AiOutboundAuthorization.DATA_TYPE_CHOICES}
 VALID_MESSAGE_ROLES = {choice[0] for choice in AiConversationMessage.ROLE_CHOICES}
+GLOBAL_AI_PENDING_STALE_AFTER = timedelta(minutes=2)
+GLOBAL_AI_RUNNING_STALE_AFTER = timedelta(minutes=15)
 
 
 class GlobalAiServiceError(ValueError):
@@ -888,6 +890,56 @@ def cancel_global_ai_request(actor, *, request_id):
         else:
             raise GlobalAiServiceError("请求当前不能停止。")
         request.save(update_fields=["status", "finished_at", "updated_at"])
+    return request
+
+
+def global_ai_request_recovery_state(request, *, now=None):
+    """Return whether an active request can be safely ended by its owner."""
+    now = now or timezone.now()
+    if request.status == AiAnalysisRequest.STATUS_PENDING:
+        stale_at = request.created_at + GLOBAL_AI_PENDING_STALE_AFTER
+        note = "后台任务超过 2 分钟仍未启动，可能已经中断。"
+    elif request.status == AiAnalysisRequest.STATUS_RUNNING:
+        stale_at = (request.started_at or request.updated_at) + GLOBAL_AI_RUNNING_STALE_AFTER
+        note = "后台任务运行超过 15 分钟，当前进程可能已经中断。"
+    elif request.status == AiAnalysisRequest.STATUS_CANCEL_REQUESTED:
+        stale_at = request.updated_at + GLOBAL_AI_PENDING_STALE_AFTER
+        note = "停止请求超过 2 分钟仍未完成，当前进程可能已经中断。"
+    else:
+        return {"can_recover": False, "note": ""}
+    return {"can_recover": now >= stale_at, "note": note if now >= stale_at else ""}
+
+
+def recover_global_ai_request(actor, *, request_id, now=None):
+    """End a stale request without retrying it or accepting a late result."""
+    _validate_actor(actor)
+    now = now or timezone.now()
+    with transaction.atomic():
+        request = AiAnalysisRequest.objects.select_for_update().filter(
+            pk=request_id,
+            family=actor.family,
+            member=actor,
+            module=GLOBAL_AI_MODULE,
+            analysis_type=GLOBAL_AI_ANALYSIS_TYPE,
+        ).first()
+        if request is None:
+            raise GlobalAiServiceError("请求不可用。")
+        state = global_ai_request_recovery_state(request, now=now)
+        if not state["can_recover"]:
+            raise GlobalAiServiceError("请求仍在正常等待时间内，请稍后再检查。")
+        if request.status == AiAnalysisRequest.STATUS_PENDING:
+            request.status = AiAnalysisRequest.STATUS_FAILED
+            request.error_message = "后台任务未启动或服务已重启，已结束等待；可以重新提问。"
+        elif request.status == AiAnalysisRequest.STATUS_RUNNING:
+            request.status = AiAnalysisRequest.STATUS_UNKNOWN
+            request.error_message = "后台任务失去运行状态，结果未知；不会自动重试。"
+        elif request.status == AiAnalysisRequest.STATUS_CANCEL_REQUESTED:
+            request.status = AiAnalysisRequest.STATUS_CANCELLED
+            request.error_message = "已结束异常停止状态；不会采纳迟到的回答。"
+        else:
+            raise GlobalAiServiceError("请求当前不需要恢复。")
+        request.finished_at = now
+        request.save(update_fields=["status", "error_message", "finished_at", "updated_at"])
     return request
 
 

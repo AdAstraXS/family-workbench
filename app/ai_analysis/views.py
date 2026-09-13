@@ -45,6 +45,8 @@ from .global_ai_services import (
     submit_global_ai_request,
     append_conversation_message,
     cancel_global_ai_request,
+    global_ai_request_recovery_state,
+    recover_global_ai_request,
     withdraw_answer_share,
 )
 from .models import (
@@ -161,9 +163,13 @@ def _workbench_context(member, *, active_conversation=None):
             AiAnalysisRequest.STATUS_RUNNING,
             AiAnalysisRequest.STATUS_CANCEL_REQUESTED,
         ]).exists()
-        conversation_requests = request_queryset.select_related(
+        conversation_requests = list(request_queryset.select_related(
             "provider", "result"
-        ).order_by("-created_at")[:10]
+        ).order_by("-created_at")[:10])
+        for item in conversation_requests:
+            recovery = global_ai_request_recovery_state(item)
+            item.can_recover = recovery["can_recover"]
+            item.recovery_note = recovery["note"]
 
     legacy_requests = AiAnalysisRequest.objects.filter(
         family=member.family
@@ -427,6 +433,30 @@ def request_cancel(request, request_id):
         messages.error(request, str(exc))
     else:
         messages.success(request, "已提交停止请求。")
+    conversation = AiConversation.objects.filter(pk=conversation_id, member=member).first()
+    return redirect(_conversation_url(conversation))
+
+
+@login_required
+@require_POST
+def request_recover(request, request_id):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    conversation_id = AiAnalysisRequest.objects.filter(
+        pk=request_id, member=member, family=member.family, module="global_ai"
+    ).values_list("conversation_id", flat=True).first()
+    try:
+        recovered = recover_global_ai_request(member, request_id=request_id)
+    except GlobalAiServiceError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            "已结束异常等待；结果状态为“未知”，系统不会自动重试。"
+            if recovered.status == AiAnalysisRequest.STATUS_UNKNOWN
+            else "已结束异常等待，现在可以重新提问。",
+        )
     conversation = AiConversation.objects.filter(pk=conversation_id, member=member).first()
     return redirect(_conversation_url(conversation))
 

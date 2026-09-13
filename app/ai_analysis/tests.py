@@ -1,10 +1,11 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from family_core.models import AccountType, AssetCategory, Family, FamilyMember
 from knowledge.models import (
@@ -32,7 +33,9 @@ from .global_ai_services import (
     GlobalAiServiceError,
     append_conversation_message,
     create_answer_share_preview,
+    global_ai_request_recovery_state,
     publish_answer_share,
+    recover_global_ai_request,
 )
 from .read_tools import (
     GlobalAiReadError,
@@ -887,6 +890,99 @@ class GlobalAiWorkbenchTests(TestCase):
         self.assertContains(response, "结果未确认，用量与费用保持未知")
         self.assertContains(response, request_record.get_status_display())
         self.assertContains(response, "当前不会调用模型，也不会生成示例答案")
+
+    def test_stale_pending_request_can_be_ended_from_conversation(self):
+        request_record = AiAnalysisRequest.objects.create(
+            family=self.family,
+            member=self.alice,
+            conversation=self.alice_conversation,
+            module="global_ai",
+            analysis_type="chat_v1",
+            prompt="等待后台启动",
+            status=AiAnalysisRequest.STATUS_PENDING,
+        )
+        old_time = timezone.now() - timedelta(minutes=3)
+        AiAnalysisRequest.objects.filter(pk=request_record.pk).update(created_at=old_time)
+        self.client.force_login(self.alice_user)
+
+        page = self.client.get(
+            reverse("ai_analysis:conversation", args=[self.alice_conversation.pk])
+        )
+        self.assertContains(page, "后台任务超过 2 分钟仍未启动")
+        self.assertContains(page, "结束异常等待")
+        response = self.client.post(
+            reverse("ai_analysis:request_recover", args=[request_record.pk])
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("ai_analysis:conversation", args=[self.alice_conversation.pk]),
+        )
+        request_record.refresh_from_db()
+        self.assertEqual(request_record.status, AiAnalysisRequest.STATUS_FAILED)
+        self.assertIn("可以重新提问", request_record.error_message)
+
+    def test_running_request_becomes_unknown_and_late_result_is_blocked(self):
+        now = timezone.now()
+        request_record = AiAnalysisRequest.objects.create(
+            family=self.family,
+            member=self.alice,
+            conversation=self.alice_conversation,
+            module="global_ai",
+            analysis_type="chat_v1",
+            prompt="已发送给模型",
+            status=AiAnalysisRequest.STATUS_RUNNING,
+            execution_token="old-worker-token",
+            started_at=now - timedelta(minutes=16),
+        )
+
+        recovered = recover_global_ai_request(self.alice, request_id=request_record.pk, now=now)
+
+        self.assertEqual(recovered.status, AiAnalysisRequest.STATUS_UNKNOWN)
+        self.assertIn("不会自动重试", recovered.error_message)
+        from .global_ai_services import complete_global_ai_request
+        with self.assertRaisesRegex(GlobalAiServiceError, "执行结果不可用"):
+            complete_global_ai_request(
+                request_id=request_record.pk,
+                execution_token="old-worker-token",
+                result_text="迟到回答",
+            )
+
+    def test_recovery_rejects_fresh_and_other_members_requests(self):
+        request_record = AiAnalysisRequest.objects.create(
+            family=self.family,
+            member=self.alice,
+            conversation=self.alice_conversation,
+            module="global_ai",
+            analysis_type="chat_v1",
+            prompt="仍在正常等待",
+            status=AiAnalysisRequest.STATUS_PENDING,
+        )
+        self.assertFalse(global_ai_request_recovery_state(request_record)["can_recover"])
+        with self.assertRaisesRegex(GlobalAiServiceError, "正常等待时间"):
+            recover_global_ai_request(self.alice, request_id=request_record.pk)
+        with self.assertRaisesRegex(GlobalAiServiceError, "请求不可用"):
+            recover_global_ai_request(self.bob, request_id=request_record.pk)
+
+    def test_stale_cancel_request_becomes_cancelled(self):
+        now = timezone.now()
+        request_record = AiAnalysisRequest.objects.create(
+            family=self.family,
+            member=self.alice,
+            conversation=self.alice_conversation,
+            module="global_ai",
+            analysis_type="chat_v1",
+            prompt="正在停止",
+            status=AiAnalysisRequest.STATUS_CANCEL_REQUESTED,
+            execution_token="stopped-worker-token",
+        )
+        AiAnalysisRequest.objects.filter(pk=request_record.pk).update(
+            updated_at=now - timedelta(minutes=3)
+        )
+
+        recovered = recover_global_ai_request(self.alice, request_id=request_record.pk, now=now)
+
+        self.assertEqual(recovered.status, AiAnalysisRequest.STATUS_CANCELLED)
 
     def _family_knowledge_answer(self):
         source = KnowledgeSource.objects.create(

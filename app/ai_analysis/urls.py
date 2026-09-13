@@ -14,6 +14,7 @@ urlpatterns = [
     path("conversations/<int:conversation_id>/archive/", views.conversation_archive, name="conversation_archive"),
     path("conversations/<int:conversation_id>/ask/", views.conversation_ask, name="conversation_ask"),
     path("requests/<int:request_id>/cancel/", views.request_cancel, name="request_cancel"),
+    path("requests/<int:request_id>/recover/", views.request_recover, name="request_recover"),
     path("outbound-authorization/", views.outbound_authorization_update, name="outbound_authorization_update"),
     path("family-financial-authorization/", views.family_financial_authorization_update, name="family_financial_authorization_update"),
     path("memories/new/", views.memory_create, name="memory_create"),
