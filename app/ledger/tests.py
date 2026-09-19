@@ -44,6 +44,7 @@ from .views import (
     build_asset_snapshot_matrix,
     build_budget_report,
     build_cashflow_monthly_rows,
+    build_overview_asset_charts,
 )
 
 
@@ -1073,6 +1074,101 @@ class AssetSnapshotWorkspaceTests(TestCase):
 
 
 class LedgerOverviewChartTests(TestCase):
+    def test_overview_asset_charts_group_by_account_region_and_account(self):
+        family = Family.objects.create(name="我的家庭")
+        member = FamilyMember.objects.create(family=family, display_name="我")
+        category = AssetCategory.objects.create(family=family, name="现金")
+        domestic = AccountRegion.objects.create(family=family, name="境内")
+        overseas = AccountRegion.objects.create(family=family, name="境外")
+        domestic_account = BankAccount.objects.create(
+            family=family,
+            member=member,
+            account_name="境内账户",
+            account_region=domestic,
+        )
+        overseas_account = BankAccount.objects.create(
+            family=family,
+            member=member,
+            account_name="境外账户",
+            account_region=overseas,
+        )
+        snapshot = AssetBalanceSnapshot.objects.create(
+            family=family,
+            snapshot_date=timezone.localdate(),
+        )
+        for account, amount in ((domestic_account, "300"), (overseas_account, "100")):
+            AssetBalanceEntry.objects.create(
+                snapshot=snapshot,
+                member=member,
+                account=account,
+                account_name=account.account_name,
+                asset_category=category,
+                original_amount=Decimal(amount),
+                base_amount=Decimal(amount),
+            )
+
+        charts = build_overview_asset_charts(snapshot)
+
+        self.assertEqual(
+            charts[0]["dimensions"]["region"]["items"],
+            [
+                {"name": "境内", "value": 300.0},
+                {"name": "境外", "value": 100.0},
+            ],
+        )
+        self.assertEqual(
+            charts[1]["dimensions"]["account"]["items"],
+            [
+                {"name": "我 · 境内账户", "value": 300.0},
+                {"name": "我 · 境外账户", "value": 100.0},
+            ],
+        )
+
+    def test_overview_account_dimension_keeps_same_named_accounts_separate(self):
+        family = Family.objects.create(name="我的家庭")
+        me = FamilyMember.objects.create(family=family, display_name="我")
+        secretary = FamilyMember.objects.create(family=family, display_name="孙秘书")
+        category = AssetCategory.objects.create(family=family, name="现金")
+        account_region = AccountRegion.objects.create(family=family, name="境内")
+        my_account = BankAccount.objects.create(
+            family=family,
+            member=me,
+            account_name="信诚NJ1122",
+            account_region=account_region,
+        )
+        secretary_account = BankAccount.objects.create(
+            family=family,
+            member=secretary,
+            account_name="信诚NJ1122",
+            account_region=account_region,
+        )
+        snapshot = AssetBalanceSnapshot.objects.create(
+            family=family,
+            snapshot_date=timezone.localdate(),
+        )
+        for member, account, amount in (
+            (me, my_account, "800"),
+            (secretary, secretary_account, "200"),
+        ):
+            AssetBalanceEntry.objects.create(
+                snapshot=snapshot,
+                member=member,
+                account=account,
+                asset_category=category,
+                original_amount=Decimal(amount),
+                base_amount=Decimal(amount),
+            )
+
+        charts = build_overview_asset_charts(snapshot)
+
+        self.assertEqual(
+            charts[0]["dimensions"]["account"]["items"],
+            [
+                {"name": "我 · 信诚NJ1122", "value": 800.0},
+                {"name": "孙秘书 · 信诚NJ1122", "value": 200.0},
+            ],
+        )
+
     def test_overview_uses_latest_assets_current_year_budget_and_investment_returns(self):
         today = timezone.localdate()
         family = Family.objects.create(name="我的家庭")
@@ -1166,6 +1262,21 @@ class LedgerOverviewChartTests(TestCase):
             {item["name"]: item["value"] for item in asset_charts[0]["items"]},
             {"基金": 20.0, "现金": 430.0},
         )
+        self.assertEqual(
+            [item["name"] for item in asset_charts[0]["items"]],
+            ["现金", "基金"],
+        )
+        self.assertEqual(
+            asset_charts[0]["dimensions"]["region"]["items"],
+            [{"name": "未设置地区", "value": 450.0}],
+        )
+        self.assertEqual(
+            asset_charts[0]["dimensions"]["account"]["items"],
+            [
+                {"name": "孙秘书 · 未设置账户", "value": 250.0},
+                {"name": "我 · 未设置账户", "value": 200.0},
+            ],
+        )
         budget_items = response.context["chart_data"]["budget"]["items"]
         self.assertEqual(
             [item["value"] for item in budget_items],
@@ -1182,6 +1293,7 @@ class LedgerOverviewChartTests(TestCase):
         self.assertContains(response, "本年收入")
         self.assertNotContains(response, "本月收入")
         self.assertContains(response, "js/ledger_overview.js")
+        self.assertContains(response, 'id="overview-asset-dimension"')
 
         budget_response = self.client.get(
             reverse("ledger:annual_budget_detail", args=[budget.pk])

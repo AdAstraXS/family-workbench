@@ -17,14 +17,17 @@
     "#b42318", "#f87171",
     "#047857", "#34d399",
   ];
-  var assetCategoryColors = {};
+  var assetColors = {};
   var nextAssetColor = 0;
   data.asset_charts.forEach(function (chart) {
-    chart.items.forEach(function (item) {
-      if (!assetCategoryColors[item.name]) {
-        assetCategoryColors[item.name] = palette[nextAssetColor % palette.length];
-        nextAssetColor += 1;
-      }
+    Object.keys(chart.dimensions || {}).forEach(function (dimension) {
+      (chart.dimensions[dimension].items || []).forEach(function (item) {
+        var colorKey = dimension + ":" + item.name;
+        if (!assetColors[colorKey]) {
+          assetColors[colorKey] = palette[nextAssetColor % palette.length];
+          nextAssetColor += 1;
+        }
+      });
     });
   });
 
@@ -68,9 +71,12 @@
 
   function renderAssetPies() {
     var container = document.getElementById("overview-asset-pies");
+    var selector = document.getElementById("overview-asset-dimension");
+    var dimension = selector ? selector.value : "category";
     if (!container) {
       return;
     }
+    container.innerHTML = "";
     if (!data.asset_charts.length) {
       container.className = "asset-trend-empty";
       container.textContent = "暂无资产快照数据";
@@ -85,12 +91,19 @@
       var title = document.createElement("h2");
       title.textContent = chartData.label;
       var scope = document.createElement("span");
-      scope.textContent = "按资产类别";
+      var dimensionData = (chartData.dimensions || {})[dimension] || {
+        label: "按资产类别",
+        items: chartData.items || [],
+      };
+      scope.textContent = dimensionData.label;
       heading.append(title, scope);
       card.appendChild(heading);
 
-      var items = chartData.items.filter(function (item) {
+      var items = dimensionData.items.filter(function (item) {
         return Number(item.value) > 0;
+      }).sort(function (left, right) {
+        return Number(right.value) - Number(left.value)
+          || left.name.localeCompare(right.name, "zh-CN");
       });
       if (!items.length) {
         var empty = document.createElement("div");
@@ -105,7 +118,7 @@
         class: "expense-pie-chart",
         viewBox: "0 0 320 250",
         role: "img",
-        "aria-label": chartData.label + "资产类别分布饼图",
+        "aria-label": chartData.label + dimensionData.label + "饼图",
       });
       var legend = document.createElement("div");
       legend.className = "expense-pie-legend";
@@ -117,7 +130,7 @@
       items.forEach(function (item, index) {
         var portion = Number(item.value) / total;
         var nextAngle = index === items.length - 1 ? 359.999 : angle + portion * 360;
-        var color = assetCategoryColors[item.name];
+        var color = assetColors[dimension + ":" + item.name];
         var segment = svgElement("path", {
           d: donutPath(angle, nextAngle),
           fill: color,
@@ -166,6 +179,11 @@
       card.append(chart, legend);
       container.appendChild(card);
     });
+  }
+
+  var assetDimensionSelector = document.getElementById("overview-asset-dimension");
+  if (assetDimensionSelector) {
+    assetDimensionSelector.addEventListener("change", renderAssetPies);
   }
 
   function renderHorizontalBars() {

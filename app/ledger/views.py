@@ -1325,24 +1325,64 @@ def build_overview_asset_charts(snapshot):
     members = list(
         FamilyMember.objects.filter(family=snapshot.family, is_active=True).order_by("id")
     )
-    member_totals = {member.id: {} for member in members}
-    family_totals = {}
-    for entry in snapshot.entries.select_related("asset_category", "member"):
-        category = entry.asset_category.name if entry.asset_category else "未分类"
+    dimensions = ("category", "region", "account")
+    member_totals = {
+        member.id: {dimension: {} for dimension in dimensions}
+        for member in members
+    }
+    family_totals = {dimension: {} for dimension in dimensions}
+    for entry in snapshot.entries.select_related(
+        "asset_category", "member", "account", "account__account_region"
+    ):
         amount = entry.base_amount or Decimal("0")
-        family_totals[category] = family_totals.get(category, Decimal("0")) + amount
-        if entry.member_id in member_totals:
-            totals = member_totals[entry.member_id]
-            totals[category] = totals.get(category, Decimal("0")) + amount
+        if amount <= 0:
+            continue
+        names = {
+            "category": entry.asset_category.name if entry.asset_category else "未分类",
+            "region": (
+                entry.account.account_region.name
+                if entry.account and entry.account.account_region
+                else "未设置地区"
+            ),
+            "account": (
+                f"{entry.member.display_name} · {entry.account.account_name}"
+                if entry.account
+                else f"{entry.member.display_name} · {entry.account_name or '未设置账户'}"
+            ),
+        }
+        for dimension, name in names.items():
+            family_dimension = family_totals[dimension]
+            family_dimension[name] = family_dimension.get(name, Decimal("0")) + amount
+            if entry.member_id in member_totals:
+                member_dimension = member_totals[entry.member_id][dimension]
+                member_dimension[name] = member_dimension.get(name, Decimal("0")) + amount
+
+    def items_for(totals):
+        return [
+            {"name": name, "value": float(amount)}
+            for name, amount in sorted(
+                totals.items(), key=lambda item: (-item[1], item[0])
+            )
+            if amount > 0
+        ]
 
     def chart(label, totals):
+        dimension_data = {
+            dimension: {
+                "label": {
+                    "category": "按资产类别",
+                    "region": "按账户地区",
+                    "account": "按账户",
+                }[dimension],
+                "items": items_for(totals[dimension]),
+            }
+            for dimension in dimensions
+        }
         return {
             "label": label,
-            "items": [
-                {"name": name, "value": float(amount)}
-                for name, amount in sorted(totals.items())
-                if amount > 0
-            ],
+            # Keep the category items at the top level for existing consumers.
+            "items": dimension_data["category"]["items"],
+            "dimensions": dimension_data,
         }
 
     return [chart("家庭合计", family_totals)] + [
