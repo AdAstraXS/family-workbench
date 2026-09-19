@@ -37,6 +37,14 @@
         {% endif %}
       </p>
     </div>
+    <label class="overview-pie-filter">
+      <span>展示维度</span>
+      <select id="overview-asset-dimension" aria-label="资产饼图展示维度">
+        <option value="category">按资产类别</option>
+        <option value="region">按账户地区</option>
+        <option value="account">按账户</option>
+      </select>
+    </label>
   </div>
   <div id="overview-asset-pies" class="overview-pie-grid"></div>
 </section>
@@ -71,5 +79,5 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="{% static 'js/ledger_overview.js' %}"></script>
+  <script src="{% static 'js/ledger_overview.js' %}?v=20260919-ledger-overview-v1"></script>
 {% endblock %}

@@ -2822,6 +2822,30 @@ textarea {
   font-size: 13px;
 }
 
+.overview-pie-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 5px 7px 5px 11px;
+  border: 1px solid #dbe5f2;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.overview-pie-filter select {
+  min-height: 32px;
+  padding: 0 30px 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #1e293b;
+  font: inherit;
+}
+
 .overview-pie-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
