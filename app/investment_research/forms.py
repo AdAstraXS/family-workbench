@@ -41,12 +41,22 @@ class CreateDossierForm(ResearchFormMixin, forms.Form):
     pillars = forms.CharField(
         label="关键假设（每行一条，最多 5 条）",
         required=False,
-        widget=forms.Textarea(attrs={"rows": 3}),
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "placeholder": "当前暂时采用、会直接影响估值或判断的前提，例如：未来三年 EPS 年增长率约 12%。",
+            }
+        ),
     )
     questions = forms.CharField(
         label="待验证问题（每行一条，最多 5 条）",
         required=False,
-        widget=forms.Textarea(attrs={"rows": 3}),
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "placeholder": "还需要通过财报、公告或后续跟踪确认的问题，例如：资本支出转化为收入和现金流的速度如何？",
+            }
+        ),
     )
 
 
@@ -58,12 +68,22 @@ class EditThesisForm(ResearchFormMixin, forms.Form):
     pillars = forms.CharField(
         label="关键假设（每行一条，最多 5 条）",
         required=False,
-        widget=forms.Textarea(attrs={"rows": 3}),
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "placeholder": "当前暂时采用、会直接影响估值或判断的前提，例如：未来三年 EPS 年增长率约 12%。",
+            }
+        ),
     )
     questions = forms.CharField(
         label="待验证问题（每行一条，最多 5 条）",
         required=False,
-        widget=forms.Textarea(attrs={"rows": 3}),
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "placeholder": "还需要通过财报、公告或后续跟踪确认的问题，例如：资本支出转化为收入和现金流的速度如何？",
+            }
+        ),
     )
     change_reason = forms.CharField(
         label="修改原因",
