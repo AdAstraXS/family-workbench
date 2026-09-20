@@ -1,0 +1,33 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}{{ document.title }}{% endblock %}
+
+{% block research_content %}
+<article class="research-page">
+  <div class="research-header">
+    <div>
+      <p class="research-private-note">{{ document.get_source_display }} · {{ document.get_document_type_display }}</p>
+      <h1>{{ document.title }}</h1>
+      <p class="research-private-note">
+        {% if document.published_at %}发布于 {{ document.published_at|date:"Y-m-d" }}{% else %}发布日期待来源补充{% endif %}
+        {% if document.period_end %} · 报告期至 {{ document.period_end|date:"Y-m-d" }}{% endif %}
+      </p>
+    </div>
+    <div class="research-actions">
+      <a class="button" href="{% url 'investment_research:documents' dossier.pk %}">返回资料列表</a>
+      <a class="button" href="{{ document.source_url }}" target="_blank" rel="noopener noreferrer">官方原文</a>
+    </div>
+  </div>
+
+  {% if document.content_text %}
+    <section class="research-document-body" aria-label="提取正文">
+      <p>{{ document.content_text|linebreaksbr }}</p>
+    </section>
+  {% else %}
+    <div class="research-document-empty">
+      <strong>当前仅归档元数据</strong>
+      <p>这份资料尚未提取正文，可以通过“官方原文”查看完整内容。</p>
+    </div>
+  {% endif %}
+</article>
+{% endblock %}

@@ -1,0 +1,67 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}官方资料 - {{ dossier.security.name }}{% endblock %}
+
+{% block research_content %}
+<section class="research-page">
+  <div class="research-header">
+    <div>
+      <h1>官方资料：{{ dossier.security.name }}（{{ dossier.security.symbol }}）</h1>
+      <p class="research-private-note">资料由后台定时同步；浏览本页不会访问外部网站或修改研究判断。</p>
+    </div>
+    <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a>
+  </div>
+
+  {% if source_states %}
+    <div class="research-source-states" aria-label="来源同步状态">
+      {% for state in source_states %}
+        <article class="research-source-state">
+          <strong>{{ state.get_source_display }}</strong>
+          {% if state.last_success_at %}
+            <span>最近成功：{{ state.last_success_at|date:"Y-m-d H:i" }}</span>
+          {% else %}
+            <span>尚未成功同步</span>
+          {% endif %}
+          {% if state.last_error %}
+            <span class="research-source-error">最近一次检查未完成：{{ state.last_error|truncatechars:160 }}</span>
+          {% elif state.last_checked_at %}
+            <span>最近检查：{{ state.last_checked_at|date:"Y-m-d H:i" }}</span>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if page.object_list %}
+    <div class="research-document-list">
+      {% for document in page.object_list %}
+        <article class="research-document-card">
+          <div class="research-document-meta">
+            <span class="research-document-type">{{ document.get_document_type_display }}</span>
+            <span>{{ document.get_source_display }}</span>
+            <time>{% if document.published_at %}{{ document.published_at|date:"Y-m-d" }}{% else %}日期待来源补充{% endif %}</time>
+            {% if document.period_end %}<span>报告期至 {{ document.period_end|date:"Y-m-d" }}</span>{% endif %}
+          </div>
+          <h2><a href="{% url 'investment_research:document_detail' dossier.pk document.pk %}">{{ document.title }}</a></h2>
+          <div class="research-document-actions">
+            <span class="research-document-status">{% if document.content_text %}已提取正文{% else %}仅归档元数据{% endif %}</span>
+            <a href="{{ document.source_url }}" target="_blank" rel="noopener noreferrer">打开官方原文</a>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+    {% if page.has_other_pages %}
+      <nav class="research-pager" aria-label="官方资料分页">
+        {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">上一页</a>{% endif %}
+        <span>第 {{ page.number }} / {{ page.paginator.num_pages }} 页</span>
+        {% if page.has_next %}<a href="?page={{ page.next_page_number }}">下一页</a>{% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <div class="research-document-empty">
+      <strong>还没有官方资料</strong>
+      <p>系统会在定时同步后显示 SEC 财报和微软投资者关系资料，不需要逐项手工填写。</p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

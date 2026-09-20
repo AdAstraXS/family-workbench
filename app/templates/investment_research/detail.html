@@ -17,6 +17,18 @@
     </div>
   </div>
 
+  <section class="research-source-summary" aria-labelledby="official-materials-heading">
+    <div>
+      <h2 id="official-materials-heading">官方资料</h2>
+      <p>
+        已归档 {{ document_count }} 份
+        {% if latest_source_success_at %} · 最近同步 {{ latest_source_success_at|date:"Y-m-d H:i" }}{% endif %}
+        {% if source_error_count %} · {{ source_error_count }} 个来源需要关注{% endif %}
+      </p>
+    </div>
+    <a class="button" href="{% url 'investment_research:documents' dossier.pk %}">查看官方资料</a>
+  </section>
+
   <details class="research-initial">
     <summary>原始持有理由（创建后不再修改）</summary>
     <p>{{ dossier.initial_thesis|linebreaksbr }}</p>

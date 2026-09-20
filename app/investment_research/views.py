@@ -9,13 +9,18 @@ ResearchValidationError；DossierNotFound 转 404。
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
+from django.db.models import F
 from django.http import Http404, HttpResponseForbidden
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from .forms import CreateDossierForm, EditThesisForm
-from .models import ResearchDossier
+from .models import (
+    OfficialResearchDocument,
+    ResearchDossier,
+    ResearchSourceState,
+)
 from .permissions import (
     accessible_dossiers,
     get_accessible_dossier_or_404,
@@ -118,6 +123,14 @@ def detail(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    documents = OfficialResearchDocument.objects.filter(security=dossier.security)
+    source_states = list(
+        ResearchSourceState.objects.filter(security=dossier.security).order_by("source")
+    )
+    successful_states = [state for state in source_states if state.last_success_at]
+    latest_success_at = max(
+        (state.last_success_at for state in successful_states), default=None
+    )
     return render(
         request,
         "investment_research/detail.html",
@@ -125,6 +138,9 @@ def detail(request, pk):
             "dossier": dossier,
             "revision": dossier.current_revision,
             "can_write": is_writer(member),
+            "document_count": documents.count(),
+            "latest_source_success_at": latest_success_at,
+            "source_error_count": sum(bool(state.last_error) for state in source_states),
         },
     )
 
@@ -208,4 +224,48 @@ def history(request, pk):
         request,
         "investment_research/history.html",
         {"dossier": dossier, "page": page},
+    )
+
+
+@_method(["GET"])
+def documents(request, pk):
+    """档案内官方资料列表；GET 只读，不触发任何来源同步。"""
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    queryset = OfficialResearchDocument.objects.filter(
+        security=dossier.security
+    ).order_by(F("published_at").desc(nulls_last=True), "-pk")
+    page = Paginator(queryset, PAGE_SIZE).get_page(request.GET.get("page"))
+    source_states = ResearchSourceState.objects.filter(
+        security=dossier.security
+    ).order_by("source")
+    return render(
+        request,
+        "investment_research/documents.html",
+        {
+            "dossier": dossier,
+            "page": page,
+            "source_states": source_states,
+        },
+    )
+
+
+@_method(["GET"])
+def document_detail(request, pk, document_pk):
+    """档案内官方资料正文；文档必须属于档案对应证券。"""
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    document = get_object_or_404(
+        OfficialResearchDocument,
+        pk=document_pk,
+        security=dossier.security,
+    )
+    return render(
+        request,
+        "investment_research/document_detail.html",
+        {"dossier": dossier, "document": document},
     )
