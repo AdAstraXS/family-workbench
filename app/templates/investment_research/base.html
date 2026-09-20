@@ -8,6 +8,8 @@
   .research-header h1 { margin-bottom:8px; }
   .research-private-note { color:#586174; line-height:1.6; }
   .research-actions { display:flex; flex-wrap:wrap; gap:8px; }
+  .research-inline-form { display:inline-flex; margin:0; }
+  .research-inline-form .button { border:0; cursor:pointer; }
   .research-current,.research-revision,.research-form { background:#fff; border:1px solid #e2e6ef; border-radius:12px; padding:24px; margin:20px 0; }
   .research-form { max-width:800px; }
   .research-form label { display:block; margin-bottom:8px; }
@@ -53,6 +55,7 @@
     .research-list td[data-label]::before { content:attr(data-label); display:block; color:#687386; font-size:12px; margin-bottom:4px; }
     .research-list td:last-child a { display:inline-block; padding:8px 0; }
     .research-source-summary { align-items:flex-start; padding:16px; }
+    .research-source-summary { flex-direction:column; }
     .research-source-summary .button { width:100%; box-sizing:border-box; text-align:center; }
     .research-document-card,.research-document-body { padding:16px; }
     .research-document-card h2 { font-size:18px; }

@@ -8,6 +8,7 @@ urlpatterns = [
     path("", views.index, name="index"),
     path("new/", views.create, name="create"),
     path("<int:pk>/", views.detail, name="detail"),
+    path("<int:pk>/documents/sync/", views.sync_documents, name="sync_documents"),
     path("<int:pk>/edit/", views.edit, name="edit"),
     path("<int:pk>/history/", views.history, name="history"),
     path("<int:pk>/documents/", views.documents, name="documents"),

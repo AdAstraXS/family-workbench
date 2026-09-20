@@ -35,6 +35,7 @@ from .services import (
     create_dossier,
     save_thesis_revision,
 )
+from .source_sync import sync_research_sources
 
 PAGE_SIZE = 20
 
@@ -145,6 +146,40 @@ def detail(request, pk):
     )
 
 
+@_method(["POST"])
+def sync_documents(request, pk):
+    """手动同步当前档案证券的 SEC 与 Microsoft IR 官方资料。"""
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if not is_writer(member):
+        return HttpResponseForbidden("查看者角色只能查看本人档案，不能执行同步。")
+
+    try:
+        _, totals = sync_research_sources(
+            symbols=[dossier.security.symbol],
+        )
+    except ValueError as exc:
+        messages.error(request, f"官方资料同步未执行：{exc}")
+    else:
+        summary = (
+            f"新增 {totals['created']} 份，更新 {totals['updated']} 份，"
+            f"无变化 {totals['unchanged']} 份"
+        )
+        if totals["failed"]:
+            messages.warning(
+                request,
+                f"官方资料同步完成，但有 {totals['failed']} 项失败；{summary}。"
+                "请查看来源状态。",
+            )
+        elif totals["created"] or totals["updated"]:
+            messages.success(request, f"官方资料已更新：{summary}。")
+        else:
+            messages.info(request, f"官方资料没有变化：{summary}。")
+    return redirect("investment_research:documents", pk=dossier.pk)
+
+
 @_method(["GET", "POST"])
 def edit(request, pk):
     member = _get_member_or_403(request)
@@ -248,6 +283,7 @@ def documents(request, pk):
             "dossier": dossier,
             "page": page,
             "source_states": source_states,
+            "can_write": is_writer(member),
         },
     )
 

@@ -397,6 +397,10 @@ def documents_url(dossier):
     return reverse("investment_research:documents", args=[dossier.pk])
 
 
+def sync_documents_url(dossier):
+    return reverse("investment_research:sync_documents", args=[dossier.pk])
+
+
 def document_detail_url(dossier, document):
     return reverse(
         "investment_research:document_detail", args=[dossier.pk, document.pk]
@@ -3220,6 +3224,72 @@ class OfficialDocumentsViewTests(ResearchViewTestBase):
         )
         self.assertContains(response, "1 个来源需要关注")
         self.assertContains(response, documents_url(self.dossier))
+
+    @mock.patch("investment_research.views.sync_research_sources")
+    def test_owner_can_trigger_sync_and_sees_summary(self, sync_mock):
+        sync_mock.return_value = (
+            [],
+            {"created": 2, "updated": 1, "unchanged": 3, "skipped": 0, "failed": 0},
+        )
+        self.login(self.alice)
+        response = self.client.post(sync_documents_url(self.dossier))
+        self.assertRedirects(
+            response,
+            documents_url(self.dossier),
+            fetch_redirect_response=False,
+        )
+        sync_mock.assert_called_once_with(symbols=[self.security.symbol])
+        self.assertContains(
+            self.client.get(documents_url(self.dossier)),
+            "官方资料已更新：新增 2 份，更新 1 份，无变化 3 份。",
+        )
+
+    @mock.patch("investment_research.views.sync_research_sources")
+    def test_failed_source_is_reported_without_losing_page(self, sync_mock):
+        sync_mock.return_value = (
+            [],
+            {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0, "failed": 1},
+        )
+        self.login(self.alice)
+        response = self.client.post(sync_documents_url(self.dossier))
+        self.assertRedirects(
+            response,
+            documents_url(self.dossier),
+            fetch_redirect_response=False,
+        )
+        self.assertContains(
+            self.client.get(documents_url(self.dossier)),
+            "官方资料同步完成，但有 1 项失败",
+        )
+
+    def test_viewer_cannot_trigger_sync(self):
+        viewer = self.make_member(self.family, "SyncViewer")
+        viewer_dossier = self.create_dossier_for(viewer)
+        viewer.role = FamilyMember.ROLE_VIEWER
+        viewer.save(update_fields=["role"])
+        self.login(viewer)
+        with mock.patch("investment_research.views.sync_research_sources") as sync_mock:
+            response = self.client.post(sync_documents_url(viewer_dossier))
+        self.assertEqual(response.status_code, 403)
+        sync_mock.assert_not_called()
+        self.assertNotContains(
+            self.client.get(detail_url(viewer_dossier)),
+            "立即同步",
+        )
+
+    def test_sync_requires_csrf(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.alice.user)
+        response = csrf_client.post(sync_documents_url(self.dossier))
+        self.assertEqual(response.status_code, 403)
+
+    def test_get_and_other_dossier_cannot_trigger_sync(self):
+        self.login(self.alice)
+        self.assertEqual(self.client.get(sync_documents_url(self.dossier)).status_code, 405)
+        self.assertEqual(
+            self.client.post(sync_documents_url(self.other_dossier)).status_code,
+            404,
+        )
 
     def test_get_is_read_only_and_does_not_call_providers(self):
         document = self.make_document()

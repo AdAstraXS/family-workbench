@@ -26,7 +26,15 @@
         {% if source_error_count %} · {{ source_error_count }} 个来源需要关注{% endif %}
       </p>
     </div>
-    <a class="button" href="{% url 'investment_research:documents' dossier.pk %}">查看官方资料</a>
+    <div class="research-actions">
+      <a class="button" href="{% url 'investment_research:documents' dossier.pk %}">查看官方资料</a>
+      {% if can_write %}
+        <form class="research-inline-form" method="post" action="{% url 'investment_research:sync_documents' dossier.pk %}">
+          {% csrf_token %}
+          <button class="button" type="submit">立即同步</button>
+        </form>
+      {% endif %}
+    </div>
   </section>
 
   <details class="research-initial">

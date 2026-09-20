@@ -7,9 +7,17 @@
   <div class="research-header">
     <div>
       <h1>官方资料：{{ dossier.security.name }}（{{ dossier.security.symbol }}）</h1>
-      <p class="research-private-note">资料由后台定时同步；浏览本页不会访问外部网站或修改研究判断。</p>
+      <p class="research-private-note">资料默认保存在本地；浏览本页不会访问外部网站或修改研究判断。</p>
     </div>
-    <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a>
+    <div class="research-actions">
+      <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a>
+      {% if can_write %}
+        <form class="research-inline-form" method="post" action="{% url 'investment_research:sync_documents' dossier.pk %}">
+          {% csrf_token %}
+          <button class="button" type="submit">立即同步</button>
+        </form>
+      {% endif %}
+    </div>
   </div>
 
   {% if source_states %}
