@@ -1,0 +1,45 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}{{ dossier.security.name }} 研究{% endblock %}
+
+{% block research_content %}
+<section class="research-page">
+  <div class="research-header">
+    <div>
+      <h1>{{ dossier.security.name }}（{{ dossier.security.symbol }} · {{ dossier.security.market }}）</h1>
+      <p class="research-private-note">本档案仅自己可见。</p>
+    </div>
+    <div class="research-actions">
+      {% if can_write %}
+        <a class="button" href="{% url 'investment_research:edit' dossier.pk %}">编辑判断</a>
+      {% endif %}
+      <a class="button" href="{% url 'investment_research:history' dossier.pk %}">历史版本</a>
+    </div>
+  </div>
+
+  <details class="research-initial">
+    <summary>原始持有理由（创建后不再修改）</summary>
+    <p>{{ dossier.initial_thesis|linebreaksbr }}</p>
+  </details>
+
+  {% if revision %}
+    <article class="research-current">
+      <h2>当前判断（第 {{ revision.revision_number }} 版，{{ revision.created_at|date:"Y-m-d H:i" }}）</h2>
+      <p>{{ revision.thesis|linebreaksbr }}</p>
+      {% if revision.change_reason %}
+        <p class="research-reason">修改原因：{{ revision.change_reason }}</p>
+      {% endif %}
+      <h3>关键假设</h3>
+      {% if revision.pillars %}
+        <ul>{% for item in revision.pillars %}<li>{{ item }}</li>{% endfor %}</ul>
+      {% else %}<p class="research-none">（无）</p>{% endif %}
+      <h3>待验证问题</h3>
+      {% if revision.questions %}
+        <ul>{% for item in revision.questions %}<li>{{ item }}</li>{% endfor %}</ul>
+      {% else %}<p class="research-none">（无）</p>{% endif %}
+    </article>
+  {% else %}
+    <p class="research-empty">还没有判断版本。</p>
+  {% endif %}
+</section>
+{% endblock %}

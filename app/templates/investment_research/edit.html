@@ -1,0 +1,23 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}编辑判断 - {{ dossier.security.name }}{% endblock %}
+
+{% block research_content %}
+<section class="research-page">
+  <h1>编辑判断：{{ dossier.security.name }}（{{ dossier.security.symbol }}）</h1>
+  <p class="research-private-note">本档案仅自己可见。保存会追加一个新版本，不改动原始理由与旧版本。</p>
+
+  {% if conflict %}
+    <div class="app-message warning">
+      判断已更新，请查看最新版本后再保存。
+      <a href="{% url 'investment_research:detail' dossier.pk %}">查看最新详情</a>，重新打开编辑后再提交。
+    </div>
+  {% endif %}
+
+  <form method="post" class="research-form">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">保存新版本</button>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block extra_head %}
+{{ block.super }}
+<style>
+  .research-page { overflow-wrap: anywhere; }
+  .research-header { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
+  .research-header h1 { margin-bottom:8px; }
+  .research-private-note { color:#586174; line-height:1.6; }
+  .research-actions { display:flex; flex-wrap:wrap; gap:8px; }
+  .research-current,.research-revision,.research-form { background:#fff; border:1px solid #e2e6ef; border-radius:12px; padding:24px; margin:20px 0; }
+  .research-form { max-width:800px; }
+  .research-form label { display:block; margin-bottom:8px; }
+  .research-form input:not([type=hidden]),.research-form textarea,.research-form select { box-sizing:border-box; width:100%; max-width:100%; }
+  .research-form textarea { resize:vertical; }
+  .research-current p,.research-revision p,.research-current li { line-height:1.75; }
+  .research-initial { margin:16px 0; }
+  .research-initial summary { cursor:pointer; }
+  .research-pager { display:flex; flex-wrap:wrap; gap:16px; margin-top:20px; }
+  .research-list { width:100%; table-layout:fixed; }
+  .research-list th,.research-list td { white-space:normal; overflow-wrap:anywhere; }
+  .research-list th:nth-child(2) { width:40%; }
+  .research-list th:last-child { width:70px; }
+  .research-back { display:inline-block; margin:4px 0 12px; }
+  @media(max-width:640px) {
+    .research-page h1 { font-size:24px; }
+    .research-current,.research-revision,.research-form { padding:16px; }
+    .research-list,.research-list tbody { display:block; width:100%; }
+    .research-list thead { display:none; }
+    .research-list tr { display:block; border:1px solid #e2e6ef; border-radius:12px; background:#fff; padding:12px; margin:12px 0; }
+    .research-list td { display:block; width:auto; border:0; padding:7px 4px; }
+    .research-list td[data-label]::before { content:attr(data-label); display:block; color:#687386; font-size:12px; margin-bottom:4px; }
+    .research-list td:last-child a { display:inline-block; padding:8px 0; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% if request.resolver_match.url_name != "index" %}
+<a class="research-back" href="{% url 'investment_research:index' %}">返回研究列表</a>
+{% endif %}
+{% block research_content %}{% endblock %}
+{% endblock %}

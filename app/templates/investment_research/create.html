@@ -1,0 +1,15 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}新建研究档案{% endblock %}
+
+{% block research_content %}
+<section class="research-page">
+  <h1>新建研究档案</h1>
+  <p class="research-private-note">本模块当前仅自己可见。</p>
+  <form method="post" class="research-form">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">创建档案</button>
+  </form>
+</section>
+{% endblock %}

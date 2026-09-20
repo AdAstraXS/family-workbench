@@ -1,0 +1,44 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}公司研究{% endblock %}
+
+{% block research_content %}
+<section class="research-page">
+  <div class="research-header">
+    <div>
+      <h1>公司研究</h1>
+      <p class="research-private-note">本模块当前仅自己可见，其他家庭成员（含管理员）看不到你的研究内容。</p>
+    </div>
+    {% if can_write %}
+      <a class="button" href="{% url 'investment_research:create' %}">＋ 新建研究档案</a>
+    {% endif %}
+  </div>
+
+  {% if page.object_list %}
+    <table class="research-list">
+      <thead>
+        <tr><th>标的</th><th>当前判断</th><th>更新时间</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for dossier in page.object_list %}
+          <tr>
+            <td data-label="标的">{{ dossier.security.name }}（{{ dossier.security.symbol }} · {{ dossier.security.market }}）</td>
+            <td data-label="当前判断" class="research-snippet">{{ dossier.current_revision.thesis|truncatechars:60 }}</td>
+            <td data-label="更新时间">{{ dossier.updated_at|date:"Y-m-d H:i" }}</td>
+            <td><a href="{% url 'investment_research:detail' dossier.pk %}">查看</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if page.has_other_pages %}
+      <nav class="research-pager">
+        {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">上一页</a>{% endif %}
+        <span>第 {{ page.number }} / {{ page.paginator.num_pages }} 页</span>
+        {% if page.has_next %}<a href="?page={{ page.next_page_number }}">下一页</a>{% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <p class="research-empty">你还没有研究档案。{% if can_write %}<a href="{% url 'investment_research:create' %}">创建第一份档案</a>。{% endif %}</p>
+  {% endif %}
+</section>
+{% endblock %}

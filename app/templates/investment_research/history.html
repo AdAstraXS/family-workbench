@@ -1,0 +1,40 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}历史版本 - {{ dossier.security.name }}{% endblock %}
+
+{% block research_content %}
+<section class="research-page">
+  <h1>历史版本：{{ dossier.security.name }}（{{ dossier.security.symbol }}）</h1>
+  <p class="research-private-note">本档案仅自己可见。版本只追加，不提供修改或删除。</p>
+
+  {% if page.object_list %}
+    {% for revision in page.object_list %}
+      <article class="research-revision">
+        <h2>第 {{ revision.revision_number }} 版（{{ revision.created_at|date:"Y-m-d H:i" }}）</h2>
+        <p>{{ revision.thesis|linebreaksbr }}</p>
+        {% if revision.change_reason %}
+          <p class="research-reason">修改原因：{{ revision.change_reason }}</p>
+        {% endif %}
+        <details class="research-initial">
+          <summary>关键假设 / 待验证问题</summary>
+          <h3>关键假设</h3>
+          {% if revision.pillars %}<ul>{% for item in revision.pillars %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="research-none">（无）</p>{% endif %}
+          <h3>待验证问题</h3>
+          {% if revision.questions %}<ul>{% for item in revision.questions %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="research-none">（无）</p>{% endif %}
+        </details>
+      </article>
+    {% endfor %}
+    {% if page.has_other_pages %}
+      <nav class="research-pager">
+        {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">上一页</a>{% endif %}
+        <span>第 {{ page.number }} / {{ page.paginator.num_pages }} 页</span>
+        {% if page.has_next %}<a href="?page={{ page.next_page_number }}">下一页</a>{% endif %}
+      </nav>
+    {% endif %}
+  {% else %}
+    <p class="research-empty">还没有版本记录。</p>
+  {% endif %}
+
+  <p><a href="{% url 'investment_research:detail' dossier.pk %}">返回档案详情</a></p>
+</section>
+{% endblock %}

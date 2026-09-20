@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "ai_analysis",
     "intelligence",
     "dashboard",
+    "investment_research",
 ]
 
 MIDDLEWARE = [
