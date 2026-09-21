@@ -1413,6 +1413,20 @@ class SecClientTickerTests(SimpleTestCase):
         self.assertEqual(len(sleeper.sleeps), 1)
         self.assertAlmostEqual(sleeper.sleeps[0], 0.2, places=6)
 
+    def test_real_clients_share_throttle_across_instances(self):
+        clock = _FakeClock()
+        sleeper = _Sleeper(clock)
+        first = SecClient(user_agent="test-agent/1.0", rate_limit_per_second=5.0)
+        second = SecClient(user_agent="test-agent/1.0", rate_limit_per_second=5.0)
+        for client in (first, second):
+            client._clock = clock
+            client._sleeper = sleeper
+        with mock.patch("investment_research.providers.sec._SHARED_LAST_REQUEST_AT", None):
+            first._throttle()
+            second._throttle()
+        self.assertEqual(len(sleeper.sleeps), 1)
+        self.assertAlmostEqual(sleeper.sleeps[0], 0.2, places=6)
+
 
 class SecFilingsParseTests(SimpleTestCase):
     def test_parse_keeps_only_allowed_forms(self):

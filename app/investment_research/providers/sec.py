@@ -8,6 +8,7 @@
 - 响应体超过上限抛错，错误信息不得包含完整响应正文。
 """
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -31,6 +32,8 @@ REQUIRED_FILING_COLUMNS = (
 RETRY_STATUSES = frozenset({429, 503})
 _TITLE_MAX_LENGTH = 500
 _CIK_DIGITS = 10
+_SHARED_REQUEST_LOCK = threading.Lock()
+_SHARED_LAST_REQUEST_AT = None
 
 
 class SecClientError(Exception):
@@ -262,11 +265,24 @@ class SecClient:
         self._clock = clock or time.monotonic
         self._sleeper = sleeper or time.sleep
         self._last_request_at = None
+        # 真实客户端在同一进程内共享节流状态；批量同步逐证券建客户端时不能重置配额。
+        self._shared_throttle = opener is None and clock is None and sleeper is None
 
     # -- 底层请求 -------------------------------------------------------
 
     def _throttle(self):
+        global _SHARED_LAST_REQUEST_AT
         interval = 1.0 / self.rate_limit_per_second
+        if self._shared_throttle:
+            with _SHARED_REQUEST_LOCK:
+                now = self._clock()
+                if _SHARED_LAST_REQUEST_AT is not None:
+                    wait_until = _SHARED_LAST_REQUEST_AT + interval
+                    if now < wait_until:
+                        self._sleeper(wait_until - now)
+                        now = self._clock()
+                _SHARED_LAST_REQUEST_AT = now
+            return
         now = self._clock()
         if self._last_request_at is not None:
             wait_until = self._last_request_at + interval

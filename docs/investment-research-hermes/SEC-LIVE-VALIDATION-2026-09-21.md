@@ -13,6 +13,8 @@
 - 项目客户端对两家最新 10-K 的 `www.sec.gov/Archives` URL 均返回 HTTP 403；NAS 对 AAPL 10-K Archives URL 也返回 403。SEC 官方网页检索通道能打开 AAPL 的该 HTML，但这是另一条访问通道，不能替代项目客户端正文下载验收。
 - 本地 403 HTML 页标题为 `SEC.gov | Request Rate Threshold Exceeded`。本次单客户端设置为 1–2 次/秒，但 SEC 可能按共享出口累计请求；无法据此断定是本项目自身触发。SEC 官网说明单一用户/应用总访问上限为每秒 10 次，降低至阈值以下 10 分钟后可恢复访问，见 https://www.sec.gov/about/privacy-information 。
 - 停止访问 `www.sec.gov` 超过 10 分钟后，用 SEC FAQ 示例格式的“项目名称 + 真实联系邮箱”User-Agent 对 ticker 映射 URL 只复测一次，仍返回 HTTP 403；随后停止请求。联系邮箱没有写入仓库或报告。SEC FAQ 对 Access Denied 建议向 webmaster@sec.gov 提供错误信息和出口 IP，见 https://www.sec.gov/about/webmaster-frequently-asked-questions 。
+- 后续只读网络排查确认 Windows 主机与 NAS 的公网出口 IP 不同；Windows WinHTTP 为直连且未配置 HTTP(S)/ALL_PROXY 环境变量，NAS 登录环境也未配置这类代理变量。NAS 当前运行源码提交为 `a5204c9f56da5956273960229bc407c81f1a5164`，检查时没有 `sync_research_sources` 进程；可见的 DSM 任务列表无 `research`/`sec` 名称匹配。这些检查不能排除其他设备/应用的共享出口流量，也不能证明 SEC 的具体拦截依据。
+- 代码审查发现批量同步每只证券新建 `SecClient`，原限速状态会重置；隔离分支已修复为真实客户端同一 Python 进程内共享节流，并新增跨实例测试。默认单进程速率从 5 降至 2 次/秒，为两名 Gunicorn worker 及独立同步命令留余量。这能减少本系统的突发请求，但不能跨多个进程或多个出口保证全局速率，也不能解释两条不同出口均返回 403 的事实；显式环境配置仍可能覆盖默认值，部署前必须核对。
 - 本次没有抓取到真实正文，没有证据宣称苹果或微软的 10-K/10-Q/8-K 正文、引用及页面回跳已通过真实来源验收。SEC 请求未修改生产数据。根据 403 现象，本地分支补充了暂停重试的错误提示及测试；页面样式检查另修正了同意复选框宽度。
 
 ## 已有离线证据与剩余工作
