@@ -41,7 +41,7 @@
         <fieldset>
           <legend>分析标的（每次最多 9 个）</legend>
           {% for symbol in analysis_symbols %}
-            <label><input type="checkbox" name="symbols" value="{{ symbol }}" checked> {{ symbol }}</label>
+            <label><input type="checkbox" name="symbols" value="{{ symbol }}"{% if forloop.first %} checked{% endif %}> {{ symbol }}</label>
           {% endfor %}
         </fieldset>
         <label for="wheel-expiry-weeks">目标到期日（只查询一个周五）</label>
@@ -98,8 +98,8 @@
     </article>
     <article class="option-wheel-status-card is-safe">
       <span>仓位口径</span>
-      <strong>账户净值控制敞口</strong>
-      <p>单标的指派后名义敞口不超过账户净值；券商实际保证金与剩余流动性需由你在下单前复核。</p>
+      <strong>剩余现金两倍比较</strong>
+      <p>超过现金只提示融资与流动性风险；超过两倍容量的合约仍展示并标出超限，由你决定。</p>
     </article>
   </section>
 
@@ -136,7 +136,7 @@
         <span>共享策略基线</span>
         <h2 id="policy-title">默认筛选偏好与硬性边界</h2>
       </div>
-      <small>DTE、权利金和流动性用于排序与提示；跨财报和净值敞口仍是硬边界</small>
+      <small>DTE、权利金、流动性和 NAV 集中度只作提示；默认不跨财报，容量超过剩余现金两倍时标出超限</small>
     </div>
     <div class="option-wheel-policy-baseline">
       <article><span>默认 DTE</span><strong>7–30 天</strong><small>偏好，不是硬门槛</small></article>
