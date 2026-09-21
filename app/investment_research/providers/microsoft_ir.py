@@ -5,7 +5,7 @@ MSFT 专用，非通用公司官网爬虫：
 - 只允许 OFFICIAL_HOSTS 内的 HTTPS 官方 host，拒绝 userinfo 与非默认端口；
 - 首页只识别官方财报页模式 /en-us/investor/earnings/fy-YYYY-qN/press-release-webcast，
   无法可靠分类的链接一律忽略；
-- 正文纯文本提取（剥 script/style/nav 等，合并空白），有字符上限；
+- 正文纯文本提取（剥 script/style/nav 等，保留段落/列表/表格行），有字符上限；
 - 页面异常、空正文、超限、外站跳转均显式失败，由同步层保留旧数据。
 
 只用 stdlib（urllib + html.parser），opener 可注入，离线测试全部 mock。
@@ -186,8 +186,9 @@ def discover_earnings_links(html, base=HOME_URL):
 class _TextExtractor(HTMLParser):
     """提取 <title>、time[datetime] 日期与正文纯文本。
 
-    script/style/nav/head 等整体跳过；块级标签换行分隔，
-    最终全部空白合并为单空格。
+    script/style/nav/head 等整体跳过；优先只提取微软财报页固定的
+    #pressreleasecontent 区域，页面结构变化或测试夹具没有该区域时回退正文；
+    块级标签、列表项和表格行保留为可读的纯文本换行。
     """
 
     def __init__(self):
@@ -195,13 +196,27 @@ class _TextExtractor(HTMLParser):
         self.title_parts = []
         self.dates = []
         self.chunks = []
+        self.release_chunks = []
         self._skip_depth = 0
         self._head_depth = 0
+        self._release_div_depth = 0
         self._capturing_title = False
         self._title_done = False
 
+    def _append_text(self, value):
+        self.chunks.append(value)
+        if self._release_div_depth > 0:
+            self.release_chunks.append(value)
+
     def handle_starttag(self, tag, attrs):
         name = tag.lower()
+        attr_map = {
+            key.lower(): value for key, value in attrs if value is not None
+        }
+        if self._release_div_depth > 0 and name == "div":
+            self._release_div_depth += 1
+        elif name == "div" and attr_map.get("id", "").lower() == "pressreleasecontent":
+            self._release_div_depth = 1
         if name == "head":
             self._head_depth += 1
         if name in SKIP_TAGS:
@@ -216,9 +231,6 @@ class _TextExtractor(HTMLParser):
                         self.dates.append(parsed)
         if name == "meta":
             # <meta property="article:published_time"> / <meta name="date">
-            attr_map = {
-                key.lower(): value for key, value in attrs if value is not None
-            }
             value = None
             if (attr_map.get("property") or "").lower() == "article:published_time":
                 value = attr_map.get("content")
@@ -229,7 +241,9 @@ class _TextExtractor(HTMLParser):
                 if parsed is not None:
                     self.dates.append(parsed)
         if name in BLOCK_TAGS:
-            self.chunks.append("\n")
+            self._append_text("\n")
+        if name == "li":
+            self._append_text("• ")
 
     def handle_endtag(self, tag):
         name = tag.lower()
@@ -240,8 +254,12 @@ class _TextExtractor(HTMLParser):
             self._skip_depth -= 1
         if name == "head" and self._head_depth > 0:
             self._head_depth -= 1
+        if name in {"td", "th"}:
+            self._append_text(" | ")
         if name in BLOCK_TAGS:
-            self.chunks.append("\n")
+            self._append_text("\n")
+        if name == "div" and self._release_div_depth > 0:
+            self._release_div_depth -= 1
 
     def handle_data(self, data):
         # <title> 位于被跳过的 <head> 内，但标题必须采集：优先 title。
@@ -250,11 +268,12 @@ class _TextExtractor(HTMLParser):
         elif self._skip_depth > 0:
             return
         else:
-            self.chunks.append(data)
+            self._append_text(data)
 
     def finish(self):
         title = _collapse_whitespace("".join(self.title_parts))
-        text = _collapse_whitespace("".join(self.chunks))
+        selected = self.release_chunks or self.chunks
+        text = _normalize_plain_text("".join(selected))
         published = min(self.dates) if self.dates else None
         return title, published, text
 
@@ -269,6 +288,17 @@ def _parse_date(value):
 
 def _collapse_whitespace(text):
     return re.sub(r"\s+", " ", str(text)).strip()
+
+
+def _normalize_plain_text(text):
+    """压缩行内空白，同时保留提取器产生的内容结构。"""
+    lines = []
+    for raw_line in str(text).replace("\xa0", " ").splitlines():
+        line = re.sub(r"[^\S\r\n]+", " ", raw_line).strip()
+        line = line.rstrip(" |").strip()
+        if line:
+            lines.append(line)
+    return "\n\n".join(lines)
 
 
 def _parse_release_dateline(text):

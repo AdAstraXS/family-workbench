@@ -21,7 +21,7 @@
 
   {% if document.content_text %}
     <section class="research-document-body" aria-label="提取正文">
-      <p>{{ document.content_text|linebreaksbr }}</p>
+      <div class="research-document-text">{{ document.content_text }}</div>
     </section>
   {% else %}
     <div class="research-document-empty">

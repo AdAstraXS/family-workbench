@@ -2224,11 +2224,27 @@ class MicrosoftIRExtractionTests(SimpleTestCase):
         self.assertNotIn("banner", body)
         self.assertNotIn("Top of page", body)
 
-    def test_whitespace_collapsed(self):
+    def test_inline_whitespace_collapsed_but_blocks_preserved(self):
         body = extract_page_content(MSFT_IR_EARNINGS_FIXTURE)["content_text"]
         self.assertNotIn("  ", body)
-        self.assertNotIn("\n", body)
         self.assertNotIn("\t", body)
+        self.assertIn("\n\n", body)
+        self.assertIn(
+            "• Intelligent Cloud revenue was $34.2 billion, up 18 percent.",
+            body,
+        )
+
+    def test_press_release_scope_excludes_surrounding_page_chrome(self):
+        html = (
+            "<html><head><title>T</title></head><body>"
+            "<div>Site navigation should be excluded</div>"
+            '<div id="pressreleasecontent"><h2>Results</h2>'
+            "<p>Revenue grew.</p></div>"
+            "<footer>Footer should be excluded</footer>"
+            "</body></html>"
+        )
+        body = extract_page_content(html)["content_text"]
+        self.assertEqual(body, "Results\n\nRevenue grew.")
 
     def test_meta_published_time_used_when_no_time_tag(self):
         html = (
