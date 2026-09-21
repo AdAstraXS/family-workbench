@@ -44,7 +44,6 @@
             <label><input type="checkbox" name="symbols" value="{{ symbol }}" checked> {{ symbol }}</label>
           {% endfor %}
         </fieldset>
-        <label><input type="checkbox" name="confirm_read_only" value="yes" required> 我确认本次仅保存分析证据，交易连接和下单闸门保持关闭</label>
         <button type="submit">刷新正式只读分析</button>
         <p>提交后会生成任务记录，页面自动显示结果。系统每批最多处理 3 个标的并恢复临时订阅；选择 9 个标的通常需要 3–9 分钟。离开页面不取消任务，可从下方任务记录找回。</p>
         <noscript><p>建议启用 JavaScript 后再提交，以便在当前页查看等待及异常提示。</p></noscript>
@@ -170,7 +169,7 @@
         <span>账户容量</span>
         <h2 id="accounts-title">参与车轮的投资账户</h2>
       </div>
-      <small>快照需包含已结算现金、待结算现金、预留现金、NAV 与融资状态</small>
+      <small>账户金额来自已录入的投资组合；券商融资与未录入订单不参与计算</small>
     </div>
     <div class="option-wheel-account-grid">
       {% for card in account_cards %}
@@ -217,7 +216,7 @@
                   <div><dt>持仓项目</dt><dd>{{ card.preview.position_count }} 项</dd></div>
                   <div><dt>现有义务</dt><dd>{{ card.preview.obligation_count }} 项</dd></div>
                 </dl>
-                <p>本结果没有写入数据库；正式快照仍需单独确认并导入。</p>
+                <p>本结果没有写入数据库；需要用于分析时，点击下方按钮保存。</p>
                 {% if request.user.is_superuser %}
                   <form method="post" class="option-wheel-save-form">
                     {% csrf_token %}

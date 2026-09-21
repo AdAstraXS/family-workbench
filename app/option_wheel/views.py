@@ -458,9 +458,6 @@ def refresh_analysis(request):
     family = _request_family(request)
     if not request.user.is_superuser:
         raise PermissionDenied("只有管理员可以刷新正式只读分析。")
-    if request.POST.get("confirm_read_only") != "yes":
-        return HttpResponseBadRequest("必须确认本操作仅保存分析证据且不会下单。")
-
     try:
         account_ids = {int(value) for value in request.POST.getlist("account_ids")}
     except (TypeError, ValueError):

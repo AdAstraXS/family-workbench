@@ -247,7 +247,7 @@ class OptionWheelPageTests(TestCase):
         run_probe.assert_not_called()
 
     @patch("option_wheel.jobs.fetch_probe")
-    def test_json_refresh_keeps_permission_and_confirmation_checks(self, probe):
+    def test_json_refresh_keeps_permission_and_selection_checks(self, probe):
         url = reverse("option_wheel:refresh_analysis")
         self.assertEqual(self.client.post(url, HTTP_ACCEPT="application/json").status_code, 403)
         self.user.is_superuser = True
