@@ -1,4 +1,7 @@
-# SEC 访问问题说明草稿（未发送）
+# SEC 访问问题说明（已发送）
+
+2026-09-21 20:46（北京时间），由 `xuxiao1108@gmail.com` 发送至 `webmaster@sec.gov`。
+发送时已将下文的两处公网 IP 占位符替换为实测出口 IP；仓库不保存实际 IP。
 
 收件方：webmaster@sec.gov
 主题：Request Rate Threshold Exceeded (HTTP 403) for low-rate EDGAR research requests
@@ -16,4 +19,4 @@ Example URLs:
 
 Thank you.
 
-发送前：由用户确认邮件内容与两条公网出口 IP；不要把 API Key、NAS 内网地址、生产数据库或私密投研内容加入邮件。此草稿未发送。
+用户已确认收件人及两条公网出口 IP 的披露。邮件未包含 API Key、NAS 内网地址、生产数据库或私密投研内容。
