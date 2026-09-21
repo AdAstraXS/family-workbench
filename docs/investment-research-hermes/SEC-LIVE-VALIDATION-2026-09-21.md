@@ -12,12 +12,13 @@
 - 随后在一次性内存数据库中尝试把 AAPL 真实 submissions 同步到档案并读取列表页，`data.sec.gov` 该次请求超时；脚本未执行到列表页。之前的 200 结果不能保证该网络路径持续可用。内存数据库随容器退出消失。
 - 项目客户端对两家最新 10-K 的 `www.sec.gov/Archives` URL 均返回 HTTP 403；NAS 对 AAPL 10-K Archives URL 也返回 403。SEC 官方网页检索通道能打开 AAPL 的该 HTML，但这是另一条访问通道，不能替代项目客户端正文下载验收。
 - 本地 403 HTML 页标题为 `SEC.gov | Request Rate Threshold Exceeded`。本次单客户端设置为 1–2 次/秒，但 SEC 可能按共享出口累计请求；无法据此断定是本项目自身触发。SEC 官网说明单一用户/应用总访问上限为每秒 10 次，降低至阈值以下 10 分钟后可恢复访问，见 https://www.sec.gov/about/privacy-information 。
-- 本次没有抓取到真实正文，没有证据宣称苹果或微软的 10-K/10-Q/8-K 正文、引用及页面回跳已通过真实来源验收。没有修改代码或生产数据。
+- 停止访问 `www.sec.gov` 超过 10 分钟后，用 SEC FAQ 示例格式的“项目名称 + 真实联系邮箱”User-Agent 对 ticker 映射 URL 只复测一次，仍返回 HTTP 403；随后停止请求。联系邮箱没有写入仓库或报告。SEC FAQ 对 Access Denied 建议向 webmaster@sec.gov 提供错误信息和出口 IP，见 https://www.sec.gov/about/webmaster-frequently-asked-questions 。
+- 本次没有抓取到真实正文，没有证据宣称苹果或微软的 10-K/10-Q/8-K 正文、引用及页面回跳已通过真实来源验收。SEC 请求未修改生产数据。根据 403 现象，本地分支补充了暂停重试的错误提示及测试；页面样式检查另修正了同意复选框宽度。
 
 ## 已有离线证据与剩余工作
 
 项目离线测试已覆盖两家以上美股的元数据处理、SEC 10-K/10-Q/8-K 模拟 HTML 的正文快照、重复抓取、失败保留旧版本、固定引用和访问权限。这些测试不能替代真实 SEC HTML、网络边缘策略或页面视觉验收。
 
-先停止 SEC 请求至少 10 分钟，再对 `www.sec.gov` 做一次低频复测；若仍为 403，应检查共享出口访问情况，并按 SEC 官方 FAQ 向 webmaster@sec.gov 提供错误文本与出口 IP 询问原因。不要改用伪装身份或绕过规则。该阻断同时影响新标的 CIK 解析和 Archives 正文获取；不能通过“已知 CIK 可读 submissions”推断整条链路可用。在具备正常官方访问的受控网络环境中，用已配置的合规 User-Agent、低于项目 5 次/秒上限的速率重试；随后各选 10-K、10-Q、8-K，检查正文长度、关键章节/表格可读性、官方 URL、版本哈希和引用回跳，再进行桌面及窄屏页面验收。生产试运行前另行核对模型数据用途和费用上限。
+冷却后仍为 403；下一步需检查共享出口访问情况，并按 SEC 官方 FAQ 向 webmaster@sec.gov 提供错误文本与出口 IP 询问原因。未得到用户指示前，不由代理对外发送邮件。不要改用伪装身份或绕过规则。该阻断同时影响新标的 CIK 解析和 Archives 正文获取；不能通过“已知 CIK 可读 submissions”推断整条链路可用。在具备正常官方访问的受控网络环境中，用已配置的合规 User-Agent、低于项目 5 次/秒上限的速率重试；随后各选 10-K、10-Q、8-K，检查正文长度、关键章节/表格可读性、官方 URL、版本哈希和引用回跳，再进行桌面及窄屏页面验收。生产试运行前另行核对模型数据用途和费用上限。
 
 注意：SEC 官方说明 submissions 主 JSON 至少包含近一年或最近 1,000 份申报；更早历史可能位于附加 JSON。当前项目只处理主 JSON 的 `filings.recent`，因此“官方资料列表”不等于完整历史申报档案。参考：https://www.sec.gov/search-filings/edgar-application-programming-interfaces
