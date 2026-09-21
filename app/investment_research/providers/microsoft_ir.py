@@ -200,6 +200,7 @@ class _TextExtractor(HTMLParser):
         self._skip_depth = 0
         self._head_depth = 0
         self._release_div_depth = 0
+        self._table_depth = 0
         self._capturing_title = False
         self._title_done = False
 
@@ -240,9 +241,14 @@ class _TextExtractor(HTMLParser):
                 parsed = _parse_date(value)
                 if parsed is not None:
                     self.dates.append(parsed)
-        if name in BLOCK_TAGS:
+        if name == "table":
             self._append_text("\n")
-        if name == "li":
+            self._table_depth += 1
+        elif name == "tr":
+            self._append_text("\n")
+        elif name in BLOCK_TAGS and self._table_depth == 0:
+            self._append_text("\n")
+        if name == "li" and self._table_depth == 0:
             self._append_text("• ")
 
     def handle_endtag(self, tag):
@@ -256,7 +262,13 @@ class _TextExtractor(HTMLParser):
             self._head_depth -= 1
         if name in {"td", "th"}:
             self._append_text(" | ")
-        if name in BLOCK_TAGS:
+        if name == "tr":
+            self._append_text("\n")
+        elif name == "table":
+            self._append_text("\n")
+            if self._table_depth > 0:
+                self._table_depth -= 1
+        elif name in BLOCK_TAGS and self._table_depth == 0:
             self._append_text("\n")
         if name == "div" and self._release_div_depth > 0:
             self._release_div_depth -= 1

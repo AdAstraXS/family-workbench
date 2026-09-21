@@ -2259,6 +2259,17 @@ class MicrosoftIRExtractionTests(SimpleTestCase):
             "Revenue increased 18 percent while operating income also increased.",
         )
 
+    def test_table_cells_stay_on_their_source_row(self):
+        html = (
+            "<html><head><title>T</title></head><body>"
+            '<div id="pressreleasecontent"><table>'
+            "<tr><th><div>Metric</div></th><th>2026</th><th>2025</th></tr>"
+            "<tr><td><div>Revenue</div></td><td>$90</td><td>$76</td></tr>"
+            "</table></div></body></html>"
+        )
+        body = extract_page_content(html)["content_text"]
+        self.assertEqual(body, "Metric | 2026 | 2025\n\nRevenue | $90 | $76")
+
     def test_meta_published_time_used_when_no_time_tag(self):
         html = (
             "<html><head><title>T</title>"
