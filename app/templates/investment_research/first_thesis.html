@@ -1,0 +1,14 @@
+{% extends "investment_research/base.html" %}
+{% block title %}保存第一版判断{% endblock %}
+{% block research_content %}
+<section class="research-page">
+  <h1>形成判断：{{ dossier.security.name }}（{{ dossier.security.symbol }}）</h1>
+  <p class="research-private-note">这是你的第一版正式判断，会保留原始版本和历史。资料或 AI 草稿不会替你自动保存判断。</p>
+  {% if conflict %}<div class="app-message warning">判断已经保存，请查看最新档案，再决定是否编辑。<a href="{% url 'investment_research:detail' dossier.pk %}">查看最新详情</a></div>{% endif %}
+  <form method="post" class="research-form">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">确认保存第一版</button>
+  </form>
+</section>
+{% endblock %}

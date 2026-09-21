@@ -6,17 +6,23 @@
 异常顺序：ThesisRevisionConflict / DuplicateDossier 先于父类
 ResearchValidationError；DossierNotFound 转 404。
 """
+from urllib.parse import urlencode
+
+from ai_analysis.models import AiAnalysisRequest
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db.models import F
 from django.http import Http404, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
-from .forms import CreateDossierForm, EditThesisForm
+from .citations import locate_quote, resolve_quote
+from .forms import CreateDossierForm, EditThesisForm, ExploreDossierForm, FirstThesisForm
 from .models import (
+    OfficialResearchContentVersion,
     OfficialResearchDocument,
     ResearchDossier,
     ResearchSourceState,
@@ -33,11 +39,29 @@ from .services import (
     ResearchValidationError,
     ThesisRevisionConflict,
     create_dossier,
+    create_exploration,
+    save_first_thesis,
     save_thesis_revision,
 )
+from .providers.sec import SecClientError
+from .research_ai import (
+    MAX_DOCUMENT_CHARS, ResearchAiError, available_research_providers,
+    generate_research_draft,
+)
+from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
 
 PAGE_SIZE = 20
+
+
+def _positive_id_or_404(raw):
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise Http404("无效的正文版本。") from exc
+    if value <= 0:
+        raise Http404("无效的正文版本。")
+    return value
 
 
 def _get_member_or_403(request):
@@ -118,6 +142,57 @@ def create(request):
     )
 
 
+@_method(["GET", "POST"])
+def explore(request):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    if not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能建立探索档案。")
+    form = ExploreDossierForm(request.POST if request.method == "POST" else None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            dossier = create_exploration(actor=member, security=form.cleaned_data["security"])
+        except DuplicateDossier as exc:
+            dossier = exc.dossier
+            messages.info(request, "已有这家公司的研究档案，已为你打开。")
+        else:
+            messages.success(request, "已建立私密探索档案。可以先看资料，再形成自己的判断。")
+        return redirect("investment_research:detail", pk=dossier.pk)
+    return render(request, "investment_research/explore.html", {"form": form})
+
+
+@_method(["GET", "POST"])
+def first_thesis(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能保存判断。")
+    if dossier.current_revision_id and request.method == "GET":
+        return redirect("investment_research:edit", pk=pk)
+    form = FirstThesisForm(request.POST if request.method == "POST" else None)
+    if request.method == "POST" and form.is_valid():
+        try:
+            save_first_thesis(
+                actor=member, dossier_id=pk, thesis=form.cleaned_data["thesis"],
+                pillars=form.cleaned_data["pillars"], questions=form.cleaned_data["questions"],
+            )
+        except ThesisRevisionConflict:
+            return render(request, "investment_research/first_thesis.html", {
+                "dossier": dossier, "form": form, "conflict": True,
+            }, status=409)
+        except DossierNotFound:
+            raise Http404
+        except ResearchValidationError as exc:
+            form.add_error(None, str(exc))
+        else:
+            messages.success(request, "第一版正式判断已保存。")
+            return redirect("investment_research:detail", pk=pk)
+    return render(request, "investment_research/first_thesis.html", {"dossier": dossier, "form": form})
+
+
 @_method(["GET"])
 def detail(request, pk):
     member = _get_member_or_403(request)
@@ -132,6 +207,17 @@ def detail(request, pk):
     latest_success_at = max(
         (state.last_success_at for state in successful_states), default=None
     )
+    available_versions = list(
+        OfficialResearchContentVersion.objects.filter(document__security=dossier.security, document__source="sec")
+        .select_related("document").order_by("-fetched_at", "-pk")[:20]
+    )
+    providers = available_research_providers() if is_writer(member) else []
+    recent_drafts = [
+        analysis for analysis in AiAnalysisRequest.objects.filter(
+            member=member, module="investment_research", analysis_type="document_draft",
+        ).select_related("provider").order_by("-created_at")[:30]
+        if (analysis.scope or {}).get("dossier_id") == dossier.pk
+    ][:5]
     return render(
         request,
         "investment_research/detail.html",
@@ -142,6 +228,10 @@ def detail(request, pk):
             "document_count": documents.count(),
             "latest_source_success_at": latest_success_at,
             "source_error_count": sum(bool(state.last_error) for state in source_states),
+            "available_versions": available_versions,
+            "research_providers": providers,
+            "research_document_limit": MAX_DOCUMENT_CHARS,
+            "recent_drafts": recent_drafts,
         },
     )
 
@@ -188,6 +278,8 @@ def edit(request, pk):
     dossier = get_accessible_dossier_or_404(member, pk)
     if not is_writer(member):
         return HttpResponseForbidden("查看者角色只能查看本人档案，不能创建或修改。")
+    if dossier.current_revision_id is None:
+        return redirect("investment_research:first_thesis", pk=pk)
 
     current = dossier.current_revision
     if request.method == "POST":
@@ -300,8 +392,127 @@ def document_detail(request, pk, document_pk):
         pk=document_pk,
         security=dossier.security,
     )
+    selected_version = None
+    highlighted = None
+    if "version" in request.GET:
+        selected_version = get_object_or_404(
+            OfficialResearchContentVersion,
+            pk=_positive_id_or_404(request.GET["version"]), document=document,
+        )
+        citation_keys = ("start", "end", "hash")
+        if any(key in request.GET for key in citation_keys):
+            if not all(key in request.GET for key in citation_keys):
+                raise Http404("引文参数不完整。")
+            highlighted = resolve_quote(
+                selected_version, request.GET["start"], request.GET["end"], request.GET["hash"],
+            )
+    elif any(key in request.GET for key in ("start", "end", "hash")):
+        raise Http404("引用缺少正文版本。")
+    current_version = document.content_versions.first() if document.source == "sec" else None
     return render(
         request,
         "investment_research/document_detail.html",
-        {"dossier": dossier, "document": document},
+        {
+            "dossier": dossier, "document": document,
+            "can_write": is_writer(member),
+            "can_fetch_sec": document.source == "sec" and document.document_type in {"10-k", "10-q", "8-k"},
+            "current_content_version": current_version,
+            "selected_version": selected_version,
+            "highlighted": highlighted,
+        },
     )
+
+
+@_method(["POST"])
+def create_citation(request, pk, document_pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    document = get_object_or_404(OfficialResearchDocument, pk=document_pk, security=dossier.security)
+    version = get_object_or_404(
+        OfficialResearchContentVersion,
+        pk=_positive_id_or_404(request.POST.get("version")), document=document,
+    )
+    try:
+        start, end, digest = locate_quote(version, request.POST.get("quote"))
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("investment_research:document_detail", pk=pk, document_pk=document_pk)
+    url = reverse("investment_research:document_detail", args=[pk, document_pk])
+    return redirect(f"{url}?{urlencode({'version': version.pk, 'start': start, 'end': end, 'hash': digest})}")
+
+
+@_method(["POST"])
+def fetch_sec_content(request, pk, document_pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    document = get_object_or_404(OfficialResearchDocument, pk=document_pk, security=dossier.security)
+    if not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能提取正文。")
+    try:
+        _, created = fetch_sec_document_content(
+            actor=member, dossier_id=dossier.pk, document_id=document.pk,
+        )
+    except (ResearchValidationError, SecClientError) as exc:
+        messages.error(request, f"正文提取失败：{exc}")
+    else:
+        messages.success(request, "SEC 正文已保存。" if created else "SEC 正文没有变化。")
+    return redirect("investment_research:document_detail", pk=pk, document_pk=document_pk)
+
+
+@_method(["POST"])
+def generate_draft(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能发起 AI 分析。")
+    try:
+        analysis = generate_research_draft(
+            actor=member, dossier_id=dossier.pk,
+            version_id=_positive_id_or_404(request.POST.get("version")),
+            provider_id=_positive_id_or_404(request.POST.get("provider")),
+            consent=request.POST.get("one_time_consent") == "yes",
+        )
+    except DossierNotFound:
+        raise Http404
+    except ResearchAiError as exc:
+        messages.error(request, str(exc))
+        return redirect("investment_research:detail", pk=pk)
+    return redirect("investment_research:draft_detail", pk=pk, request_pk=analysis.pk)
+
+
+@_method(["GET"])
+def draft_detail(request, pk, request_pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    analysis = get_object_or_404(
+        AiAnalysisRequest.objects.select_related("provider"),
+        pk=request_pk, member=member, family=member.family,
+        module="investment_research", analysis_type="document_draft",
+    )
+    if (analysis.scope or {}).get("dossier_id") != dossier.pk:
+        raise Http404
+    result = analysis.result if analysis.status == AiAnalysisRequest.STATUS_SUCCESS else None
+    rendered = None
+    if result:
+        rendered = dict(result.result_json)
+        for field in ("supports", "weakens"):
+            rendered[field] = [dict(item) for item in rendered.get(field, [])]
+            for item in rendered[field]:
+                item["citations"] = [dict(citation) for citation in item.get("citations", [])]
+                for citation in item["citations"]:
+                    citation["url"] = (
+                        reverse("investment_research:document_detail", args=[pk, analysis.scope["document_id"]])
+                        + "?" + urlencode({"version": citation["version_id"], "start": citation["start"],
+                                           "end": citation["end"], "hash": citation["hash"]})
+                    )
+    return render(request, "investment_research/draft_detail.html", {
+        "dossier": dossier, "analysis": analysis, "draft": rendered,
+    })

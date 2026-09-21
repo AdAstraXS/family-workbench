@@ -37,7 +37,8 @@ class ResearchDossier(TimestampedModel):
     """私密公司研究档案：一个成员对一个证券一份。
 
     family/owner/security 由后端从当前登录成员与所选证券赋值，
-    创建后不可由编辑接口变更。
+    创建后不可由编辑接口变更。探索态没有判断版本，首次正式确认时
+    才填写 initial_thesis 并创建第一版判断。
     """
 
     family = models.ForeignKey(
@@ -58,7 +59,7 @@ class ResearchDossier(TimestampedModel):
         on_delete=models.PROTECT,
         related_name="research_dossiers",
     )
-    initial_thesis = models.TextField("原始持有理由")
+    initial_thesis = models.TextField("原始持有理由", blank=True)
     current_revision = models.ForeignKey(
         "ResearchThesisRevision",
         verbose_name="当前判断版本",
@@ -165,6 +166,34 @@ class OfficialResearchDocument(TimestampedModel):
 
     def __str__(self):
         return f"{self.security} {self.get_source_display()} {self.external_id}"
+
+
+class OfficialResearchContentVersion(models.Model):
+    """按需取得的 SEC 原件和规范正文；旧版本永不由业务入口覆盖。"""
+
+    document = models.ForeignKey(
+        OfficialResearchDocument, on_delete=models.PROTECT,
+        related_name="content_versions", verbose_name="官方资料",
+    )
+    version_number = models.PositiveIntegerField("版本号")
+    source_url = models.URLField("获取时来源链接", max_length=1000)
+    raw_sha256 = models.CharField("原始响应 SHA-256", max_length=64)
+    raw_gzip = models.BinaryField("原始 HTML（gzip）")
+    content_text = models.TextField("规范正文")
+    content_sha256 = models.CharField("规范正文 SHA-256", max_length=64)
+    extractor_version = models.CharField("提取器版本", max_length=32)
+    fetched_at = models.DateTimeField("获取时间")
+
+    class Meta:
+        verbose_name = "官方资料正文版本"
+        verbose_name_plural = "官方资料正文版本"
+        ordering = ["-version_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["document", "version_number"],
+                name="unique_research_content_version_number",
+            ),
+        ]
 
 
 class ResearchSourceState(TimestampedModel):

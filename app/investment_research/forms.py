@@ -60,6 +60,18 @@ class CreateDossierForm(ResearchFormMixin, forms.Form):
     )
 
 
+class ExploreDossierForm(forms.Form):
+    security = forms.ModelChoiceField(
+        label="想了解的美股", queryset=Security.objects.filter(market="US", asset_type=Security.TYPE_STOCK).order_by("symbol", "pk"),
+    )
+
+
+class FirstThesisForm(ResearchFormMixin, forms.Form):
+    thesis = forms.CharField(label="我的第一版判断", widget=forms.Textarea(attrs={"rows": 4}))
+    pillars = forms.CharField(label="关键假设（每行一条，最多 5 条）", required=False, widget=forms.Textarea(attrs={"rows": 3}))
+    questions = forms.CharField(label="待验证问题（每行一条，最多 5 条）", required=False, widget=forms.Textarea(attrs={"rows": 3}))
+
+
 class EditThesisForm(ResearchFormMixin, forms.Form):
     thesis = forms.CharField(
         label="当前判断",

@@ -73,6 +73,32 @@ class SecDocumentUrlError(SecClientError):
     """primaryDocument/accession 不合法，无法构造 Archives URL。"""
 
 
+def _validate_sec_request_url(url, *, archives_only=False):
+    parts = urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise SecClientError("SEC 请求地址的端口无效。") from exc
+    if parts.scheme != "https":
+        raise SecClientError("SEC 请求必须使用 HTTPS。")
+    if (parts.hostname not in OFFICIAL_HOSTS or parts.username
+            or parts.password or port not in (None, 443)):
+        raise SecClientError("SEC 请求只允许无凭据的官方主机。")
+    if archives_only and (parts.hostname != "www.sec.gov"
+                          or not parts.path.startswith("/Archives/edgar/data/")
+                          or parts.query or parts.fragment):
+        raise SecDocumentUrlError("SEC 正文必须来自官方 Archives 路径。")
+
+
+class _OfficialRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        archives_only = urlsplit(req.full_url).path.startswith("/Archives/edgar/data/")
+        _validate_sec_request_url(newurl, archives_only=archives_only)
+        if archives_only and newurl != req.full_url:
+            raise SecDocumentUrlError("SEC 正文重定向到其他文件，已停止抓取。")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _validate_positive_number(value, label, *, maximum=None):
     """数值配置校验：必须是 int/float（bool 不算），大于 0，可选上限。"""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -232,7 +258,7 @@ class SecClient:
         self.rate_limit_per_second = rate_limit_per_second
         self.max_retries = max_retries
         self.backoff_seconds = backoff_seconds
-        self._opener = opener or urllib.request.urlopen
+        self._opener = opener or urllib.request.build_opener(_OfficialRedirectHandler()).open
         self._clock = clock or time.monotonic
         self._sleeper = sleeper or time.sleep
         self._last_request_at = None
@@ -249,12 +275,10 @@ class SecClient:
                 now = self._clock()
         self._last_request_at = now
 
-    def _get(self, url):
-        parts = urlsplit(url)
-        if parts.scheme != "https":
-            raise SecClientError(f"SEC 请求必须使用 HTTPS：{url}")
-        if parts.hostname not in OFFICIAL_HOSTS:
-            raise SecClientError(f"非 SEC 官方主机：{parts.hostname}")
+    def _get(self, url, *, max_bytes=None, archives_only=False):
+        _validate_sec_request_url(url, archives_only=archives_only)
+        limit = self.max_response_bytes if max_bytes is None else max_bytes
+        _validate_positive_number(limit, "max_bytes")
         request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
         attempt = 0
         while True:
@@ -277,12 +301,21 @@ class SecClient:
                 # ConnectionResetError 等底层 OSError 统一归为网络错误，不泄漏原文
                 raise SecNetworkError(f"SEC 连接异常：{type(exc).__name__}") from exc
             with response:
-                body = response.read(self.max_response_bytes + 1)
-            if len(body) > self.max_response_bytes:
+                if hasattr(response, "geturl"):
+                    final_url = response.geturl()
+                    _validate_sec_request_url(final_url, archives_only=archives_only)
+                    if archives_only and final_url != url:
+                        raise SecDocumentUrlError("SEC 正文最终链接与所选文件不同。")
+                body = response.read(limit + 1)
+            if len(body) > limit:
                 raise SecResponseTooLarge(
-                    f"SEC 响应超过 {self.max_response_bytes} 字节上限。"
+                    f"SEC 响应超过 {limit} 字节上限。"
                 )
             return body
+
+    def get_document_html(self, url, *, max_bytes):
+        """仅获取已校验的 SEC Archives 主 HTML；不跟随站外跳转。"""
+        return self._get(url, max_bytes=max_bytes, archives_only=True)
 
     def get_json(self, url):
         body = self._get(url)
