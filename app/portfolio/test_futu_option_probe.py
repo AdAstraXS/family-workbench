@@ -782,10 +782,11 @@ class FakeContext:
         self.calls.append("get_option_expiration_date")
         if symbol in self.fail_expiration:
             return 1, "expiration failed"
+        base = datetime.now(timezone.utc).date()
         return 0, [
-            {"strike_time": "2026-09-04"},
-            {"strike_time": "2026-09-11"},
-            {"strike_time": "2026-09-18"},
+            {"strike_time": (base + timedelta(days=7)).isoformat()},
+            {"strike_time": (base + timedelta(days=14)).isoformat()},
+            {"strike_time": (base + timedelta(days=21)).isoformat()},
         ]
 
     def get_option_chain(self, symbol, start=None, end=None, option_type=None):

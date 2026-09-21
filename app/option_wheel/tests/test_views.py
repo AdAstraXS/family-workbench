@@ -295,8 +295,6 @@ class OptionWheelPageTests(TestCase):
             {
                 "action": "preview_capacity",
                 "account_id": account.pk,
-                "confirm_no_margin": "yes",
-                "confirm_no_open_orders": "yes",
             },
         )
 
@@ -308,14 +306,12 @@ class OptionWheelPageTests(TestCase):
         self.assertEqual(WheelBrokerAccountSnapshot.objects.count(), 0)
         build_capacity.assert_called_once_with(
             account_id=account.pk,
-            confirm_no_margin=True,
-            confirm_no_open_orders=True,
         )
 
     @patch("option_wheel.views.build_portfolio_capacity")
     def test_capacity_preview_shows_fail_closed_error(self, build_capacity):
         account = self.make_account(self.family, self.member, "盈透证券")
-        build_capacity.side_effect = CapacityImportError("必须明确确认该账户当前没有融资或借贷。")
+        build_capacity.side_effect = CapacityImportError("投资组合当日估值不完整。")
 
         response = self.client.post(
             reverse("option_wheel:index"),
@@ -324,7 +320,7 @@ class OptionWheelPageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "无法完成预演")
-        self.assertContains(response, "必须明确确认该账户当前没有融资或借贷。")
+        self.assertContains(response, "投资组合当日估值不完整。")
         self.assertEqual(WheelBrokerAccountSnapshot.objects.count(), 0)
 
     @patch("option_wheel.views.build_portfolio_capacity")
@@ -341,8 +337,6 @@ class OptionWheelPageTests(TestCase):
             {
                 "action": "preview_capacity",
                 "account_id": other_account.pk,
-                "confirm_no_margin": "yes",
-                "confirm_no_open_orders": "yes",
             },
         )
 
@@ -363,9 +357,6 @@ class OptionWheelPageTests(TestCase):
             {
                 "action": "save_capacity",
                 "account_id": account.pk,
-                "confirm_no_margin": "yes",
-                "confirm_no_open_orders": "yes",
-                "confirm_save_snapshot": "yes",
             },
         )
 
@@ -375,7 +366,7 @@ class OptionWheelPageTests(TestCase):
 
     @patch("option_wheel.views.import_portfolio_capacity")
     @patch("option_wheel.views.build_portfolio_capacity")
-    def test_superuser_must_confirm_before_saving_capacity_snapshot(
+    def test_superuser_can_save_capacity_without_repeated_attestation(
         self,
         build_capacity,
         import_capacity,
@@ -390,6 +381,7 @@ class OptionWheelPageTests(TestCase):
             positions_summary={"count": 3},
             open_obligations={"count": 1},
         )
+        import_capacity.return_value = SimpleNamespace(snapshot_created=True)
         admin = get_user_model().objects.create_superuser(
             username="wheel-admin",
             email="wheel-admin@example.com",
@@ -402,15 +394,11 @@ class OptionWheelPageTests(TestCase):
             {
                 "action": "save_capacity",
                 "account_id": account.pk,
-                "confirm_no_margin": "yes",
-                "confirm_no_open_orders": "yes",
             },
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "保存前必须再次确认")
-        self.assertContains(response, "保存为正式容量快照")
-        import_capacity.assert_not_called()
+        self.assertEqual(response.status_code, 302)
+        import_capacity.assert_called_once()
 
     @patch("option_wheel.views.import_portfolio_capacity")
     @patch("option_wheel.views.build_portfolio_capacity")
@@ -443,9 +431,6 @@ class OptionWheelPageTests(TestCase):
             {
                 "action": "save_capacity",
                 "account_id": account.pk,
-                "confirm_no_margin": "yes",
-                "confirm_no_open_orders": "yes",
-                "confirm_save_snapshot": "yes",
             },
             follow=True,
         )
@@ -454,8 +439,6 @@ class OptionWheelPageTests(TestCase):
         self.assertContains(response, "已保存 盈透证券 的正式容量快照")
         build_capacity.assert_called_once_with(
             account_id=account.pk,
-            confirm_no_margin=True,
-            confirm_no_open_orders=True,
         )
         import_capacity.assert_called_once_with(evidence=evidence, commit=True)
 

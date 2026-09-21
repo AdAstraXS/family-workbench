@@ -102,8 +102,6 @@ class PortfolioCapacityImportTests(TestCase):
     def build(self, valuation=None, **overrides):
         values = {
             "account_id": self.account.pk,
-            "confirm_no_margin": True,
-            "confirm_no_open_orders": True,
             "source_as_of": AS_OF,
         }
         values.update(overrides)
@@ -120,6 +118,9 @@ class PortfolioCapacityImportTests(TestCase):
         self.assertEqual(evidence.nav, Decimal("150000.0000"))
         self.assertEqual(evidence.reserved_cash, Decimal("30000.0000"))
         self.assertEqual(evidence.positions_summary["count"], 1)
+        self.assertIsNone(evidence.uses_margin)
+        self.assertIsNone(evidence.margin_loan_balance)
+        self.assertEqual(evidence.open_obligations["unrecorded_open_orders"], "unknown")
 
     def test_formal_snapshot_becomes_stale_after_portfolio_transaction(self):
         evidence = self.build()
@@ -151,11 +152,7 @@ class PortfolioCapacityImportTests(TestCase):
         self.assertEqual(evidence.settled_cash, Decimal("95000.0000"))
         self.assertEqual(evidence.unsettled_cash, Decimal("5000.0000"))
 
-    def test_fails_closed_without_confirmations_or_complete_valuation(self):
-        with self.assertRaises(CapacityImportError):
-            self.build(confirm_no_margin=False)
-        with self.assertRaises(CapacityImportError):
-            self.build(confirm_no_open_orders=False)
+    def test_fails_closed_without_complete_valuation(self):
         with self.assertRaises(CapacityImportError):
             self.build(valuation=self.valuation(complete=False))
         with self.assertRaises(CapacityImportError):
@@ -231,17 +228,15 @@ class PortfolioCapacityImportTests(TestCase):
             call_command(
                 "import_wheel_portfolio_capacity",
                 account_id=self.account.pk,
-                confirm_no_margin=True,
-                confirm_no_open_orders=True,
                 stdout=output,
             )
 
         self.assertIn("mode=DRY-RUN", output.getvalue())
         self.assertFalse(WheelBrokerAccountSnapshot.objects.exists())
 
-    def test_command_requires_explicit_safety_confirmations(self):
+    def test_command_rejects_unknown_account(self):
         with self.assertRaises(CommandError):
             call_command(
                 "import_wheel_portfolio_capacity",
-                account_id=self.account.pk,
+                account_id=self.other.pk,
             )

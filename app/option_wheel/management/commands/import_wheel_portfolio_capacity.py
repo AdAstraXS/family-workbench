@@ -12,8 +12,6 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--account-id", required=True, type=int)
-        parser.add_argument("--confirm-no-margin", action="store_true")
-        parser.add_argument("--confirm-no-open-orders", action="store_true")
         parser.add_argument(
             "--commit",
             action="store_true",
@@ -24,8 +22,6 @@ class Command(BaseCommand):
         try:
             evidence = build_portfolio_capacity(
                 account_id=options["account_id"],
-                confirm_no_margin=options["confirm_no_margin"],
-                confirm_no_open_orders=options["confirm_no_open_orders"],
             )
             result = import_portfolio_capacity(
                 evidence=evidence,

@@ -41,8 +41,8 @@ class CapacityEvidence:
     unsettled_cash: Decimal
     nav: Decimal
     reserved_cash: Decimal
-    margin_loan_balance: Decimal
-    uses_margin: bool
+    margin_loan_balance: Decimal | None
+    uses_margin: bool | None
     positions_summary: dict
     open_obligations: dict
 
@@ -73,7 +73,7 @@ def capacity_snapshot_stale_reasons(snapshot):
         updated_at__gt=cutoff,
     ).exists()
     if transaction_changed or cash_changed or position_changed:
-        reasons.append("投资组合流水、现金或持仓在确认后发生变化")
+        reasons.append("投资组合流水、现金或持仓在快照后发生变化")
 
     position_items = snapshot.positions_summary.get("items", []) if isinstance(snapshot.positions_summary, dict) else []
     security_ids = {
@@ -86,7 +86,7 @@ def capacity_snapshot_stale_reasons(snapshot):
             security_id__in=security_ids,
         ).aggregate(value=Max("fetched_at"))["value"]
         if latest_price and latest_price > cutoff:
-            reasons.append("持仓行情在确认后已更新，账户净值需要重新确认")
+            reasons.append("持仓行情在快照后已更新，账户净值需要重新计算")
     return reasons
 
 
@@ -139,14 +139,8 @@ def _position_item(position):
 def build_portfolio_capacity(
     *,
     account_id,
-    confirm_no_margin=False,
-    confirm_no_open_orders=False,
     source_as_of=None,
 ):
-    if not confirm_no_margin:
-        raise CapacityImportError("必须明确确认该账户当前没有融资或借贷。")
-    if not confirm_no_open_orders:
-        raise CapacityImportError("必须明确确认券商端没有尚未录入投资组合的未成交订单。")
     try:
         account = InvestmentAccount.objects.select_related(
             "bank_account", "bank_account__family"
@@ -261,7 +255,7 @@ def build_portfolio_capacity(
     }
     open_obligations = {
         "source": "portfolio_positions",
-        "no_unrecorded_open_orders_confirmed": True,
+        "unrecorded_open_orders": "unknown",
         "count": len(obligations),
         "items": obligations,
         "reserved_cash": str(reserved_cash),
@@ -294,8 +288,8 @@ def build_portfolio_capacity(
         unsettled_cash=unsettled_cash,
         nav=nav,
         reserved_cash=reserved_cash,
-        margin_loan_balance=Decimal("0"),
-        uses_margin=False,
+        margin_loan_balance=None,
+        uses_margin=None,
         positions_summary=positions_summary,
         open_obligations=open_obligations,
     )

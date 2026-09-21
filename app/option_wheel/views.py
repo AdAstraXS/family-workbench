@@ -87,7 +87,6 @@ def _snapshot_is_ready(snapshot, *, max_age_minutes, now, stale_reasons=None):
         snapshot.unsettled_cash,
         snapshot.nav,
         snapshot.reserved_cash,
-        snapshot.margin_loan_balance,
     )
     if any(value is None or not value.is_finite() for value in required_amounts):
         return False
@@ -96,8 +95,6 @@ def _snapshot_is_ready(snapshot, *, max_age_minutes, now, stale_reasons=None):
         or not snapshot.source_reference.strip()
         or snapshot.nav <= 0
         or snapshot.reserved_cash > snapshot.settled_cash
-        or snapshot.uses_margin is not False
-        or snapshot.margin_loan_balance != Decimal("0")
         or not isinstance(snapshot.positions_summary, dict)
         or not isinstance(snapshot.open_obligations, dict)
     ):
@@ -250,7 +247,7 @@ def index(request):
             state = "数据不可用"
             account_blockers.append(f"{account_name}尚无容量快照")
         elif stale_reasons:
-            state = "投资组合已变化，待重新确认"
+            state = "投资组合已变化，待更新容量"
             account_blockers.append(f"{account_name}容量快照已失效：{'；'.join(stale_reasons)}")
         elif not ready:
             state = "证据不完整或已过期"
@@ -268,9 +265,6 @@ def index(request):
                 "stale_reasons": stale_reasons,
                 "preview": None,
                 "preview_error": "",
-                "confirm_no_margin": False,
-                "confirm_no_open_orders": False,
-                "confirm_save_snapshot": False,
             }
         )
 
@@ -294,20 +288,9 @@ def index(request):
         )
         if target_card is None:
             raise PermissionDenied("该账户不属于当前家庭的车轮参与账户。")
-        target_card["confirm_no_margin"] = (
-            request.POST.get("confirm_no_margin") == "yes"
-        )
-        target_card["confirm_no_open_orders"] = (
-            request.POST.get("confirm_no_open_orders") == "yes"
-        )
-        target_card["confirm_save_snapshot"] = (
-            request.POST.get("confirm_save_snapshot") == "yes"
-        )
         try:
             evidence = build_portfolio_capacity(
                 account_id=account_id,
-                confirm_no_margin=target_card["confirm_no_margin"],
-                confirm_no_open_orders=target_card["confirm_no_open_orders"],
             )
         except CapacityImportError as exc:
             target_card["preview_error"] = str(exc)
@@ -319,25 +302,20 @@ def index(request):
                 "obligation_count": evidence.open_obligations.get("count", 0),
             }
             if action == "save_capacity":
-                if not target_card["confirm_save_snapshot"]:
-                    target_card["preview_error"] = (
-                        "保存前必须再次确认将当前预演结果写入正式容量快照。"
+                result = import_portfolio_capacity(evidence=evidence, commit=True)
+                if result.snapshot_created:
+                    messages.success(
+                        request,
+                        f"已保存 {target_card['name']} 的正式容量快照；"
+                        "投资组合、现金、持仓和订单均未修改。",
                     )
                 else:
-                    result = import_portfolio_capacity(evidence=evidence, commit=True)
-                    if result.snapshot_created:
-                        messages.success(
-                            request,
-                            f"已保存 {target_card['name']} 的正式容量快照；"
-                            "投资组合、现金、持仓和订单均未修改。",
-                        )
-                    else:
-                        messages.success(
-                            request,
-                            f"{target_card['name']} 的同一份容量证据已存在，"
-                            "本次没有重复写入。",
-                        )
-                    return redirect(reverse("option_wheel:index"))
+                    messages.success(
+                        request,
+                        f"{target_card['name']} 的同一份容量证据已存在，"
+                        "本次没有重复写入。",
+                    )
+                return redirect(reverse("option_wheel:index"))
 
     decisions = WheelDecision.objects.filter(family=family)
     latest_decision = (

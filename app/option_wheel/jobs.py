@@ -49,7 +49,7 @@ def validate_selection(family, selection):
         if not _snapshot_is_ready(snapshot, now=timezone.now(),
                 max_age_minutes=min(p.account_snapshot_max_age_minutes for p in policies if p.account_id == account.pk),
                 stale_reasons=capacity_snapshot_stale_reasons(snapshot) if snapshot else []):
-            raise WheelAnalysisError("账户容量已变化、过期或未就绪，请重新预演并确认。")
+            raise WheelAnalysisError("账户容量已变化、过期或未就绪，请重新预演并保存。")
     return accounts
 
 

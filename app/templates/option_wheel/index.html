@@ -188,7 +188,7 @@
               <div><dt>待结算现金</dt><dd>{% if card.snapshot.unsettled_cash is not None %}{{ card.snapshot.unsettled_cash|floatformat:2 }} {{ card.snapshot.currency }}{% else %}数据不可用{% endif %}</dd></div>
               <div><dt>预留现金</dt><dd>{% if card.snapshot.reserved_cash is not None %}{{ card.snapshot.reserved_cash|floatformat:2 }} {{ card.snapshot.currency }}{% else %}数据不可用{% endif %}</dd></div>
               <div><dt>账户 NAV</dt><dd>{% if card.snapshot.nav is not None %}{{ card.snapshot.nav|floatformat:2 }} {{ card.snapshot.currency }}{% else %}数据不可用{% endif %}</dd></div>
-              <div><dt>当前融资/借贷</dt><dd>{% if card.snapshot.uses_margin is True %}是（风险提示）{% elif card.snapshot.uses_margin is False %}否{% else %}未知（需复核）{% endif %}</dd></div>
+              <div><dt>券商融资/借贷</dt><dd>{% if card.snapshot.uses_margin is True %}有记录（风险提示）{% elif card.snapshot.uses_margin is False %}记录为无{% else %}投资组合未记录{% endif %}</dd></div>
               <div><dt>来源时点</dt><dd>{{ card.snapshot.source_as_of|date:"Y-m-d H:i:s T" }}</dd></div>
             </dl>
             <p>数据状态：{{ card.snapshot.get_data_status_display }}；允许最大年龄 {{ card.max_age_minutes }} 分钟。</p>
@@ -201,8 +201,6 @@
               <input type="hidden" name="action" value="preview_capacity">
               <input type="hidden" name="account_id" value="{{ card.account.pk }}">
               <p><strong>从投资组合只读预演</strong><span>结果仅在本页临时展示，不保存容量快照。</span></p>
-              <label><input type="checkbox" name="confirm_no_margin" value="yes" {% if card.confirm_no_margin %}checked{% endif %}> 我确认券商端当前没有融资或借贷</label>
-              <label><input type="checkbox" name="confirm_no_open_orders" value="yes" {% if card.confirm_no_open_orders %}checked{% endif %}> 我确认没有尚未录入投资组合的未成交订单</label>
               <button type="submit">只读预演账户容量</button>
             </form>
             {% if card.preview_error %}
@@ -225,11 +223,8 @@
                     {% csrf_token %}
                     <input type="hidden" name="action" value="save_capacity">
                     <input type="hidden" name="account_id" value="{{ card.account.pk }}">
-                    <input type="hidden" name="confirm_no_margin" value="yes">
-                    <input type="hidden" name="confirm_no_open_orders" value="yes">
-                    <label><input type="checkbox" name="confirm_save_snapshot" value="yes" {% if card.confirm_save_snapshot %}checked{% endif %}> 我确认以上金额与券商当前状态一致，并将其保存为正式容量证据</label>
                     <button type="submit">保存为正式容量快照</button>
-                    <small>仅写入期权车轮的证据快照；不会下单，也不会修改投资组合。</small>
+                    <small>仅按投资组合已录入数据保存期权车轮证据；券商融资和未录入订单无法由系统核实。不会下单，也不会修改投资组合。</small>
                   </form>
                 {% endif %}
               </div>
