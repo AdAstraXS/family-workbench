@@ -2246,6 +2246,19 @@ class MicrosoftIRExtractionTests(SimpleTestCase):
         body = extract_page_content(html)["content_text"]
         self.assertEqual(body, "Results\n\nRevenue grew.")
 
+    def test_source_line_wrapping_does_not_split_a_paragraph(self):
+        html = (
+            "<html><head><title>T</title></head><body>"
+            '<div id="pressreleasecontent"><p>Revenue increased\n'
+            "  18 percent while operating income\r\n"
+            "  also increased.</p></div></body></html>"
+        )
+        body = extract_page_content(html)["content_text"]
+        self.assertEqual(
+            body,
+            "Revenue increased 18 percent while operating income also increased.",
+        )
+
     def test_meta_published_time_used_when_no_time_tag(self):
         html = (
             "<html><head><title>T</title>"

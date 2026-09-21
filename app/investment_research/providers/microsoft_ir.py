@@ -268,7 +268,9 @@ class _TextExtractor(HTMLParser):
         elif self._skip_depth > 0:
             return
         else:
-            self._append_text(data)
+            # HTML 源码常为排版而在句子中换行；这些不是正文段落。
+            # 先压成普通空格，仅保留由块级标签显式加入的结构换行。
+            self._append_text(re.sub(r"\s+", " ", data))
 
     def finish(self):
         title = _collapse_whitespace("".join(self.title_parts))
