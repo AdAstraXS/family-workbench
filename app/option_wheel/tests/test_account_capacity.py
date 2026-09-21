@@ -122,6 +122,14 @@ class PortfolioCapacityImportTests(TestCase):
         self.assertIsNone(evidence.margin_loan_balance)
         self.assertEqual(evidence.open_obligations["unrecorded_open_orders"], "unknown")
 
+    def test_existing_put_obligation_above_cash_remains_visible(self):
+        valuation = self.valuation()
+        valuation["cash_lines"][0]["amount"] = Decimal("20000")
+        evidence = self.build(valuation=valuation)
+        self.assertEqual(evidence.settled_cash, Decimal("20000.0000"))
+        self.assertEqual(evidence.reserved_cash, Decimal("30000.0000"))
+        self.assertEqual(evidence.open_obligations["count"], 1)
+
     def test_formal_snapshot_becomes_stale_after_portfolio_transaction(self):
         evidence = self.build()
         snapshot_id = import_portfolio_capacity(evidence=evidence, commit=True).snapshot_id

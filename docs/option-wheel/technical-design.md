@@ -3,6 +3,10 @@
 状态：Draft 0.1
 更新时间：2026-08-30
 
+> 2026-09-21 用户更新：本文件早期全额现金担保与 NAV 硬门槛章节已被
+> [当前口径](README.md#2026-09-21-更新口径)取代；现行只读分析按剩余现金两倍
+> 比较 Put，并为管理员选定的单一周五采集少量代表合约。
+
 ## 1. 现有系统基线
 
 - `portfolio.Security`、`OptionContract`、`InvestmentTransaction` 和 `InvestmentPosition` 已支持正股、

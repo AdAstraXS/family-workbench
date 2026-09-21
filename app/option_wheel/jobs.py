@@ -1,5 +1,6 @@
 """Small durable, bounded on-demand jobs; no scheduler or broker required."""
-from datetime import timedelta
+from datetime import date, timedelta
+from zoneinfo import ZoneInfo
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,15 @@ def validate_selection(family, selection):
     from .views import PARTICIPATING_ACCOUNTS, _snapshot_is_ready
     from .account_capacity import capacity_snapshot_stale_reasons
     ids, symbols = selection.get("account_ids", []), selection.get("symbols", [])
+    target = selection.get("target_expiration")
+    if target is not None:
+        try:
+            expiry = date.fromisoformat(target)
+        except (TypeError, ValueError):
+            raise WheelAnalysisError("目标到期日无效。") from None
+        ny_today = timezone.now().astimezone(ZoneInfo("America/New_York")).date()
+        if expiry.weekday() != 4 or not 0 < (expiry - ny_today).days <= 35:
+            raise WheelAnalysisError("目标周五已经过去或超出可选范围，请重新提交。")
     if not ids or not symbols or len(ids) > 2 or len(symbols) > MAX_SYMBOLS:
         raise WheelAnalysisError("每次请选择 1–2 个账户和 1–9 个已配置标的。")
     accounts = list(InvestmentAccount.objects.filter(
@@ -94,11 +104,13 @@ def enqueue(family, user, key, selection):
     return job
 
 
-def _fetch_probe_batch(symbols, covered_call_symbols):
+def _fetch_probe_batch(symbols, covered_call_symbols, target_expiration=None):
     covered_call_symbols = sorted(set(symbols) & set(covered_call_symbols))
     command = [sys.executable, "-m", "option_wheel.live_probe"]
     if covered_call_symbols:
         command.append("--calls-for=" + ",".join(covered_call_symbols))
+    if target_expiration:
+        command.append("--expiration=" + target_expiration)
     command.extend("US." + symbol for symbol in symbols)
     try:
         completed = subprocess.run(
@@ -126,13 +138,13 @@ def _fetch_probe_batch(symbols, covered_call_symbols):
         raise WheelAnalysisError("行情查询进程或响应异常，未保存分析；订阅清理状态需核对。") from None
 
 
-def fetch_probe(symbols, covered_call_symbols=None):
+def fetch_probe(symbols, covered_call_symbols=None, target_expiration=None):
     """Probe at most three symbols per process so Futu subscriptions stay bounded."""
     covered_call_symbols = set(covered_call_symbols or [])
     rows = []
     for offset in range(0, len(symbols), PROBE_BATCH_SIZE):
         batch = symbols[offset:offset + PROBE_BATCH_SIZE]
-        rows.extend(_fetch_probe_batch(batch, covered_call_symbols))
+        rows.extend(_fetch_probe_batch(batch, covered_call_symbols, target_expiration))
     return rows
 
 
@@ -164,9 +176,10 @@ def run_job(job_id):
         call_symbols = covered_call_symbols(
             job.family, accounts, job.selection["symbols"]
         )
-        rows = fetch_probe(
-            job.selection["symbols"], covered_call_symbols=call_symbols
-        )
+        probe_kwargs = {"covered_call_symbols": call_symbols}
+        if job.selection.get("target_expiration"):
+            probe_kwargs["target_expiration"] = job.selection["target_expiration"]
+        rows = fetch_probe(job.selection["symbols"], **probe_kwargs)
         with transaction.atomic():
             job = WheelAnalysisJob.objects.select_for_update().get(pk=job_id)
             if job.status != "running" or job.expires_at <= timezone.now():
@@ -199,7 +212,7 @@ def job_payload(job):
     return {
         "kind": "option-wheel-job-v1", "id": str(job.pk), "status": status,
         "label": dict(WheelAnalysisJob._meta.get_field("status").choices).get(status, status),
-        "message": "当前任务：" + " / ".join(job.selection.get("account_names", []) + job.selection.get("symbols", [])) + "。" + (message or ("正在查询行情及核对订阅清理，请勿重复提交。" if status == "running" else "任务已受理，等待分析进程启动。")),
+        "message": "当前任务：" + " / ".join(job.selection.get("account_names", []) + job.selection.get("symbols", [])) + ("；目标到期日 " + job.selection["target_expiration"] if job.selection.get("target_expiration") else "") + "。" + (message or ("正在查询行情及核对订阅清理，请勿重复提交。" if status == "running" else "任务已受理，等待分析进程启动。")),
         "selection": job.selection, "created_at": job.created_at.isoformat(),
         "status_url": reverse("option_wheel:job_status", args=[job.pk]),
         "detail_url": reverse("option_wheel:job_detail", args=[job.pk]),

@@ -147,22 +147,16 @@ class FailClosedRulesTest(TestCase):
                 self.assertEqual(result.status, "blocked")
                 self.assertIn(code, result.reason_codes)
 
-    def test_margin_use_or_unknown_margin_data_warns(self):
-        cases = [
-            ({"uses_margin": "yes"}, "account_margin_status_unknown"),
-            ({"uses_margin": True}, "account_margin_active"),
-            ({"margin_loan_balance": None}, "account_margin_balance_unknown"),
-            ({"margin_loan_balance": Decimal("50")}, "account_margin_active"),
-        ]
-        for overrides, code in cases:
-            with self.subTest(overrides=overrides):
-                result = self.evaluate(
-                    context=self.context(account=self.account(**overrides))
-                )
-                self.assertEqual(result.status, "executable")
-                self.assertIn(code, result.warning_codes)
+    def test_margin_account_does_not_demand_repeat_declaration(self):
+        account = self.account(uses_margin=None, margin_loan_balance=None)
+        result = self.evaluate(context=self.context(account=account))
+        self.assertEqual(result.status, "executable")
+        self.assertNotIn("account_margin_status_unknown", result.warning_codes)
+        self.assertNotIn("account_margin_balance_unknown", result.warning_codes)
+        loan = self.evaluate(context=self.context(account=self.account(margin_loan_balance=Decimal("50"))))
+        self.assertIn("account_margin_active", loan.warning_codes)
 
-    def test_unknown_or_invalid_nav_and_exposure_block(self):
+    def test_unknown_or_invalid_nav_and_exposure_warn(self):
         cases = [
             ({"nav": None}, "account_nav_missing"),
             ({"nav": Decimal("-1")}, "account_nav_nonpositive"),
@@ -177,8 +171,8 @@ class FailClosedRulesTest(TestCase):
                 result = self.evaluate(
                     context=self.context(account=self.account(**overrides))
                 )
-                self.assertEqual(result.status, "blocked")
-                self.assertIn(code, result.reason_codes)
+                self.assertEqual(result.status, "executable")
+                self.assertIn(code, result.warning_codes)
 
     def test_cash_fields_are_margin_review_warnings(self):
         cases = [
@@ -193,8 +187,9 @@ class FailClosedRulesTest(TestCase):
                 result = self.evaluate(
                     context=self.context(account=self.account(**overrides))
                 )
-                self.assertEqual(result.status, "executable")
+                self.assertEqual(result.status, "blocked")
                 self.assertIn(code, result.warning_codes)
+                self.assertIn("margin_capacity_exceeded", result.reason_codes)
 
     def test_contract_count_requires_strict_positive_integer(self):
         for count in (True, 0, -1, "1", 1.0):
@@ -359,8 +354,6 @@ class FailClosedRulesTest(TestCase):
         expected = {
             "account_status",
             "account_currency",
-            "account_nav_missing",
-            "account_exposure_missing",
             "option_type",
             "strike",
             "quote_bid",
@@ -372,6 +365,8 @@ class FailClosedRulesTest(TestCase):
         self.assertTrue(expected.issubset(result.reason_codes))
         self.assertIn("account_cash_missing", result.warning_codes)
         self.assertIn("account_reserved_missing", result.warning_codes)
+        self.assertIn("account_nav_missing", result.warning_codes)
+        self.assertIn("account_exposure_missing", result.warning_codes)
         self.assertEqual(len(result.reason_codes), len(set(result.reason_codes)))
 
     def test_non_finite_decimals_fail_closed_without_raising(self):
@@ -414,8 +409,12 @@ class FailClosedRulesTest(TestCase):
                     quote=quote,
                     policy=policy,
                 )
-                self.assertEqual(result.status, "blocked")
-                self.assertIn(code, result.reason_codes)
+                if code == "account_nav_missing":
+                    self.assertEqual(result.status, "executable")
+                    self.assertIn(code, result.warning_codes)
+                else:
+                    self.assertEqual(result.status, "blocked")
+                    self.assertIn(code, result.reason_codes)
 
         probability = self.evaluate(
             quote=self.quote(assignment_probability=Decimal("NaN"))

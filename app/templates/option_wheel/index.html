@@ -44,6 +44,14 @@
             <label><input type="checkbox" name="symbols" value="{{ symbol }}" checked> {{ symbol }}</label>
           {% endfor %}
         </fieldset>
+        <label for="wheel-expiry-weeks">目标到期日（只查询一个周五）</label>
+        <select id="wheel-expiry-weeks" name="expiry_weeks">
+          <option value="0">最近一个未来周五</option>
+          <option value="1">再下一周五</option>
+          <option value="2">第三个未来周五</option>
+          <option value="3">第四个未来周五</option>
+        </select>
+        <p>以纽约日期计算；若该周五没有可用合约，本次任务会明确提示未取得期权链，不改查其他到期日。</p>
         <button type="submit">刷新正式只读分析</button>
         <p>提交后会生成任务记录，页面自动显示结果。系统每批最多处理 3 个标的并恢复临时订阅；选择 9 个标的通常需要 3–9 分钟。离开页面不取消任务，可从下方任务记录找回。</p>
         <noscript><p>建议启用 JavaScript 后再提交，以便在当前页查看等待及异常提示。</p></noscript>
@@ -61,7 +69,7 @@
 
   <section class="option-wheel-section" aria-labelledby="jobs-title">
     <div class="option-wheel-section-heading"><h2 id="jobs-title">最近分析任务</h2><small>任务编号用于找回结果；同一家庭同时只运行一个任务。</small></div>
-    {% for job in recent_jobs %}<p><a href="{% url 'option_wheel:job_detail' job.pk %}">任务 {{ job.pk }}</a> · {{ job.selection.symbols|join:" / " }} · {{ job.created_at|date:"m-d H:i:s T" }} · {{ job.get_status_display }}（记录状态，点击核对最新进度）</p>{% empty %}<p>尚无任务记录。</p>{% endfor %}
+    {% for job in recent_jobs %}<p><a href="{% url 'option_wheel:job_detail' job.pk %}">任务 {{ job.pk }}</a> · {{ job.selection.symbols|join:" / " }}{% if job.selection.target_expiration %} · 到期 {{ job.selection.target_expiration }}{% endif %} · {{ job.created_at|date:"m-d H:i:s T" }} · {{ job.get_status_display }}（记录状态，点击核对最新进度）</p>{% empty %}<p>尚无任务记录。</p>{% endfor %}
   </section>
 
   <section id="recent-analysis" class="option-wheel-section" aria-labelledby="recent-analysis-title">
@@ -135,14 +143,14 @@
       <article><span>每张权利金</span><strong>90–500 USD</strong><small>偏好，不是硬门槛</small></article>
       <article><span>跨财报政策</span><strong>默认不跨</strong><small>不赌财报方向</small></article>
       <article><span>Delta</span><strong>无固定默认值</strong><small>作为风险辅助指标</small></article>
-      <article><span>标的上限</span><strong>≤ 账户总资产</strong><small>按指派后名义敞口计算</small></article>
+      <article><span>Put 容量上限</span><strong>剩余现金 × 2</strong><small>指派金额超过现金只作风险提示</small></article>
       <article><span>保证金</span><strong>人工复核</strong><small>系统不连接券商，不能确认实时购买力</small></article>
     </div>
     {% if policies %}
       <div class="option-wheel-table-wrap">
         <table class="option-wheel-table">
           <thead>
-            <tr><th>标的</th><th>账户</th><th>状态</th><th>DTE 偏好</th><th>权利金偏好</th><th>标的 NAV 上限</th></tr>
+            <tr><th>标的</th><th>账户</th><th>状态</th><th>DTE 偏好</th><th>权利金偏好</th><th>NAV 集中度提示阈值</th></tr>
           </thead>
           <tbody>
             {% for policy in policies %}
@@ -169,7 +177,7 @@
         <span>账户容量</span>
         <h2 id="accounts-title">参与车轮的投资账户</h2>
       </div>
-      <small>账户金额来自已录入的投资组合；券商融资与未录入订单不参与计算</small>
+      <small>两账户均按融资账户的剩余现金 2 倍比较；金额来自投资组合，不代表券商实时购买力</small>
     </div>
     <div class="option-wheel-account-grid">
       {% for card in account_cards %}
@@ -187,7 +195,7 @@
               <div><dt>待结算现金</dt><dd>{% if card.snapshot.unsettled_cash is not None %}{{ card.snapshot.unsettled_cash|floatformat:2 }} {{ card.snapshot.currency }}{% else %}数据不可用{% endif %}</dd></div>
               <div><dt>预留现金</dt><dd>{% if card.snapshot.reserved_cash is not None %}{{ card.snapshot.reserved_cash|floatformat:2 }} {{ card.snapshot.currency }}{% else %}数据不可用{% endif %}</dd></div>
               <div><dt>账户 NAV</dt><dd>{% if card.snapshot.nav is not None %}{{ card.snapshot.nav|floatformat:2 }} {{ card.snapshot.currency }}{% else %}数据不可用{% endif %}</dd></div>
-              <div><dt>券商融资/借贷</dt><dd>{% if card.snapshot.uses_margin is True %}有记录（风险提示）{% elif card.snapshot.uses_margin is False %}记录为无{% else %}投资组合未记录{% endif %}</dd></div>
+              <div><dt>Put 容量上限</dt><dd>{% if card.snapshot.settled_cash is not None and card.snapshot.reserved_cash is not None %}{% if card.snapshot.settled_cash > card.snapshot.reserved_cash %}{{ card.margin_capacity|floatformat:2 }} {{ card.snapshot.currency }}{% else %}0 {{ card.snapshot.currency }}{% endif %}{% else %}数据不可用{% endif %}</dd></div>
               <div><dt>来源时点</dt><dd>{{ card.snapshot.source_as_of|date:"Y-m-d H:i:s T" }}</dd></div>
             </dl>
             <p>数据状态：{{ card.snapshot.get_data_status_display }}；允许最大年龄 {{ card.max_age_minutes }} 分钟。</p>
@@ -211,7 +219,8 @@
                 <dl>
                   <div><dt>已结算 USD 现金</dt><dd>{{ card.preview.evidence.settled_cash|floatformat:2 }} USD</dd></div>
                   <div><dt>现有 Put 占用</dt><dd>{{ card.preview.evidence.reserved_cash|floatformat:2 }} USD</dd></div>
-                  <div><dt>可用于新 Put</dt><dd>{{ card.preview.available_cash|floatformat:2 }} USD</dd></div>
+                  <div><dt>剩余现金</dt><dd>{{ card.preview.available_cash|floatformat:2 }} USD</dd></div>
+                  <div><dt>Put 容量上限（2 倍）</dt><dd>{{ card.preview.margin_capacity|floatformat:2 }} USD</dd></div>
                   <div><dt>账户 NAV</dt><dd>{{ card.preview.evidence.nav|floatformat:2 }} USD</dd></div>
                   <div><dt>持仓项目</dt><dd>{{ card.preview.position_count }} 项</dd></div>
                   <div><dt>现有义务</dt><dd>{{ card.preview.obligation_count }} 项</dd></div>
@@ -223,7 +232,7 @@
                     <input type="hidden" name="action" value="save_capacity">
                     <input type="hidden" name="account_id" value="{{ card.account.pk }}">
                     <button type="submit">保存为正式容量快照</button>
-                    <small>仅按投资组合已录入数据保存期权车轮证据；券商融资和未录入订单无法由系统核实。不会下单，也不会修改投资组合。</small>
+                    <small>仅保存已录入的投资组合证据；融资账户容量按剩余现金的 2 倍用于分析，实际保证金和购买力以券商为准。不会下单或修改投资组合。</small>
                   </form>
                 {% endif %}
               </div>

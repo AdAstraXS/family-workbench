@@ -455,7 +455,7 @@ class WheelModelTest(TestCase):
                 None,
                 "account_snapshot",
             ),
-            (None, {"uses_margin": True}, None, None, "account_snapshot"),
+            (None, {"nav": Decimal("0")}, None, None, "account_snapshot"),
             (None, None, {"data_quality": DataStatus.PARTIAL}, None, "market_snapshot"),
             (None, None, {"market_session": ""}, None, "market_snapshot"),
             (

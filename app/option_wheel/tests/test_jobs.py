@@ -1,4 +1,5 @@
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -63,6 +64,9 @@ class JobTests(TestCase):
         self.assertEqual(first.json()["id"], second.json()["id"])
         self.assertEqual(first.json()["id"], third.json()["id"])
         self.assertEqual(first.json()["status"], "queued")
+        friday = WheelAnalysisJob.objects.get().selection["target_expiration"]
+        self.assertEqual(timezone.datetime.fromisoformat(friday).weekday(), 4)
+        self.assertEqual(first.json()["selection"]["target_expiration"], friday)
         self.assertEqual(WheelAnalysisJob.objects.count(), 1)
         launch.assert_called_once()
         fetch.assert_not_called()
@@ -157,6 +161,20 @@ class JobTests(TestCase):
             self.assertEqual(self.client.post(url, self.payload()).status_code, 400)
         self.assertFalse(WheelAnalysisJob.objects.exists())
 
+    @patch("option_wheel.jobs.launch_job")
+    def test_selected_week_is_frozen_and_invalid_week_rejected(self, launch):
+        url = reverse("option_wheel:refresh_analysis")
+        self.assertEqual(self.client.post(url, {**self.payload(), "expiry_weeks": "9"}).status_code, 400)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(url, {**self.payload(), "expiry_weeks": "2"}, HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 202)
+        target = timezone.datetime.fromisoformat(response.json()["selection"]["target_expiration"]).date()
+        ny_today = timezone.now().astimezone(ZoneInfo("America/New_York")).date()
+        self.assertEqual(target.weekday(), 4)
+        self.assertTrue(14 < (target - ny_today).days <= 21)
+        self.assertEqual(self.client.get(reverse("option_wheel:job_detail", args=[response.json()["id"]])).status_code, 200)
+        launch.assert_called_once()
+
     @patch("option_wheel.jobs.subprocess.Popen", side_effect=OSError("secret"))
     def test_launcher_failure_is_visible_without_provider_details(self, popen):
         job = self.create_job()
@@ -174,6 +192,8 @@ class JobTests(TestCase):
         self.assertNotIn("--calls-for=TSLA", command)
         self.assertEqual(fetch_probe(["TSLA"], {"TSLA"}), result["symbols"])
         self.assertIn("--calls-for=TSLA", run.call_args.args[0])
+        self.assertEqual(fetch_probe(["TSLA"], target_expiration="2026-09-25"), result["symbols"])
+        self.assertIn("--expiration=2026-09-25", run.call_args.args[0])
         result["symbols"] = []
         run.return_value.stdout = "WHEEL_LIVE:" + json.dumps(result)
         with self.assertRaises(WheelAnalysisError): fetch_probe(["TSLA"])
@@ -220,7 +240,7 @@ class JobTests(TestCase):
             )
 
     def test_chinese_reason_and_model_probability_disclaimer(self):
-        self.assertIn("券商端复核保证金", wheel_reason("cash_insufficient"))
+        self.assertIn("保证金与流动性", wheel_reason("cash_insufficient"))
         self.assertIn("备兑", wheel_reason("covered_shares_insufficient"))
         self.assertIn("报价", wheel_reasons(["quote_age_expired"]))
         response = self.client.get(reverse("option_wheel:index"))

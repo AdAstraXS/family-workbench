@@ -1117,13 +1117,6 @@ class WheelDecision(AppendOnlyEvidenceMixin, TimestampedModel):
                 or not _finite_decimal(account_snapshot.nav)
                 or account_snapshot.nav <= 0
                 or not _finite_decimal(account_snapshot.reserved_cash)
-                or account_snapshot.reserved_cash
-                > account_snapshot.settled_cash
-                or account_snapshot.uses_margin is not False
-                or not _finite_decimal(
-                    account_snapshot.margin_loan_balance
-                )
-                or account_snapshot.margin_loan_balance != 0
                 or not isinstance(account_snapshot.positions_summary, dict)
                 or not isinstance(account_snapshot.open_obligations, dict)
                 or policy is None
@@ -1134,7 +1127,7 @@ class WheelDecision(AppendOnlyEvidenceMixin, TimestampedModel):
                 )
             ):
                 errors["account_snapshot"] = (
-                    "可执行决策要求完整 USD 现金证据且禁止融资。"
+                    "可执行决策要求完整 USD 账户与持仓证据。"
                 )
             market_snapshot = (
                 self.market_snapshot if self.market_snapshot_id else None
@@ -1489,16 +1482,14 @@ class WheelCandidate(AppendOnlyEvidenceMixin, TimestampedModel):
                     and _finite_decimal(account_snapshot.settled_cash)
                     and _finite_decimal(account_snapshot.reserved_cash)
                     and _finite_decimal(account_snapshot.nav)
-                    and self.required_cash
-                    <= account_snapshot.settled_cash
-                    - account_snapshot.reserved_cash
-                    and existing_exposure + self.required_cash
-                    <= account_snapshot.nav
-                    * self.decision.policy.max_underlying_nav_ratio
+                    and self.required_cash <= max(
+                        account_snapshot.settled_cash - account_snapshot.reserved_cash,
+                        Decimal("0"),
+                    ) * 2
                 )
                 if not capacity_ok:
                     errors["required_cash"] = (
-                        "可执行候选必须满足未占用现金和 NAV 暴露上限。"
+                        "可执行候选必须满足剩余现金两倍的容量上限。"
                     )
         if errors:
             raise ValidationError(errors)

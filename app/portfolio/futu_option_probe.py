@@ -1047,6 +1047,7 @@ def probe_symbol(
     monotonic=None,
     sleeper=None,
     include_covered_call=True,
+    target_expiration=None,
 ):
     """Probe one underlying while isolating provider failures from other symbols."""
     ret_ok = getattr(futu_module, "RET_OK", 0)
@@ -1131,13 +1132,26 @@ def probe_symbol(
                         "strike_time": expiration,
                     }
                 )
-            elif detail["dte"] < 0:
+            elif detail["dte"] <= 0:
                 detail["status"] = "expired"
                 rejected_expirations.append(detail)
             else:
                 eligible_details.append(detail)
 
-        expiration_details = eligible_details[:max_expirations]
+        if config.get("profile") == "m1-gate":
+            # One weekly expiration per underlying: this Friday if it is
+            # still ahead, otherwise the next available Friday.  A single
+            # date keeps the live subscription load predictable.
+            eligible_details = [
+                detail for detail in eligible_details
+                if date.fromisoformat(detail["date"]).weekday() == 4
+            ]
+            if target_expiration is not None:
+                eligible_details = [
+                    detail for detail in eligible_details
+                    if detail["date"] == target_expiration
+                ]
+        expiration_details = eligible_details[:1 if config.get("profile") == "m1-gate" else max_expirations]
         expirations = [
             detail["strike_time"] for detail in expiration_details
         ]
@@ -1226,11 +1240,7 @@ def probe_symbol(
             partial = True
 
         remaining = list(put_rows)
-        put_limit = (
-            1
-            if config.get("profile") == "m1-gate"
-            else max_contracts_per_expiration
-        )
+        put_limit = max_contracts_per_expiration
         for _ in range(put_limit):
             selected, metadata = select_representative_put(remaining, spot)
             if selected is None:
@@ -1756,6 +1766,7 @@ def run_probe(
     monotonic=None,
     sleeper=None,
     covered_call_symbols=None,
+    target_expiration=None,
 ):
     """Run one isolated capability probe and return a JSON-safe result."""
     probe_now = datetime.now(timezone.utc)
@@ -1815,7 +1826,7 @@ def run_probe(
             allow_partial,
         )
         worst_case_candidates = len(normalized_symbols) * (
-            max_expirations + 1
+            max_contracts_per_expiration + 1
             if config["profile"] == "m1-gate"
             else max_expirations * max_contracts_per_expiration
         )
@@ -2037,6 +2048,7 @@ def run_probe(
                         market_state=market_state,
                         event_calendar_cache=event_calendar_cache,
                         subscription_started_at=subscription_started_at,
+                        target_expiration=target_expiration,
                         monotonic=monotonic,
                         sleeper=sleeper,
                         include_covered_call=(symbol in normalized_covered_call_symbols),

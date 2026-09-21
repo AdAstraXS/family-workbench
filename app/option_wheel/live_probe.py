@@ -18,10 +18,14 @@ if __name__ == "__main__":
                 for value in arguments.pop(0).split("=", 1)[1].split(",")
                 if value
             }
+        target_expiration = None
+        if arguments and arguments[0].startswith("--expiration="):
+            target_expiration = arguments.pop(0).split("=", 1)[1]
         result = run_probe(
-            arguments, profile="m1-gate", max_expirations=3,
-            max_contracts_per_expiration=1,
+            arguments, profile="m1-gate", max_expirations=1,
+            max_contracts_per_expiration=3,
             covered_call_symbols=calls_for,
+            target_expiration=target_expiration,
         )
         # run_probe closes the SDK context and verifies subscriptions before returning.
         print("\nWHEEL_LIVE:" + json.dumps(result, ensure_ascii=True), flush=True)

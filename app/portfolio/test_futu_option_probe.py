@@ -31,9 +31,10 @@ from portfolio.futu_option_probe import (
 )
 
 
-# Keep the dynamic-flow fixture ahead of the wall clock. A fixed 2026-09-04
-# silently stopped exercising subscription and analytics once that date arrived.
-DYNAMIC_EXPIRY = (datetime.now(timezone.utc).date() + timedelta(days=7)).isoformat()
+# Keep the dynamic-flow fixture at the next future Friday so weekly analysis
+# exercises subscription and analytics regardless of the current weekday.
+_today = datetime.now(timezone.utc).date()
+DYNAMIC_EXPIRY = (_today + timedelta(days=(4 - _today.weekday()) % 7 or 7)).isoformat()
 from portfolio.management.commands.probe_futu_option_capabilities import (
     format_json,
     format_table,
@@ -2254,11 +2255,11 @@ class FinalFlowGuardTest(SimpleTestCase):
         self.assertTrue(context.closed)
         self.assertTrue(lock.released)
 
-    def test_live_probe_fetches_one_range_for_nearest_three_expirations(self):
-        probe_date = datetime.now(timezone.utc).date()
+    def test_live_probe_queries_only_selected_friday(self):
+        probe_date = datetime(2026, 9, 21, tzinfo=timezone.utc).date()
         expirations = [
             (probe_date + timedelta(days=offset)).isoformat()
-            for offset in (0, 3, 10, 17)
+            for offset in (0, 4, 11, 18)
         ]
 
         class RangeContext(DynamicContext):
@@ -2303,6 +2304,17 @@ class FinalFlowGuardTest(SimpleTestCase):
                             },
                         ]
                     )
+                    if expiration == expirations[2]:
+                        for strike in (180, 185):
+                            rows.append({
+                                "code": f"{symbol}-{expiration}-P{strike}",
+                                "option_type": "PUT", "strike_price": strike,
+                                "option_standard_type": "STANDARD",
+                                "strike_time": expiration,
+                                "expiration_date": expiration,
+                                "lot_size": 100, "stock_owner": symbol,
+                                "option_settlement_mode": "PHYSICAL",
+                            })
                 return 0, rows
 
         context = RangeContext()
@@ -2312,13 +2324,14 @@ class FinalFlowGuardTest(SimpleTestCase):
             FakeFutu(),
             "US.TSLA",
             config,
-            3,
             1,
+            3,
             set(),
             [],
             probe_dt=datetime.combine(
                 probe_date, datetime.min.time(), tzinfo=timezone.utc
             ),
+            target_expiration=expirations[2],
             sleeper=lambda seconds: None,
         )
 
@@ -2326,10 +2339,10 @@ class FinalFlowGuardTest(SimpleTestCase):
             call for call in context.calls if call[0] == "get_option_chain"
         ]
         self.assertEqual(len(chain_calls), 1)
-        self.assertEqual(chain_calls[0][2:4], (expirations[0], expirations[2]))
+        self.assertEqual(chain_calls[0][2:4], (expirations[2], expirations[2]))
         self.assertEqual(
             [item["strike_time"] for item in result["expirations"]],
-            expirations[:3],
+            [expirations[2]],
         )
         representatives = result["representative_contracts"]
         self.assertEqual(
@@ -2341,7 +2354,7 @@ class FinalFlowGuardTest(SimpleTestCase):
             1,
         )
         self.assertNotIn(
-            expirations[3],
+            expirations[0],
             {item["strike_time"] for item in representatives},
         )
 
@@ -2357,6 +2370,24 @@ class FinalFlowGuardTest(SimpleTestCase):
         self.assertEqual(result["status"], PARTIAL)
         self.assertEqual(len(result["symbols"]), 13)
         self.assertTrue(context.closed)
+
+    def test_selected_friday_missing_does_not_fall_back(self):
+        class NoSelectedFriday(DynamicContext):
+            def get_option_expiration_date(self, symbol):
+                self.calls.append(("get_option_expiration_date", symbol))
+                return 0, [{"strike_time": "2026-09-25"}]
+
+        context = NoSelectedFriday()
+        result = probe_symbol(
+            context, FakeFutu(), "US.TSLA",
+            resolve_profile("m1-gate", False, False, False, False, False),
+            1, 3, set(), [],
+            probe_dt=datetime(2026, 9, 21, tzinfo=timezone.utc),
+            target_expiration="2026-10-02",
+        )
+        self.assertEqual(result["expirations"], [])
+        self.assertIn("expiration_date:no_eligible_expiration", result["errors"])
+        self.assertNotIn("get_option_chain", [call[0] for call in context.calls])
 
     def test_expired_and_unparseable_expirations_are_not_probed(self):
         class MixedExpirationContext(DynamicContext):

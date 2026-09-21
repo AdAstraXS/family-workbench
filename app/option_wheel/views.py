@@ -1,5 +1,6 @@
 from uuid import UUID, uuid4
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from django.conf import settings
@@ -94,7 +95,6 @@ def _snapshot_is_ready(snapshot, *, max_age_minutes, now, stale_reasons=None):
         snapshot.currency != "USD"
         or not snapshot.source_reference.strip()
         or snapshot.nav <= 0
-        or snapshot.reserved_cash > snapshot.settled_cash
         or not isinstance(snapshot.positions_summary, dict)
         or not isinstance(snapshot.open_obligations, dict)
     ):
@@ -262,6 +262,11 @@ def index(request):
                 "ready": ready,
                 "state": state,
                 "max_age_minutes": max_age_minutes,
+                "margin_capacity": (
+                    max(snapshot.settled_cash - snapshot.reserved_cash, Decimal("0")) * 2
+                    if snapshot and snapshot.settled_cash is not None and snapshot.reserved_cash is not None
+                    else None
+                ),
                 "stale_reasons": stale_reasons,
                 "preview": None,
                 "preview_error": "",
@@ -297,7 +302,8 @@ def index(request):
         else:
             target_card["preview"] = {
                 "evidence": evidence,
-                "available_cash": evidence.settled_cash - evidence.reserved_cash,
+                "available_cash": max(evidence.settled_cash - evidence.reserved_cash, Decimal("0")),
+                "margin_capacity": max(evidence.settled_cash - evidence.reserved_cash, Decimal("0")) * 2,
                 "position_count": evidence.positions_summary.get("count", 0),
                 "obligation_count": evidence.open_obligations.get("count", 0),
             }
@@ -469,6 +475,17 @@ def refresh_analysis(request):
     }
     if not account_ids or not symbols:
         return HttpResponseBadRequest("至少选择一个账户和一个标的。")
+    try:
+        expiry_weeks = int(request.POST.get("expiry_weeks", "0"))
+    except ValueError:
+        return HttpResponseBadRequest("目标到期周无效。")
+    if expiry_weeks not in range(4):
+        return HttpResponseBadRequest("目标到期周无效。")
+    ny_today = timezone.now().astimezone(ZoneInfo("America/New_York")).date()
+    days_to_friday = (4 - ny_today.weekday()) % 7 or 7
+    target_expiration = (
+        ny_today + timedelta(days=days_to_friday + 7 * expiry_weeks)
+    ).isoformat()
 
     accounts = list(
         InvestmentAccount.objects.filter(
@@ -502,7 +519,7 @@ def refresh_analysis(request):
     except (signing.BadSignature, KeyError, TypeError, ValueError):
         return HttpResponseBadRequest("提交凭证无效或过期，请重新打开页面。")
     try:
-        job = enqueue(family, request.user, key, {"account_ids": sorted(account_ids), "symbols": sorted(symbols)})
+        job = enqueue(family, request.user, key, {"account_ids": sorted(account_ids), "symbols": sorted(symbols), "target_expiration": target_expiration})
     except WheelAnalysisError as exc:
         return HttpResponseBadRequest(str(exc))
     job.refresh_from_db()

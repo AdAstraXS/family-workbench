@@ -243,8 +243,9 @@ def build_portfolio_capacity(
             }
         )
     reserved_cash = _money(reserved_cash)
-    if reserved_cash > settled_cash:
-        raise CapacityImportError("现有 Sell Put 的全额现金占用超过已结算 USD 现金。")
+    # Margin accounts can have existing Put obligations above cash.  Preserve
+    # the full recorded obligation and let the analysis show remaining
+    # capacity (zero when the recorded cash is already fully occupied).
 
     positions_summary = {
         "source": "portfolio_current_valuation",
