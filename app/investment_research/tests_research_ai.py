@@ -17,7 +17,7 @@ from portfolio.models import Security
 
 from .models import OfficialResearchContentVersion, OfficialResearchDocument, ResearchThesisRevision
 from .research_ai import ResearchAiError, available_research_providers, generate_research_draft
-from .services import create_exploration
+from .services import create_exploration, save_first_thesis
 
 
 class ResearchAiTests(TestCase):
@@ -95,6 +95,25 @@ class ResearchAiTests(TestCase):
         page = self.client.get(reverse("investment_research:draft_detail", args=[self.dossier.pk, analysis.pk]))
         self.assertContains(page, "查看原文 E1")
         self.assertContains(page, "仅自己可见")
+
+    def test_exploration_draft_keeps_its_original_context_after_first_thesis(self):
+        analysis = self.generate()
+        save_first_thesis(
+            actor=self.actor, dossier_id=self.dossier.pk,
+            thesis="后来形成的正式判断", pillars=[], questions=[],
+        )
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("investment_research:draft_detail", args=[self.dossier.pk, analysis.pk]))
+        self.assertContains(page, "探索阶段，尚无本人正式判断")
+        self.assertContains(page, "可能有利的证据")
+        self.assertContains(page, "可能不利的证据")
+        self.assertContains(page, "第一版判断建议草稿")
+        self.assertNotContains(page, "支持当前判断的证据")
+        self.assertContains(
+            page, "正文获取于 " + timezone.localtime(self.version.fetched_at).strftime("%Y-%m-%d %H:%M"),
+        )
+        detail = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
+        self.assertContains(detail, "最初记录（不会随当前判断修改）")
 
     def test_one_time_consent_and_provider_opt_in_are_required(self):
         with self.assertRaises(ResearchAiError):

@@ -16,6 +16,7 @@ from django.db.models import F
 from django.http import Http404, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
@@ -499,6 +500,8 @@ def draft_detail(request, pk, request_pk):
     )
     if (analysis.scope or {}).get("dossier_id") != dossier.pk:
         raise Http404
+    fetched_at_raw = (analysis.scope or {}).get("content_fetched_at")
+    fetched_at = parse_datetime(fetched_at_raw) if isinstance(fetched_at_raw, str) else None
     result = analysis.result if analysis.status == AiAnalysisRequest.STATUS_SUCCESS else None
     rendered = None
     if result:
@@ -515,4 +518,5 @@ def draft_detail(request, pk, request_pk):
                     )
     return render(request, "investment_research/draft_detail.html", {
         "dossier": dossier, "analysis": analysis, "draft": rendered,
+        "content_fetched_at": fetched_at,
     })

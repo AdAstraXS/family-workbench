@@ -40,7 +40,7 @@
   </section>
 
   {% if dossier.initial_thesis %}<details class="research-initial">
-    <summary>原始持有理由（创建后不再修改）</summary>
+    <summary>最初记录（不会随当前判断修改）</summary>
     <p>{{ dossier.initial_thesis|linebreaksbr }}</p>
   </details>{% endif %}
 
