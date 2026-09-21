@@ -1381,6 +1381,17 @@ class SecClientTickerTests(SimpleTestCase):
         self.assertEqual(len(opener.requests), 1)
         self.assertNotIn(body.decode("ascii", "replace"), str(ctx.exception))
 
+    def test_403_tells_member_to_pause_without_retry_or_response_body(self):
+        body = b"SEC.gov | Request Rate Threshold Exceeded"
+        opener = _MockOpener([_http_error(403, body)])
+        client, _ = _make_client(opener)
+        with self.assertRaises(SecHTTPError) as ctx:
+            client.resolve_cik("MSFT")
+        self.assertEqual(ctx.exception.status, 403)
+        self.assertIn("暂缓重试", str(ctx.exception))
+        self.assertNotIn(body.decode(), str(ctx.exception))
+        self.assertEqual(len(opener.requests), 1)
+
     def test_rate_limit_throttles_within_process(self):
         clock = _FakeClock()
         sleeper = _Sleeper(clock)

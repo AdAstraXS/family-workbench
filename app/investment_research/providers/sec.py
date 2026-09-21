@@ -290,8 +290,12 @@ class SecClient:
                 if exc.code in RETRY_STATUSES and attempt <= self.max_retries:
                     self._sleeper(self.backoff_seconds * attempt)
                     continue
+                message = (
+                    "SEC 返回 HTTP 403；可能是访问限流或出口受限，请暂缓重试并检查 SEC 访问状态。"
+                    if exc.code == 403 else f"SEC 返回 HTTP {exc.code}"
+                )
                 raise SecHTTPError(
-                    f"SEC 返回 HTTP {exc.code}", status=exc.code
+                    message, status=exc.code
                 ) from exc
             except TimeoutError as exc:
                 raise SecTimeoutError(f"SEC 请求超时（{self.timeout}s）。") from exc
