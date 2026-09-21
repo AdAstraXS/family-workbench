@@ -13,7 +13,8 @@
   .research-current,.research-revision,.research-form { background:#fff; border:1px solid #e2e6ef; border-radius:12px; padding:24px; margin:20px 0; }
   .research-form { max-width:800px; }
   .research-form label { display:block; margin-bottom:8px; }
-  .research-form input:not([type=hidden]),.research-form textarea,.research-form select { box-sizing:border-box; width:100%; max-width:100%; }
+  .research-form input:not([type=hidden]):not([type=checkbox]):not([type=radio]),.research-form textarea,.research-form select { box-sizing:border-box; width:100%; max-width:100%; }
+  .research-form input[type=checkbox],.research-form input[type=radio] { width:auto; margin-right:8px; }
   .research-form textarea { resize:vertical; }
   .research-form textarea::placeholder { color:#8a94a6; opacity:1; }
   .research-current p,.research-revision p,.research-current li { line-height:1.75; }
