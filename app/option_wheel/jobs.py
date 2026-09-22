@@ -228,7 +228,8 @@ def run_job(job_id):
                 validate_selection(job.family, job.selection)
                 job.status = "saved"
                 job.screening_results = results
-                job.message = (f'Futu {report["reference_date"]} 收盘参考：已列出 {len(results)} 张合约。'
+                sampled = sum(item.get("sampled_count", 0) for item in report["symbols"])
+                job.message = (f'Futu {report["reference_date"]} 收盘参考：抽样 {sampled} 张合约，列出 {len(results)} 张。'
                                + ("；" + "；".join(issues) if issues else ""))
                 job.finished_at = timezone.now()
                 job.save(update_fields=["status", "screening_results", "message", "finished_at", "updated_at"])
@@ -254,7 +255,8 @@ def run_job(job_id):
                     raise WheelAnalysisError("申请人的管理员权限已失效，未保存分析。")
                 job.status = "saved"
                 job.screening_results = results
-                job.message = f"已比较 {len(results)} 张合约；报价来自 Futu，临时订阅已恢复。"
+                sampled = sum(len(item.get("representative_contracts", [])) for item in rows)
+                job.message = f"Futu 抽样 {sampled} 张合约，列出 {len(results)} 张；临时订阅已恢复。"
                 if not results:
                     job.message += " 所选到期日没有取得可用 Bid；可能是非交易时段、期权链为空或报价缺失。可选择上一交易日收盘参考分析。"
                 job.finished_at = timezone.now()
