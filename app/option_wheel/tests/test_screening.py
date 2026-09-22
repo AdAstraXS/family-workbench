@@ -13,7 +13,7 @@ from django.utils import timezone
 from family_core.models import ExchangeRate, Family, FamilyMember
 from ledger.models import BankAccount
 from portfolio.models import InvestmentAccount, PortfolioSnapshot
-from option_wheel.jobs import run_job
+from option_wheel.jobs import job_payload, run_job
 from option_wheel.models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelDecision, WheelWatchItem
 from option_wheel.watch_refresh import refresh_watch_events
 
@@ -137,6 +137,9 @@ class ScreeningTests(TestCase):
             family=self.family, requested_by=self.user, selection=selection,
             expires_at=timezone.now() + timedelta(minutes=12),
         )
+        job.status = "running"
+        self.assertIn("Futu 历史收盘数据", job_payload(job)["message"])
+        job.status = "queued"
         reference = timezone.now().astimezone(ZoneInfo("America/New_York")).date() - timedelta(days=1)
         fetch.return_value = {"reference_date": str(reference), "symbols": [{
             "symbol": "INTC", "issues": [], "contracts": [{"code": "US.INTC-TEST", "strike": "30",

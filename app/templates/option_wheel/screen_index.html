@@ -17,4 +17,4 @@
   <section class="wheel-section" aria-labelledby="wheel-history-title"><div class="wheel-heading"><div><small>05 · 历史分析</small><h2 id="wheel-history-title">过去的分析</h2><p>按日期和次数找回冻结结果；历史数字不会被新行情覆盖。</p></div></div><div class="wheel-panel wheel-history">{% for job in jobs %}<a href="{% url 'option_wheel:job_detail' job.pk %}">{{ job.created_at|date:"Y-m-d" }} · 第 {{ job.day_number }} 次分析 <span>{{ job.get_status_display }}　↗</span></a>{% empty %}<p class="wheel-empty">尚无分析记录。</p>{% endfor %}</div></section>
 </main>
 {% endblock %}
-{% block scripts %}<script src="{% static 'js/option_wheel_jobs.js' %}?v=screen2" defer></script><script src="{% static 'js/option_wheel_screen.js' %}?v=1" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'js/option_wheel_jobs.js' %}?v=screen3" defer></script><script src="{% static 'js/option_wheel_screen.js' %}?v=1" defer></script>{% endblock %}

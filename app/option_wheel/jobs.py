@@ -294,12 +294,15 @@ def run_job(job_id):
 def job_payload(job):
     status = job.status
     message = job.message
+    close_mode = job.selection.get("mode") == "screening_close_v2"
     if status in ACTIVE and job.expires_at <= timezone.now():
-        status, message = "interrupted", INTERRUPTED
+        status, message = "interrupted", (
+            "运行超时或中断，未取得完成确认。不会自动重试。" if close_mode else INTERRUPTED
+        )
     return {
         "kind": "option-wheel-job-v1", "id": str(job.pk), "status": status,
         "label": dict(WheelAnalysisJob._meta.get_field("status").choices).get(status, status),
-        "message": "当前任务：" + " / ".join(job.selection.get("account_names", []) + job.selection.get("symbols", [])) + ("；目标到期日 " + job.selection["target_expiration"] if job.selection.get("target_expiration") else "") + "。" + (message or ("正在查询行情及核对订阅清理，请勿重复提交。" if status == "running" else "任务已受理，等待分析进程启动。")),
+        "message": "当前任务：" + " / ".join(job.selection.get("account_names", []) + job.selection.get("symbols", [])) + ("；目标到期日 " + job.selection["target_expiration"] if job.selection.get("target_expiration") else "") + "。" + (message or (("正在查询 Futu 历史收盘数据，请勿重复提交。" if close_mode else "正在查询行情及核对订阅清理，请勿重复提交。") if status == "running" else "任务已受理，等待分析进程启动。")),
         "selection": job.selection, "created_at": job.created_at.isoformat(),
         "status_url": reverse("option_wheel:job_status", args=[job.pk]),
         "detail_url": reverse("option_wheel:job_detail", args=[job.pk]),

@@ -34,7 +34,8 @@
   }
   function display(job) {
     feedback.hidden = false;
-    status.textContent = labels[job.status];
+    status.textContent = job.status === 'running' && job.selection?.mode === 'screening_close_v2'
+      ? '收盘数据查询中' : labels[job.status];
     detail.textContent = job.message;
     elapsed.textContent = `任务 ${job.id} · 提交时间 ${new Date(job.created_at).toLocaleString()}`;
     let results = document.getElementById('wheel-job-results');
