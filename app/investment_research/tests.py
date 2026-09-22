@@ -1201,8 +1201,9 @@ class _Sleeper:
 
 
 class _FakeResponse:
-    def __init__(self, body):
+    def __init__(self, body, headers=None):
         self._body = body
+        self.headers = headers or {}
 
     def read(self, size=-1):
         if size is None or size < 0:
@@ -1233,6 +1234,8 @@ class _MockOpener:
         result = self.results.pop(0)
         if isinstance(result, Exception):
             raise result
+        if isinstance(result, tuple):
+            return _FakeResponse(*result)
         return _FakeResponse(result)
 
 
@@ -1319,7 +1322,41 @@ class SecClientTickerTests(SimpleTestCase):
         # urllib 不同版本对头名大小写处理不一，按不区分大小写断言
         ua = {key.lower(): value for key, value in request.headers.items()}
         self.assertEqual(ua.get("user-agent"), "my-agent/2.0")
+        self.assertEqual(ua.get("accept-encoding"), "gzip, deflate")
         self.assertEqual(timeout, 2.0)
+
+    def test_compressed_json_and_html_are_decoded_with_size_limit(self):
+        import gzip
+        import zlib
+
+        for encoding, compress in (("gzip", gzip.compress), ("deflate", zlib.compress)):
+            with self.subTest(encoding=encoding):
+                opener = _MockOpener([(compress(TICKERS_PAYLOAD), {"Content-Encoding": encoding})])
+                client, _ = _make_client(opener)
+                self.assertEqual(client.resolve_cik("MSFT"), "0000789019")
+
+                html = b"<html><body>Annual report</body></html>"
+                opener = _MockOpener([(compress(html), {"Content-Encoding": encoding})])
+                client, _ = _make_client(opener)
+                self.assertEqual(
+                    client.get_document_html(
+                        "https://www.sec.gov/Archives/edgar/data/789019/000078901925000011/report.htm",
+                        max_bytes=4096,
+                    ), html,
+                )
+
+                opener = _MockOpener([(compress(b"x" * 5000), {"Content-Encoding": encoding})])
+                client, _ = _make_client(opener)
+                with self.assertRaises(SecResponseTooLarge):
+                    client.get_json("https://data.sec.gov/submissions/CIK0000789019.json")
+
+    def test_broken_compressed_response_is_rejected(self):
+        for encoding in ("gzip", "deflate"):
+            with self.subTest(encoding=encoding):
+                opener = _MockOpener([(b"not compressed", {"Content-Encoding": encoding})])
+                client, _ = _make_client(opener)
+                with self.assertRaises(SecClientError):
+                    client.get_json("https://data.sec.gov/submissions/CIK0000789019.json")
 
     def test_empty_user_agent_raises_before_request(self):
         opener = _MockOpener([TICKERS_PAYLOAD])
@@ -1337,6 +1374,12 @@ class SecClientTickerTests(SimpleTestCase):
 
     def test_timeout_raises_sec_timeout_error(self):
         opener = _MockOpener([TimeoutError()])
+        client, _ = _make_client(opener)
+        with self.assertRaises(SecTimeoutError):
+            client.get_json("https://data.sec.gov/submissions/CIK0000789019.json")
+
+    def test_url_error_timeout_raises_sec_timeout_error(self):
+        opener = _MockOpener([urllib.error.URLError(TimeoutError("timed out"))])
         client, _ = _make_client(opener)
         with self.assertRaises(SecTimeoutError):
             client.get_json("https://data.sec.gov/submissions/CIK0000789019.json")

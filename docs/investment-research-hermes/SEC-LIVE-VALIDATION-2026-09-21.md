@@ -25,3 +25,11 @@
 冷却后仍为 403。用户随后明确同意向 webmaster@sec.gov 发送排查邮件并披露 Windows 与 NAS 两条公网出口 IP；邮件已从用户 Gmail 发出，等待 SEC 回复。不要改用伪装身份或绕过规则。该阻断同时影响新标的 CIK 解析和 Archives 正文获取；不能通过“已知 CIK 可读 submissions”推断整条链路可用。在具备正常官方访问的受控网络环境中，用已配置的合规 User-Agent、低于项目 5 次/秒上限的速率重试；随后各选 10-K、10-Q、8-K，检查正文长度、关键章节/表格可读性、官方 URL、版本哈希和引用回跳。桌面及窄屏的离线样例页面验收已另行完成，见 `UI-ACCEPTANCE-2026-09-21.md`；这不能代替真实来源验收。生产试运行前另行核对模型数据用途和费用上限。
 
 注意：SEC 官方说明 submissions 主 JSON 至少包含近一年或最近 1,000 份申报；更早历史可能位于附加 JSON。当前项目只处理主 JSON 的 `filings.recent`，因此“官方资料列表”不等于完整历史申报档案。参考：https://www.sec.gov/search-filings/edgar-application-programming-interfaces
+
+## 2026-09-22：SEC Web Group 回复后的核对
+
+SEC Web Group 回复称，自动化访问上限是同一网络所有机器合计每秒 10 次，请求必须包含明确的 `User-Agent`、`Accept-Encoding: gzip, deflate`，以及与请求目标一致的 `Host`；不合规或未分类的自动化工具可能被拦截。回复没有确认本项目的具体拦截原因，也不提供定制脚本调试支持。
+
+代码核对发现 `SecClient` 仅显式发送 `User-Agent`，遗漏 `Accept-Encoding`。隔离分支现已补发压缩声明，按响应头解压 gzip/deflate，并在压缩体及解压后都执行大小限制；HTTPS 客户端按 `www.sec.gov` 或 `data.sec.gov` 的请求目标生成对应 `Host`。默认速率仍为单进程每秒 2 次，上限配置为 5 次；同一进程共享节流不能保证多进程、多设备或整个出口的聚合速率，因此生产调度仍须避免并发 SEC 任务。
+
+修正后只从本地 Docker 用实名联系信息、每秒 1 次配置、零重试尝试了一次 `www.sec.gov/files/company_tickers.json`；连接在 10 秒后超时，没有收到 HTTP 状态，未继续请求。离线测试可验证请求与解压逻辑，但真实访问恢复和 10-K/10-Q/8-K 正文质量仍未验收。后续应先核查出口连通性及是否有共享流量，再用少量请求复测，不因超时或 403 自动反复重试。

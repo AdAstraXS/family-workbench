@@ -7,11 +7,14 @@
 - 429/503 做有限次数线性退避重试，其他 HTTP 错误不盲目重试；
 - 响应体超过上限抛错，错误信息不得包含完整响应正文。
 """
+import gzip
+import io
 import json
 import threading
 import time
 import urllib.error
 import urllib.request
+import zlib
 from datetime import datetime
 from urllib.parse import unquote, urlsplit
 
@@ -62,6 +65,10 @@ class SecTimeoutError(SecClientError):
 
 class SecResponseTooLarge(SecClientError):
     """响应体超过大小上限。"""
+
+
+class SecEncodingError(SecClientError):
+    """SEC 响应的压缩格式不受支持或内容损坏。"""
 
 
 class SecTickerNotFoundError(SecClientError):
@@ -117,6 +124,34 @@ def _validate_non_negative_number(value, label):
         raise SecConfigError(f"{label} 应为数值：{value!r}")
     if value < 0:
         raise SecConfigError(f"{label} 不应为负，当前为 {value!r}。")
+
+
+def _decode_response(body, encoding, limit):
+    encoding = (encoding or "identity").strip().lower()
+    if encoding in ("identity", ""):
+        return body
+    try:
+        if encoding == "gzip":
+            with gzip.GzipFile(fileobj=io.BytesIO(body)) as stream:
+                decoded = stream.read(limit + 1)
+        elif encoding == "deflate":
+            try:
+                stream = zlib.decompressobj()
+                decoded = stream.decompress(body, limit + 1)
+            except zlib.error:
+                stream = zlib.decompressobj(-zlib.MAX_WBITS)
+                decoded = stream.decompress(body, limit + 1)
+            if len(decoded) <= limit:
+                decoded += stream.flush(limit + 1 - len(decoded))
+            if len(decoded) <= limit and not stream.eof:
+                raise SecEncodingError("SEC 压缩响应不完整。")
+        else:
+            raise SecEncodingError("SEC 返回了不支持的压缩格式。")
+    except (OSError, EOFError, zlib.error) as exc:
+        raise SecEncodingError("SEC 压缩响应无法解码。") from exc
+    if len(decoded) > limit:
+        raise SecResponseTooLarge(f"SEC 解压后响应超过 {limit} 字节上限。")
+    return decoded
 
 
 def _pad_cik(cik):
@@ -295,7 +330,9 @@ class SecClient:
         _validate_sec_request_url(url, archives_only=archives_only)
         limit = self.max_response_bytes if max_bytes is None else max_bytes
         _validate_positive_number(limit, "max_bytes")
-        request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
+        request = urllib.request.Request(
+            url, headers={"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"},
+        )
         attempt = 0
         while True:
             attempt += 1
@@ -316,6 +353,8 @@ class SecClient:
             except TimeoutError as exc:
                 raise SecTimeoutError(f"SEC 请求超时（{self.timeout}s）。") from exc
             except urllib.error.URLError as exc:
+                if isinstance(exc.reason, TimeoutError):
+                    raise SecTimeoutError(f"SEC 请求超时（{self.timeout}s）。") from exc
                 raise SecNetworkError(f"SEC 网络错误：{exc.reason}") from exc
             except OSError as exc:
                 # ConnectionResetError 等底层 OSError 统一归为网络错误，不泄漏原文
@@ -327,11 +366,13 @@ class SecClient:
                     if archives_only and final_url != url:
                         raise SecDocumentUrlError("SEC 正文最终链接与所选文件不同。")
                 body = response.read(limit + 1)
+                headers = getattr(response, "headers", None)
+                encoding = headers.get("Content-Encoding") if headers is not None else None
             if len(body) > limit:
                 raise SecResponseTooLarge(
                     f"SEC 响应超过 {limit} 字节上限。"
                 )
-            return body
+            return _decode_response(body, encoding, limit)
 
     def get_document_html(self, url, *, max_bytes):
         """仅获取已校验的 SEC Archives 主 HTML；不跟随站外跳转。"""
