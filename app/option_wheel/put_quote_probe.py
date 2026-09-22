@@ -28,11 +28,17 @@ def amount(value):
 
 
 def quote_code(contract):
-    code = contract.provider_contract_code or contract.security.symbol
-    code = code.strip().upper()
-    if re.fullmatch(r"[A-Z0-9]+", code):
-        code = "US." + code
-    return code if CODE.fullmatch(code) else None
+    if contract.is_adjusted or contract.multiplier != 100 or contract.underlying.market != "US":
+        return None
+    if contract.provider == "futu" and contract.provider_contract_code:
+        code = contract.provider_contract_code.strip().upper()
+        return code if CODE.fullmatch(code) else None
+    root = contract.underlying.symbol.strip().upper()
+    strike = contract.strike_price * 1000
+    if not re.fullmatch(r"[A-Z]+", root) or strike != strike.to_integral_value() or strike <= 0:
+        return None
+    option_type = "P" if contract.option_type == "put" else "C"
+    return f"US.{root}{contract.expiration_date:%y%m%d}{option_type}{int(strike)}"
 
 
 def fetch_exact_put_quotes(codes):

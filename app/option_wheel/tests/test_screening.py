@@ -15,6 +15,7 @@ from ledger.models import BankAccount
 from portfolio.models import InvestmentAccount, InvestmentPosition, InvestmentTransaction, OptionContract, PortfolioSnapshot, Security, TradeTypeChoices
 from option_wheel.jobs import job_payload, run_job
 from option_wheel.put_quote_jobs import run_job as run_put_quote_job
+from option_wheel.put_quote_probe import quote_code
 from option_wheel.screening import compare_close_rows, compare_probe_rows, covered_stock, present_results
 from option_wheel.models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelDecision, WheelPositionReview, WheelPutQuoteJob, WheelWatchItem
 from option_wheel.watch_refresh import refresh_watch_events
@@ -155,6 +156,17 @@ class ScreeningTests(TestCase):
         self.assertContains(page, "$0.80")
         self.assertContains(page, "23.4%")
         self.assertEqual(InvestmentTransaction.objects.count(), 0)
+
+    def test_portfolio_occ_symbol_maps_to_unpadded_futu_code(self):
+        stock = Security.objects.create(symbol="SPCX", market="US", asset_type="stock")
+        put = Security.objects.create(symbol="SPCX260925P00152500", market="US", asset_type="option")
+        contract = OptionContract.objects.create(
+            security=put, underlying=stock, option_type="put",
+            strike_price=Decimal("152.5"), expiration_date=date(2026, 9, 25),
+        )
+        self.assertEqual(quote_code(contract), "US.SPCX260925P152500")
+        contract.is_adjusted = True
+        self.assertIsNone(quote_code(contract))
 
     @patch("option_wheel.jobs.launch_job")
     def test_submit_is_account_independent_and_idempotent(self, launch):
