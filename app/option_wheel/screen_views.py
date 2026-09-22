@@ -82,11 +82,16 @@ def index(request):
         counts[key] = counts.get(key, 0) + 1
         job.day_number = counts[key]
     latest = next((job for job in jobs if job.selection.get("mode") in ("screening_v2", "screening_close_v2")), None)
+    visible_results = []
+    if latest and latest.status == "saved":
+        from .screening import present_results
+        visible_results = present_results(latest.screening_results, latest.selection)
     ny_now = timezone.now().astimezone(NY)
     key = uuid4()
     return render(request, "option_wheel/screen_index.html", {
         "accounts": account_summary(family), "watchlist": watch, "jobs": jobs,
         "latest_job": latest,
+        "visible_results": visible_results,
         "analysis_request_token": signing.dumps({"family": family.pk, "key": str(key)}, salt="wheel-live-job-v1"),
         "analysis_status_url": reverse("option_wheel:job_status", args=[key]),
         "today_ny": ny_now.date(),

@@ -1,1 +1,25 @@
-<div class="wheel-panel wheel-scroll"><table class="wheel-table wheel-results-table"><thead><tr><th>合约</th><th>权利金</th><th>行权价</th><th>盈亏平衡价</th><th>到期日</th><th>Delta</th><th>合约 IV</th><th>标的 IV 百分位</th><th>预计到期价内概率</th><th>年化权利金率</th><th>风险提示与分析</th></tr></thead><tbody>{% for item in results %}<tr><td><strong>{{ item.symbol }} · {% if item.strategy == "PUT" %}Put{% else %}Covered Call{% endif %}</strong><small>{{ item.code }}</small>{% if item.reference_date %}<small>{{ item.reference_date }} 收盘参考</small>{% endif %}</td><td>{% if item.premium is not None %}${{ item.premium }}{% else %}—{% endif %}{% if item.strategy == "PUT" and item.premium is not None and not item.premium_match %}<small>范围外</small>{% endif %}</td><td>{% if item.strike is not None %}${{ item.strike }}{% else %}—{% endif %}</td><td>{% if item.break_even is not None %}${{ item.break_even }}{% else %}—{% endif %}</td><td>{{ item.expiration }}</td><td>{{ item.delta|default:"—" }}</td><td>{% if item.iv is not None %}{{ item.iv }}%{% else %}—{% endif %}</td><td>{% if item.underlying_iv_percentile is not None %}{{ item.underlying_iv_percentile }}%{% if item.reference_date %}<small>Futu 最新查询值{% if item.underlying_iv_queried_at %} · {{ item.underlying_iv_queried_at }} 美东查询{% endif %}，非历史值</small>{% else %}<small>Futu 标的值</small>{% endif %}{% else %}—{% endif %}</td><td>{% if item.probability is not None %}{{ item.probability }}%{% else %}—{% endif %}</td><td>{% if item.annualized_premium_rate is not None %}{{ item.annualized_premium_rate }}%{% else %}—{% endif %}</td><td><span class="wheel-analysis">{{ item.analysis }}</span>{% for risk in item.risks %}<span class="wheel-risk">{{ risk }}</span>{% endfor %}</td></tr>{% empty %}<tr><td colspan="11">本次未取得可比较合约。请查看任务记录中的具体原因；不会自动切换其他到期日。</td></tr>{% endfor %}</tbody></table><footer class="wheel-table-note">{% if results.0.reference_date %}收盘观察：权利金为 {{ results.0.reference_date }} 的 Futu 期权日线收盘成交价 × 100，仅供比较；当前 Bid、Delta 和可成交权利金未知。{% else %}权利金按 Futu Bid × 合约乘数估算；{% endif %}Put 盈亏平衡价＝行权价－每股权利金。{% if results.0.reference_date %}收盘年化率按历史收盘每股价格 ÷（Put 行权价或 Call 持股成本）× 365 ÷ 收盘日至到期日天数，仅为假设参考，不代表当前可成交收益；{% else %}年化权利金率按 DTE 简单年化，不代表实际收益；{% endif %}概率是 Futu 模型的到期价内概率，不等于提前指派概率。标的 IV 百分位采用 Futu 直接返回值，历史窗口未披露，不标称 252 日；收盘观察中的该值是最新查询值，不对应历史收盘日。</footer></div>
+<div class="wheel-panel wheel-results-panel">
+  <table class="wheel-table wheel-results-table">
+    <colgroup><col class="wheel-col-contract"><col class="wheel-col-premium"><col class="wheel-col-strike"><col class="wheel-col-break-even"><col class="wheel-col-delta"><col class="wheel-col-iv"><col class="wheel-col-iv-rank"><col class="wheel-col-probability"><col class="wheel-col-annual"><col class="wheel-col-risks"></colgroup>
+    <thead><tr><th>合约</th><th>权利金</th><th>行权价</th><th>盈亏平衡价</th><th>Delta</th><th>合约 IV</th><th>标的 IV 百分位</th><th>预计到期价内概率</th><th>年化权利金率</th><th>风险提示与分析</th></tr></thead>
+    <tbody>
+      {% for item in results %}
+        <tr>
+          <td><strong>{{ item.symbol }} · {% if item.strategy == "PUT" %}Put{% else %}Covered Call{% endif %}</strong><small>{{ item.code }}</small>{% if item.reference_date %}<small>{{ item.reference_date }} 收盘参考</small>{% endif %}</td>
+          <td>{% if item.premium is not None %}${{ item.premium }}{% else %}—{% endif %}</td>
+          <td>{% if item.strike is not None %}${{ item.strike }}{% else %}—{% endif %}</td>
+          <td>{% if item.break_even is not None %}${{ item.break_even }}{% else %}—{% endif %}</td>
+          <td>{{ item.delta|default:"—" }}</td>
+          <td>{% if item.iv is not None %}{{ item.iv }}%{% else %}—{% endif %}</td>
+          <td>{% if item.underlying_iv_percentile is not None %}{{ item.underlying_iv_percentile }}%<span class="wheel-info" tabindex="0" aria-label="标的 IV 百分位说明"><span aria-hidden="true">!</span><span class="wheel-info-tip" role="tooltip">Futu 返回的标的 IV 百分位，历史窗口未披露。{% if item.reference_date %}此值为最新查询结果，不对应 {{ item.reference_date }} 收盘；{% if item.underlying_iv_queried_at %}查询时间：{{ item.underlying_iv_queried_at }}（美东）。{% endif %}{% endif %}</span></span>{% else %}—{% endif %}</td>
+          <td>{% if item.probability is not None %}{{ item.probability }}%{% else %}—{% endif %}</td>
+          <td>{% if item.annualized_premium_rate is not None %}{{ item.annualized_premium_rate }}%{% else %}—{% endif %}</td>
+          <td><span class="wheel-analysis">规则比较：{{ item.display_analysis }}</span>{% for risk in item.risks %}<span class="wheel-risk">{{ risk }}</span>{% endfor %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="10">本次取得的 Put 中没有符合所设权利金范围的合约；不会硬凑范围外合约。Covered Call 不受 Put 权利金范围限制。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <footer class="wheel-table-note">{% if basis == "screening_close_v2" %}收盘观察：权利金按 Futu 期权日线收盘成交价 × 100 计算，仅供比较；当前 Bid、Delta 和可成交权利金未知。年化率按历史收盘日至到期日简单年化，不代表可成交收益。{% else %}交易时段权利金按 Futu Bid × 合约乘数估算；年化率按 DTE 简单年化。{% endif %}概率为 Futu 模型估算的到期价内概率，不等于实际提前指派概率。表内建议按规则比较，未调用 AI。</footer>
+</div>

@@ -20,4 +20,9 @@ def status(request, pk):
 @require_GET
 def detail(request, pk):
     job = get_object_or_404(WheelAnalysisJob, pk=pk, family=_request_family(request))
-    return render(request, "option_wheel/job_detail.html", {"job": job, "job_state": job_payload(job)})
+    from .screening import present_results
+    visible_results = (present_results(job.screening_results, job.selection)
+                       if job.selection.get("mode") in ("screening_v2", "screening_close_v2") else [])
+    return render(request, "option_wheel/job_detail.html", {
+        "job": job, "job_state": job_payload(job), "visible_results": visible_results,
+    })

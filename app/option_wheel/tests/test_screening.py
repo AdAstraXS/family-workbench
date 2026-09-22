@@ -14,6 +14,7 @@ from family_core.models import ExchangeRate, Family, FamilyMember
 from ledger.models import BankAccount
 from portfolio.models import InvestmentAccount, PortfolioSnapshot
 from option_wheel.jobs import job_payload, run_job
+from option_wheel.screening import compare_close_rows, present_results
 from option_wheel.models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelDecision, WheelWatchItem
 from option_wheel.watch_refresh import refresh_watch_events
 
@@ -159,6 +160,46 @@ class ScreeningTests(TestCase):
         self.assertNotIn("contract_iv_percentile", row)
         self.assertContains(self.client.get(reverse("option_wheel:job_detail", args=[job.pk])), "收盘参考")
         self.assertEqual(PortfolioSnapshot.objects.count(), 0)
+
+    def test_saved_results_keep_raw_rows_but_both_pages_show_only_matching_puts(self):
+        selection = self.selection()
+        selection["mode"] = "screening_close_v2"
+        selection["symbols"] = ["INTC", "AMD"]
+        rows = [
+            {"symbol": "INTC", "code": "US.INTC-OUT", "strategy": "PUT", "premium": "90.00", "probability": "5", "risks": []},
+            {"symbol": "INTC", "code": "US.INTC-HIGH", "strategy": "PUT", "premium": "150.00", "probability": "30", "risks": []},
+            {"symbol": "AMD", "code": "US.AMD-LOW", "strategy": "PUT", "premium": "200.00", "probability": "20", "risks": []},
+            {"symbol": "INTC", "code": "US.INTC-LOW", "strategy": "PUT", "premium": "120.00", "probability": "10",
+             "risks": ["标的 IV 百分位是 Futu 最新查询值，并非历史收盘日数值"]},
+        ]
+        job = WheelAnalysisJob.objects.create(
+            family=self.family, requested_by=self.user, selection=selection,
+            status="saved", screening_results=rows, expires_at=timezone.now() + timedelta(minutes=12),
+        )
+        displayed = present_results(rows, selection)
+        self.assertEqual([row["code"] for row in displayed], ["US.AMD-LOW", "US.INTC-LOW", "US.INTC-HIGH"])
+        self.assertEqual(len(job.screening_results), 4)
+        self.assertNotIn("标的 IV 百分位是 Futu 最新查询值", displayed[1]["risks"])
+        for url in (reverse("option_wheel:index"), reverse("option_wheel:job_detail", args=[job.pk])):
+            page = self.client.get(url)
+            self.assertContains(page, "US.INTC-LOW")
+            self.assertNotContains(page, "US.INTC-OUT")
+            self.assertNotContains(page, "<th>到期日</th>", html=False)
+            self.assertNotContains(page, "标的 IV 百分位是 Futu 最新查询值")
+            self.assertContains(page, "规则比较")
+
+    def test_close_screen_does_not_pad_with_out_of_range_puts(self):
+        selection = self.selection()
+        report = {"reference_date": selection["analysis_date"], "symbols": [{
+            "symbol": "INTC", "contracts": [
+                {"code": "US.INTC-LOW", "strategy": "PUT", "strike": "30", "size": 100,
+                 "close": "0.90", "iv": "40", "probability": "10", "issues": []},
+                {"code": "US.INTC-OK", "strategy": "PUT", "strike": "31", "size": 100,
+                 "close": "1.25", "iv": "41", "probability": "20", "issues": []},
+            ],
+        }]}
+        rows = compare_close_rows(report, selection, {}, {})
+        self.assertEqual([row["code"] for row in rows], ["US.INTC-OK"])
 
     @patch("option_wheel.watch_refresh._fetch_dividend_calendar", return_value=({"status": "ok"}, []))
     @patch("option_wheel.watch_refresh.sdk_call")

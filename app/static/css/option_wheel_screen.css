@@ -51,9 +51,17 @@
 .wheel-feedback h3{margin:0}
 .wheel-feedback p{margin:7px 0;color:#526b70}
 .wheel-result-meta{color:#647381;font-size:13px;margin:0 0 10px}
-.wheel-results-table td{min-width:90px}
-.wheel-results-table td:first-child{min-width:185px}
-.wheel-results-table td:last-child{min-width:235px;max-width:330px}
+.wheel-results-panel{overflow:visible}
+.wheel-results-table{table-layout:fixed;text-align:center}
+.wheel-results-table th,.wheel-results-table td{padding:9px 6px;text-align:center;overflow-wrap:anywhere}
+.wheel-results-table th{white-space:normal;line-height:1.35}
+.wheel-results-table th:last-child,.wheel-results-table td:last-child{text-align:left}
+.wheel-col-contract{width:14%}.wheel-col-premium{width:8%}.wheel-col-strike{width:8%}.wheel-col-break-even{width:10%}.wheel-col-delta{width:6%}.wheel-col-iv{width:7%}.wheel-col-iv-rank{width:8%}.wheel-col-probability{width:9%}.wheel-col-annual{width:9%}.wheel-col-risks{width:21%}
+.wheel-results-table td:first-child small{font-size:10px;overflow-wrap:anywhere}
+.wheel-info{position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:3px;border:1px solid #527483;border-radius:50%;color:#345769;font-size:11px;font-weight:700;cursor:help;vertical-align:middle}
+.wheel-info:focus-visible{outline:2px solid #087e7b;outline-offset:2px}
+.wheel-info-tip{display:none;position:absolute;z-index:5;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);width:225px;padding:9px 11px;border-radius:7px;background:#183747;color:white;box-shadow:0 5px 15px #123b4a33;font-size:12px;font-weight:400;line-height:1.5;text-align:left;overflow-wrap:break-word}
+.wheel-info:hover .wheel-info-tip,.wheel-info:focus .wheel-info-tip{display:block}
 .wheel-risk{display:block;color:#9d6214;font-size:12px;margin:0 0 5px}
 .wheel-analysis{display:block;color:#345769;font-size:12px;margin-bottom:7px}
 .wheel-table-note{border-top:1px solid #e9eef0;padding:12px 17px;color:#647381;font-size:12px}

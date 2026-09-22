@@ -29,6 +29,51 @@ def text(value, places=2):
     return str(value.quantize(Decimal(1).scaleb(-places)))
 
 
+def present_results(rows, selection):
+    """Apply the saved Put preference to old and new observations alike."""
+    minimum, maximum = number(selection.get("premium_min")), number(selection.get("premium_max"))
+    visible = []
+    for original in rows:
+        row = dict(original)
+        premium = number(row.get("premium"))
+        if row.get("strategy") == "PUT" and (
+            premium is None or minimum is None or maximum is None or not minimum <= premium <= maximum
+        ):
+            continue
+        row["risks"] = [risk for risk in row.get("risks", [])
+                        if risk != "标的 IV 百分位是 Futu 最新查询值，并非历史收盘日数值"]
+        visible.append(row)
+    visible.sort(key=lambda row: (
+        row.get("symbol") or "",
+        number(row.get("probability")) if number(row.get("probability")) is not None else Decimal(101),
+        row.get("code") or "",
+    ))
+    lowest_put = {}
+    for row in visible:
+        if row.get("strategy") == "PUT" and number(row.get("probability")) is not None:
+            lowest_put.setdefault(row["symbol"], row)
+    for row in visible:
+        probability = number(row.get("probability"))
+        if row.get("strategy") == "PUT" and probability is not None:
+            best = lowest_put.get(row["symbol"])
+            if probability == number(best["probability"]):
+                row["display_analysis"] = "本标的已取得且符合权利金范围的 Put 中，预计到期价内概率最低；仍须核对事件及报价风险。"
+            else:
+                gap = probability - number(best["probability"])
+                premium_gain = number(row.get("premium")) - number(best.get("premium"))
+                if premium_gain > 0:
+                    row["display_analysis"] = (f"到期价内概率比本标的最低值高 {text(gap)} 个百分点，"
+                                               f"权利金多 ${text(premium_gain)}；请权衡增收与行权风险。")
+                else:
+                    row["display_analysis"] = (f"到期价内概率比本标的最低值高 {text(gap)} 个百分点，"
+                                               "权利金未更高；可优先比较同标的较低概率合约。")
+        elif row.get("strategy") == "PUT":
+            row["display_analysis"] = "缺少可比的到期价内概率；请结合权利金、行权价和事件风险自行判断。"
+        else:
+            row["display_analysis"] = "Covered Call 请重点比较行权价与已录入持股成本，以及正股被交割的风险。"
+    return visible
+
+
 def covered_stock(family, symbols):
     """Current recorded shares, for context only; no account gates."""
     holdings = {}
@@ -106,7 +151,7 @@ def compare_probe_rows(rows, selection, holdings, watch_events):
             if premium is None:
                 risks.append("可卖报价或合约乘数缺失")
             elif kind == "PUT" and not matches:
-                risks.append("权利金不在偏好范围")
+                continue
             if probability is None:
                 risks.append("预计到期价内概率缺失")
             elif not 0 <= probability <= 100:
@@ -139,14 +184,7 @@ def compare_probe_rows(rows, selection, holdings, watch_events):
                 "iv_percentile_source": overview.get("source") if stock_percentile is not None else None,
             }
             results.append(result)
-    def sort_key(row):
-        boundary = any("不符合本次边界" in reason for reason in row["risks"])
-        probability = number(row["probability"])
-        return (
-            row["strategy"] != "PUT", boundary, not row["premium_match"],
-            probability if probability is not None else Decimal(101), row["symbol"],
-        )
-    return sorted(results, key=sort_key)
+    return present_results(results, selection)
 
 
 def compare_close_rows(report, selection, watch_events, holdings=None):
@@ -181,8 +219,8 @@ def compare_close_rows(report, selection, watch_events, holdings=None):
                 if watch.next_dividend and reference <= watch.next_dividend <= expiry:
                     risks.append("到期前跨除息日" + ("" if selection["allow_dividend"] else "（不符合本次边界）"))
             matches = kind == "CALL" or (premium is not None and minimum <= premium <= maximum)
-            if kind == "PUT" and premium is not None and not matches:
-                risks.append("历史收盘参考金额不在权利金偏好范围")
+            if kind == "PUT" and not matches:
+                continue
             if kind == "CALL" and (cost is None or strike is None):
                 risks.append("持股成本或 Call 行权价待核对")
             elif kind == "CALL" and strike < cost:
@@ -191,8 +229,6 @@ def compare_close_rows(report, selection, watch_events, holdings=None):
                 risks.append("目标交易日预计到期价内概率缺失")
             if iv is None:
                 risks.append("目标交易日合约 IV 缺失")
-            if stock_percentile is not None:
-                risks.append("标的 IV 百分位是 Futu 最新查询值，并非历史收盘日数值")
             dte = (expiry - reference).days
             base = strike if kind == "PUT" else cost
             annual = (close / base * Decimal(365) / Decimal(dte) * Decimal(100)
@@ -208,10 +244,4 @@ def compare_close_rows(report, selection, watch_events, holdings=None):
                 "annualized_premium_rate": text(annual), "premium_match": matches,
                 "risks": risks, "analysis": "按上一完整交易日的成交收盘价观察；开盘前请重新核对卖出报价。",
             })
-    return sorted(results, key=lambda row: (
-        row["strategy"] != "PUT",
-        any("不符合本次边界" in risk for risk in row["risks"]),
-        not row["premium_match"],
-        number(row["probability"]) if row["probability"] is not None else Decimal(101),
-        row["symbol"],
-    ))
+    return present_results(results, selection)

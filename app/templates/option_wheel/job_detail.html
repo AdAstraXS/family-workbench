@@ -15,7 +15,7 @@
     <p>本页只读取当前任务。连接中断不会取消后台任务，也不会自动再次发起分析。服务重启后的中断任务不会自动重跑。</p>
   </section>
   {% if job.status == "saved" and job.selection.mode == "screening_v2" or job.status == "saved" and job.selection.mode == "screening_close_v2" %}
-    <section class="option-wheel-section"><h2>本次合约对比</h2>{% include "option_wheel/screen_results_table.html" with results=job.screening_results %}</section>
+    <section class="option-wheel-section"><h2>本次合约对比</h2><p>本次采集 {{ job.screening_results|length }} 张，符合展示条件 {{ visible_results|length }} 张。按本次设定的 Put 权利金范围筛选；标的内按预计到期价内概率升序排列。历史采集记录保持原样。</p>{% include "option_wheel/screen_results_table.html" with results=visible_results basis=job.selection.mode %}</section>
   {% endif %}
 </div>
 {% endblock %}
