@@ -1,12 +1,14 @@
 from django.urls import path
 
-from . import advice_views, close_views, job_views, views
+from . import advice_views, close_views, job_views, screen_views, views
 
 
 app_name = "option_wheel"
 
 urlpatterns = [
-    path("", views.index, name="index"),
+    path("", screen_views.index, name="index"),
+    path("watch/", screen_views.watch_action, name="watch_action"),
+    path("analyze/", screen_views.analyze, name="analyze"),
     path("close/", close_views.index, name="close_index"),
     path("close/refresh/", close_views.refresh, name="close_refresh"),
     path("close/<int:pk>/", close_views.detail, name="close_detail"),

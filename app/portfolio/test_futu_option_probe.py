@@ -1114,6 +1114,26 @@ class DynamicProbeTest(SimpleTestCase):
         self.assertLess(unsubscribe_index, second_query_index)
         self.assertLess(second_query_index, close_index)
 
+    def test_screen_profile_keeps_underlying_percentile_separate(self):
+        class ScreenContext(DynamicContext):
+            def get_option_underlying_overview(self, codes):
+                self.calls.append(("get_option_underlying_overview", tuple(codes)))
+                return 0, [{"code": "US.TSLA", "iv": 42.0, "iv_percentile": 68.5}]
+
+        context = ScreenContext()
+        result = run_probe(
+            ["US.TSLA"], profile="screen", max_contracts_per_expiration=8,
+            target_expiration=DYNAMIC_EXPIRY, covered_call_symbols=set(),
+            futu_module=FakeFutu(), context_factory=lambda: context,
+            lock_factory=FakeLock,
+        )
+        self.assertEqual(result["subscription"]["cleanup_status"], "restored")
+        self.assertEqual(result["symbols"][0]["underlying_iv"]["iv_percentile"], 68.5)
+        names = [call[0] for call in context.calls]
+        self.assertIn("get_option_underlying_overview", names)
+        self.assertNotIn("request_history_kline", names)
+        self.assertNotIn("get_earnings_calendar", names)
+
     def test_m1_gate_rejects_premarket_even_with_fresh_quotes(self):
         class PremarketContext(DynamicContext):
             def get_global_state(self):

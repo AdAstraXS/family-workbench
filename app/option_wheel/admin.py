@@ -19,6 +19,7 @@ from .models import (
     WheelPolicy,
     WheelTechnicalSnapshot,
     WheelTransactionLink,
+    WheelWatchItem,
 )
 
 
@@ -57,6 +58,13 @@ class WheelCloseReportAdmin(EvidenceReadOnlyAdminMixin, admin.ModelAdmin):
 class WheelAnalysisJobAdmin(EvidenceReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ("id", "family", "status", "created_at", "finished_at")
     list_filter = ("family", "status")
+
+
+@admin.register(WheelWatchItem)
+class WheelWatchItemAdmin(admin.ModelAdmin):
+    list_display = ("family", "symbol", "price", "price_as_of", "next_earnings", "next_dividend")
+    list_filter = ("family",)
+    search_fields = ("symbol", "name")
 
 
 @admin.register(WheelPolicy)

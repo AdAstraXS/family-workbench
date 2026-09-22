@@ -206,6 +206,15 @@ def resolve_profile(
             "include_earnings": True,
             "allow_partial": False,
         }
+    if profile == "screen":
+        return {
+            "profile": "screen",
+            "subscribe_quotes": True,
+            "include_option_analytics": True,
+            "include_history": False,
+            "include_earnings": False,
+            "allow_partial": True,
+        }
     raise ValueError(f"unknown profile: {profile!r}")
 
 
@@ -1073,7 +1082,7 @@ def probe_symbol(
         "market_us": None,
     }
     if (
-        config["profile"] == "m1-gate"
+        config["profile"] in {"m1-gate", "screen"}
         and market_state.get("market_us") not in {"MORNING", "AFTERNOON"}
     ):
         partial = True
@@ -1097,6 +1106,18 @@ def probe_symbol(
     else:
         partial = True
         errors.append(_sdk_issue("underlying_snapshot", snapshot))
+
+    underlying_iv = {}
+    if config["profile"] == "screen":
+        overview = sdk_call(context, "get_option_underlying_overview", ret_ok, [symbol])
+        if overview["status"] == "ok":
+            overview_rows = records_from(overview["data"])
+            if overview_rows and str(overview_rows[0].get("code", "")).upper() == symbol:
+                underlying_iv = {
+                    "iv": overview_rows[0].get("iv"),
+                    "iv_percentile": overview_rows[0].get("iv_percentile"),
+                    "source": "futu_get_option_underlying_overview",
+                }
 
     expirations = []
     expiration_details = []
@@ -1138,7 +1159,7 @@ def probe_symbol(
             else:
                 eligible_details.append(detail)
 
-        if config.get("profile") == "m1-gate":
+        if config.get("profile") in {"m1-gate", "screen"}:
             # One weekly expiration per underlying: this Friday if it is
             # still ahead, otherwise the next available Friday.  A single
             # date keeps the live subscription load predictable.
@@ -1151,7 +1172,7 @@ def probe_symbol(
                     detail for detail in eligible_details
                     if detail["date"] == target_expiration
                 ]
-        expiration_details = eligible_details[:1 if config.get("profile") == "m1-gate" else max_expirations]
+        expiration_details = eligible_details[:1 if config.get("profile") in {"m1-gate", "screen"} else max_expirations]
         expirations = [
             detail["strike_time"] for detail in expiration_details
         ]
@@ -1168,7 +1189,7 @@ def probe_symbol(
     option_type = getattr(futu_module, "OptionType", None)
     all_options = getattr(option_type, "ALL", "ALL")
     chain_rows_by_expiration = {expiration: [] for expiration in expirations}
-    if config.get("profile") == "m1-gate" and expirations:
+    if config.get("profile") in {"m1-gate", "screen"} and expirations:
         chain_ranges = [(expirations[0], expirations[-1])]
     else:
         chain_ranges = [(expiration, expiration) for expiration in expirations]
@@ -1187,7 +1208,7 @@ def probe_symbol(
             partial = True
             source = (
                 "option_chain"
-                if config.get("profile") == "m1-gate"
+                if config.get("profile") in {"m1-gate", "screen"}
                 else f"chain_{range_start}"
             )
             errors.append(_sdk_issue(source, chain_response))
@@ -1239,15 +1260,36 @@ def probe_symbol(
         if unknown_count:
             partial = True
 
-        remaining = list(put_rows)
-        put_limit = max_contracts_per_expiration
-        for _ in range(put_limit):
-            selected, metadata = select_representative_put(remaining, spot)
-            if selected is None:
-                break
-            put_candidates.append((selected, metadata))
-            remaining.remove(selected)
-        if config.get("profile") == "m1-gate" and include_covered_call:
+        if config.get("profile") == "screen":
+            # Sample both near and farther OTM strikes. Eight nearest strikes
+            # alone can omit the lower-assignment-risk side of the chain.
+            try:
+                spot_value = Decimal(str(spot))
+            except (InvalidOperation, TypeError, ValueError):
+                spot_value = None
+            standard_puts = [row for row in put_rows if _is_standard_contract(row) and _strike(row) is not None]
+            standard_puts.sort(key=lambda row: _strike(row), reverse=True)
+            below = [row for row in standard_puts if spot_value is not None and _strike(row) <= spot_value]
+            ranked = below or standard_puts
+            picked = []
+            for index in (0, 1, 2, 4, 7, 11, 16, 23):
+                if index < len(ranked):
+                    picked.append(ranked[index])
+            for row in ranked:
+                if len(picked) >= max_contracts_per_expiration:
+                    break
+                if row not in picked:
+                    picked.append(row)
+            put_candidates.extend((row, {"degradation": None}) for row in picked)
+        else:
+            remaining = list(put_rows)
+            put_limit = max_contracts_per_expiration
+            for _ in range(put_limit):
+                selected, metadata = select_representative_put(remaining, spot)
+                if selected is None:
+                    break
+                put_candidates.append((selected, metadata))
+        if config.get("profile") in {"m1-gate", "screen"} and include_covered_call:
             selected, metadata = select_representative_call(call_rows, spot)
             if selected is not None:
                 call_candidates.append((selected, metadata))
@@ -1738,6 +1780,7 @@ def probe_symbol(
             "status": PARTIAL if partial else SUCCESS,
             "market_state": market_state,
             "underlying_quote": underlying_quote,
+            "underlying_iv": underlying_iv,
             "expirations": expiration_details,
             "rejected_expirations": rejected_expirations,
             "chain_summary": chain_summary,
@@ -1813,9 +1856,10 @@ def run_probe(
             )
         if not 1 <= max_expirations <= 3:
             raise ValueError("max_expirations must be between 1 and 3")
-        if not 1 <= max_contracts_per_expiration <= 3:
+        contract_limit = 8 if profile == "screen" else 3
+        if not 1 <= max_contracts_per_expiration <= contract_limit:
             raise ValueError(
-                "max_contracts_per_expiration must be between 1 and 3"
+                f"max_contracts_per_expiration must be between 1 and {contract_limit}"
             )
         config = resolve_profile(
             profile,
@@ -1827,16 +1871,16 @@ def run_probe(
         )
         worst_case_candidates = len(normalized_symbols) * (
             max_contracts_per_expiration + 1
-            if config["profile"] == "m1-gate"
+            if config["profile"] in {"m1-gate", "screen"}
             else max_expirations * max_contracts_per_expiration
         )
         if (
             config["subscribe_quotes"]
-            and worst_case_candidates > MAX_DYNAMIC_CANDIDATES
+            and worst_case_candidates > (27 if profile == "screen" else MAX_DYNAMIC_CANDIDATES)
         ):
             raise ValueError(
                 "dynamic candidate limit exceeded: "
-                f"{worst_case_candidates}>{MAX_DYNAMIC_CANDIDATES}"
+                f"{worst_case_candidates}>{27 if profile == 'screen' else MAX_DYNAMIC_CANDIDATES}"
             )
     except (TypeError, ValueError) as exc:
         return failed_result([sanitize_for_output(str(exc))])
@@ -1927,7 +1971,7 @@ def run_probe(
         sdk_version = getattr(futu_module, "__version__", None)
         capabilities = method_capabilities(context, methods)
 
-        if config["profile"] == "m1-gate":
+        if config["profile"] in {"m1-gate", "screen"}:
             global_state_response = sdk_call(
                 context, "get_global_state", ret_ok
             )

@@ -36,6 +36,7 @@ class WheelAnalysisJob(TimestampedModel):
     finished_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField()
     decision_ids = models.JSONField(default=list)
+    screening_results = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ("-created_at",)
@@ -43,6 +44,24 @@ class WheelAnalysisJob(TimestampedModel):
             fields=("family",), condition=Q(status__in=("queued", "running")),
             name="wheel_one_active_analysis_per_family",
         )]
+
+
+class WheelWatchItem(TimestampedModel):
+    """Family's independent option watchlist; portfolio securities are untouched."""
+
+    family = models.ForeignKey(Family, on_delete=models.PROTECT, related_name="wheel_watch_items")
+    symbol = models.CharField(max_length=12)
+    name = models.CharField(max_length=100, blank=True)
+    price = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    price_as_of = models.DateTimeField(null=True, blank=True)
+    next_earnings = models.DateField(null=True, blank=True)
+    next_dividend = models.DateField(null=True, blank=True)
+    events_checked_at = models.DateTimeField(null=True, blank=True)
+    events_covered_until = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("symbol",)
+        constraints = [models.UniqueConstraint(fields=("family", "symbol"), name="wheel_watch_family_symbol_unique")]
 
 
 class AppendOnlyQuerySet(models.QuerySet):

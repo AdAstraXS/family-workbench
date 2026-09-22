@@ -20,7 +20,7 @@ from .probe_diagnostics import probe_failure_summary
 ACTIVE = ("queued", "running")
 JOB_SECONDS = 720
 PROBE_SECONDS = 180
-MAX_SYMBOLS = 9
+MAX_SYMBOLS = 20
 PROBE_BATCH_SIZE = 3
 INTERRUPTED = "运行超时或中断，未取得完成确认。不会自动重试；行情订阅清理状态需核对。"
 
@@ -28,6 +28,26 @@ INTERRUPTED = "运行超时或中断，未取得完成确认。不会自动重�
 def validate_selection(family, selection):
     from .views import PARTICIPATING_ACCOUNTS, _snapshot_is_ready
     from .account_capacity import capacity_snapshot_stale_reasons
+    if selection.get("mode") == "screening_v2":
+        from .models import WheelWatchItem
+        from .screening import number
+        symbols = selection.get("symbols", [])
+        if not symbols or len(symbols) > MAX_SYMBOLS or len(set(symbols)) != len(symbols):
+            raise WheelAnalysisError("请选择 1–20 个自选标的。")
+        configured = set(WheelWatchItem.objects.filter(family=family, symbol__in=symbols).values_list("symbol", flat=True))
+        if configured != set(symbols):
+            raise WheelAnalysisError("所选股票不在当前家庭的期权自选列表。")
+        try:
+            expiry = date.fromisoformat(selection["target_expiration"])
+            premium_min, premium_max = number(selection["premium_min"]), number(selection["premium_max"])
+        except (KeyError, TypeError, ValueError):
+            raise WheelAnalysisError("到期日或权利金范围无效。") from None
+        ny_today = timezone.now().astimezone(ZoneInfo("America/New_York")).date()
+        if expiry.weekday() != 4 or not 0 < (expiry - ny_today).days <= 35:
+            raise WheelAnalysisError("请选择未来 35 天内的一个周五到期日。")
+        if premium_min is None or premium_max is None or premium_min < 0 or premium_max < premium_min or premium_max > 100000:
+            raise WheelAnalysisError("权利金范围无效。")
+        return []
     ids, symbols = selection.get("account_ids", []), selection.get("symbols", [])
     target = selection.get("target_expiration")
     if target is not None:
@@ -38,7 +58,7 @@ def validate_selection(family, selection):
         ny_today = timezone.now().astimezone(ZoneInfo("America/New_York")).date()
         if expiry.weekday() != 4 or not 0 < (expiry - ny_today).days <= 35:
             raise WheelAnalysisError("目标周五已经过去或超出可选范围，请重新提交。")
-    if not ids or not symbols or len(ids) > 2 or len(symbols) > MAX_SYMBOLS:
+    if not ids or not symbols or len(ids) > 2 or len(symbols) > 9:
         raise WheelAnalysisError("每次请选择 1–2 个账户和 1–9 个已配置标的。")
     accounts = list(InvestmentAccount.objects.filter(
         pk__in=ids, bank_account__family=family, bank_account__is_active=True,
@@ -104,9 +124,11 @@ def enqueue(family, user, key, selection):
     return job
 
 
-def _fetch_probe_batch(symbols, covered_call_symbols, target_expiration=None):
+def _fetch_probe_batch(symbols, covered_call_symbols, target_expiration=None, screening=False):
     covered_call_symbols = sorted(set(symbols) & set(covered_call_symbols))
     command = [sys.executable, "-m", "option_wheel.live_probe"]
+    if screening:
+        command.append("--screen")
     if covered_call_symbols:
         command.append("--calls-for=" + ",".join(covered_call_symbols))
     if target_expiration:
@@ -124,8 +146,10 @@ def _fetch_probe_batch(symbols, covered_call_symbols, target_expiration=None):
         result = json.loads(frames[0])
         if not isinstance(result, dict):
             raise ValueError("invalid payload")
-        if result.get("status") != "success":
+        if result.get("status") not in (("success", "partial") if screening else ("success",)):
             raise WheelAnalysisError("本次未保存分析。" + probe_failure_summary(result, symbols))
+        if screening and result.get("subscription", {}).get("cleanup_status") != "restored":
+            raise WheelAnalysisError("行情订阅未确认恢复，本次未保存分析。")
         rows = result.get("symbols", [])
         if len(rows) != len(symbols) or {r.get("symbol") for r in rows} != {"US." + s for s in symbols}:
             raise ValueError("incomplete result")
@@ -138,13 +162,13 @@ def _fetch_probe_batch(symbols, covered_call_symbols, target_expiration=None):
         raise WheelAnalysisError("行情查询进程或响应异常，未保存分析；订阅清理状态需核对。") from None
 
 
-def fetch_probe(symbols, covered_call_symbols=None, target_expiration=None):
+def fetch_probe(symbols, covered_call_symbols=None, target_expiration=None, screening=False):
     """Probe at most three symbols per process so Futu subscriptions stay bounded."""
     covered_call_symbols = set(covered_call_symbols or [])
     rows = []
     for offset in range(0, len(symbols), PROBE_BATCH_SIZE):
         batch = symbols[offset:offset + PROBE_BATCH_SIZE]
-        rows.extend(_fetch_probe_batch(batch, covered_call_symbols, target_expiration))
+        rows.extend(_fetch_probe_batch(batch, covered_call_symbols, target_expiration, screening))
     return rows
 
 
@@ -173,6 +197,31 @@ def run_job(job_id):
         if not job.requested_by.is_active or not job.requested_by.is_superuser:
             raise WheelAnalysisError("申请人的管理员权限已失效，未保存分析。")
         accounts = validate_selection(job.family, job.selection)
+        if job.selection.get("mode") == "screening_v2":
+            from .screening import compare_probe_rows, covered_stock
+            from .models import WheelWatchItem
+            holdings = covered_stock(job.family, job.selection["symbols"])
+            watch_events = {item.symbol: item for item in WheelWatchItem.objects.filter(
+                family=job.family, symbol__in=job.selection["symbols"],
+            )}
+            rows = fetch_probe(
+                job.selection["symbols"], covered_call_symbols=set(holdings),
+                target_expiration=job.selection["target_expiration"], screening=True,
+            )
+            results = compare_probe_rows(rows, job.selection, holdings, watch_events)
+            with transaction.atomic():
+                job = WheelAnalysisJob.objects.select_for_update().get(pk=job_id)
+                if job.status != "running" or job.expires_at <= timezone.now():
+                    raise WheelAnalysisError("任务已中断或超过保存期限，未保存分析。")
+                validate_selection(job.family, job.selection)
+                if not job.requested_by.is_active or not job.requested_by.is_superuser:
+                    raise WheelAnalysisError("申请人的管理员权限已失效，未保存分析。")
+                job.status = "saved"
+                job.screening_results = results
+                job.message = f"已比较 {len(results)} 张合约；报价来自 Futu，临时订阅已恢复。"
+                job.finished_at = timezone.now()
+                job.save(update_fields=["status", "screening_results", "message", "finished_at", "updated_at"])
+            return
         call_symbols = covered_call_symbols(
             job.family, accounts, job.selection["symbols"]
         )

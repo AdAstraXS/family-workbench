@@ -1,555 +1,90 @@
-from datetime import date, timedelta
-from decimal import Decimal
-from types import SimpleNamespace
-from unittest.mock import patch
+"""Current household option screen: view safety and family ownership."""
+
+from datetime import timedelta
+from uuid import uuid4
 
 from django.contrib.auth import get_user_model
+from django.core import signing
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from family_core.models import Family, FamilyMember
-from ledger.models import BankAccount
-from portfolio.models import InvestmentAccount, Security
-
-from option_wheel.account_capacity import CapacityImportError
-from option_wheel.analysis_service import WheelAnalysisError
-from option_wheel.models import (
-    DataStatus,
-    DelayStatus,
-    EventStatus,
-    Freshness,
-    OverallStatus,
-    Strategy,
-    TechnicalStatus,
-    WheelBrokerAccountSnapshot,
-    WheelCandidate,
-    WheelCycle,
-    WheelDecision,
-    WheelMarketSnapshot,
-    WheelOptionQuoteSnapshot,
-    WheelPolicy,
-    WheelPause,
-)
+from option_wheel.models import WheelAnalysisJob, WheelWatchItem
 
 
 class OptionWheelPageTests(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        cls.family = Family.objects.create(name="Wheel Page Family")
-        cls.user = get_user_model().objects.create_user(username="wheel-page")
-        cls.member = FamilyMember.objects.create(
-            family=cls.family,
-            user=cls.user,
-            display_name="Wheel Member",
-        )
-        cls.tsla = Security.objects.create(
-            symbol="TSLA",
-            name="Tesla",
-            market="US",
-            asset_type=Security.TYPE_STOCK,
-            currency="USD",
-        )
-
-    @classmethod
-    def make_account(cls, family, member, name):
-        bank = BankAccount.objects.create(
-            family=family,
-            member=member,
-            account_name=name,
-            supports_investment=True,
-        )
-        return InvestmentAccount.objects.create(bank_account=bank)
-
     def setUp(self):
-        self.client.force_login(self.user)
-
-    def create_policy(self, account, underlying=None):
-        return WheelPolicy.objects.create(
-            family=account.family,
-            account=account,
-            underlying=underlying or self.tsla,
+        self.family = Family.objects.create(name="wheel-page")
+        self.admin = get_user_model().objects.create_user(
+            username="wheel-admin", is_superuser=True, is_staff=True,
         )
-
-    def create_complete_account_snapshot(self, account, *, source_as_of=None):
-        return WheelBrokerAccountSnapshot.objects.create(
-            family=account.family,
-            account=account,
-            source_kind=WheelBrokerAccountSnapshot.SOURCE_MANUAL_FILE,
-            source_reference=f"fixture-{account.pk}",
-            currency="USD",
-            settled_cash=Decimal("120000"),
-            unsettled_cash=Decimal("0"),
-            nav=Decimal("120000"),
-            reserved_cash=Decimal("0"),
-            margin_loan_balance=Decimal("0"),
-            uses_margin=False,
-            positions_summary={},
-            open_obligations={},
-            source_as_of=source_as_of or timezone.now(),
-            data_status=DataStatus.COMPLETE,
-        )
-
-    def create_market(self, underlying=None):
-        return WheelMarketSnapshot.objects.create(
-            underlying=underlying or self.tsla,
-            provider="Futu",
-            provider_symbol="US.TSLA",
-            last_price=Decimal("341.25"),
-            source_as_of=timezone.now(),
-            market_session="regular",
-            regular_session_verified=True,
-            calendar_reference="US-2026",
-            delay_status=DelayStatus.REAL_TIME,
-            freshness_status=Freshness.FRESH,
-            data_quality=DataStatus.COMPLETE,
-        )
-
-    def create_decision(self, policy, snapshot, market):
-        return WheelDecision.objects.create(
-            family=policy.family,
-            account=policy.account,
-            underlying=policy.underlying,
-            policy=policy,
-            account_snapshot=snapshot,
-            market_snapshot=market,
-            input_fingerprint=f"decision-{policy.pk}",
-            event_status=EventStatus.CLEAR,
-            technical_status=TechnicalStatus.COMPLETE,
-            overall_status=OverallStatus.INVESTIGATION,
-            blockers=["执行总闸门关闭"],
-            frozen_input={
-                "earnings_status": "未来七天无已核验财报",
-                "earnings_as_of": "2026-08-30T09:00:00+08:00",
-            },
-        )
+        self.member = get_user_model().objects.create_user(username="wheel-member")
+        FamilyMember.objects.create(family=self.family, user=self.admin, display_name="我")
+        FamilyMember.objects.create(family=self.family, user=self.member, display_name="家庭成员")
+        self.client.force_login(self.admin)
 
     def test_login_is_required(self):
         self.client.logout()
-
         response = self.client.get(reverse("option_wheel:index"))
+        self.assertRedirects(response, f"{reverse('login')}?next={reverse('option_wheel:index')}")
 
-        self.assertRedirects(
-            response,
-            f"{reverse('login')}?next={reverse('option_wheel:index')}",
+    def test_home_contains_current_flow_without_capacity_controls(self):
+        WheelWatchItem.objects.create(family=self.family, symbol="INTC", name="Intel")
+        response = self.client.get(reverse("option_wheel:index"))
+        self.assertContains(response, "两个账户的现金与净值")
+        self.assertContains(response, "Intel")
+        self.assertContains(response, "合约对比")
+        for retired in ("策略总闸门", "保存为正式容量快照", "风险总闸", "当前阻断项"):
+            self.assertNotContains(response, retired)
+
+    def test_member_can_read_but_cannot_mutate_or_analyze(self):
+        self.client.force_login(self.member)
+        self.assertEqual(self.client.get(reverse("option_wheel:index")).status_code, 200)
+        self.assertEqual(self.client.post(reverse("option_wheel:watch_action"), {
+            "action": "add", "symbol": "MU",
+        }).status_code, 403)
+        self.assertEqual(self.client.post(reverse("option_wheel:analyze"), {}).status_code, 403)
+
+    def test_family_watchlist_and_history_are_isolated(self):
+        other = Family.objects.create(name="other family")
+        WheelWatchItem.objects.create(family=other, symbol="TSLA", name="Other Tesla")
+        WheelWatchItem.objects.create(family=self.family, symbol="INTC", name="Intel")
+        WheelAnalysisJob.objects.create(
+            family=other, requested_by=self.admin, selection={"mode": "screening_v2", "symbols": ["TSLA"]},
+            status="saved", expires_at=timezone.now() + timedelta(minutes=12),
         )
-
-    def test_duplicate_broker_names_fail_closed_until_one_has_capacity_evidence(self):
-        first = self.make_account(self.family, self.member, "盈透证券")
-        self.make_account(self.family, self.member, "盈透证券")
-
         response = self.client.get(reverse("option_wheel:index"))
+        self.assertContains(response, "Intel")
+        self.assertNotContains(response, "Other Tesla")
+        self.assertNotContains(response, "TSLA")
 
-        self.assertContains(response, "身份有重名")
-        self.assertContains(response, "需先生成对应账户的容量快照")
-
-        self.create_complete_account_snapshot(first)
-        response = self.client.get(reverse("option_wheel:index"))
-
-        self.assertNotContains(response, "身份有重名")
-        self.assertContains(response, "120000.00 USD")
-
-    def test_active_family_member_sees_read_only_empty_state_and_navigation(self):
-        response = self.client.get(reverse("option_wheel:index"))
-
+    def test_get_has_no_market_or_database_side_effects(self):
+        from unittest.mock import patch
+        with patch("option_wheel.watch_refresh.refresh_watch_prices") as prices, patch(
+            "option_wheel.jobs.fetch_probe"
+        ) as probe:
+            before = WheelWatchItem.objects.count()
+            response = self.client.get(reverse("option_wheel:index"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "仅分析，不下单")
-        self.assertContains(response, "数据是否就绪")
-        self.assertContains(response, "尚未就绪")
-        self.assertContains(response, "致富证券（公户）")
-        self.assertContains(response, "盈透证券")
-        self.assertContains(response, "TSLA")
-        self.assertContains(response, "未来财报")
-        self.assertContains(response, "尚无独立持久化证据", count=2)
-        self.assertContains(
-            response,
-            '<a href="/option-wheel/">期权车轮</a>',
-            html=True,
-        )
-
-    def test_unlinked_non_superuser_is_forbidden(self):
-        user = get_user_model().objects.create_user(username="wheel-outsider")
-        self.client.force_login(user)
-
-        response = self.client.get(reverse("option_wheel:index"))
-
-        self.assertEqual(response.status_code, 403)
-
-    def test_other_family_records_are_not_rendered(self):
-        other_family = Family.objects.create(name="Secret Other Family")
-        other_member = FamilyMember.objects.create(
-            family=other_family,
-            display_name="Other Member",
-        )
-        other_account = self.make_account(
-            other_family,
-            other_member,
-            "其他家庭秘密账户",
-        )
-        other_decision = self.create_decision(
-            self.create_policy(other_account), self.create_complete_account_snapshot(other_account),
-            self.create_market(),
-        )
-
-        response = self.client.get(reverse("option_wheel:index"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "其他家庭秘密账户")
-        self.assertNotContains(response, reverse("option_wheel:decision_detail", args=[other_decision.pk]))
-        self.assertEqual(list(response.context["recent_decisions"]), [])
-        self.assertNotContains(response, "Secret Other Family")
-
-    def test_get_does_not_write_wheel_tables(self):
-        models = (
-            WheelPolicy,
-            WheelBrokerAccountSnapshot,
-            WheelMarketSnapshot,
-            WheelOptionQuoteSnapshot,
-            WheelDecision,
-            WheelCandidate,
-        )
-        before = [model.objects.count() for model in models]
-
-        response = self.client.get(reverse("option_wheel:index"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(before, [model.objects.count() for model in models])
-
-    @patch("option_wheel.views.build_portfolio_capacity")
-    def test_get_does_not_calculate_capacity(self, build_capacity):
-        self.make_account(self.family, self.member, "盈透证券")
-
-        response = self.client.get(reverse("option_wheel:index"))
-
-        self.assertEqual(response.status_code, 200)
-        build_capacity.assert_not_called()
-
-    def test_refresh_analysis_is_post_only(self):
-        response = self.client.get(reverse("option_wheel:refresh_analysis"))
-
-        self.assertEqual(response.status_code, 405)
-
-    @patch("option_wheel.jobs.fetch_probe")
-    def test_non_superuser_cannot_refresh_analysis(self, run_probe):
-        account = self.make_account(self.family, self.member, "盈透证券")
-        self.create_policy(account)
-
-        response = self.client.post(
-            reverse("option_wheel:refresh_analysis"),
-            {
-                "account_ids": [account.pk],
-                "symbols": ["TSLA"],
-                "confirm_read_only": "yes",
-            },
-        )
-
-        self.assertEqual(response.status_code, 403)
-        run_probe.assert_not_called()
-
-    @patch("option_wheel.jobs.fetch_probe")
-    def test_json_refresh_keeps_permission_and_selection_checks(self, probe):
-        url = reverse("option_wheel:refresh_analysis")
-        self.assertEqual(self.client.post(url, HTTP_ACCEPT="application/json").status_code, 403)
-        self.user.is_superuser = True
-        self.user.save(update_fields=["is_superuser"])
-        self.assertEqual(self.client.post(url, HTTP_ACCEPT="application/json").status_code, 400)
+        self.assertEqual(WheelWatchItem.objects.count(), before)
+        prices.assert_not_called()
         probe.assert_not_called()
 
-    def test_recent_analysis_includes_records_without_candidates(self):
-        account = self.make_account(self.family, self.member, "盈透证券")
-        decision = self.create_decision(self.create_policy(account),
-                                        self.create_complete_account_snapshot(account), self.create_market())
-        response = self.client.get(reverse("option_wheel:index"))
-        self.assertContains(response, "最近已保存的分析")
-        self.assertContains(response, reverse("option_wheel:decision_detail", args=[decision.pk]))
-        self.assertEqual(list(response.context["recent_decisions"]), [decision])
+    def test_admin_can_add_and_remove_watch_symbol(self):
+        add = self.client.post(reverse("option_wheel:watch_action"), {"action": "add", "symbol": "MU"})
+        self.assertEqual(add.status_code, 302)
+        self.assertTrue(WheelWatchItem.objects.filter(family=self.family, symbol="MU").exists())
+        remove = self.client.post(reverse("option_wheel:watch_action"), {"action": "remove", "symbol": "MU"})
+        self.assertEqual(remove.status_code, 302)
+        self.assertFalse(WheelWatchItem.objects.filter(family=self.family, symbol="MU").exists())
 
-    def test_account_owned_by_me_is_preferred_over_same_name(self):
-        self.make_account(self.family, self.member, "盈透证券")
-        owner = FamilyMember.objects.create(family=self.family, display_name="我")
-        preferred = self.make_account(self.family, owner, "盈透证券")
-
-        response = self.client.get(reverse("option_wheel:index"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "身份有重名")
-        card = next(card for card in response.context["account_cards"] if card["name"] == "盈透证券")
-        self.assertEqual(card["account"], preferred)
-        self.assertContains(response, "投资组合账户：盈透证券 · 我")
-
-    @patch("option_wheel.views.build_portfolio_capacity")
-    def test_capacity_preview_is_rendered_without_writing_snapshot(self, build_capacity):
-        account = self.make_account(self.family, self.member, "盈透证券")
-        build_capacity.return_value = SimpleNamespace(
-            settled_cash=Decimal("52000.25"),
-            unsettled_cash=Decimal("100.00"),
-            reserved_cash=Decimal("32000.00"),
-            nav=Decimal("121000.00"),
-            source_as_of=timezone.now(),
-            positions_summary={"count": 3},
-            open_obligations={"count": 1},
-        )
-
-        response = self.client.post(
-            reverse("option_wheel:index"),
-            {
-                "action": "preview_capacity",
-                "account_id": account.pk,
-            },
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "预演结果（未保存）")
-        self.assertContains(response, "20000.25 USD")
-        self.assertContains(response, "3 项")
-        self.assertNotContains(response, "保存为正式容量快照")
-        self.assertEqual(WheelBrokerAccountSnapshot.objects.count(), 0)
-        build_capacity.assert_called_once_with(
-            account_id=account.pk,
-        )
-
-    @patch("option_wheel.views.build_portfolio_capacity")
-    def test_capacity_preview_shows_fail_closed_error(self, build_capacity):
-        account = self.make_account(self.family, self.member, "盈透证券")
-        build_capacity.side_effect = CapacityImportError("投资组合当日估值不完整。")
-
-        response = self.client.post(
-            reverse("option_wheel:index"),
-            {"action": "preview_capacity", "account_id": account.pk},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "无法完成预演")
-        self.assertContains(response, "投资组合当日估值不完整。")
-        self.assertEqual(WheelBrokerAccountSnapshot.objects.count(), 0)
-
-    @patch("option_wheel.views.build_portfolio_capacity")
-    def test_capacity_preview_rejects_other_family_account(self, build_capacity):
-        other_family = Family.objects.create(name="Other Family")
-        other_member = FamilyMember.objects.create(
-            family=other_family,
-            display_name="Other Member",
-        )
-        other_account = self.make_account(other_family, other_member, "盈透证券")
-
-        response = self.client.post(
-            reverse("option_wheel:index"),
-            {
-                "action": "preview_capacity",
-                "account_id": other_account.pk,
-            },
-        )
-
-        self.assertEqual(response.status_code, 403)
-        build_capacity.assert_not_called()
-
-    @patch("option_wheel.views.import_portfolio_capacity")
-    @patch("option_wheel.views.build_portfolio_capacity")
-    def test_non_superuser_cannot_save_capacity_snapshot(
-        self,
-        build_capacity,
-        import_capacity,
-    ):
-        account = self.make_account(self.family, self.member, "盈透证券")
-
-        response = self.client.post(
-            reverse("option_wheel:index"),
-            {
-                "action": "save_capacity",
-                "account_id": account.pk,
-            },
-        )
-
-        self.assertEqual(response.status_code, 403)
-        build_capacity.assert_not_called()
-        import_capacity.assert_not_called()
-
-    @patch("option_wheel.views.import_portfolio_capacity")
-    @patch("option_wheel.views.build_portfolio_capacity")
-    def test_superuser_can_save_capacity_without_repeated_attestation(
-        self,
-        build_capacity,
-        import_capacity,
-    ):
-        account = self.make_account(self.family, self.member, "盈透证券")
-        build_capacity.return_value = SimpleNamespace(
-            settled_cash=Decimal("52000.25"),
-            unsettled_cash=Decimal("100.00"),
-            reserved_cash=Decimal("32000.00"),
-            nav=Decimal("121000.00"),
-            source_as_of=timezone.now(),
-            positions_summary={"count": 3},
-            open_obligations={"count": 1},
-        )
-        import_capacity.return_value = SimpleNamespace(snapshot_created=True)
-        admin = get_user_model().objects.create_superuser(
-            username="wheel-admin",
-            email="wheel-admin@example.com",
-            password="unused",
-        )
-        self.client.force_login(admin)
-
-        response = self.client.post(
-            reverse("option_wheel:index"),
-            {
-                "action": "save_capacity",
-                "account_id": account.pk,
-            },
-        )
-
-        self.assertEqual(response.status_code, 302)
-        import_capacity.assert_called_once()
-
-    @patch("option_wheel.views.import_portfolio_capacity")
-    @patch("option_wheel.views.build_portfolio_capacity")
-    def test_superuser_can_save_recomputed_capacity_snapshot(
-        self,
-        build_capacity,
-        import_capacity,
-    ):
-        account = self.make_account(self.family, self.member, "盈透证券")
-        evidence = SimpleNamespace(
-            settled_cash=Decimal("52000.25"),
-            unsettled_cash=Decimal("100.00"),
-            reserved_cash=Decimal("32000.00"),
-            nav=Decimal("121000.00"),
-            source_as_of=timezone.now(),
-            positions_summary={"count": 3},
-            open_obligations={"count": 1},
-        )
-        build_capacity.return_value = evidence
-        import_capacity.return_value = SimpleNamespace(snapshot_created=True)
-        admin = get_user_model().objects.create_superuser(
-            username="wheel-save-admin",
-            email="wheel-save-admin@example.com",
-            password="unused",
-        )
-        self.client.force_login(admin)
-
-        response = self.client.post(
-            reverse("option_wheel:index"),
-            {
-                "action": "save_capacity",
-                "account_id": account.pk,
-            },
-            follow=True,
-        )
-
-        self.assertRedirects(response, reverse("option_wheel:index"))
-        self.assertContains(response, "已保存 盈透证券 的正式容量快照")
-        build_capacity.assert_called_once_with(
-            account_id=account.pk,
-        )
-        import_capacity.assert_called_once_with(evidence=evidence, commit=True)
-
-    def test_account_market_event_and_candidate_evidence_are_rendered(self):
-        zhifu = self.make_account(self.family, self.member, "致富证券（公户）")
-        ibkr = self.make_account(self.family, self.member, "盈透证券")
-        policy = self.create_policy(zhifu)
-        zhifu_snapshot = self.create_complete_account_snapshot(zhifu)
-        self.create_complete_account_snapshot(ibkr)
-        market = self.create_market()
-        decision = self.create_decision(policy, zhifu_snapshot, market)
-        quote = WheelOptionQuoteSnapshot.objects.create(
-            underlying=self.tsla,
-            market_snapshot=market,
-            provider="Futu",
-            provider_contract_code="TSLA260904P00320000",
-            currency="USD",
-            option_type=WheelOptionQuoteSnapshot.PUT,
-            expiration=date.today() + timedelta(days=5),
-            strike=Decimal("320"),
-            assignment_probability=Decimal("12.5"),
-            quote_as_of=timezone.now(),
-        )
-        WheelCandidate.objects.create(
-            decision=decision,
-            option_quote=quote,
-            candidate_key="tsla-put-320",
-            strategy=Strategy.SELL_PUT,
-            status=OverallStatus.BLOCKED,
-            required_cash=Decimal("32000"),
-            premium_total=Decimal("300"),
-            break_even=Decimal("317"),
-            annualized_premium_rate=Decimal("0.1425"),
-            assignment_probability=Decimal("12.5"),
-            premium_preference_match=True,
-            dte_preference_match=True,
-            exclusion_reasons=["财报证据仍需人工核对"],
-        )
-
-        response = self.client.get(reverse("option_wheel:index"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context["data_ready"])
-        self.assertContains(response, "341.25")
-        self.assertContains(response, "实时")
-        self.assertContains(response, "未来七天无已核验财报")
-        self.assertContains(response, "12.50%")
-        self.assertContains(response, "14.25%")
-        self.assertContains(response, "财报证据仍需人工核对")
-        self.assertContains(response, "32000.00 USD")
-        self.assertContains(response, "仅分析，不下单")
-
-    def test_stale_account_snapshot_keeps_data_not_ready(self):
-        zhifu = self.make_account(self.family, self.member, "致富证券（公户）")
-        ibkr = self.make_account(self.family, self.member, "盈透证券")
-        policy = self.create_policy(zhifu)
-        zhifu_snapshot = self.create_complete_account_snapshot(zhifu)
-        self.create_complete_account_snapshot(
-            ibkr,
-            source_as_of=timezone.now() - timedelta(days=2),
-        )
-        market = self.create_market()
-        self.create_decision(policy, zhifu_snapshot, market)
-
-        response = self.client.get(reverse("option_wheel:index"))
-
-        self.assertFalse(response.context["data_ready"])
-        self.assertContains(response, "盈透证券容量证据未就绪")
-
-    def test_underlying_decision_and_holdings_pages_are_read_only(self):
-        account = self.make_account(self.family, self.member, "盈透证券")
-        policy = self.create_policy(account)
-        snapshot = self.create_complete_account_snapshot(account)
-        decision = self.create_decision(policy, snapshot, self.create_market())
-        WheelCycle.objects.create(
-            family=self.family, account=account, underlying=self.tsla,
-            opened_on=date.today(),
-        )
-
-        underlying_response = self.client.get(
-            reverse("option_wheel:underlying_detail", args=["TSLA"])
-        )
-        decision_response = self.client.get(
-            reverse("option_wheel:decision_detail", args=[decision.pk])
-        )
-        holdings_response = self.client.get(reverse("option_wheel:holdings"))
-
-        self.assertContains(underlying_response, "TSLA · Tesla")
-        self.assertContains(decision_response, "冻结决策证据")
-        self.assertContains(holdings_response, "轮转周期")
-        self.assertContains(holdings_response, "仅分析，不下单")
-
-    def test_only_superuser_can_pause_and_explicitly_resume(self):
-        forbidden = self.client.post(reverse("option_wheel:index"), {
-            "action": "pause_strategy", "reason": "市场异常",
+    def test_analysis_rejects_stock_outside_family_watchlist(self):
+        key = uuid4()
+        token = signing.dumps({"family": self.family.pk, "key": str(key)}, salt="wheel-live-job-v1")
+        response = self.client.post(reverse("option_wheel:analyze"), {
+            "request_token": token, "symbols": ["MU"], "expiry_choice": "next",
+            "premium_min": "100", "premium_max": "500",
         })
-        self.assertEqual(forbidden.status_code, 403)
-        self.user.is_superuser = True
-        self.user.is_staff = True
-        self.user.save(update_fields=["is_superuser", "is_staff"])
-
-        created = self.client.post(reverse("option_wheel:index"), {
-            "action": "pause_strategy", "reason": "市场异常",
-        }, follow=True)
-        pause = WheelPause.objects.get()
-        self.assertContains(created, "市场异常")
-        self.assertIsNone(pause.ends_at)
-
-        resumed = self.client.post(reverse("option_wheel:index"), {
-            "action": "resume_pause", "pause_id": pause.pk,
-        }, follow=True)
-        pause.refresh_from_db()
-        self.assertIsNotNone(pause.ends_at)
-        self.assertContains(resumed, "该暂停已明确恢复")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(WheelAnalysisJob.objects.filter(pk=key).exists())

@@ -3,7 +3,11 @@
 投资板块 2026-07-03 至 2026-08-09 的设计决策、主要交付、版本节点和部署经验，已归档到
 [`investment-module-development-history.md`](investment-module-development-history.md)。
 
-更新时间：2026-09-02
+更新时间：2026-09-22
+
+## 期权车轮新版进展
+
+用户已确认用批准的前端 demo 替换旧首页：账户现金/NAV 仅作展示；家庭自选股、单个周五到期日、全局 Put 权利金偏好和财报/除息边界；合约风险与指标供人工选择。旧容量预演和保存流程不再出现在首页，现金、NAV、Delta、保证金不限制合约。合约表增加盈亏平衡价、Delta、简单年化权利金率，以及分开的合约与标的 IV 百分位。先使用 Futu 直接提供的标的百分位；合约百分位没有可靠供应商数值时明确显示缺失。当前代码仍在 `codex/option-wheel-redesign` 本地测试阶段；NAS 运行版本须单独核对，不能视为已部署。新设计详见 `docs/option-wheel/screening-v2.md`。
 
 ## 当前结论
 

@@ -244,8 +244,8 @@ class JobTests(TestCase):
         self.assertIn("备兑", wheel_reason("covered_shares_insufficient"))
         self.assertIn("报价", wheel_reasons(["quote_age_expired"]))
         response = self.client.get(reverse("option_wheel:index"))
-        self.assertContains(response, "不等同于真实提前指派概率")
-        self.assertContains(response, "采集时冻结")
+        self.assertContains(response, "合约对比")
+        self.assertContains(response, "历史数字不会被新行情覆盖")
 
     @patch("option_wheel.jobs.fetch_probe")
     def test_multiple_accounts_share_probe_but_save_separate_decisions(self, fetch):
