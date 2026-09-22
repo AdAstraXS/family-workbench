@@ -53,7 +53,7 @@
 .wheel-result-meta{color:#647381;font-size:13px;margin:0 0 10px}
 .wheel-results-panel{overflow:visible}
 .wheel-results-table{table-layout:fixed;text-align:center}
-.wheel-results-table th,.wheel-results-table td{padding:9px 6px;text-align:center;overflow-wrap:anywhere}
+.wheel-results-table th,.wheel-results-table td{padding:9px 6px;text-align:center;white-space:normal;overflow-wrap:anywhere}
 .wheel-results-table th{white-space:normal;line-height:1.35}
 .wheel-results-table th:last-child,.wheel-results-table td:last-child{text-align:left}
 .wheel-col-contract{width:14%}.wheel-col-premium{width:8%}.wheel-col-strike{width:8%}.wheel-col-break-even{width:10%}.wheel-col-delta{width:6%}.wheel-col-iv{width:7%}.wheel-col-iv-rank{width:8%}.wheel-col-probability{width:9%}.wheel-col-annual{width:9%}.wheel-col-risks{width:21%}
