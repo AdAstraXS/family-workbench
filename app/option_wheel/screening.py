@@ -147,3 +147,61 @@ def compare_probe_rows(rows, selection, holdings, watch_events):
             probability if probability is not None else Decimal(101), row["symbol"],
         )
     return sorted(results, key=sort_key)
+
+
+def compare_close_rows(report, selection, watch_events, holdings=None):
+    """Historical trade closes are observations, never executable sell quotes."""
+    expiry = date.fromisoformat(selection["target_expiration"])
+    reference = date.fromisoformat(report["reference_date"])
+    minimum, maximum = number(selection["premium_min"]), number(selection["premium_max"])
+    results = []
+    holdings = holdings or {}
+    for symbol_row in report["symbols"]:
+        symbol = symbol_row["symbol"]
+        watch = watch_events.get(symbol)
+        for contract in symbol_row["contracts"]:
+            kind = contract.get("strategy", "PUT")
+            close = number(contract["close"])
+            strike = number(contract["strike"])
+            premium = close * Decimal(contract["size"]) if close is not None else None
+            probability = number(contract["probability"])
+            iv = number(contract["iv"])
+            cost = max((row["cost"] for row in holdings.get(symbol, []) if row["cost"] is not None), default=None)
+            risks = ["历史收盘成交价仅供比较，当前卖出 Bid 和可成交权利金未知"]
+            risks.extend(contract["issues"])
+            if watch is None or watch.events_checked_at is None or watch.events_covered_until is None or watch.events_covered_until < expiry:
+                risks.append("财报及除息日期未核实")
+            else:
+                if watch.next_earnings and reference <= watch.next_earnings <= expiry:
+                    risks.append("到期前跨财报" + ("" if selection["allow_earnings"] else "（不符合本次边界）"))
+                if watch.next_dividend and reference <= watch.next_dividend <= expiry:
+                    risks.append("到期前跨除息日" + ("" if selection["allow_dividend"] else "（不符合本次边界）"))
+            matches = kind == "CALL" or (premium is not None and minimum <= premium <= maximum)
+            if kind == "PUT" and premium is not None and not matches:
+                risks.append("历史收盘参考金额不在权利金偏好范围")
+            if kind == "CALL" and (cost is None or strike is None):
+                risks.append("持股成本或 Call 行权价待核对")
+            elif kind == "CALL" and strike < cost:
+                risks.append("Call 行权价低于已录入持股成本")
+            if probability is None:
+                risks.append("目标交易日预计到期价内概率缺失")
+            if iv is None:
+                risks.append("目标交易日合约 IV 缺失")
+            results.append({
+                "symbol": symbol, "code": contract["code"], "strategy": kind,
+                "expiration": expiry.isoformat(), "reference_date": reference.isoformat(),
+                "price_basis": "Futu 历史期权日线收盘成交价", "strike": text(strike),
+                "premium": text(premium), "break_even": text(strike - close if kind == "PUT" else cost - close)
+                if close is not None and (strike is not None if kind == "PUT" else cost is not None) else None,
+                "delta": None, "iv": text(iv), "contract_iv_percentile": None,
+                "underlying_iv_percentile": None, "probability": text(probability),
+                "annualized_premium_rate": None, "premium_match": matches,
+                "risks": risks, "analysis": "按上一完整交易日的成交收盘价观察；开盘前请重新核对卖出报价。",
+            })
+    return sorted(results, key=lambda row: (
+        row["strategy"] != "PUT",
+        any("不符合本次边界" in risk for risk in row["risks"]),
+        not row["premium_match"],
+        number(row["probability"]) if row["probability"] is not None else Decimal(101),
+        row["symbol"],
+    ))

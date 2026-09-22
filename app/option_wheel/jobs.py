@@ -28,7 +28,7 @@ INTERRUPTED = "运行超时或中断，未取得完成确认。不会自动重�
 def validate_selection(family, selection):
     from .views import PARTICIPATING_ACCOUNTS, _snapshot_is_ready
     from .account_capacity import capacity_snapshot_stale_reasons
-    if selection.get("mode") == "screening_v2":
+    if selection.get("mode") in ("screening_v2", "screening_close_v2"):
         from .models import WheelWatchItem
         from .screening import number
         symbols = selection.get("symbols", [])
@@ -197,6 +197,42 @@ def run_job(job_id):
         if not job.requested_by.is_active or not job.requested_by.is_superuser:
             raise WheelAnalysisError("申请人的管理员权限已失效，未保存分析。")
         accounts = validate_selection(job.family, job.selection)
+        if job.selection.get("mode") == "screening_close_v2":
+            from portfolio.futu_option_probe import ProbeLock
+            from .close_data import CloseDataError
+            from .models import WheelWatchItem
+            from .screen_close import fetch
+            from .screening import compare_close_rows, covered_stock
+
+            holdings = covered_stock(job.family, job.selection["symbols"])
+
+            lock = ProbeLock()
+            if not lock.acquire():
+                raise WheelAnalysisError("已有 Futu 行情查询正在运行，请稍后重新提交。")
+            try:
+                report = fetch(job.selection["symbols"], job.selection["target_expiration"], calls_for=set(holdings))
+            except CloseDataError as exc:
+                raise WheelAnalysisError(str(exc)) from exc
+            finally:
+                lock.release()
+            watch_events = {item.symbol: item for item in WheelWatchItem.objects.filter(
+                family=job.family, symbol__in=job.selection["symbols"],
+            )}
+            results = compare_close_rows(report, job.selection, watch_events, holdings)
+            issues = [f'{item["symbol"]}：' + "、".join(item["issues"])
+                      for item in report["symbols"] if item["issues"]]
+            with transaction.atomic():
+                job = WheelAnalysisJob.objects.select_for_update().get(pk=job_id)
+                if job.status != "running" or job.expires_at <= timezone.now():
+                    raise WheelAnalysisError("任务已中断或超过保存期限，未保存分析。")
+                validate_selection(job.family, job.selection)
+                job.status = "saved"
+                job.screening_results = results
+                job.message = (f'Futu {report["reference_date"]} 收盘参考：已列出 {len(results)} 张合约。'
+                               + ("；" + "；".join(issues) if issues else ""))
+                job.finished_at = timezone.now()
+                job.save(update_fields=["status", "screening_results", "message", "finished_at", "updated_at"])
+            return
         if job.selection.get("mode") == "screening_v2":
             from .screening import compare_probe_rows, covered_stock
             from .models import WheelWatchItem
@@ -219,6 +255,8 @@ def run_job(job_id):
                 job.status = "saved"
                 job.screening_results = results
                 job.message = f"已比较 {len(results)} 张合约；报价来自 Futu，临时订阅已恢复。"
+                if not results:
+                    job.message += " 所选到期日没有取得可用 Bid；可能是非交易时段、期权链为空或报价缺失。可选择上一交易日收盘参考分析。"
                 job.finished_at = timezone.now()
                 job.save(update_fields=["status", "screening_results", "message", "finished_at", "updated_at"])
             return

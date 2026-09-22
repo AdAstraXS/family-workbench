@@ -115,6 +115,44 @@ class ScreeningTests(TestCase):
         self.assertIsNotNone(self.watch.price_as_of)
         self.assertEqual(self.watch.next_earnings, timezone.now().date() + timedelta(days=10))
 
+    @patch("option_wheel.jobs.launch_job")
+    def test_submit_previous_close_mode(self, launch):
+        token = signing.dumps({"family": self.family.pk, "key": str(uuid4())}, salt="wheel-live-job-v1")
+        payload = {"symbols": ["INTC"], "request_token": token, "expiry_choice": "next",
+                   "premium_min": "100", "premium_max": "500", "analysis_basis": "close"}
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse("option_wheel:analyze"), payload, HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(WheelAnalysisJob.objects.get().selection["mode"], "screening_close_v2")
+        launch.assert_called_once()
+
+    @patch("option_wheel.screen_close.fetch")
+    def test_previous_close_result_is_labelled_and_does_not_invent_delta(self, fetch):
+        selection = self.selection()
+        selection["mode"] = "screening_close_v2"
+        self.watch.events_checked_at = timezone.now()
+        self.watch.events_covered_until = timezone.now().date() + timedelta(days=35)
+        self.watch.save()
+        job = WheelAnalysisJob.objects.create(
+            family=self.family, requested_by=self.user, selection=selection,
+            expires_at=timezone.now() + timedelta(minutes=12),
+        )
+        reference = timezone.now().astimezone(ZoneInfo("America/New_York")).date() - timedelta(days=1)
+        fetch.return_value = {"reference_date": str(reference), "symbols": [{
+            "symbol": "INTC", "issues": [], "contracts": [{"code": "US.INTC-TEST", "strike": "30",
+                "size": 100, "close": "1.25", "iv": "42", "probability": "18", "issues": []}],
+        }]}
+        run_job(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "saved", job.message)
+        row = job.screening_results[0]
+        self.assertEqual(row["premium"], "125.00")
+        self.assertEqual(row["reference_date"], str(reference))
+        self.assertIsNone(row["delta"])
+        self.assertIsNone(row["annualized_premium_rate"])
+        self.assertContains(self.client.get(reverse("option_wheel:job_detail", args=[job.pk])), "收盘参考")
+        self.assertEqual(PortfolioSnapshot.objects.count(), 0)
+
     @patch("option_wheel.watch_refresh._fetch_dividend_calendar", return_value=({"status": "ok"}, []))
     @patch("option_wheel.watch_refresh.sdk_call")
     @patch("futu.OpenQuoteContext")

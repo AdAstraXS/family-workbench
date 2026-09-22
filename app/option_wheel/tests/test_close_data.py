@@ -8,6 +8,7 @@ from django.test import SimpleTestCase
 from option_wheel.close_data import (
     CloseDataError, NY, calendar_target, collect, daily_row, fetch_close_report, technical_summary,
 )
+from option_wheel.screen_close import collect as collect_screen_close
 
 TARGET = date(2026, 9, 2)
 NOW = datetime(2026, 9, 3, 8, tzinfo=NY)
@@ -55,6 +56,16 @@ class FakeQuote:
 
 
 class CloseDataTests(SimpleTestCase):
+    def test_screen_close_uses_exact_previous_day_without_subscriptions(self):
+        quote = FakeQuote()
+        report = collect_screen_close(quote, ["TSLA"], date(2026, 9, 9), NOW)
+        self.assertEqual(report["reference_date"], "2026-09-02")
+        contract = report["symbols"][0]["contracts"][0]
+        self.assertEqual(contract["close"], "3.20")
+        self.assertEqual(contract["probability"], "25.25")
+        self.assertEqual(contract["iv"], "40.1")
+        self.assertNotIn("subscribe", quote.calls)
+
     def test_daily_evidence_and_no_live_quote_dependency(self):
         report = collect(FakeQuote(), "TSLA", NOW)
         item = report["candidates"][0]

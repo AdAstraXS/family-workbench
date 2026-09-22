@@ -1,7 +1,7 @@
 """Simple household-facing weekly option screener."""
 
 import re
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from decimal import Decimal, InvalidOperation
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -81,14 +81,16 @@ def index(request):
         key = timezone.localtime(job.created_at).date()
         counts[key] = counts.get(key, 0) + 1
         job.day_number = counts[key]
-    latest = next((job for job in jobs if job.selection.get("mode") == "screening_v2"), None)
+    latest = next((job for job in jobs if job.selection.get("mode") in ("screening_v2", "screening_close_v2")), None)
+    ny_now = timezone.now().astimezone(NY)
     key = uuid4()
     return render(request, "option_wheel/screen_index.html", {
         "accounts": account_summary(family), "watchlist": watch, "jobs": jobs,
         "latest_job": latest,
         "analysis_request_token": signing.dumps({"family": family.pk, "key": str(key)}, salt="wheel-live-job-v1"),
         "analysis_status_url": reverse("option_wheel:job_status", args=[key]),
-        "today_ny": timezone.now().astimezone(NY).date(),
+        "today_ny": ny_now.date(),
+        "default_close": ny_now.weekday() >= 5 or not time(9, 30) <= ny_now.time() < time(16),
     })
 
 
@@ -165,8 +167,11 @@ def analyze(request):
         return HttpResponseBadRequest("提交凭证无效，请重新打开页面。")
     from .jobs import enqueue, job_payload
     from .analysis_service import WheelAnalysisError
+    basis = request.POST.get("analysis_basis", "live")
+    if basis not in ("live", "close"):
+        return HttpResponseBadRequest("分析依据无效。")
     selection = {
-        "mode": "screening_v2", "symbols": symbols,
+        "mode": "screening_close_v2" if basis == "close" else "screening_v2", "symbols": symbols,
         "target_expiration": expiry.isoformat(), "analysis_date": today.isoformat(),
         "premium_min": str(premium_min), "premium_max": str(premium_max),
         "allow_earnings": request.POST.get("allow_earnings") == "on",
