@@ -132,7 +132,7 @@ def compare_probe_rows(rows, selection, holdings, watch_events):
                 "symbol": symbol, "code": str(item.get("code") or ""), "strategy": kind,
                 "expiration": expiry.isoformat(), "strike": text(strike), "premium": text(premium),
                 "break_even": text(break_even), "delta": text(delta, 4), "iv": text(iv),
-                "contract_iv_percentile": None, "underlying_iv_percentile": text(stock_percentile),
+                "underlying_iv_percentile": text(stock_percentile),
                 "probability": text(probability), "annualized_premium_rate": text(annual),
                 "risks": risks, "premium_match": matches, "quote_source": "Futu Bid",
                 "analysis": iv_comment,
@@ -159,6 +159,10 @@ def compare_close_rows(report, selection, watch_events, holdings=None):
     for symbol_row in report["symbols"]:
         symbol = symbol_row["symbol"]
         watch = watch_events.get(symbol)
+        stock_percentile = number(symbol_row.get("underlying_iv_percentile"))
+        if stock_percentile is not None and not 0 <= stock_percentile <= 100:
+            stock_percentile = None
+        queried_at = symbol_row.get("underlying_iv_queried_at") if stock_percentile is not None else None
         for contract in symbol_row["contracts"]:
             kind = contract.get("strategy", "PUT")
             close = number(contract["close"])
@@ -187,15 +191,21 @@ def compare_close_rows(report, selection, watch_events, holdings=None):
                 risks.append("目标交易日预计到期价内概率缺失")
             if iv is None:
                 risks.append("目标交易日合约 IV 缺失")
+            if stock_percentile is not None:
+                risks.append("标的 IV 百分位是 Futu 最新查询值，并非历史收盘日数值")
+            dte = (expiry - reference).days
+            base = strike if kind == "PUT" else cost
+            annual = (close / base * Decimal(365) / Decimal(dte) * Decimal(100)
+                      if close is not None and base is not None and base > 0 and dte > 0 else None)
             results.append({
                 "symbol": symbol, "code": contract["code"], "strategy": kind,
                 "expiration": expiry.isoformat(), "reference_date": reference.isoformat(),
                 "price_basis": "Futu 历史期权日线收盘成交价", "strike": text(strike),
                 "premium": text(premium), "break_even": text(strike - close if kind == "PUT" else cost - close)
                 if close is not None and (strike is not None if kind == "PUT" else cost is not None) else None,
-                "delta": None, "iv": text(iv), "contract_iv_percentile": None,
-                "underlying_iv_percentile": None, "probability": text(probability),
-                "annualized_premium_rate": None, "premium_match": matches,
+                "delta": None, "iv": text(iv), "underlying_iv_percentile": text(stock_percentile),
+                "underlying_iv_queried_at": queried_at, "probability": text(probability),
+                "annualized_premium_rate": text(annual), "premium_match": matches,
                 "risks": risks, "analysis": "按上一完整交易日的成交收盘价观察；开盘前请重新核对卖出报价。",
             })
     return sorted(results, key=lambda row: (

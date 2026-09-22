@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 from portfolio.futu_option_probe import _is_standard_contract, _normalize_bool
 
@@ -20,14 +21,47 @@ FRAME = "WHEEL_SCREEN_CLOSE:"
 def _call(context, method, **kwargs):
     try:
         response = getattr(context, method)(**kwargs)
-        if response[0] != 0 or (len(response) > 2 and response[2] is not None):
-            raise CloseDataError(f"{method} 未返回完整数据")
+        if not isinstance(response, tuple) or len(response) < 2:
+            raise CloseDataError(f"{method} 响应格式无效")
+        if response[0] != 0:
+            # Provider text can include account details; only expose known categories.
+            message = str(response[1]).lower()
+            if any(word in message for word in ("timeout", "timed out", "超时")):
+                category = "查询超时"
+            elif any(word in message for word in ("frequency", "too frequent", "rate limit", "频率", "过于频繁")):
+                category = "请求频率限制"
+            elif any(word in message for word in ("permission", "privilege", "no right", "权限")):
+                category = "行情权限不足"
+            elif any(word in message for word in ("quota", "额度")):
+                category = "行情额度不足"
+            else:
+                category = "供应商拒绝请求"
+            if method == "get_option_chain" and category in {"查询超时", "请求频率限制"}:
+                time.sleep(31 if category == "请求频率限制" else 1)
+                return _call_once(context, method, kwargs)
+            raise CloseDataError(f"{method}：{category}")
+        if method == "request_history_kline" and len(response) > 2 and response[2] is not None:
+            raise CloseDataError(f"{method} 历史数据未取全")
         data = response[1]
         return data.to_dict("records") if hasattr(data, "to_dict") else data
     except CloseDataError:
         raise
     except Exception:
         raise CloseDataError(f"{method} 查询失败") from None
+
+
+def _call_once(context, method, kwargs):
+    """A single bounded retry; never retry permissions or arbitrary provider errors."""
+    try:
+        response = getattr(context, method)(**kwargs)
+        if not isinstance(response, tuple) or len(response) < 2 or response[0] != 0:
+            raise CloseDataError(f"{method}：重试后仍未返回数据")
+        data = response[1]
+        return data.to_dict("records") if hasattr(data, "to_dict") else data
+    except CloseDataError:
+        raise
+    except Exception:
+        raise CloseDataError(f"{method}：重试失败") from None
 
 
 def _positive(value):
@@ -66,6 +100,15 @@ def collect(context, symbols, expiry, now, calls_for=()):
             if spot is None:
                 raise CloseDataError("目标交易日正股收盘价缺失")
             item["stock_close"] = str(spot)
+            try:
+                overview = _call(context, "get_option_underlying_overview", code_list=[code])
+                matching = [row for row in overview if row.get("code") == code]
+                percentile = number(matching[0].get("iv_percentile")) if matching else None
+                if percentile is not None and 0 <= percentile <= 100:
+                    item["underlying_iv_percentile"] = str(percentile)
+                    item["underlying_iv_queried_at"] = datetime.now(NY).isoformat(timespec="seconds")
+            except CloseDataError:
+                pass  # Latest overview is optional and never blocks a historical chain.
             chain = _call(context, "get_option_chain", code=code, start=str(expiry), end=str(expiry), option_type="PUT")
             eligible = [row for row in chain if _contract_identity(row, symbol, expiry, "PUT")]
             eligible.sort(key=lambda row: (abs(number(row["strike_price"]) - spot), row["code"]))

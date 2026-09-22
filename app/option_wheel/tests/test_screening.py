@@ -97,7 +97,7 @@ class ScreeningTests(TestCase):
         self.assertEqual(row["break_even"], "28.50")
         self.assertEqual(row["delta"], "-0.1800")
         self.assertEqual(row["underlying_iv_percentile"], "65.00")
-        self.assertIsNone(row["contract_iv_percentile"])
+        self.assertNotIn("contract_iv_percentile", row)
         self.assertEqual(WheelDecision.objects.count(), 0)
         self.assertEqual(PortfolioSnapshot.objects.count(), 0)
         self.assertContains(self.client.get(reverse("option_wheel:job_detail", args=[job.pk])), "28.50")
@@ -142,7 +142,9 @@ class ScreeningTests(TestCase):
         job.status = "queued"
         reference = timezone.now().astimezone(ZoneInfo("America/New_York")).date() - timedelta(days=1)
         fetch.return_value = {"reference_date": str(reference), "symbols": [{
-            "symbol": "INTC", "issues": [], "contracts": [{"code": "US.INTC-TEST", "strike": "30",
+            "symbol": "INTC", "issues": [], "underlying_iv_percentile": "65",
+            "underlying_iv_queried_at": "2026-09-22T05:00:00-04:00",
+            "contracts": [{"code": "US.INTC-TEST", "strike": "30",
                 "size": 100, "close": "1.25", "iv": "42", "probability": "18", "issues": []}],
         }]}
         run_job(job.pk)
@@ -152,7 +154,9 @@ class ScreeningTests(TestCase):
         self.assertEqual(row["premium"], "125.00")
         self.assertEqual(row["reference_date"], str(reference))
         self.assertIsNone(row["delta"])
-        self.assertIsNone(row["annualized_premium_rate"])
+        self.assertIsNotNone(row["annualized_premium_rate"])
+        self.assertEqual(row["underlying_iv_percentile"], "65.00")
+        self.assertNotIn("contract_iv_percentile", row)
         self.assertContains(self.client.get(reverse("option_wheel:job_detail", args=[job.pk])), "收盘参考")
         self.assertEqual(PortfolioSnapshot.objects.count(), 0)
 
