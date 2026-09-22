@@ -562,8 +562,25 @@ def decision_detail(request, pk):
 
 @login_required
 def holdings(request):
+    from .open_puts import open_put_rows
+    from .models import WheelPositionReview
+    from portfolio.models import InvestmentTransaction, TradeStatusChoices, TradeTypeChoices
+
     family = _request_family(request)
+    open_puts = open_put_rows(family)
+    reviews = WheelPositionReview.objects.filter(family=family).select_related(
+        "account__bank_account", "security", "linked_transaction", "created_by",
+    )[:50]
+    for review in reviews:
+        if review.linked_transaction_id is None:
+            review.linkable_trades = InvestmentTransaction.objects.filter(
+                account=review.account, security=review.security,
+                status__in=[TradeStatusChoices.COMPLETED, TradeStatusChoices.PARTIAL],
+                trade_type=TradeTypeChoices.BUY, position_effect=InvestmentTransaction.EFFECT_CLOSE,
+            ).order_by("-trade_date", "-pk")[:20]
     cycles = WheelCycle.objects.filter(family=family).select_related(
         "account__bank_account", "underlying"
     ).prefetch_related("legs__transaction_links", "legs__collateral_reservations").order_by("status", "underlying__symbol", "-opened_on")
-    return render(request, "option_wheel/holdings.html", {"cycles": cycles})
+    return render(request, "option_wheel/holdings.html", {
+        "cycles": cycles, "open_puts": open_puts, "reviews": reviews,
+    })

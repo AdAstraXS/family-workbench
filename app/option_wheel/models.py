@@ -1799,3 +1799,45 @@ class WheelCollateralReservation(TimestampedModel):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+class WheelPositionReview(TimestampedModel):
+    """Human decision note; linking a real transaction never creates a trade."""
+
+    CHOICES = [
+        ("hold", "继续持有"), ("buy_back", "考虑买回"),
+        ("roll_out", "考虑同价延后"), ("roll_down_out", "考虑降价延后"),
+        ("assignment", "等待核实指派"), ("pause", "暂停操作"),
+    ]
+    family = models.ForeignKey(Family, on_delete=models.PROTECT, related_name="wheel_position_reviews")
+    account = models.ForeignKey(InvestmentAccount, on_delete=models.PROTECT, related_name="wheel_position_reviews")
+    security = models.ForeignKey(Security, on_delete=models.PROTECT, related_name="wheel_position_reviews")
+    choice = models.CharField(max_length=20, choices=CHOICES)
+    note = models.TextField(blank=True)
+    frozen_facts = models.JSONField(default=dict)
+    linked_transaction = models.ForeignKey(
+        InvestmentTransaction, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="wheel_position_reviews",
+    )
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+
+    class Meta:
+        verbose_name = "车轮人工决策记录"
+        verbose_name_plural = "车轮人工决策记录"
+        ordering = ["-created_at", "-pk"]
+
+    def clean(self):
+        errors = {}
+        if self.account_id and self.family_id and self.account.family_id != self.family_id:
+            errors["account"] = "账户不属于此家庭。"
+        if self.linked_transaction_id and (
+            self.linked_transaction.account_id != self.account_id
+            or self.linked_transaction.security_id != self.security_id
+        ):
+            errors["linked_transaction"] = "只能关联同账户、同合约的真实交易。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)

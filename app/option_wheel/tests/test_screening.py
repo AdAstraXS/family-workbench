@@ -12,10 +12,10 @@ from django.utils import timezone
 
 from family_core.models import ExchangeRate, Family, FamilyMember
 from ledger.models import BankAccount
-from portfolio.models import InvestmentAccount, InvestmentPosition, PortfolioSnapshot, Security
+from portfolio.models import InvestmentAccount, InvestmentPosition, InvestmentTransaction, OptionContract, PortfolioSnapshot, Security, TradeTypeChoices
 from option_wheel.jobs import job_payload, run_job
-from option_wheel.screening import compare_close_rows, compare_probe_rows, present_results
-from option_wheel.models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelDecision, WheelWatchItem
+from option_wheel.screening import compare_close_rows, compare_probe_rows, covered_stock, present_results
+from option_wheel.models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelDecision, WheelPositionReview, WheelWatchItem
 from option_wheel.watch_refresh import refresh_watch_events
 
 
@@ -63,6 +63,71 @@ class ScreeningTests(TestCase):
         self.assertContains(response, "120 股")
         self.assertContains(response, "可比较 Covered Call")
         self.assertEqual(WheelBrokerAccountSnapshot.objects.count(), 0)
+
+    def test_existing_short_call_occupies_shares_and_alternatives_are_not_additive(self):
+        stock = Security.objects.create(symbol="INTC", name="Intel", market="US", asset_type="stock")
+        call = Security.objects.create(symbol="INTC-C", market="US", asset_type="option")
+        OptionContract.objects.create(security=call, underlying=stock, option_type="call",
+                                      strike_price=Decimal("35"), expiration_date=date(2026, 10, 2))
+        InvestmentPosition.objects.create(account=self.account, security=stock, quantity=Decimal("190"),
+                                          avg_cost=Decimal("31"), position_date=timezone.localdate())
+        InvestmentPosition.objects.create(account=self.account, security=call, quantity=Decimal("-1"),
+                                          avg_cost=Decimal("0.5"), position_date=timezone.localdate())
+        self.assertEqual(covered_stock(self.family, ["INTC"]), {})
+        page = self.client.get(reverse("option_wheel:index"))
+        self.assertContains(page, "已被未平仓 Call 覆盖 100 股")
+        self.assertContains(page, "还能覆盖 0 张")
+
+    def test_stock_lots_are_only_shown_when_recorded_buys_reconcile(self):
+        stock = Security.objects.create(symbol="INTC", name="Intel", market="US", asset_type="stock")
+        InvestmentPosition.objects.create(account=self.account, security=stock, quantity=Decimal("200"),
+                                          avg_cost=Decimal("31"), position_date=timezone.localdate())
+        for quantity, price in (("100", "30"), ("100", "32")):
+            InvestmentTransaction.objects.create(
+                account=self.account, security=stock, trade_date=timezone.localdate(),
+                trade_type=TradeTypeChoices.BUY, quantity=Decimal(quantity),
+                price=Decimal(price), amount=Decimal(quantity) * Decimal(price),
+            )
+        holdings = covered_stock(self.family, ["INTC"])["INTC"]
+        self.assertEqual(holdings[0]["available_contracts"], 2)
+        self.assertEqual([lot["cost"] for lot in holdings[0]["cost_lots"]], [Decimal("30"), Decimal("32")])
+        page = self.client.get(reverse("option_wheel:index"))
+        self.assertContains(page, "每股成本 $32.00")
+
+    def test_open_put_page_uses_real_position_and_marks_missing_quotes_unknown(self):
+        stock = Security.objects.create(symbol="INTC", name="Intel", market="US", asset_type="stock")
+        put = Security.objects.create(symbol="INTC-P", market="US", asset_type="option")
+        OptionContract.objects.create(security=put, underlying=stock, option_type="put",
+                                      strike_price=Decimal("30"), expiration_date=date(2026, 10, 2))
+        InvestmentPosition.objects.create(account=self.account, security=put, quantity=Decimal("-1"),
+                                          avg_cost=Decimal("1.5"), current_price=Decimal("0.8"),
+                                          unrealized_pnl=Decimal("70"), position_date=timezone.localdate())
+        page = self.client.get(reverse("option_wheel:holdings"))
+        self.assertContains(page, "管理未平仓 Put")
+        self.assertContains(page, "INTC")
+        self.assertContains(page, "150.00")
+        self.assertContains(page, "待查询 / 待查询")
+
+        response = self.client.post(reverse("option_wheel:record_put_review"), {
+            "position_id": InvestmentPosition.objects.get(security=put).pk,
+            "choice": "roll_down_out", "note": "等待 Ask 报价后比较",
+        })
+        self.assertEqual(response.status_code, 302)
+        review = WheelPositionReview.objects.get()
+        self.assertEqual(review.frozen_facts["quantity"], "-1.000000")
+        self.assertIsNone(review.linked_transaction_id)
+        close_trade = InvestmentTransaction.objects.create(
+            account=self.account, security=put, trade_date=timezone.localdate(),
+            trade_type=TradeTypeChoices.BUY, position_effect=InvestmentTransaction.EFFECT_CLOSE,
+            quantity=Decimal("1"), price=Decimal("0.8"), amount=Decimal("80"),
+        )
+        response = self.client.post(reverse("option_wheel:link_put_transaction", args=[review.pk]), {
+            "transaction_id": close_trade.pk,
+        })
+        self.assertEqual(response.status_code, 302)
+        review.refresh_from_db()
+        self.assertEqual(review.linked_transaction_id, close_trade.pk)
+        self.assertEqual(InvestmentTransaction.objects.count(), 1)
 
     @patch("option_wheel.jobs.launch_job")
     def test_submit_is_account_independent_and_idempotent(self, launch):

@@ -17,6 +17,7 @@ from .models import (
     WheelOptionQuoteSnapshot,
     WheelPause,
     WheelPolicy,
+    WheelPositionReview,
     WheelTechnicalSnapshot,
     WheelTransactionLink,
     WheelWatchItem,
@@ -285,6 +286,7 @@ for evidence_model in (
     WheelLeg,
     WheelTransactionLink,
     WheelCollateralReservation,
+    WheelPositionReview,
 ):
     admin.site.register(evidence_model, GenericEvidenceReadOnlyAdmin)
 

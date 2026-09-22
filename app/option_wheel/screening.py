@@ -3,9 +3,7 @@
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from portfolio.models import InvestmentPosition
-
-from .views import PARTICIPATING_ACCOUNTS
+from .position_evidence import stock_evidence
 
 
 def number(value):
@@ -27,6 +25,15 @@ def text(value, places=2):
     if value is None:
         return None
     return str(value.quantize(Decimal(1).scaleb(-places)))
+
+
+def call_cost(holding):
+    lots = holding.get("cost_lots")
+    if lots:
+        costs = [lot["cost"] for lot in lots if lot["cost"] is not None]
+        if costs:
+            return max(costs), "已录入批次中最高成本（尚未指定覆盖批次）"
+    return holding.get("cost"), "账户平均成本参考，股票批次未核实"
 
 
 def present_results(rows, selection):
@@ -74,10 +81,10 @@ def present_results(rows, selection):
             if strike is not None and cost is not None:
                 difference = strike - cost
                 if difference >= 0:
-                    row["display_analysis"] = (f"行权价比该账户录入均价高 ${text(difference)}；"
+                    row["display_analysis"] = (f"行权价比所示成本高 ${text(difference)}；"
                                                "请结合权利金与到期价内概率权衡正股被卖出的可能。")
                 else:
-                    row["display_analysis"] = (f"行权价比该账户录入均价低 ${text(-difference)}；"
+                    row["display_analysis"] = (f"行权价比所示成本低 ${text(-difference)}；"
                                                "如被行权，正股会按此行权价卖出。")
             else:
                 row["display_analysis"] = "Covered Call 请比较行权价与该账户持股成本，以及正股被行权卖出的风险。"
@@ -85,23 +92,11 @@ def present_results(rows, selection):
 
 
 def covered_stock(family, symbols):
-    """Current recorded shares, for context only; no account gates."""
+    """Only unoccupied same-account shares can support a Call comparison."""
     holdings = {}
-    positions = InvestmentPosition.objects.filter(
-        account__bank_account__family=family,
-        account__bank_account__account_name__in=PARTICIPATING_ACCOUNTS,
-        security__symbol__in=symbols,
-        security__market__iexact="US",
-        security__asset_type="stock",
-        quantity__gt=0,
-    ).select_related("security", "account__bank_account")
-    for position in positions:
-        if position.quantity >= 100:
-            holdings.setdefault(position.security.symbol.upper(), []).append({
-                "account": position.account.account_name,
-                "shares": position.quantity,
-                "cost": position.avg_cost if position.avg_cost > 0 else None,
-            })
+    for position in stock_evidence(family, symbols).values():
+        if position["available_contracts"]:
+            holdings.setdefault(position["symbol"], []).append(position)
     return holdings
 
 
@@ -146,7 +141,7 @@ def compare_probe_rows(rows, selection, holdings, watch_events):
                 available = holdings.get(symbol, [])
                 if not available:
                     continue
-                cost = max((row["cost"] for row in available if row["cost"] is not None), default=None)
+                cost = max((call_cost(row)[0] for row in available if call_cost(row)[0] is not None), default=None)
             break_even = (strike - bid if kind == "PUT" else cost - bid if cost is not None else None) if strike is not None and bid is not None else None
             base = (strike if kind == "PUT" else cost)
             annual = bid / base * Decimal(365) / Decimal(dte) * Decimal(100) if bid is not None and base and dte > 0 else None
@@ -195,10 +190,13 @@ def compare_probe_rows(rows, selection, holdings, watch_events):
             }
             if kind == "CALL":
                 for holding in available:
-                    account_cost = holding["cost"]
+                    account_cost, cost_note = call_cost(holding)
                     account_row = dict(result)
                     account_row["account"] = holding["account"]
                     account_row["shares"] = text(holding["shares"], 0)
+                    account_row["available_contracts"] = holding.get("available_contracts", 1)
+                    account_row["occupied_shares"] = text(holding.get("occupied_shares", Decimal(0)), 0)
+                    account_row["cost_note"] = cost_note
                     account_row["cost"] = text(account_cost)
                     account_row["break_even"] = text(account_cost - bid) if account_cost is not None and bid is not None else None
                     account_row["annualized_premium_rate"] = text(
@@ -275,10 +273,13 @@ def compare_close_rows(report, selection, watch_events, holdings=None):
             }
             if kind == "CALL":
                 for holding in holdings.get(symbol, []):
-                    account_cost = holding["cost"]
+                    account_cost, cost_note = call_cost(holding)
                     account_row = dict(result)
                     account_row["account"] = holding["account"]
                     account_row["shares"] = text(holding["shares"], 0)
+                    account_row["available_contracts"] = holding.get("available_contracts", 1)
+                    account_row["occupied_shares"] = text(holding.get("occupied_shares", Decimal(0)), 0)
+                    account_row["cost_note"] = cost_note
                     account_row["cost"] = text(account_cost)
                     account_row["break_even"] = text(account_cost - close) if account_cost is not None and close is not None else None
                     account_row["annualized_premium_rate"] = text(
