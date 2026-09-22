@@ -113,7 +113,12 @@ def collect(context, symbols, expiry, now, calls_for=()):
             eligible = [row for row in chain if _contract_identity(row, symbol, expiry, "PUT")]
             eligible.sort(key=lambda row: (abs(number(row["strike_price"]) - spot), row["code"]))
             item["chain_count"] = len(chain)
-            selected = eligible[:8]
+            otm_puts = sorted((row for row in eligible if number(row["strike_price"]) <= spot),
+                              key=lambda row: (-number(row["strike_price"]), row["code"]))
+            ranked_puts = otm_puts or eligible
+            selected = [ranked_puts[index] for index in (0, 1, 2, 3, 4, 5, 7, 9, 12, 16, 22, 30)
+                        if index < len(ranked_puts)]
+            selected.extend(row for row in ranked_puts if row not in selected and len(selected) < 12)
             if not eligible:
                 item["issues"].append("所选到期日没有可确认的标准 Put 合约")
             if symbol in calls_for:
@@ -122,7 +127,10 @@ def collect(context, symbols, expiry, now, calls_for=()):
                     call_options = [row for row in calls if _contract_identity(row, symbol, expiry, "CALL")]
                     call_options.sort(key=lambda row: (number(row["strike_price"]) < spot,
                                                        abs(number(row["strike_price"]) - spot), row["code"]))
-                    selected.extend(call_options[:1])
+                    ranked_calls = [row for row in call_options if number(row["strike_price"]) >= spot] or call_options
+                    picked_calls = [ranked_calls[index] for index in (0, 1, 3, 7) if index < len(ranked_calls)]
+                    picked_calls.extend(row for row in ranked_calls if row not in picked_calls and len(picked_calls) < 4)
+                    selected.extend(picked_calls)
                     if not call_options:
                         item["issues"].append("所选到期日没有可确认的标准 Call 合约")
                 except CloseDataError as exc:

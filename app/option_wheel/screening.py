@@ -70,7 +70,17 @@ def present_results(rows, selection):
         elif row.get("strategy") == "PUT":
             row["display_analysis"] = "缺少可比的到期价内概率；请结合权利金、行权价和事件风险自行判断。"
         else:
-            row["display_analysis"] = "Covered Call 请重点比较行权价与已录入持股成本，以及正股被交割的风险。"
+            strike, cost = number(row.get("strike")), number(row.get("cost"))
+            if strike is not None and cost is not None:
+                difference = strike - cost
+                if difference >= 0:
+                    row["display_analysis"] = (f"行权价比该账户录入均价高 ${text(difference)}；"
+                                               "请结合权利金与到期价内概率权衡正股被卖出的可能。")
+                else:
+                    row["display_analysis"] = (f"行权价比该账户录入均价低 ${text(-difference)}；"
+                                               "如被行权，正股会按此行权价卖出。")
+            else:
+                row["display_analysis"] = "Covered Call 请比较行权价与该账户持股成本，以及正股被行权卖出的风险。"
     return visible
 
 
@@ -183,7 +193,26 @@ def compare_probe_rows(rows, selection, holdings, watch_events):
                 "analysis": iv_comment,
                 "iv_percentile_source": overview.get("source") if stock_percentile is not None else None,
             }
-            results.append(result)
+            if kind == "CALL":
+                for holding in available:
+                    account_cost = holding["cost"]
+                    account_row = dict(result)
+                    account_row["account"] = holding["account"]
+                    account_row["shares"] = text(holding["shares"], 0)
+                    account_row["cost"] = text(account_cost)
+                    account_row["break_even"] = text(account_cost - bid) if account_cost is not None and bid is not None else None
+                    account_row["annualized_premium_rate"] = text(
+                        bid / account_cost * Decimal(365) / Decimal(dte) * Decimal(100)
+                    ) if bid is not None and account_cost is not None and account_cost > 0 and dte > 0 else None
+                    account_row["risks"] = [risk for risk in risks if risk not in (
+                        "持股成本或行权价待核对", "Call 行权价低于已录入持股成本")]
+                    if account_cost is None or strike is None:
+                        account_row["risks"].append("持股成本或行权价待核对")
+                    elif strike < account_cost:
+                        account_row["risks"].append("Call 行权价低于该账户持股成本")
+                    results.append(account_row)
+            else:
+                results.append(result)
     return present_results(results, selection)
 
 
@@ -233,7 +262,7 @@ def compare_close_rows(report, selection, watch_events, holdings=None):
             base = strike if kind == "PUT" else cost
             annual = (close / base * Decimal(365) / Decimal(dte) * Decimal(100)
                       if close is not None and base is not None and base > 0 and dte > 0 else None)
-            results.append({
+            result = {
                 "symbol": symbol, "code": contract["code"], "strategy": kind,
                 "expiration": expiry.isoformat(), "reference_date": reference.isoformat(),
                 "price_basis": "Futu 历史期权日线收盘成交价", "strike": text(strike),
@@ -243,5 +272,25 @@ def compare_close_rows(report, selection, watch_events, holdings=None):
                 "underlying_iv_queried_at": queried_at, "probability": text(probability),
                 "annualized_premium_rate": text(annual), "premium_match": matches,
                 "risks": risks, "analysis": "按上一完整交易日的成交收盘价观察；开盘前请重新核对卖出报价。",
-            })
+            }
+            if kind == "CALL":
+                for holding in holdings.get(symbol, []):
+                    account_cost = holding["cost"]
+                    account_row = dict(result)
+                    account_row["account"] = holding["account"]
+                    account_row["shares"] = text(holding["shares"], 0)
+                    account_row["cost"] = text(account_cost)
+                    account_row["break_even"] = text(account_cost - close) if account_cost is not None and close is not None else None
+                    account_row["annualized_premium_rate"] = text(
+                        close / account_cost * Decimal(365) / Decimal(dte) * Decimal(100)
+                    ) if close is not None and account_cost is not None and account_cost > 0 and dte > 0 else None
+                    account_row["risks"] = [risk for risk in risks if risk not in (
+                        "持股成本或 Call 行权价待核对", "Call 行权价低于已录入持股成本")]
+                    if account_cost is None or strike is None:
+                        account_row["risks"].append("持股成本或 Call 行权价待核对")
+                    elif strike < account_cost:
+                        account_row["risks"].append("Call 行权价低于该账户持股成本")
+                    results.append(account_row)
+            else:
+                results.append(result)
     return present_results(results, selection)

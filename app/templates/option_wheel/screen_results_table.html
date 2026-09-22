@@ -5,7 +5,7 @@
     <tbody>
       {% for item in results %}
         <tr>
-          <td><strong>{{ item.symbol }} · {% if item.strategy == "PUT" %}Put{% else %}Covered Call{% endif %}</strong><small>{{ item.code }}</small>{% if item.reference_date %}<small>{{ item.reference_date }} 收盘参考</small>{% endif %}</td>
+          <td><strong>{{ item.symbol }} · {% if item.strategy == "PUT" %}Put{% else %}Covered Call{% endif %}</strong>{% if item.account %}<small>{{ item.account }} · {{ item.shares }} 股 · 成本 ${{ item.cost|default:"—" }}</small>{% endif %}<small>{{ item.code }}</small>{% if item.reference_date %}<small>{{ item.reference_date }} 收盘参考</small>{% endif %}</td>
           <td>{% if item.premium is not None %}${{ item.premium }}{% else %}—{% endif %}</td>
           <td>{% if item.strike is not None %}${{ item.strike }}{% else %}—{% endif %}</td>
           <td>{% if item.break_even is not None %}${{ item.break_even }}{% else %}—{% endif %}</td>

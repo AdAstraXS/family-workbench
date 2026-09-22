@@ -1134,6 +1134,31 @@ class DynamicProbeTest(SimpleTestCase):
         self.assertNotIn("request_history_kline", names)
         self.assertNotIn("get_earnings_calendar", names)
 
+    def test_screen_samples_twelve_puts_and_four_calls_from_one_expiry(self):
+        class WideChainContext(DynamicContext):
+            def get_option_chain(self, symbol, start=None, end=None, option_type=None):
+                self.calls.append(("get_option_chain", symbol))
+                return 0, [
+                    {"code": f"{symbol}-{start}-{kind}-{strike}", "option_type": kind,
+                     "strike_price": strike, "option_standard_type": "STANDARD",
+                     "strike_time": start, "expiration_date": start, "lot_size": 100,
+                     "stock_owner": symbol, "option_settlement_mode": "PHYSICAL"}
+                    for kind, strikes in (("PUT", range(100, 200, 2)), ("CALL", range(200, 240, 2)))
+                    for strike in strikes
+                ]
+
+        context = WideChainContext()
+        result = probe_symbol(
+            context, FakeFutu(), "US.TSLA",
+            resolve_profile("screen", False, False, False, False, False), 1, 12,
+            set(), [], target_expiration=DYNAMIC_EXPIRY, include_covered_call=True,
+            sleeper=lambda seconds: None,
+        )
+        contracts = result["representative_contracts"]
+        self.assertEqual(sum(row["option_type"] == "PUT" for row in contracts), 12)
+        self.assertEqual(sum(row["option_type"] == "CALL" for row in contracts), 4)
+        self.assertEqual(len([call for call in context.calls if call[0] == "get_option_chain"]), 1)
+
     def test_m1_gate_rejects_premarket_even_with_fresh_quotes(self):
         class PremarketContext(DynamicContext):
             def get_global_state(self):

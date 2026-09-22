@@ -1272,7 +1272,7 @@ def probe_symbol(
             below = [row for row in standard_puts if spot_value is not None and _strike(row) <= spot_value]
             ranked = below or standard_puts
             picked = []
-            for index in (0, 1, 2, 4, 7, 11, 16, 23):
+            for index in (0, 1, 2, 3, 4, 5, 7, 9, 12, 16, 22, 30):
                 if index < len(ranked):
                     picked.append(ranked[index])
             for row in ranked:
@@ -1290,13 +1290,31 @@ def probe_symbol(
                     break
                 put_candidates.append((selected, metadata))
         if config.get("profile") in {"m1-gate", "screen"} and include_covered_call:
-            selected, metadata = select_representative_call(call_rows, spot)
-            if selected is not None:
-                call_candidates.append((selected, metadata))
+            if config.get("profile") == "screen":
+                standard_calls = [row for row in call_rows if _is_standard_contract(row) and _strike(row) is not None]
+                try:
+                    spot_value = Decimal(str(spot))
+                except (InvalidOperation, TypeError, ValueError):
+                    spot_value = None
+                ranked_calls = sorted(
+                    (row for row in standard_calls if spot_value is None or _strike(row) >= spot_value),
+                    key=lambda row: (_strike(row), row.get("code") or ""),
+                ) or sorted(standard_calls, key=lambda row: (_strike(row), row.get("code") or ""))
+                for index in (0, 1, 3, 7):
+                    if index < len(ranked_calls):
+                        call_candidates.append((ranked_calls[index], {"degradation": None}))
+                for row in ranked_calls:
+                    if len(call_candidates) >= 4:
+                        break
+                    if not any(candidate.get("code") == row.get("code") for candidate, _ in call_candidates):
+                        call_candidates.append((row, {"degradation": None}))
+            else:
+                selected, metadata = select_representative_call(call_rows, spot)
+                if selected is not None:
+                    call_candidates.append((selected, metadata))
 
     selected_candidates = list(put_candidates)
-    if call_candidates:
-        selected_candidates.append(call_candidates[0])
+    selected_candidates.extend(call_candidates if config.get("profile") == "screen" else call_candidates[:1])
     for selected, metadata in selected_candidates:
         settlement_mode = selected.get("option_settlement_mode")
         identity_unknown_fields = ["deliverable_shares", "exercise_style"]
@@ -1856,7 +1874,7 @@ def run_probe(
             )
         if not 1 <= max_expirations <= 3:
             raise ValueError("max_expirations must be between 1 and 3")
-        contract_limit = 8 if profile == "screen" else 3
+        contract_limit = 12 if profile == "screen" else 3
         if not 1 <= max_contracts_per_expiration <= contract_limit:
             raise ValueError(
                 f"max_contracts_per_expiration must be between 1 and {contract_limit}"
@@ -1870,17 +1888,17 @@ def run_probe(
             allow_partial,
         )
         worst_case_candidates = len(normalized_symbols) * (
-            max_contracts_per_expiration + 1
+            max_contracts_per_expiration + (4 if profile == "screen" else 1)
             if config["profile"] in {"m1-gate", "screen"}
             else max_expirations * max_contracts_per_expiration
         )
         if (
             config["subscribe_quotes"]
-            and worst_case_candidates > (27 if profile == "screen" else MAX_DYNAMIC_CANDIDATES)
+            and worst_case_candidates > (48 if profile == "screen" else MAX_DYNAMIC_CANDIDATES)
         ):
             raise ValueError(
                 "dynamic candidate limit exceeded: "
-                f"{worst_case_candidates}>{27 if profile == 'screen' else MAX_DYNAMIC_CANDIDATES}"
+                f"{worst_case_candidates}>{48 if profile == 'screen' else MAX_DYNAMIC_CANDIDATES}"
             )
     except (TypeError, ValueError) as exc:
         return failed_result([sanitize_for_output(str(exc))])

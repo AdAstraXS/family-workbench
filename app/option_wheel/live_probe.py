@@ -26,7 +26,7 @@ if __name__ == "__main__":
             target_expiration = arguments.pop(0).split("=", 1)[1]
         result = run_probe(
             arguments, profile="screen" if screening else "m1-gate", max_expirations=1,
-            max_contracts_per_expiration=8 if screening else 3,
+            max_contracts_per_expiration=12 if screening else 3,
             covered_call_symbols=calls_for,
             target_expiration=target_expiration,
         )

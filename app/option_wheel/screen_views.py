@@ -16,7 +16,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from portfolio.models import InvestmentAccount, PortfolioSnapshot, Security
+from portfolio.models import InvestmentAccount, InvestmentPosition, PortfolioSnapshot, Security
 from portfolio.valuation import resolve_exchange_rate
 
 from .models import WheelAnalysisJob, WheelWatchItem
@@ -39,10 +39,18 @@ def account_summary(family):
     result = []
     for name, matches in groups.items():
         account, ambiguous = _select_participating_account(matches)
-        row = {"name": name, "cash": None, "nav": None, "as_of": None, "note": "尚无投资组合快照"}
+        row = {"name": name, "cash": None, "nav": None, "as_of": None, "note": "尚无投资组合快照", "stocks": []}
         if ambiguous:
             row["note"] = "账户映射不唯一"
         elif account is not None:
+            positions = InvestmentPosition.objects.filter(
+                account=account, security__market__iexact="US",
+                security__asset_type=Security.TYPE_STOCK, quantity__gt=0,
+            ).select_related("security").order_by("security__symbol")
+            row["stocks"] = [{"symbol": position.security.symbol, "name": position.security.name,
+                              "shares": position.quantity, "cost": position.avg_cost,
+                              "as_of": position.position_date, "covered": position.quantity >= 100}
+                             for position in positions]
             snapshot = PortfolioSnapshot.objects.filter(family=family, account=account).order_by("-snapshot_date", "-pk").first()
             if snapshot:
                 row["as_of"] = snapshot.snapshot_date

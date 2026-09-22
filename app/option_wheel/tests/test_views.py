@@ -32,7 +32,7 @@ class OptionWheelPageTests(TestCase):
     def test_home_contains_current_flow_without_capacity_controls(self):
         WheelWatchItem.objects.create(family=self.family, symbol="INTC", name="Intel")
         response = self.client.get(reverse("option_wheel:index"))
-        self.assertContains(response, "两个账户的现金与净值")
+        self.assertContains(response, "两个账户的现金、净值与美股持仓")
         self.assertContains(response, "Intel")
         self.assertContains(response, "合约对比")
         for retired in ("策略总闸门", "保存为正式容量快照", "风险总闸", "当前阻断项"):

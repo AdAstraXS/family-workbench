@@ -12,9 +12,9 @@ from django.utils import timezone
 
 from family_core.models import ExchangeRate, Family, FamilyMember
 from ledger.models import BankAccount
-from portfolio.models import InvestmentAccount, PortfolioSnapshot
+from portfolio.models import InvestmentAccount, InvestmentPosition, PortfolioSnapshot, Security
 from option_wheel.jobs import job_payload, run_job
-from option_wheel.screening import compare_close_rows, present_results
+from option_wheel.screening import compare_close_rows, compare_probe_rows, present_results
 from option_wheel.models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelDecision, WheelWatchItem
 from option_wheel.watch_refresh import refresh_watch_events
 
@@ -53,6 +53,15 @@ class ScreeningTests(TestCase):
         self.assertContains(response, "2000.00")
         self.assertContains(response, "合约对比")
         self.assertNotContains(response, "容量快照")
+        self.assertEqual(WheelBrokerAccountSnapshot.objects.count(), 0)
+
+    def test_home_shows_recorded_us_shares_and_covered_call_threshold(self):
+        security = Security.objects.create(symbol="INTC", name="Intel", market="US", asset_type="stock")
+        InvestmentPosition.objects.create(account=self.account, security=security, quantity=Decimal("120"),
+                                          avg_cost=Decimal("31"), position_date=timezone.localdate())
+        response = self.client.get(reverse("option_wheel:index"))
+        self.assertContains(response, "120 股")
+        self.assertContains(response, "可比较 Covered Call")
         self.assertEqual(WheelBrokerAccountSnapshot.objects.count(), 0)
 
     @patch("option_wheel.jobs.launch_job")
@@ -200,6 +209,36 @@ class ScreeningTests(TestCase):
         }]}
         rows = compare_close_rows(report, selection, {}, {})
         self.assertEqual([row["code"] for row in rows], ["US.INTC-OK"])
+
+    def test_close_call_is_compared_for_each_account_with_100_shares(self):
+        selection = self.selection()
+        report = {"reference_date": selection["analysis_date"], "symbols": [{
+            "symbol": "INTC", "contracts": [{"code": "US.INTC-C1", "strategy": "CALL", "strike": "32",
+                                          "size": 100, "close": "0.50", "iv": "40", "probability": "25", "issues": []}],
+        }]}
+        holdings = {"INTC": [{"account": "盈透证券", "shares": Decimal(120), "cost": Decimal(31)},
+                             {"account": "致富证券（公户）", "shares": Decimal(100), "cost": Decimal(34)}]}
+        rows = compare_close_rows(report, selection, {}, holdings)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row["account"] for row in rows}, {"盈透证券", "致富证券（公户）"})
+        self.assertEqual({row["break_even"] for row in rows}, {"30.50", "33.50"})
+        self.assertTrue(any("低于该账户持股成本" in risk for row in rows for risk in row["risks"]))
+
+    def test_live_call_uses_each_account_cost_without_put_premium_gate(self):
+        selection = self.selection()
+        holdings = {"INTC": [{"account": "盈透证券", "shares": Decimal(120), "cost": Decimal(31)},
+                             {"account": "致富证券（公户）", "shares": Decimal(100), "cost": Decimal(34)}]}
+        probe = [{"symbol": "US.INTC", "market_state": {"market_us": "MORNING"},
+                  "representative_contracts": [{
+                      "code": "US.INTC-C1", "option_type": "CALL", "strike_time": selection["target_expiration"],
+                      "strike_price": "32", "lot_size": 100, "contract_identity_status": "ok",
+                      "dynamic_quote": {"bid_price": {"value": "0.50"}, "contract_size": {"value": 100}},
+                      "analytics": {"probability": {"fields": {"strike_probability": {"value": "25"}}}},
+                  }]}]
+        rows = compare_probe_rows(probe, selection, holdings, {})
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row["break_even"] for row in rows}, {"30.50", "33.50"})
+        self.assertEqual({row["premium"] for row in rows}, {"50.00"})
 
     @patch("option_wheel.watch_refresh._fetch_dividend_calendar", return_value=({"status": "ok"}, []))
     @patch("option_wheel.watch_refresh.sdk_call")

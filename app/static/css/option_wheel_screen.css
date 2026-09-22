@@ -19,6 +19,12 @@
 .wheel-account span{display:block;color:#647381;font-size:12px}
 .wheel-account strong{display:block;margin-top:3px;font-size:22px;font-variant-numeric:tabular-nums}
 .wheel-account footer{border-top:1px solid #e9eef0;color:#647381;font-size:12px;margin-top:14px;padding-top:10px}
+.wheel-stock-holdings{display:block!important;border-top:1px solid #e9eef0;margin-top:13px;padding-top:11px;font-size:12px}
+.wheel-stock-holdings>b{display:block;margin-bottom:7px;color:#345769}
+.wheel-stock-holdings p{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:5px 0!important}
+.wheel-stock-holdings p strong{font-size:12px!important;margin:0!important}
+.wheel-stock-holdings em{font-style:normal;color:#087e7b;margin-left:5px}
+.wheel-stock-holdings small{margin-left:auto;color:#647381}
 .wheel-button{border:1px solid #cbd8dd;border-radius:9px;padding:9px 14px;font-weight:700;cursor:pointer}
 .wheel-button.secondary{background:white;color:#123b4a}
 .wheel-button.primary{background:#087e7b;border-color:#087e7b;color:white;padding:12px 22px}
