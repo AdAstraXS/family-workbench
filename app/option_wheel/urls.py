@@ -18,6 +18,7 @@ urlpatterns = [
     path("holdings/", views.holdings, name="holdings"),
     path("holdings/review/", position_views.record_put_review, name="record_put_review"),
     path("holdings/review/<int:pk>/link/", position_views.link_put_transaction, name="link_put_transaction"),
+    path("holdings/quotes/refresh/", position_views.refresh_put_quotes, name="refresh_put_quotes"),
     path("underlying/<str:symbol>/", views.underlying_detail, name="underlying_detail"),
     path("decisions/<int:pk>/", views.decision_detail, name="decision_detail"),
     path("decisions/<int:pk>/advice/", advice_views.preview, name="advice_preview"),

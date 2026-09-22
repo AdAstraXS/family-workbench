@@ -18,6 +18,7 @@ from .models import (
     WheelPause,
     WheelPolicy,
     WheelPositionReview,
+    WheelPutQuoteJob,
     WheelTechnicalSnapshot,
     WheelTransactionLink,
     WheelWatchItem,
@@ -287,6 +288,7 @@ for evidence_model in (
     WheelTransactionLink,
     WheelCollateralReservation,
     WheelPositionReview,
+    WheelPutQuoteJob,
 ):
     admin.site.register(evidence_model, GenericEvidenceReadOnlyAdmin)
 

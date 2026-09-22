@@ -14,8 +14,9 @@ from family_core.models import ExchangeRate, Family, FamilyMember
 from ledger.models import BankAccount
 from portfolio.models import InvestmentAccount, InvestmentPosition, InvestmentTransaction, OptionContract, PortfolioSnapshot, Security, TradeTypeChoices
 from option_wheel.jobs import job_payload, run_job
+from option_wheel.put_quote_jobs import run_job as run_put_quote_job
 from option_wheel.screening import compare_close_rows, compare_probe_rows, covered_stock, present_results
-from option_wheel.models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelDecision, WheelPositionReview, WheelWatchItem
+from option_wheel.models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelDecision, WheelPositionReview, WheelPutQuoteJob, WheelWatchItem
 from option_wheel.watch_refresh import refresh_watch_events
 
 
@@ -106,7 +107,7 @@ class ScreeningTests(TestCase):
         self.assertContains(page, "管理未平仓 Put")
         self.assertContains(page, "INTC")
         self.assertContains(page, "150.00")
-        self.assertContains(page, "待查询 / 待查询")
+        self.assertContains(page, "未知 / 未知")
 
         response = self.client.post(reverse("option_wheel:record_put_review"), {
             "position_id": InvestmentPosition.objects.get(security=put).pk,
@@ -128,6 +129,32 @@ class ScreeningTests(TestCase):
         review.refresh_from_db()
         self.assertEqual(review.linked_transaction_id, close_trade.pk)
         self.assertEqual(InvestmentTransaction.objects.count(), 1)
+
+    @patch("option_wheel.put_quote_jobs.fetch_exact_put_quotes")
+    def test_open_put_quote_job_saves_vendor_observation_without_portfolio_write(self, fetch):
+        stock = Security.objects.create(symbol="INTC", name="Intel", market="US", asset_type="stock")
+        put = Security.objects.create(symbol="INTC260925P30000", market="US", asset_type="option")
+        OptionContract.objects.create(security=put, underlying=stock, option_type="put",
+                                      strike_price=Decimal("30"), expiration_date=date(2026, 9, 25))
+        InvestmentPosition.objects.create(account=self.account, security=put, quantity=Decimal("-1"),
+                                          avg_cost=Decimal("1.5"), position_date=timezone.localdate())
+        job = WheelPutQuoteJob.objects.create(
+            family=self.family, requested_by=self.user,
+            expires_at=timezone.now() + timedelta(minutes=5),
+        )
+        fetch.return_value = {"US.INTC260925P30000": {
+            "bid": "0.65", "ask": "0.80", "probability": "23.4",
+            "as_of": "2026-09-22 09:35:00", "iv": "42", "delta": "-0.2",
+        }}
+        run_put_quote_job(job.pk)
+        job.refresh_from_db()
+        self.assertEqual(job.status, "saved")
+        fetch.assert_called_once_with(["US.INTC260925P30000"])
+        page = self.client.get(reverse("option_wheel:holdings"))
+        self.assertContains(page, "$0.65")
+        self.assertContains(page, "$0.80")
+        self.assertContains(page, "23.4%")
+        self.assertEqual(InvestmentTransaction.objects.count(), 0)
 
     @patch("option_wheel.jobs.launch_job")
     def test_submit_is_account_independent_and_idempotent(self, launch):

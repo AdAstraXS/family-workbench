@@ -11,6 +11,7 @@ from portfolio.models import InvestmentPosition, InvestmentTransaction, OptionCo
 
 from .models import WheelPositionReview
 from .position_evidence import participating_accounts
+from .put_quote_jobs import enqueue as enqueue_put_quotes
 from .views import PARTICIPATING_ACCOUNTS, _request_family
 
 
@@ -67,4 +68,14 @@ def link_put_transaction(request, pk):
     review.linked_transaction = trade
     review.save(update_fields=["linked_transaction", "updated_at"])
     messages.success(request, "已关联投资组合中的真实交易；没有创建或修改交易。")
+    return redirect("option_wheel:holdings")
+
+
+@login_required
+@require_POST
+def refresh_put_quotes(request):
+    family = _request_family(request)
+    if not request.user.is_superuser:
+        raise PermissionDenied("只有管理员可查询 Futu 持仓报价。")
+    enqueue_put_quotes(family, request.user)
     return redirect("option_wheel:holdings")

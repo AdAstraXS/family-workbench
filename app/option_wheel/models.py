@@ -1841,3 +1841,25 @@ class WheelPositionReview(TimestampedModel):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+class WheelPutQuoteJob(TimestampedModel):
+    """On-demand Futu observation of recorded short Put contracts."""
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    family = models.ForeignKey(Family, on_delete=models.PROTECT)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    status = models.CharField(max_length=16, default="queued", choices=[
+        ("queued", "等待启动"), ("running", "查询与清理中"),
+        ("saved", "已保存"), ("failed", "未保存"), ("interrupted", "运行已中断"),
+    ])
+    quotes = models.JSONField(default=dict)
+    message = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "未平仓 Put 行情任务"
+        verbose_name_plural = "未平仓 Put 行情任务"
+        ordering = ["-created_at"]

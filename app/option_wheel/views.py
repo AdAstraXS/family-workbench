@@ -563,11 +563,16 @@ def decision_detail(request, pk):
 @login_required
 def holdings(request):
     from .open_puts import open_put_rows
-    from .models import WheelPositionReview
+    from .models import WheelPositionReview, WheelPutQuoteJob
     from portfolio.models import InvestmentTransaction, TradeStatusChoices, TradeTypeChoices
 
     family = _request_family(request)
-    open_puts = open_put_rows(family)
+    quote_job = WheelPutQuoteJob.objects.filter(family=family).order_by("-created_at").first()
+    quote_snapshot = WheelPutQuoteJob.objects.filter(family=family, status="saved").order_by("-finished_at").first()
+    open_puts = open_put_rows(
+        family, quotes=quote_snapshot.quotes if quote_snapshot else None,
+        quote_time=quote_snapshot.finished_at if quote_snapshot else None,
+    )
     reviews = WheelPositionReview.objects.filter(family=family).select_related(
         "account__bank_account", "security", "linked_transaction", "created_by",
     )[:50]
@@ -583,4 +588,5 @@ def holdings(request):
     ).prefetch_related("legs__transaction_links", "legs__collateral_reservations").order_by("status", "underlying__symbol", "-opened_on")
     return render(request, "option_wheel/holdings.html", {
         "cycles": cycles, "open_puts": open_puts, "reviews": reviews,
+        "quote_job": quote_job, "quote_snapshot": quote_snapshot,
     })

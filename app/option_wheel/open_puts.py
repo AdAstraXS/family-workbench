@@ -1,7 +1,7 @@
 """Read-only view data for Put positions recorded in the portfolio."""
 
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 from django.utils import timezone
@@ -14,7 +14,7 @@ from .models import WheelAnalysisJob, WheelCycle, WheelWatchItem
 NY = ZoneInfo("America/New_York")
 
 
-def open_put_rows(family):
+def open_put_rows(family, quotes=None, quote_time=None):
     accounts = participating_accounts(family)
     account_ids = [account.pk for account in accounts.values() if account is not None]
     today = timezone.now().astimezone(NY).date()
@@ -25,10 +25,17 @@ def open_put_rows(family):
         security__option_contract__option_type=OptionContract.PUT, quantity__lt=0,
     ).select_related("account__bank_account", "security__option_contract__underlying")
     rows = []
+    quotes = quotes or {}
     for position in positions:
         contract = position.security.option_contract
         symbol = contract.underlying.symbol.upper()
         stock = watch.get(symbol)
+        from .put_quote_probe import quote_code
+        live_quote = quotes.get(quote_code(contract)) or {}
+        try:
+            current_ask = Decimal(str(live_quote["ask"]))
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            current_ask = None
         spot = stock.price if stock and stock.price and stock.price > 0 else None
         mark = position.current_price if position.current_price_as_of and position.current_price >= 0 else None
         intrinsic = max(contract.strike_price - spot, Decimal(0)) if spot is not None else None
@@ -59,6 +66,9 @@ def open_put_rows(family):
                     "probability": candidate.get("probability"),
                     "source_time": job.created_at,
                     "basis": "收盘参考" if job.selection.get("mode") == "screening_close_v2" else "历史 Bid 观察",
+                    "net_indicative": (new_premium - current_ask * contract.multiplier)
+                    if current_ask is not None and job.selection.get("mode") == "screening_v2"
+                    and quote_time and job.created_at.date() == quote_time.date() else None,
                 })
             if roll_options:
                 break
@@ -77,5 +87,8 @@ def open_put_rows(family):
             "intrinsic": intrinsic, "time_value": time_value,
             "event": stock, "cycle_net_premium": cycle_net,
             "roll_options": roll_options[:3],
+            "live_quote": live_quote,
+            "buyback_pnl_reference": position.avg_cost * abs(position.quantity) * contract.multiplier
+            - current_ask * abs(position.quantity) * contract.multiplier if current_ask is not None else None,
         })
     return sorted(rows, key=lambda row: (row["dte"], row["symbol"], row["account"]))
