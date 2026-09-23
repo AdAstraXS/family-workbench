@@ -15,6 +15,7 @@
     </div>
   </div>
   <p class="research-private-note">以正文第 {{ version.version_number|default:"—" }} 版为基准，核对最多三个完整财年；单位为亿美元。租赁历史列缺失时，逐年查同一公司的已保存原始 10-K，并在每个数字旁标明来源年报。比较数可能因重列而与原年报不同；出现冲突会留空待核对。空白不能当作零。“简化自由现金流”只由上两行相减，不是 AI 投入回报率。租赁存量与尚未开始的租赁均不是当期现金支出，公司专属收入不可跨公司直接比较。</p>
+  {% if can_fill_history %}<form method="post" action="{% url 'investment_research:fill_document_metrics_history' dossier.pk document.pk %}" class="research-actions">{% csrf_token %}<input type="hidden" name="version" value="{{ version.pk }}"><button class="button" type="submit">补齐缺失的历史 10-K</button></form>{% endif %}
   {% if problem %}
     <p class="research-private-note">{{ problem }}</p>
   {% else %}

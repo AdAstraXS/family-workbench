@@ -3,6 +3,7 @@ import gzip
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
@@ -17,6 +18,7 @@ from .models import OfficialResearchContentVersion, OfficialResearchDocument
 from .sec_content import extract_sec_html
 from .services import create_dossier
 from .tenk_metrics import tenk_metric_grid
+from .tenk_history import fill_tenk_history
 
 
 def _latest_rows(version):
@@ -190,6 +192,51 @@ class TenKMetricsTests(SimpleTestCase):
 
 
 class TenKMetricsPageTests(TestCase):
+    def test_fill_history_archives_only_needed_year_and_saves_its_body(self):
+        family = Family.objects.create(name="Family")
+        security = Security.objects.create(symbol="TEST", name="Test", market="US", asset_type="stock")
+        user = get_user_model().objects.create_user(username="history-owner", password="x")
+        owner = FamilyMember.objects.create(family=family, user=user, display_name="Owner")
+        dossier = create_dossier(actor=owner, security=security, initial_thesis="Study",
+                                 pillars=[], questions=[])
+        current = OfficialResearchDocument.objects.create(
+            security=security, source="sec", external_id="0000000001-25-000001",
+            document_type="10-k", title="FY2025", period_end=date(2025, 12, 31),
+            source_url="https://www.sec.gov/Archives/edgar/data/1/000000000125000001/current.htm",
+            metadata={"cik": "0000000001"},
+        )
+        source = _version()
+        version = OfficialResearchContentVersion.objects.create(
+            document=current, version_number=1, source_url=current.source_url,
+            raw_sha256="a" * 64, raw_gzip=source.raw_gzip,
+            content_text=source.content_text, content_sha256="b" * 64,
+            extractor_version="sec-html-v2", fetched_at=timezone.now(),
+        )
+        record = {"accession": "0000000001-24-000001", "form": "10-K",
+                  "document_type": "10-k", "filing_date": date(2025, 1, 30),
+                  "report_date": date(2024, 12, 31), "primary_document": "prior.htm",
+                  "title": "FY2024"}
+        client = SimpleNamespace(get_filings=lambda cik: [record])
+        with patch("investment_research.tenk_history.tenk_metric_grid",
+                   return_value=([date(2025, 12, 31), date(2024, 12, 31)], [], None)), \
+             patch("investment_research.tenk_history.fetch_sec_document_content",
+                   return_value=(None, True)) as fetch:
+            outcome = fill_tenk_history(actor=owner, dossier=dossier, version=version, client=client)
+        self.assertEqual(outcome, {"archived": 1, "saved": 1, "missing": []})
+        prior = OfficialResearchDocument.objects.get(external_id=record["accession"])
+        self.assertEqual(prior.period_end, date(2024, 12, 31))
+        self.assertEqual(prior.metadata["cik"], "0000000001")
+        self.assertEqual(fetch.call_args.kwargs["document_id"], prior.pk)
+        url = reverse("investment_research:fill_document_metrics_history",
+                      args=[dossier.pk, current.pk])
+        self.client.force_login(user)
+        self.assertEqual(self.client.get(url).status_code, 405)
+        with patch("investment_research.views.fill_tenk_history",
+                   return_value={"archived": 0, "saved": 0, "missing": []}) as fill:
+            response = self.client.post(url, {"version": version.pk})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(fill.call_args.kwargs["version"], version)
+
     def test_private_page_uses_saved_version_without_writing(self):
         family = Family.objects.create(name="Family")
         security = Security.objects.create(symbol="TEST", name="Test", market="US", asset_type="stock")

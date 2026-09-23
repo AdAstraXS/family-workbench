@@ -27,6 +27,11 @@ urlpatterns = [
         name="document_metrics",
     ),
     path(
+        "<int:pk>/documents/<int:document_pk>/metrics/fill-history/",
+        views.fill_document_metrics_history,
+        name="fill_document_metrics_history",
+    ),
+    path(
         "<int:pk>/documents/<int:document_pk>/fetch/",
         views.fetch_sec_content,
         name="fetch_sec_content",

@@ -56,7 +56,8 @@ from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
 from .tenk_chapters import tenk_chapter_coverage
 from .tenk_financial_index import tenk_item8_index
-from .tenk_metrics import tenk_metric_grid
+from .tenk_history import fill_tenk_history
+from .tenk_metrics import HISTORICAL_LEASE_CODES, tenk_metric_grid
 
 PAGE_SIZE = 20
 logger = logging.getLogger(__name__)
@@ -528,7 +529,43 @@ def document_metrics(request, pk, document_pk):
     return render(request, "investment_research/document_metrics.html", {
         "dossier": dossier, "document": document, "version": version,
         "periods": periods, "rows": rows, "problem": problem,
+        "can_fill_history": is_writer(member) and any(
+            row["code"] in HISTORICAL_LEASE_CODES and any(
+                cell["status"] in {"该年 10-K 尚未归档", "该年 10-K 正文未保存"}
+                for cell in row["cells"][1:]
+            ) for row in rows
+        ),
     })
+
+
+@_method(["POST"])
+def fill_document_metrics_history(request, pk, document_pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    document = get_object_or_404(
+        OfficialResearchDocument, pk=document_pk, security=dossier.security,
+        source="sec", document_type="10-k",
+    )
+    version = get_object_or_404(
+        OfficialResearchContentVersion,
+        pk=_positive_id_or_404(request.POST.get("version")), document=document,
+    )
+    try:
+        outcome = fill_tenk_history(actor=member, dossier=dossier, version=version)
+    except (ResearchValidationError, SecClientError, ValueError) as exc:
+        messages.error(request, f"历史年报补齐失败：{exc}")
+    else:
+        message = (f"历史年报：新增归档 {outcome['archived']} 份，保存正文 "
+                   f"{outcome['saved']} 份。")
+        if outcome["missing"]:
+            messages.warning(request, message + "仍缺 FY" +
+                             "、FY".join(map(str, outcome["missing"])) + "。")
+        else:
+            messages.success(request, message)
+    return redirect(f"{reverse('investment_research:document_metrics', args=[pk, document_pk])}"
+                    f"?{urlencode({'version': version.pk})}")
 
 
 @_method(["POST"])
