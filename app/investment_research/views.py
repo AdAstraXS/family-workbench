@@ -8,6 +8,7 @@ ResearchValidationError；DossierNotFound 转 404。
 """
 import logging
 import traceback
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from ai_analysis.models import AiAnalysisRequest
@@ -512,7 +513,18 @@ def document_metrics(request, pk, document_pk):
         )
     else:
         version = document.content_versions.first()
-    periods, rows, problem = tenk_metric_grid(version) if version else ([], [], "请先提取这份 10-K 的正文。")
+    historical_documents = (
+        OfficialResearchDocument.objects.filter(
+            security=dossier.security, source="sec", document_type="10-k",
+            period_end__lt=document.period_end,
+            period_end__gte=document.period_end - timedelta(days=900),
+        ).exclude(pk=document.pk).prefetch_related("content_versions")
+        if version and document.period_end else ()
+    )
+    periods, rows, problem = (
+        tenk_metric_grid(version, historical_documents)
+        if version else ([], [], "请先提取这份 10-K 的正文。")
+    )
     return render(request, "investment_research/document_metrics.html", {
         "dossier": dossier, "document": document, "version": version,
         "periods": periods, "rows": rows, "problem": problem,

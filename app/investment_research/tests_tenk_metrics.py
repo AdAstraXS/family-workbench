@@ -55,6 +55,53 @@ def _version(*, duplicate=False, dimensioned=False, visible=True, zero=False, wr
 
 
 class TenKMetricsTests(SimpleTestCase):
+    def test_historical_lease_uses_original_filing_and_rejects_wrong_cik(self):
+        def filing(year, *, comparative=False, liability=None):
+            years = (year, year - 1) if comparative else (year,)
+            contexts = "".join(
+                f"<xbrli:context id='fy{y}'><xbrli:period><xbrli:startDate>{y}-01-01</xbrli:startDate>"
+                f"<xbrli:endDate>{y}-12-31</xbrli:endDate></xbrli:period></xbrli:context>"
+                for y in years)
+            contexts += (f"<xbrli:context id='at{year}'><xbrli:period><xbrli:instant>"
+                         f"{year}-12-31</xbrli:instant></xbrli:period></xbrli:context>")
+            cash = "".join(
+                f"<tr><td>Net cash provided by operating activities</td><td>"
+                f"<ix:nonFraction name='us-gaap:NetCashProvidedByUsedInOperatingActivities' "
+                f"contextRef='fy{y}' unitRef='usd' scale='6' id='cash{y}'>100</ix:nonFraction>"
+                f"</td></tr>" for y in years)
+            lease = (f"<tr><td>Finance lease liabilities</td><td><ix:nonFraction "
+                     f"name='us-gaap:FinanceLeaseLiability' contextRef='at{year}' "
+                     f"unitRef='usd' scale='6' id='lease{year}'>{liability}</ix:nonFraction>"
+                     f"</td></tr>" if liability is not None else "")
+            raw = ("<html><body><ix:header><xbrli:unit id='usd'><xbrli:measure>"
+                   "iso4217:USD</xbrli:measure></xbrli:unit>" + contexts +
+                   "</ix:header><h1>ITEM 8. FINANCIAL STATEMENTS AND SUPPLEMENTARY DATA</h1>"
+                   "<table>" + cash + lease + "</table><p>" + "Other text " * 100 +
+                   "</p><h1>ITEM 9. CHANGES IN AND DISAGREEMENTS WITH ACCOUNTANTS</h1>"
+                   "</body></html>").encode()
+            document = SimpleNamespace(pk=year, period_end=date(year, 12, 31),
+                                       document_type="10-k", source="sec", security_id=1,
+                                       security=SimpleNamespace(symbol="TEST"), metadata={"cik": "1"})
+            version = SimpleNamespace(pk=year, version_number=1, document=document,
+                                      source_url=f"https://www.sec.gov/{year}.htm",
+                                      raw_gzip=gzip.compress(raw), content_text=extract_sec_html(raw))
+            document.content_versions = SimpleNamespace(all=lambda: [version])
+            return version
+
+        latest = filing(2025, comparative=True)
+        original = filing(2024, liability=250)
+        periods, rows, problem = tenk_metric_grid(latest, [original.document])
+        self.assertIsNone(problem)
+        self.assertEqual([p.year for p in periods], [2025, 2024])
+        historical = next(r for r in rows if r["code"] == "finance_liability")["cells"][1]
+        self.assertEqual(historical["amount"], Decimal("2.5"))
+        self.assertEqual(historical["source_document_id"], 2024)
+        self.assertEqual(historical["source_version_id"], 2024)
+        self.assertEqual(historical["fact_ids"], ["lease2024"])
+        original.document.metadata = {"cik": "2"}
+        _, rows, _ = tenk_metric_grid(latest, [original.document])
+        self.assertNotIn("amount", next(r for r in rows if r["code"] == "finance_liability")["cells"][1])
+
     def test_selects_full_year_usd_and_undimensioned_fact_with_fixed_quote(self):
         version = _version(dimensioned=True)
         rows, problem = _latest_rows(version)

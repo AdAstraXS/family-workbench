@@ -14,7 +14,7 @@
       <a class="button" href="{{ document.source_url }}" target="_blank" rel="noopener noreferrer">SEC 原文</a>
     </div>
   </div>
-  <p class="research-private-note">从已保存正文第 {{ version.version_number|default:"—" }} 版核对最多三个完整财年；单位为亿美元。比较数采用这份 10-K 的列报口径，可能与早年原始年报不同。原始金额可回到该版原文及 SEC 数字。空白表示本文件没有通过核对，不能当作零。“简化自由现金流”只由上两行相减，不是 AI 投入回报率。固定资产现金支出的具体口径请看原文；租赁存量与尚未开始的租赁均不是当期现金支出。公司专属收入行不可跨公司直接比较。</p>
+  <p class="research-private-note">以正文第 {{ version.version_number|default:"—" }} 版为基准，核对最多三个完整财年；单位为亿美元。租赁历史列缺失时，逐年查同一公司的已保存原始 10-K，并在每个数字旁标明来源年报。比较数可能因重列而与原年报不同；出现冲突会留空待核对。空白不能当作零。“简化自由现金流”只由上两行相减，不是 AI 投入回报率。租赁存量与尚未开始的租赁均不是当期现金支出，公司专属收入不可跨公司直接比较。</p>
   {% if problem %}
     <p class="research-private-note">{{ problem }}</p>
   {% else %}
@@ -29,11 +29,13 @@
                 <td>
                   {% if cell.citation %}
                     <strong>{{ cell.amount|floatformat:2 }}</strong>
-                    <span class="research-metric-links"><a href="{% url 'investment_research:document_detail' dossier.pk document.pk %}?version={{ version.pk }}&amp;start={{ cell.citation.start }}&amp;end={{ cell.citation.end }}&amp;hash={{ cell.citation.hash }}#research-citation">本地原文</a><a href="{{ version.source_url }}#{{ cell.fact_id }}" target="_blank" rel="noopener noreferrer">SEC 数字</a></span>
+                    <small class="research-metric-source">来源 FY{{ cell.source_report_year }} 10-K · 正文第 {{ cell.source_version_number }} 版{% if cell.status != "已核对" %} · {{ cell.status }}{% endif %}</small>
+                    <span class="research-metric-links"><a href="{% url 'investment_research:document_detail' dossier.pk cell.source_document_id %}?version={{ cell.source_version_id }}&amp;start={{ cell.citation.start }}&amp;end={{ cell.citation.end }}&amp;hash={{ cell.citation.hash }}#research-citation">本地原文</a>{% for fact_id in cell.fact_ids %}<a href="{{ cell.source_url }}#{{ fact_id }}" target="_blank" rel="noopener noreferrer">SEC 数字{% if cell.fact_ids|length > 1 %} {{ forloop.counter }}{% endif %}</a>{% endfor %}</span>
                   {% elif cell.derived %}
                     <strong>{{ cell.amount|floatformat:2 }}</strong><span class="research-private-note">由上两行相减</span>
                   {% else %}
                     <span class="research-private-note">— · {{ cell.status }}</span>
+                    {% if cell.pending_document_id %}<span class="research-metric-links"><a href="{% url 'investment_research:document_detail' dossier.pk cell.pending_document_id %}">查看该年 10-K 并提取正文</a></span>{% elif "未归档" in cell.status %}<span class="research-metric-links"><a href="{% url 'investment_research:documents' dossier.pk %}">查看资料列表</a></span>{% endif %}
                   {% endif %}
                 </td>
               {% endfor %}

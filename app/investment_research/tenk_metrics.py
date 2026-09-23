@@ -30,6 +30,9 @@ METRICS = (
 # 公司专属披露不能互相改名或汇总；每项同时限制公司、分类维度和原文行。
 COMPANY_METRICS = {
     "MSFT": (
+        ("finance_rou_asset", "融资租赁资产净额（期末）", "us-gaap:PropertyPlantAndEquipmentNet",
+         "instant", r"^Property and equipment, net\s*\|", "us-gaap:LeaseContractualTermAxis",
+         "msft:FinanceLeaseMember"),
         ("company_revenue", "Microsoft Cloud 收入", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
          "duration", r"^Our Microsoft Cloud revenue,", "msft:ProductsOrServicesSecondaryCategorizationAxis",
          "msft:MicrosoftCloudMember"),
@@ -39,6 +42,8 @@ COMPANY_METRICS = {
          "msft:OperatingLeaseMember"),
     ),
     "AAPL": (
+        ("finance_liability", "融资租赁负债（期末）", "us-gaap:FinanceLeaseLiability",
+         "instant", r"^Total lease liabilities\s*\|", None, None),
         ("company_revenue", "Services 收入", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
          "duration", r"^Services\s*\|", "srt:ProductOrServiceAxis", "us-gaap:ServiceMember"),
         ("uncommenced_lease", "尚未开始的租赁（未来承诺）",
@@ -55,6 +60,10 @@ COMPANY_METRICS = {
     ),
 }
 COMPANY_CIK = {"MSFT": 789019, "AAPL": 320193, "TSLA": 1318605}
+HISTORICAL_LEASE_CODES = frozenset({
+    "finance_rou_add", "finance_principal", "finance_liability", "finance_rou_asset",
+    "uncommenced_lease",
+})
 
 
 class _IXBRL(HTMLParser):
@@ -213,7 +222,12 @@ def _metric_cell(parser, version, item8, spec, end):
         fact_id = fact["attrs"].get("id")
         if amount is not None and citation and fact_id and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", fact_id):
             cell.update(status="已核对", amount=amount / Decimal("100000000"),
-                        citation=citation, fact_id=fact_id)
+                        citation=citation, fact_id=fact_id, fact_ids=[fact_id],
+                        source_document_id=getattr(version.document, "pk", None),
+                        source_version_id=getattr(version, "pk", None),
+                        source_version_number=getattr(version, "version_number", None),
+                        source_report_year=version.document.period_end.year,
+                        source_url=getattr(version, "source_url", None))
         else:
             cell["status"] = "原文引用待核对"
     elif len(matches) > 1:
@@ -221,8 +235,28 @@ def _metric_cell(parser, version, item8, spec, end):
     return cell
 
 
-def tenk_metric_grid(version):
-    """返回本文件最多三个完整财年的核对表；每个单元独立拒错。"""
+def _microsoft_uncommenced_cell(parser, version, item8, spec, end):
+    if end.year == 2024 and version.document.period_end.year == 2024:
+        spec = (*spec[:4], r"additional operating and finance leases.*had not yet commenced", *spec[5:])
+    operating = _metric_cell(parser, version, item8, spec, end)
+    finance_spec = (*spec[:-1], "msft:FinanceLeaseMember")
+    finance = _metric_cell(parser, version, item8, finance_spec, end)
+    if end.year == 2024 and version.document.period_end.year == 2024:
+        if ("amount" not in operating or "amount" not in finance or
+                operating["citation"] != finance["citation"]):
+            return {"status": "经营与融资租赁两项未全部核对"}
+        operating["amount"] += finance["amount"]
+        operating["fact_ids"] += finance["fact_ids"]
+        operating["status"] = "经营与融资租赁两项相加"
+    elif "amount" in operating and "amount" in finance:
+        if operating["amount"] != finance["amount"]:
+            return {"status": "同年两个租赁成员金额不同，待核对"}
+        operating["status"] = "同额重复披露，仅计一次"
+    return operating
+
+
+def tenk_metric_grid(version, historical_documents=()):
+    """以当前 10-K 为基准；仅缺失的租赁历史列回查同年已保存原件。"""
     period_end = version.document.period_end
     if not period_end:
         return [], [], "这份资料缺少报告期截止日，无法核对完整财年。"
@@ -245,11 +279,54 @@ def tenk_metric_grid(version):
     except (TypeError, ValueError):
         cik = None
     company_specs = COMPANY_METRICS.get(symbol, ()) if COMPANY_CIK.get(symbol) == cik else ()
-    specs = [(*metric, None, None) for metric in METRICS] + list(company_specs)
+    overrides = {metric[0]: metric for metric in company_specs}
+    specs = [overrides.pop(metric[0], (*metric, None, None)) for metric in METRICS]
+    specs.extend(overrides.values())
     rows = []
     for spec in specs:
+        selector = _microsoft_uncommenced_cell if symbol == "MSFT" and spec[0] == "uncommenced_lease" else _metric_cell
         rows.append({"code": spec[0], "label": spec[1],
-                     "cells": [_metric_cell(parser, version, item8, spec, end) for end in periods]})
+                     "cells": [selector(parser, version, item8, spec, end) for end in periods]})
+    for index, end in enumerate(periods[1:], start=1):
+        candidates = [document for document in historical_documents
+                      if (cik is not None and document.period_end == end and
+                          document.document_type == "10-k" and
+                          getattr(document, "source", "sec") == "sec" and
+                          getattr(document, "security_id", None) == getattr(version.document, "security_id", None) and
+                          getattr(document.security, "symbol", None) == symbol and
+                          str((document.metadata or {}).get("cik")) == str(cik))]
+        if len(candidates) != 1:
+            message = "该年 10-K 尚未归档" if not candidates else "该年有多份 10-K，待核对"
+            for row in rows:
+                if row["code"] in HISTORICAL_LEASE_CODES and "amount" not in row["cells"][index]:
+                    row["cells"][index]["status"] = message
+            continue
+        historical_document = candidates[0]
+        old_version = next(iter(historical_document.content_versions.all()), None)
+        if old_version is None:
+            for row in rows:
+                if row["code"] in HISTORICAL_LEASE_CODES and "amount" not in row["cells"][index]:
+                    row["cells"][index] = {"status": "该年 10-K 正文未保存",
+                                           "pending_document_id": historical_document.pk}
+            continue
+        old_periods, old_rows, old_problem = tenk_metric_grid(old_version)
+        old_by_code = {row["code"]: row for row in old_rows}
+        old_index = old_periods.index(end) if end in old_periods else None
+        for row in rows:
+            if row["code"] not in HISTORICAL_LEASE_CODES:
+                continue
+            current = row["cells"][index]
+            source = (old_by_code[row["code"]]["cells"][old_index]
+                      if not old_problem and old_index is not None and row["code"] in old_by_code
+                      else {"status": "原年报无法核对该指标"})
+            if "amount" in current and "amount" in source and current["amount"] != source["amount"]:
+                row["cells"][index] = {"status": "两份 10-K 同期金额不一致，待核对"}
+            elif "amount" not in current:
+                if "amount" in source:
+                    row["cells"][index] = {**source, "status": "由该年原始 10-K 补齐"}
+                else:
+                    row["cells"][index] = {"status": source["status"],
+                                           "pending_document_id": historical_document.pk}
     operating, capital = rows[:2]
     free_cash_cells = []
     for cash, spending in zip(operating["cells"], capital["cells"]):
