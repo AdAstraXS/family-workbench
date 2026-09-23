@@ -22,4 +22,10 @@
 
 Item 6 是保留项目；三份文件均未识别到独立标题。以上只验证了这三份文件的标准章节入口，不能推断所有公司的变体均可识别。正文附注如 Note 6/13 不属于 10-K 的标准 Item，本轮仍通过 Item 8 原文阅读；以后如要做附注目录，应另行验证其表述和边界。
 
-离线回归 `investment_research ai_analysis ipo portfolio option_wheel` 共 715 项通过、1 项跳过；`check` 只有测试配置中 OneNote/加密密钥未设置的既有警告；迁移检查无变化，`git diff --check` 通过。生产部署和浏览器验收另记录于后续段落。
+离线回归 `investment_research ai_analysis ipo portfolio option_wheel` 共 715 项通过、1 项跳过；`check` 只有测试配置中 OneNote/加密密钥未设置的既有警告；迁移检查无变化，`git diff --check` 通过。
+
+## 生产验收
+
+已将精确源码提交 `643014a70b0ff84b772d44f2bf21a120fb7b493d` 部署到 NAS，并在全部检查后记录为 `DEPLOYED_COMMIT`。部署前备份位于 `/volume1/docker/family-workbench/backups/family-workbench-pre-tenk-chapters-20260923-1732.dump`，SHA-256 为 `58b9f2e0cbc36bde43f5d3d0a4da02bb330afb521c03adff0361ec9cdf0c5264`；源码回滚包位于 `/volume1/docker/family-workbench/backups/source-predeploy-3e623f12291f0471a30ecd0cb5231f194de6224d-20260923-173344.tar.gz`。本次没有迁移，也没有主动修改生产数据库。部署前后投资账户 35、持仓 474、流水 1061、快照 2023、快照明细 12534、最新快照日 2026-09-23，均一致。
+
+NAS 数据库和 Web 容器状态正常，Django 检查与迁移状态检查通过。已登录浏览器中的微软资料页显示 23 个 Item：Item 7 涉及 5 段、已有 4 段草稿；Item 8 涉及 8 段、已有 4 段草稿；Item 6 明确提示未识别。点击 Item 8 后，正文版本 1 的对应标题按原文引用坐标准确高亮。档案页的区段选项也显示所涉 Item 和草稿状态。匿名外部访问该资料页按预期跳转登录。
