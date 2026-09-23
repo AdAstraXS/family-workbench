@@ -98,6 +98,10 @@ class TenKMetricsTests(SimpleTestCase):
         self.assertEqual(historical["source_document_id"], 2024)
         self.assertEqual(historical["source_version_id"], 2024)
         self.assertEqual(historical["fact_ids"], ["lease2024"])
+        original.document.metadata = {"cik": "0000000001"}
+        _, rows, _ = tenk_metric_grid(latest, [original.document])
+        self.assertEqual(next(r for r in rows if r["code"] == "finance_liability")["cells"][1]["amount"],
+                         Decimal("2.5"))
         original.document.metadata = {"cik": "2"}
         _, rows, _ = tenk_metric_grid(latest, [original.document])
         self.assertNotIn("amount", next(r for r in rows if r["code"] == "finance_liability")["cells"][1])

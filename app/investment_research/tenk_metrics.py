@@ -66,6 +66,11 @@ HISTORICAL_LEASE_CODES = frozenset({
 })
 
 
+def _document_cik(document):
+    value = str((getattr(document, "metadata", None) or {}).get("cik", "")).strip()
+    return int(value) if value.isdigit() else None
+
+
 class _IXBRL(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -274,10 +279,7 @@ def tenk_metric_grid(version, historical_documents=()):
         return [], [], "未定位到 Item 8 财务报表，暂不展示指标。"
     periods = _full_year_end_dates(parser, period_end)
     symbol = getattr(getattr(version.document, "security", None), "symbol", "").upper()
-    try:
-        cik = int((getattr(version.document, "metadata", None) or {}).get("cik"))
-    except (TypeError, ValueError):
-        cik = None
+    cik = _document_cik(version.document)
     company_specs = COMPANY_METRICS.get(symbol, ()) if COMPANY_CIK.get(symbol) == cik else ()
     overrides = {metric[0]: metric for metric in company_specs}
     specs = [overrides.pop(metric[0], (*metric, None, None)) for metric in METRICS]
@@ -294,7 +296,7 @@ def tenk_metric_grid(version, historical_documents=()):
                           getattr(document, "source", "sec") == "sec" and
                           getattr(document, "security_id", None) == getattr(version.document, "security_id", None) and
                           getattr(document.security, "symbol", None) == symbol and
-                          str((document.metadata or {}).get("cik")) == str(cik))]
+                          _document_cik(document) == cik)]
         if len(candidates) != 1:
             message = "该年 10-K 尚未归档" if not candidates else "该年有多份 10-K，待核对"
             for row in rows:
