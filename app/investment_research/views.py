@@ -47,7 +47,7 @@ from .services import (
 from .providers.sec import SecClientError
 from .research_ai import (
     MAX_DOCUMENT_CHARS, ResearchAiError, available_research_providers,
-    generate_research_draft,
+    document_segments, generate_research_draft,
 )
 from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
@@ -63,6 +63,18 @@ def _positive_id_or_404(raw):
     if value <= 0:
         raise Http404("无效的正文版本。")
     return value
+
+
+def _draft_selection_or_404(raw):
+    try:
+        version_raw, segment_raw = raw.split(":", 1)
+        version_id = _positive_id_or_404(version_raw)
+        segment_index = int(segment_raw)
+    except (AttributeError, ValueError) as exc:
+        raise Http404("无效的正文区段。") from exc
+    if segment_index < 0 or str(segment_index) != segment_raw:
+        raise Http404("无效的正文区段。")
+    return version_id, segment_index
 
 
 def _get_member_or_403(request):
@@ -212,6 +224,28 @@ def detail(request, pk):
         OfficialResearchContentVersion.objects.filter(document__security=dossier.security, document__source="sec")
         .select_related("document").order_by("-fetched_at", "-pk")[:20]
     )
+    completed_segments = set()
+    if is_writer(member) and available_versions:
+        for analysis in AiAnalysisRequest.objects.filter(
+            member=member, family=member.family, module="investment_research",
+            analysis_type="document_draft", status=AiAnalysisRequest.STATUS_SUCCESS,
+        ).only("scope"):
+            scope = analysis.scope or {}
+            if scope.get("dossier_id") == dossier.pk and scope.get("version_id"):
+                # 旧草稿只读取开头 16,000 字，没有 segment_index。
+                completed_segments.add((scope["version_id"], scope.get("segment_index", 0)))
+    research_groups = []
+    for version in available_versions:
+        segments = document_segments(version)
+        for segment in segments:
+            segment["completed"] = (version.pk, segment["index"]) in completed_segments
+        research_groups.append({"version": version, "segments": segments})
+    first_pending = next(
+        (segment for group in research_groups for segment in group["segments"] if not segment["completed"]),
+        None,
+    )
+    if first_pending is not None:
+        first_pending["selected"] = True
     providers = available_research_providers() if is_writer(member) else []
     recent_drafts = [
         analysis for analysis in AiAnalysisRequest.objects.filter(
@@ -230,6 +264,7 @@ def detail(request, pk):
             "latest_source_success_at": latest_success_at,
             "source_error_count": sum(bool(state.last_error) for state in source_states),
             "available_versions": available_versions,
+            "research_groups": research_groups,
             "research_providers": providers,
             "research_document_limit": MAX_DOCUMENT_CHARS,
             "recent_drafts": recent_drafts,
@@ -473,9 +508,10 @@ def generate_draft(request, pk):
     if not is_writer(member):
         return HttpResponseForbidden("查看者角色不能发起 AI 分析。")
     try:
+        version_id, segment_index = _draft_selection_or_404(request.POST.get("selection"))
         analysis = generate_research_draft(
             actor=member, dossier_id=dossier.pk,
-            version_id=_positive_id_or_404(request.POST.get("version")),
+            version_id=version_id, segment_index=segment_index,
             provider_id=_positive_id_or_404(request.POST.get("provider")),
             consent=request.POST.get("one_time_consent") == "yes",
         )

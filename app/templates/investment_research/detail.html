@@ -78,10 +78,14 @@
       <summary>生成一份带原文引用的草稿</summary>
       <form method="post" action="{% url 'investment_research:generate_draft' dossier.pk %}" class="research-form">
         {% csrf_token %}
-        <label for="research-version">选择一份 SEC 正文版本</label>
-        <select id="research-version" name="version" required>
-          {% for item in available_versions %}
-            <option value="{{ item.pk }}">{{ item.document.title }} · 正文第 {{ item.version_number }} 版 · {{ item.content_text|length }} 字</option>
+        <label for="research-selection">选择 SEC 正文版本与阅读区段</label>
+        <select id="research-selection" name="selection" required>
+          {% for group in research_groups %}
+            <optgroup label="{{ group.version.document.title }} · 正文第 {{ group.version.version_number }} 版 · {{ group.version.content_text|length }} 字">
+              {% for segment in group.segments %}
+                <option value="{{ group.version.pk }}:{{ segment.index }}"{% if segment.selected %} selected{% endif %}>第 {{ forloop.counter }}/{{ group.segments|length }} 区段 · 字符 {{ segment.start }}–{{ segment.end }}{% if segment.completed %} · 已生成草稿{% else %} · 尚未生成草稿{% endif %}</option>
+              {% endfor %}
+            </optgroup>
           {% endfor %}
         </select>
         <label for="research-provider">选择文本模型</label>
@@ -90,8 +94,8 @@
             <option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }} · 已配置单次费用上限 ${{ provider.extra_data.research_max_estimated_usd|default:"待核对" }}</option>
           {% endfor %}
         </select>
-        <p class="research-private-note">本次最多发送所选正文版本的前 {{ research_document_limit }} 字；超过部分不会被 AI 阅读。若已有正式判断，也会发送当前判断、关键假设和待验证问题。模型只能引用本次发送的片段。</p>
-        <label><input type="checkbox" name="one_time_consent" value="yes" required> 我确认本次将上述资料和我的当前判断发送给所选云端模型；仅授权这一次。</label>
+        <p class="research-private-note">每个区段最多 {{ research_document_limit }} 字，按原文位置顺序划分，未必对应 SEC 自身章节。每次仅发送所选区段；其他区段仍需分别生成草稿。若已有正式判断，还会发送当前判断、关键假设和待验证问题。模型只能引用本次发送的片段。已生成草稿只表示模型读过该区段，不代表内容已由你核实。</p>
+        <label><input type="checkbox" name="one_time_consent" value="yes" required> 我确认本次将所选正文区段及我的当前判断发送给所选云端模型；仅授权这一次。</label>
         <button type="submit">生成私密草稿</button>
       </form>
     </details>

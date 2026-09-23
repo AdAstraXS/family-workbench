@@ -16,7 +16,7 @@ from family_core.models import Family, FamilyMember
 from portfolio.models import Security
 
 from .models import OfficialResearchContentVersion, OfficialResearchDocument, ResearchThesisRevision
-from .research_ai import ResearchAiError, available_research_providers, generate_research_draft
+from .research_ai import ResearchAiError, available_research_providers, document_segments, generate_research_draft
 from .services import create_exploration, save_first_thesis
 
 
@@ -96,6 +96,51 @@ class ResearchAiTests(TestCase):
         self.assertContains(page, "查看原文 E1")
         self.assertContains(page, "仅自己可见")
 
+    def test_later_segment_sends_only_selected_text_and_cites_original_offsets(self):
+        body = ("FIRST_ONLY " * 1600)[:16000] + "SECOND_ONLY " * 600
+        version = OfficialResearchContentVersion.objects.create(
+            document=self.document, version_number=2, source_url=self.document.source_url,
+            raw_sha256=hashlib.sha256(body.encode()).hexdigest(), raw_gzip=gzip.compress(body.encode()),
+            content_text=body, content_sha256=hashlib.sha256(body.encode()).hexdigest(),
+            extractor_version="test", fetched_at=timezone.now(),
+        )
+        sent = []
+
+        def transport(request, **kwargs):
+            sent.append(json.loads(request.data)["messages"][1]["content"])
+            return self.response()
+
+        analysis = self.generate(version_id=version.pk, segment_index=1, transport=transport)
+        segment = document_segments(version)[1]
+        self.assertEqual((segment["start"], segment["end"]), (16000, len(body)))
+        self.assertEqual(analysis.scope["segment_index"], 1)
+        self.assertEqual(analysis.scope["segment_count"], 2)
+        self.assertEqual(analysis.sanitized_input["provided_characters"], len(body) - 16000)
+        self.assertIn("SECOND_ONLY", sent[0])
+        self.assertNotIn("FIRST_ONLY", sent[0])
+        citation = analysis.result.result_json["supports"][0]["citations"][0]
+        self.assertEqual(citation["start"], 16000)
+        self.assertEqual(citation["end"], 16300)
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("investment_research:draft_detail", args=[self.dossier.pk, analysis.pk]))
+        self.assertContains(page, "第 2/2 区段")
+        self.assertContains(page, "其他区段未在本次发送")
+        link = reverse("investment_research:document_detail", args=[self.dossier.pk, self.document.pk])
+        self.assertContains(page, link + "?version=")
+        cited = self.client.get(link, {"version": version.pk, "start": citation["start"],
+                                       "end": citation["end"], "hash": citation["hash"]})
+        self.assertContains(cited, '<mark id="research-citation">')
+        with patch.dict(os.environ, {"RESEARCH_TEST_KEY": "test-token"}):
+            detail = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
+        self.assertContains(detail, f'value="{version.pk}:1"')
+        self.assertContains(detail, "已生成草稿")
+        self.assertContains(detail, "尚未生成草稿")
+
+    def test_invalid_segment_is_rejected_before_model_request(self):
+        with self.assertRaisesRegex(ResearchAiError, "区段不存在"):
+            self.generate(segment_index=1)
+        self.assertEqual(AiAnalysisRequest.objects.count(), 0)
+
     def test_exploration_draft_keeps_its_original_context_after_first_thesis(self):
         analysis = self.generate()
         save_first_thesis(
@@ -151,11 +196,12 @@ class ResearchAiTests(TestCase):
     def test_post_requires_explicit_consent_and_owner(self):
         url = reverse("investment_research:generate_draft", args=[self.dossier.pk])
         self.client.force_login(self.user)
-        data = {"version": self.version.pk, "provider": self.provider.pk}
+        data = {"selection": f"{self.version.pk}:0", "provider": self.provider.pk}
         with patch("investment_research.views.generate_research_draft", side_effect=ResearchAiError("请确认本次发送范围")) as generate:
             self.assertEqual(self.client.post(url, data).status_code, 302)
             generate.assert_called_once()
             self.assertIs(generate.call_args.kwargs["consent"], False)
+            self.assertEqual(generate.call_args.kwargs["segment_index"], 0)
         self.client.force_login(self.outsider.user)
         with patch("investment_research.views.generate_research_draft") as generate:
             self.assertEqual(self.client.post(url, {**data, "one_time_consent": "yes"}).status_code, 404)
