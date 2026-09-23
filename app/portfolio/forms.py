@@ -886,6 +886,7 @@ class InvestmentTransactionForm(BaseModelForm):
             "trade_date",
             "trade_type_option",
             "position_effect",
+            "option_purpose",
             "currency",
             "quantity",
             "price",
@@ -936,6 +937,7 @@ class InvestmentTransactionForm(BaseModelForm):
                 "trade_date",
                 "trade_type_option",
                 "position_effect",
+                "option_purpose",
                 "currency",
                 "quantity",
                 "price",
@@ -956,8 +958,11 @@ class InvestmentTransactionForm(BaseModelForm):
         self.fields["trade_type_option"].label = "交易类型"
         self.fields["position_effect"].label = "开平仓（期权）"
         self.fields["position_effect"].required = False
+        self.fields["option_purpose"].label = "期权用途 / 策略归属"
+        self.fields["option_purpose"].help_text = "仅在期权开仓时选择；历史持仓未录入用途时显示待归类。"
         self.fields["information_source_option"].label = "信息来源"
-        self.fields["strategy_option"].label = "交易类型（策略）"
+        self.fields["strategy_option"].label = "复盘策略标签（可选）"
+        self.fields["strategy_option"].help_text = "仅供交易复盘；期权用途请在上方单独选择。"
         self.fields["emotion_option"].label = "交易情绪"
         self.fields["currency"].required = False
         self.fields["currency"].widget = forms.Select(
@@ -1212,6 +1217,10 @@ class InvestmentTransactionForm(BaseModelForm):
         strategy = cleaned_data.get("strategy_option")
         if strategy and strategy.code == "other" and not cleaned_data.get("strategy_other"):
             self.add_error("strategy_other", "选择“其他”时请填写具体交易策略。")
+        if not (creating_option or (security and security.asset_type == Security.TYPE_OPTION)):
+            cleaned_data["option_purpose"] = ""
+        elif cleaned_data.get("position_effect") == InvestmentTransaction.EFFECT_CLOSE:
+            cleaned_data["option_purpose"] = ""
         return cleaned_data
 
     def save(self, commit=True):

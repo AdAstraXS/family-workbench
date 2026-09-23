@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}期权持仓详情{% endblock %}
+{% block content %}
+<div class="option-wheel-page">
+  <section class="option-wheel-hero"><div><span class="option-wheel-eyebrow">已录入期权持仓 · 只读分析</span><h1>{{ item.symbol }} · {{ item.contract.get_option_type_display }} ${{ item.contract.strike_price|floatformat:2 }}</h1><p><a href="{% url 'option_wheel:index' %}">返回期权车轮首页</a> · <a href="{% url 'option_wheel:holdings' %}">查看车轮记录</a></p></div><div class="option-wheel-analysis-only"><strong>{{ item.purpose_label }}</strong><span>{{ item.account }} · {{ item.side }} {{ item.contracts|floatformat:0 }} 张</span></div></section>
+
+  <section class="option-wheel-section"><div class="option-wheel-section-heading"><div><span>来自投资组合</span><h2>当前持仓</h2></div></div>
+    <article class="option-wheel-candidate-card"><p>到期日 {{ item.contract.expiration_date|date:"Y-m-d" }} · 行权价 ${{ item.contract.strike_price|floatformat:2 }} / 股 · 合约乘数 {{ item.contract.multiplier }} 股 / 张</p>
+      <dl><div><dt>{% if item.position.quantity < 0 %}原仓开仓收入{% else %}原仓买入成本{% endif %}</dt><dd>{% if item.open_per_contract is not None %}${{ item.open_per_contract|floatformat:2 }} / 张{% else %}未知{% endif %}</dd></div><div><dt>已录入估值价</dt><dd>{% if item.mark_per_contract is not None %}${{ item.mark_per_contract|floatformat:2 }} / 张{% else %}未知{% endif %}</dd></div><div><dt>估值时间</dt><dd>{{ item.mark_as_of|date:"Y-m-d H:i"|default:"未知" }}</dd></div><div><dt>对应正股</dt><dd>{{ item.stock_shares|floatformat:0 }} 股 · {% if item.stock_cost %}账户均价 ${{ item.stock_cost|floatformat:2 }} / 股{% else %}成本未知{% endif %}</dd></div></dl>
+      {% if not item.purpose %}<p>历史开仓的期权用途未完全明确；请在投资组合的原开仓交易中核对并补填。系统不会按到期天数猜测。</p>{% elif item.purpose == "protective_put" and not item.protection_covered %}<p>同账户已录入正股少于 Put 覆盖股数；“保护性 Put”归属已记录，但覆盖关系尚待核实。</p>{% elif item.purpose == "wheel_covered_call" and not item.protection_covered %}<p>同账户已录入正股少于 Call 覆盖股数；请核对真实覆盖关系。</p>{% endif %}
+      <p><a href="{% url 'portfolio:transaction_create' %}?account={{ item.account_id }}&amp;security={{ item.position.security_id }}">前往投资组合录入真实交易 →</a></p>
+    </article>
+  </section>
+
+  <section class="option-wheel-section"><div class="option-wheel-section-heading"><div><span>继续持有 · 平仓 · 仅供比较</span><h2>持仓调整</h2></div></div>
+    {% if item.position.quantity < 0 and item.contract.option_type == "put" %}<p>接受指派是车轮卖出 Put 的正常路径；若希望暂不接股，可比较同价或降价延后。Roll 会平掉旧仓，旧仓盈亏与换仓净收支分开列示。</p>{% elif item.purpose == "protective_put" %}<p>先核对同账户正股覆盖，再比较保护期限、保护行权价和续保净支出。旧 Put 的平仓盈亏单独列示。</p>{% elif item.contract.option_type == "call" and item.position.quantity > 0 %}<p>长期看涨 Call 主要比较到期时间、行权价、IV、Delta 和追加成本。旧 Call 的平仓盈亏单独列示。</p>{% else %}<p>比较继续持有、平仓和换到所选到期日的合约；先核对这张期权的实际用途。</p>{% endif %}
+    <div class="option-wheel-candidate-card"><h3>先看原仓的选择</h3><p>继续持有：保留当前期权及原到期日。平掉旧仓：卖方按 Ask 买回，买方按 Bid 卖出；报价缺失时不估算盈亏。</p>
+      {% if item.position.quantity < 0 and item.contract.option_type == "put" %}<p>等待实际指派：若 Put 被指派，将以行权价买入正股；之后可比较 Covered Call。若正股持续下跌、理想行权价的 Call 权利金很低，也可以暂停卖 Call。</p>{% endif %}
+    </div>
+    {% if request.user.is_superuser %}<form method="post" action="{% url 'option_wheel:scan_position' item.position.pk %}">{% csrf_token %}<label>选择一个目标到期日 <input type="date" name="target_expiration" value="{{ suggested_expiration|date:'Y-m-d' }}" required></label><button type="submit"{% if job.status == "queued" or job.status == "running" %} disabled{% endif %}>查询该到期日的调整候选</button></form>{% endif %}
+    {% if job %}<p>最近任务 {{ job.pk }} · {{ job.get_status_display }} · {{ job.message }}{% if job.status == "queued" or job.status == "running" %} 页面会自动读取结果，请勿重复提交。{% endif %}</p>{% endif %}
+    {% if position_changed %}<p>持仓数量、成本或日期已变化；旧比较结果不再与当前持仓混用，请重新查询。</p>{% endif %}
+    {% if comparison %}
+      <article class="option-wheel-candidate-card"><h3>所选到期日 {{ job.target_expiration|date:"Y-m-d" }} · 旧仓参考</h3><dl><div><dt>旧仓平仓参考额</dt><dd>{% if comparison.old_close is not None %}${{ comparison.old_close|floatformat:2 }} / 张{% else %}未知{% endif %}</dd></div><div><dt>旧仓平仓盈亏</dt><dd>{% if comparison.old_pnl is not None %}${{ comparison.old_pnl|floatformat:2 }} / 张{% else %}未知{% endif %}</dd></div><div><dt>旧仓报价时间</dt><dd>{{ comparison.old_quote_as_of|default:"未知" }}</dd></div></dl><p>金额均为每张合约参考，未计新手续费或滑点；当前共 {{ item.contracts|floatformat:0 }} 张。</p></article>
+{% if comparison.rows %}<div class="option-wheel-table-wrap"><table class="option-wheel-table"><thead><tr><th>候选合约</th><th>行权价</th><th>旧仓平仓额 / 张</th><th>旧仓盈亏 / 张</th><th>新仓开仓额 / 张</th><th>换仓净收支 / 张</th><th>IV / Delta / 到期价内概率</th><th>新仓报价时间</th><th>规则比较</th></tr></thead><tbody>{% for candidate in comparison.rows %}<tr><td>{{ candidate.code }}</td><td>${{ candidate.strike|floatformat:2 }}</td><td>{% if candidate.old_close is not None %}${{ candidate.old_close|floatformat:2 }}{% else %}未知{% endif %}</td><td>{% if candidate.old_pnl is not None %}${{ candidate.old_pnl|floatformat:2 }}{% else %}未知{% endif %}</td><td>{% if candidate.new_open is not None %}${{ candidate.new_open|floatformat:2 }}{% else %}未知{% endif %}</td><td>{% if candidate.net is not None %}{% if candidate.net >= 0 %}净收入{% else %}净支出{% endif %} ${{ candidate.net_abs|floatformat:2 }}{% else %}未知{% endif %}</td><td>{% if candidate.iv %}{{ candidate.iv }}%{% else %}未知{% endif %} / {{ candidate.delta|default:"未知" }} / {% if candidate.probability %}{{ candidate.probability }}%{% else %}未知{% endif %}</td><td>{{ candidate.as_of|default:"未知" }}</td><td>{{ candidate.analysis }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p>Futu 在所选日期未返回可识别的标准合约；不会自动改查其他到期日。</p>{% endif %}
+      <p>只按与原行权价接近的最多 8 张标准合约比较，结果不代表完整链最优。候选和旧仓报价时间可能不同；净收支不等于整轮策略利润。Futu 模型到期价内概率不等于提前指派概率。</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}{% if job.status == "queued" or job.status == "running" %}<script>window.setTimeout(function () { window.location.reload(); }, 5000);</script>{% endif %}{% endblock %}

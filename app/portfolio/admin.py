@@ -290,7 +290,7 @@ class InvestmentPositionAdmin(admin.ModelAdmin):
 
 @admin.register(InvestmentTransaction)
 class InvestmentTransactionAdmin(admin.ModelAdmin):
-    list_display = ("transaction_no", "trade_date", "account", "security", "trade_type_option", "quantity", "price", "amount", "realized_pnl", "currency")
+    list_display = ("transaction_no", "trade_date", "account", "security", "trade_type_option", "option_purpose", "quantity", "price", "amount", "realized_pnl", "currency")
     list_filter = ("account__bank_account__family", "account__bank_account__member", "trade_type_option", "currency", "trade_date")
     search_fields = ("transaction_no", "account__bank_account__account_name", "security__symbol", "security__name", "remark")
 
