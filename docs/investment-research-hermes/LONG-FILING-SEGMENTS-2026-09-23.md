@@ -23,3 +23,13 @@
 同一项用户授权的真实请求最终创建为投研 AI 请求 #30，并向 DeepSeek 发送所选第 10 区段与当前判断一次。返回正文未通过 JSON 解析，记录为失败，未生成引用草稿，未改写正式判断；由于返回用量未保存，实际账单金额无法从系统核实。没有自动或手动再次发送。按 DeepSeek 官方接口文档，后续请求改为显式 `response_format=json_object`、关闭默认思考模式、在提示词提供 JSON 结构示例，并在输出达到长度上限时明确报错。此修复经 699 项本地测试（1 项跳过）通过，生产运行提交 `4415d5213ef56a18f0c19bb8f3292d49814c93a5`；**尚未再次调用真实模型验证修复效果，下一次必须重新逐次授权**。
 
 最后一次部署前数据库备份为 `/volume1/docker/family-workbench/backups/family-workbench-pre-sec-ai-json-20260923-1146.dump`，SHA-256 `6c8745128d9aa269153508864e888fdd1d3b850bbc5980f350df2987bf398e04`；源码回滚包为 `/volume1/docker/family-workbench/backups/source-predeploy-a7c6932175a812435c5249545f8e1d04e7d29af6-20260923-114700.tar.gz`，SHA-256 `d6f4332b6c9b5a49236f5ce9e6ed6cd893ae5dfb331e90ef95723ec2bcfe74d7`。Web、数据库、OpenD 健康，Django `check` 无问题，投资组合关键表计数与最新快照日期未变。生产启动仍提示 `ai_analysis` 模型状态与全局 AI 迁移状态存在差异；本分支只做了投研请求插入兼容，后续需合并全局 AI 源码，避免长期保留分支漂移。
+
+## 第二次生产验收（同日 12:07）
+
+系统仍沿用已配置的单次 0.10 美元费用上限，本次请求没有触发该上限。
+
+成员再次授权调用模型，不要求以费用为停止条件。为消除上述漂移，仅同步全局 AI 的模型定义，并增加 `ai_analysis.0010` 迁移对齐三个请求字段的 Python 默认值；没有把另一分支的 162 个文件直接合并进投研分支。`makemigrations ai_analysis --check` 无变化，相关 699 项测试通过（1 项跳过）。生产数据库备份 `/volume1/docker/family-workbench/backups/family-workbench-pre-sec-ai-model-align-20260923-1207.dump` 已经验证，SHA-256 `378e2c5e2abccc82dd7ffd20774abbe1ddfd11a4f06a401b0258f35bd3742f82`；源码回滚包 `/volume1/docker/family-workbench/backups/source-predeploy-4415d5213ef56a18f0c19bb8f3292d49814c93a5-20260923-120635.tar.gz`，SHA-256 `8382d2b2fd38f1eda169845f9b293d2830eeac44e3721c67af6b0179296fcaa8`。生产运行 `cadbae78455b33de6dfd920c990c20c1fbb7c3bc`，迁移、Django `check` 和外部投研页面通过，启动日志不再提示 `ai_analysis` 模型/迁移差异。
+
+浏览器明确选择微软 2026-07-29 10-K 正文版本 1、第 10/22 区段（字符 144000–160000）与 DeepSeek V4 Pro，只发起一次新请求。成功草稿为投研 AI 请求 #31，私密页面 `/research/1/drafts/31/` 显示该区段的摘要、支持、反证、未知和待验证问题，引用均约束到正文版本 1 的全局字符位置。人工抽查 E3、E4 和 E42：点击后正确定位并高亮原文，分别对应 Microsoft Cloud 收入增长 27% 与商业剩余履约义务增长 84%、Azure 增长 41%、Microsoft Cloud 毛利率降至 66%。正式判断没有自动更改；其他 21 个区段尚未由这次请求阅读。生产投资组合基线仍为账户 35、持仓 474、交易 1061、快照 2023、明细 12534、估值运行 69，最新快照日期 2026-09-23。
+
+本次对齐只覆盖数据模型，不代表全局 AI 会话服务、路由和页面已并入本分支。以后需要恢复或推进全局 AI 产品时，应单独规划代码整合和回归验收。草稿的中文解释仍须用户核查；目前引用机制验证的是原文片段与位置，不自动证明模型的所有推论。
