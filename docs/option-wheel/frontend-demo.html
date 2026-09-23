@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>期权车轮 · 首页交互演示</title>
+  <style>
+    :root { color-scheme: light; --ink:#182735; --muted:#647381; --line:#dce4e8; --paper:#fff; --bg:#f4f7f8; --navy:#123b4a; --teal:#087e7b; --pale:#e8f4f2; --amber:#9d6214; --amber-bg:#fff4dc; --red:#a64335; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 "Microsoft YaHei", "PingFang SC", Arial, sans-serif; }
+    button,input,select { font:inherit; }
+    button { cursor:pointer; }
+    .shell { max-width:1280px; margin:auto; padding:24px 28px 80px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 0 22px; }
+    .brand { display:flex; align-items:center; gap:12px; font-weight:800; color:var(--navy); letter-spacing:.02em; }
+    .mark { display:grid; place-items:center; width:34px; height:34px; border-radius:10px; background:var(--navy); color:white; font-size:20px; }
+    .topbar small { color:var(--muted); }
+    .hero { display:flex; justify-content:space-between; align-items:end; gap:24px; padding:34px 38px; background:linear-gradient(115deg,#123b4a,#176b70); color:white; border-radius:22px; box-shadow:0 12px 30px #123b4a16; }
+    .hero .eyebrow { color:#a6dfd8; font-size:12px; font-weight:700; letter-spacing:.16em; }
+    h1 { font-size:34px; line-height:1.2; margin:9px 0 10px; }
+    .hero p { margin:0; color:#d5e8e9; max-width:650px; }
+    .hero-note { border:1px solid #ffffff45; border-radius:12px; padding:10px 13px; white-space:nowrap; font-size:13px; color:#e8f5f3; }
+    .demo-banner { display:flex; justify-content:space-between; gap:12px; margin:18px 0 28px; padding:11px 16px; border-radius:10px; background:#edf1f5; color:#3d5565; font-size:13px; }
+    .section { margin-top:29px; }
+    .section-head { display:flex; align-items:end; justify-content:space-between; gap:16px; margin:0 0 14px; }
+    .section-head h2 { margin:0; font-size:22px; letter-spacing:-.02em; }
+    .section-head p { margin:3px 0 0; color:var(--muted); font-size:13px; }
+    .section-index { color:var(--teal); font-weight:800; font-size:12px; letter-spacing:.12em; }
+    .panel { background:var(--paper); border:1px solid var(--line); border-radius:16px; box-shadow:0 4px 18px #123b4a08; }
+    .account-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .account-card { padding:21px 23px; }
+    .account-card h3 { margin:0 0 18px; font-size:17px; }
+    .account-numbers { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .account-numbers span { display:block; color:var(--muted); font-size:12px; }
+    .account-numbers strong { display:block; margin-top:3px; font-size:24px; font-variant-numeric:tabular-nums; }
+    .account-card footer { margin-top:16px; padding-top:12px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+    .btn { border:1px solid var(--line); background:white; color:var(--navy); border-radius:9px; padding:9px 14px; font-weight:700; }
+    .btn:hover { border-color:var(--teal); color:var(--teal); }
+    .btn.primary { border-color:var(--teal); background:var(--teal); color:white; }
+    .btn.primary:hover { background:#076965; }
+    .btn.text { border:0; background:transparent; color:var(--teal); padding:5px 7px; }
+    .btn.danger { color:var(--red); border:0; background:transparent; padding:4px 7px; }
+    .inline-actions { display:flex; flex-wrap:wrap; align-items:center; gap:9px; }
+    .watch-panel { overflow:hidden; }
+    .watch-toolbar { display:flex; align-items:center; justify-content:space-between; gap:15px; padding:16px 19px; border-bottom:1px solid var(--line); }
+    .watch-toolbar span { color:var(--muted); font-size:13px; }
+    .add-form { display:flex; gap:8px; align-items:center; }
+    .add-form input { width:130px; text-transform:uppercase; }
+    .field, select, input[type=number], input[type=text] { min-height:39px; padding:8px 10px; border:1px solid #cbd8dd; border-radius:8px; background:white; color:var(--ink); }
+    .table-wrap { overflow-x:auto; }
+    table { border-collapse:collapse; width:100%; text-align:left; }
+    th,td { padding:12px 15px; border-bottom:1px solid #e9eef0; vertical-align:middle; }
+    th { color:var(--muted); font-size:12px; font-weight:700; background:#f9fbfb; white-space:nowrap; }
+    td { font-variant-numeric:tabular-nums; }
+    tbody tr:last-child td { border-bottom:0; }
+    .watch-table th:first-child,.watch-table td:first-child { width:56px; text-align:center; }
+    .watch-table td:nth-child(2) strong { color:var(--navy); }
+    .watch-table td:nth-child(2) small { display:block; color:var(--muted); }
+    .check { width:18px; height:18px; accent-color:var(--teal); cursor:pointer; }
+    .empty { padding:24px; color:var(--muted); text-align:center; }
+    .preferences { padding:22px; }
+    .preference-grid { display:grid; grid-template-columns:1.1fr 1fr 1fr 1fr; gap:18px; }
+    .preference-grid label { display:block; font-weight:700; font-size:13px; }
+    .preference-grid label > span { display:block; color:var(--muted); font-size:12px; font-weight:400; margin:5px 0 8px; }
+    .preference-grid select { width:100%; }
+    .range { display:flex; align-items:center; gap:7px; }
+    .range input { width:88px; }
+    .check-option { display:flex !important; align-items:center; gap:9px; min-height:39px; margin-top:27px; }
+    .check-option input { accent-color:var(--teal); width:17px; height:17px; }
+    .check-option span { margin:0 !important; font-size:13px !important; font-weight:700 !important; color:var(--ink) !important; }
+    .preference-foot { margin:17px 0 0; padding-top:14px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+    .run-panel { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:21px 24px; background:#e8f4f2; border-color:#c9e8e3; }
+    .run-panel strong { color:var(--navy); font-size:17px; }
+    .run-panel p { margin:4px 0 0; color:#526b70; font-size:13px; }
+    .run-panel .btn { padding:12px 23px; white-space:nowrap; }
+    .result-panel { overflow:visible; }
+    .result-summary { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:17px 19px; border-bottom:1px solid var(--line); }
+    .result-summary strong { font-size:16px; }
+    .result-summary small { color:var(--muted); }
+    .result-panel .table-wrap { overflow:visible; }
+    .results-table { table-layout:fixed; text-align:center; }
+    .results-table th,.results-table td { padding:9px 6px; text-align:center; overflow-wrap:anywhere; }
+    .results-table th { white-space:normal; }
+    .results-table th:first-child { width:14%; } .results-table th:nth-child(2) { width:8%; } .results-table th:nth-child(3) { width:8%; } .results-table th:nth-child(4) { width:10%; } .results-table th:nth-child(5) { width:6%; } .results-table th:nth-child(6) { width:7%; } .results-table th:nth-child(7) { width:8%; } .results-table th:nth-child(8) { width:9%; } .results-table th:nth-child(9) { width:9%; } .results-table th:last-child { width:21%; }
+    .results-table td:last-child,.results-table th:last-child { text-align:left; font-size:12px; line-height:1.45; }
+    .info-mark { display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:3px;border:1px solid #527483;border-radius:50%;color:#345769;font-size:11px;cursor:help;position:relative; }
+    .info-mark span { display:none;position:absolute;z-index:3;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);width:220px;padding:9px;border-radius:7px;background:#183747;color:white;text-align:left;font-size:12px;line-height:1.5; }
+    .info-mark:hover span,.info-mark:focus span { display:block; }
+    .ticker { display:block; color:var(--navy); font-weight:800; }
+    .contract { display:block; color:var(--muted); font-size:12px; }
+    .tag { display:inline-block; padding:3px 7px; border-radius:6px; background:var(--pale); color:#096c67; font-size:11px; font-weight:700; white-space:nowrap; }
+    .tag.warn { color:var(--amber); background:var(--amber-bg); }
+    .tag.neutral { color:#536475; background:#edf1f4; }
+    .risk { color:var(--amber); }
+    .muted { color:var(--muted); }
+    .result-footer { padding:14px 19px; color:var(--muted); font-size:12px; border-top:1px solid var(--line); }
+    .history-list { margin:0; padding:0; list-style:none; }
+    .history-list li + li { border-top:1px solid var(--line); }
+    .history-list button { width:100%; display:flex; align-items:center; justify-content:space-between; gap:12px; text-align:left; padding:16px 19px; border:0; background:white; color:var(--ink); }
+    .history-list button:hover { background:#f8fbfa; }
+    .history-list small { color:var(--muted); }
+    .history-list .arrow { color:var(--teal); font-size:18px; }
+    .message { min-height:22px; margin:10px 0 0; color:var(--teal); font-size:13px; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    @media(max-width:900px) { .preference-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .hero { align-items:start; } }
+    @media(max-width:650px) { .shell { padding:14px 13px 45px; } .topbar small,.hero-note { display:none; } .hero { padding:26px 22px; } h1 { font-size:29px; } .demo-banner { display:block; } .account-grid,.preference-grid { grid-template-columns:1fr; } .section-head,.watch-toolbar,.run-panel,.result-summary { align-items:start; flex-direction:column; } .watch-toolbar { gap:10px; } .add-form { width:100%; } .add-form input { flex:1; min-width:0; } .check-option { margin-top:0; } .run-panel .btn { width:100%; } .account-numbers strong { font-size:20px; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar"><div class="brand"><div class="mark">◌</div><span>家庭工作台 <span class="muted">/</span> 投资 <span class="muted">/</span> 期权车轮</span></div><small>每周选标的 · 比较合约 · 自己决策</small></header>
+    <div class="hero"><div><div class="eyebrow">WHEEL STRATEGY</div><h1>本周的期权机会</h1><p>选好标的和条件，比较当周 Put；已有正股时再看 Covered Call。结果只辅助判断，交易由你自己完成。</p></div><div class="hero-note">只读分析 · 不连接交易账户</div></div>
+    <div class="demo-banner"><strong>界面演示：以下金额、行情、概率和历史记录均为示例，不是真实建议。</strong><span>按钮仅演示交互，不访问 NAS、Futu 或投资组合。</span></div>
+
+    <section class="section" aria-labelledby="accounts-title"><div class="section-head"><div><span class="section-index">01 · 账户概览</span><h2 id="accounts-title">两个账户的现金与净值</h2><p>正式版从投资组合读取；各币种现金按有效汇率折算后汇总为美元，每天早晨随投资组合更新。</p></div><small class="muted">这里只展示信息，不决定哪些合约可看</small></div><div class="account-grid"><article class="panel account-card"><h3>致富证券（公户）</h3><div class="account-numbers"><div><span>现金合计 · USD</span><strong>—</strong></div><div><span>账户 NAV · USD</span><strong>—</strong></div></div><footer>等待接入投资组合汇总 · 缺少汇率时显示缺项，不估算</footer></article><article class="panel account-card"><h3>盈透证券</h3><div class="account-numbers"><div><span>现金合计 · USD</span><strong>—</strong></div><div><span>账户 NAV · USD</span><strong>—</strong></div></div><footer>等待接入投资组合汇总 · 不设置数据年龄门槛</footer></article></div></section>
+
+    <section class="section" aria-labelledby="watch-title"><div class="section-head"><div><span class="section-index">02 · 自选标的</span><h2 id="watch-title">这次想比较哪些股票？</h2><p>勾选后参与本次分析。关注列表可增删，最多 20 只。</p></div><button type="button" class="btn" id="refresh-price">刷新价格</button></div><div class="panel watch-panel"><div class="watch-toolbar"><span id="selection-count">已选 0 只</span><form id="add-form" class="add-form"><label class="sr-only" for="new-symbol">股票代码</label><input id="new-symbol" class="field" type="text" maxlength="8" placeholder="输入代码，如 MU" autocomplete="off"><button type="submit" class="btn">＋ 添加自选</button></form></div><div class="table-wrap"><table class="watch-table"><thead><tr><th><span class="sr-only">选择</span></th><th>股票</th><th>价格</th><th>价格日期</th><th>下次财报</th><th>下次除息</th><th><span class="sr-only">操作</span></th></tr></thead><tbody id="watch-body"></tbody></table></div></div><p id="watch-message" class="message" role="status" aria-live="polite"></p></section>
+
+    <section class="section" aria-labelledby="preferences-title"><div class="section-head"><div><span class="section-index">03 · 全局条件</span><h2 id="preferences-title">筛选偏好与事件边界</h2><p>下面的选择对本次勾选的所有股票生效，与账户无关。</p></div></div><div class="panel preferences"><div class="preference-grid"><label for="dte">到期时间<span>默认当周周五，也可选下一周</span><select id="dte"><option value="this">当周周五</option><option value="next">下一周周五</option><option value="2">两周后周五</option><option value="custom">自定到期日</option></select></label><label for="premium-min">每张权利金 · USD<span>Put 仅展示区间内合约</span><div class="range"><input id="premium-min" type="number" min="0" step="10" value="100" aria-label="权利金下限"><span>至</span><input id="premium-max" type="number" min="0" step="10" value="500" aria-label="权利金上限"></div></label><label class="check-option"><input id="earnings" type="checkbox"><span>允许跨财报</span></label><label class="check-option"><input id="dividend" type="checkbox"><span>允许跨除息日</span></label></div><div id="custom-date-wrap" style="display:none;margin-top:16px"><label for="custom-date" style="display:block;font-weight:700;font-size:13px;margin-bottom:6px">自定到期日</label><input id="custom-date" type="date" class="field"></div><p class="preference-foot">主要目标：在满足权利金偏好的合约里，优先比较较低的预计到期价内概率。财报和除息交叉会醒目标记，供你决定是否参与。Covered Call 优先看行权价是否高于对应持股成本。</p></div></section>
+
+    <section class="section" aria-label="开始分析"><div class="panel run-panel"><div><strong>准备分析 <span id="run-count">0</span> 只股票</strong><p>演示版点击后生成示例结果；正式版只读取选中标的与本次条件，不自动下单。</p></div><button id="run-analysis" type="button" class="btn primary">分析并比较合约 →</button></div><p id="run-message" class="message" role="status" aria-live="polite"></p></section>
+
+    <section class="section" aria-labelledby="results-title"><div class="section-head"><div><span class="section-index">04 · 本次结果</span><h2 id="results-title">合约对比</h2><p>只展示符合 Put 权利金范围的合约；先按标的，再按预计到期价内概率升序。</p></div></div><div class="panel result-panel"><div class="result-summary"><strong id="result-heading">尚未开始分析</strong><small id="result-meta">勾选标的并点击上方按钮</small></div><div id="results-empty" class="empty">本次结果会显示在这里。范围内没有合约时不硬凑。</div><div class="table-wrap"><table id="results-table" class="results-table" hidden><thead><tr><th>合约</th><th>权利金</th><th>行权价</th><th>盈亏平衡价</th><th>Delta</th><th>合约 IV</th><th>标的 IV 百分位</th><th>预计到期价内概率</th><th>年化权利金率</th><th>风险提示与分析</th></tr></thead><tbody id="results-body"></tbody></table></div><div class="result-footer">概率为模型估算，并非实际提前指派概率。分析建议为规则比较，未调用 AI。示例数字只用于检查页面结构。</div></div></section>
+
+    <section class="section" aria-labelledby="history-title"><div class="section-head"><div><span class="section-index">05 · 历史分析</span><h2 id="history-title">过去的分析</h2><p>列表只保留日期与次数，点开后查看当时冻结的完整表格。</p></div></div><div class="panel"><ul id="history-list" class="history-list"><li><button type="button" data-demo-history="1"><span>2026-09-21 · 第 1 次分析 <small>· 示例记录</small></span><span class="arrow">↗</span></button></li></ul></div><p id="history-message" class="message" role="status" aria-live="polite"></p></section>
+  </main>
+  <script>
+    const watch = [
+      {symbol:'NVDA', name:'英伟达', price:'—', date:'—', earnings:'待更新', dividend:'待更新', selected:true},
+      {symbol:'MSFT', name:'微软', price:'—', date:'—', earnings:'待更新', dividend:'待更新', selected:true},
+      {symbol:'AMD', name:'超威半导体', price:'—', date:'—', earnings:'待更新', dividend:'待更新', selected:false},
+      {symbol:'INTC', name:'英特尔', price:'—', date:'—', earnings:'待更新', dividend:'待更新', selected:true},
+      {symbol:'MU', name:'美光科技', price:'—', date:'—', earnings:'待更新', dividend:'待更新', selected:false},
+      {symbol:'SPCX', name:'SPCX', price:'—', date:'—', earnings:'待更新', dividend:'待更新', selected:false},
+      {symbol:'SKHY', name:'SKHY', price:'—', date:'—', earnings:'待更新', dividend:'待更新', selected:false}
+    ];
+    const demoContracts = [
+      {symbol:'INTC', code:'INTC · Put', type:'Put', premium:138, strike:31, delta:'-0.14', iv:'42.1%', rank:'68%', probability:'14.2%', risk:'未发现演示事件交叉', analysis:'同组示例里到期价内概率较低；权利金落在偏好范围。'},
+      {symbol:'INTC', code:'INTC · Put', type:'Put', premium:226, strike:32, delta:'-0.23', iv:'43.7%', rank:'72%', probability:'22.8%', risk:'较高行权风险', analysis:'权利金更高，但行权价和预计到期价内概率也更高。'},
+      {symbol:'NVDA', code:'NVDA · Put', type:'Put', premium:314, strike:165, delta:'-0.20', iv:'49.3%', rank:'81%', probability:'19.6%', risk:'IV 百分位偏高', analysis:'较高 IV 可能抬升权利金，也可能反映市场预期波动放大。'},
+      {symbol:'MSFT', code:'MSFT · Put', type:'Put', premium:176, strike:500, delta:'-0.16', iv:'31.8%', rank:'44%', probability:'16.3%', risk:'需核对财报日期', analysis:'示例事件日期未接入；正式分析须显示已核实、跨越或未知。'},
+      {symbol:'INTC', code:'INTC · Covered Call', type:'Call', premium:68, strike:35, delta:'0.12', iv:'39.5%', rank:'61%', probability:'11.8%', risk:'需先核对正股与持股成本', analysis:'演示持股成本 $33；行权价高于成本。Call 权利金可以低于 Put 偏好。'}
+    ];
+    const escapeHtml = value => String(value).replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+    function renderWatch() {
+      document.getElementById('watch-body').innerHTML = watch.map(item => `<tr><td><input class="check" type="checkbox" data-select="${escapeHtml(item.symbol)}" aria-label="选择 ${escapeHtml(item.symbol)}" ${item.selected?'checked':''}></td><td><strong>${escapeHtml(item.symbol)}</strong><small>${escapeHtml(item.name)}</small></td><td>${escapeHtml(item.price)}</td><td>${escapeHtml(item.date)}</td><td>${escapeHtml(item.earnings)}</td><td>${escapeHtml(item.dividend)}</td><td><button class="btn danger" type="button" data-remove="${escapeHtml(item.symbol)}" aria-label="移除 ${escapeHtml(item.symbol)}">移除</button></td></tr>`).join('');
+      const count = watch.filter(item => item.selected).length;
+      document.getElementById('selection-count').textContent = `已选 ${count} 只 · 自选 ${watch.length}/20`;
+      document.getElementById('run-count').textContent = count;
+    }
+    document.getElementById('watch-body').addEventListener('change', event => { if (!event.target.matches('[data-select]')) return; const item=watch.find(row=>row.symbol===event.target.dataset.select); if(item) item.selected=event.target.checked; renderWatch(); });
+    document.getElementById('watch-body').addEventListener('click', event => { const button=event.target.closest('[data-remove]'); if(!button) return; const index=watch.findIndex(row=>row.symbol===button.dataset.remove); if(index>=0) watch.splice(index,1); renderWatch(); document.getElementById('watch-message').textContent='已从演示自选列表移除。'; });
+    document.getElementById('add-form').addEventListener('submit', event => { event.preventDefault(); const input=document.getElementById('new-symbol'); const symbol=input.value.trim().toUpperCase(); const message=document.getElementById('watch-message'); if(!/^[A-Z][A-Z0-9.]{0,7}$/.test(symbol)) { message.textContent='请输入有效的美股代码。'; return; } if(watch.some(row=>row.symbol===symbol)) { message.textContent='该股票已经在自选列表中。'; return; } if(watch.length>=20) { message.textContent='自选列表最多 20 只。'; return; } watch.push({symbol,name:'待获取名称',price:'—',date:'—',earnings:'待更新',dividend:'待更新',selected:true}); input.value=''; renderWatch(); message.textContent=`已加入 ${symbol}。演示版不会获取真实行情。`; });
+    document.getElementById('refresh-price').addEventListener('click', () => { document.getElementById('watch-message').textContent='演示版不连接行情。正式版这个按钮仅更新价格和价格日期，不改财报或除息日期。'; });
+    document.getElementById('dte').addEventListener('change', event => { document.getElementById('custom-date-wrap').style.display=event.target.value==='custom'?'block':'none'; });
+    function futureFriday(weeks) { const date=new Date(); const offset=(5-date.getDay()+7)%7; date.setDate(date.getDate()+offset+7*weeks); return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; }
+    document.getElementById('run-analysis').addEventListener('click', () => {
+      const selected=watch.filter(item=>item.selected).map(item=>item.symbol); const message=document.getElementById('run-message');
+      const min=Number(document.getElementById('premium-min').value), max=Number(document.getElementById('premium-max').value);
+      if(!selected.length) { message.textContent='请先勾选至少一只股票。'; return; }
+      if(!Number.isFinite(min)||!Number.isFinite(max)||min<0||max<min) { message.textContent='请检查权利金上下限。'; return; }
+      const choice=document.getElementById('dte').value; const expiry=choice==='custom'?document.getElementById('custom-date').value:futureFriday(choice==='this'?0:choice==='next'?1:2);
+      if(!expiry) { message.textContent='请选择到期日。'; return; }
+      const rows=demoContracts.filter(row=>selected.includes(row.symbol)&&(row.type==='Call'||min<=row.premium&&row.premium<=max)).sort((a,b)=>a.symbol.localeCompare(b.symbol)||parseFloat(a.probability)-parseFloat(b.probability));
+      document.getElementById('results-body').innerHTML=rows.map(row=>{ const credit=Number(row.premium)/100; const breakEven=row.type==='Call'?33-credit:row.strike-credit; const dte=Math.max(1,Math.ceil((new Date(`${expiry}T12:00:00`)-new Date())/86400000)); const annualized=(row.premium/(row.type==='Call'?3300:row.strike*100)*365/dte*100).toFixed(1); return `<tr><td><span class="ticker">${escapeHtml(row.code)}</span><span class="contract">${escapeHtml(row.symbol)} ${escapeHtml(expiry)} ${escapeHtml(row.strike)}${row.type==='Call'?'C':'P'}</span></td><td><strong>$${row.premium}</strong></td><td>$${row.strike}</td><td>$${breakEven.toFixed(2)}</td><td>${row.delta}</td><td>${row.iv}</td><td>${row.rank}<span class="info-mark" tabindex="0" aria-label="标的 IV 百分位说明">!<span>Futu 提供的标的 IV 百分位示例；历史窗口未披露。</span></span></td><td><strong>${row.probability}</strong></td><td>${annualized}%</td><td><span class="risk">${escapeHtml(row.risk)}</span><br>规则比较：${escapeHtml(row.analysis)}</td></tr>`; }).join('');
+      document.getElementById('results-empty').hidden=rows.length>0;
+      document.getElementById('results-empty').textContent=rows.length?'':'演示合约中没有符合 Put 权利金范围的结果；Covered Call 不受该范围限制。';
+      document.getElementById('results-table').hidden=rows.length===0;
+      document.getElementById('result-heading').textContent=`${selected.length} 只股票 · ${rows.length} 张示例合约`;
+      document.getElementById('result-meta').textContent=`到期 ${expiry} · 权利金偏好 $${min}–$${max}`;
+      message.textContent='已生成演示结果。IV、百分位、概率和事件提示均为示例，不能据此交易。';
+      document.getElementById('results-title').scrollIntoView({behavior:'smooth',block:'start'});
+    });
+    document.getElementById('history-list').addEventListener('click', () => { document.getElementById('history-message').textContent='这是示例历史记录。正式版会打开该次分析冻结的完整结果表格。'; });
+    renderWatch();
+  </script>
+</body>
+</html>

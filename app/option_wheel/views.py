@@ -1,5 +1,6 @@
 from uuid import UUID, uuid4
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 from decimal import Decimal
 
 from django.conf import settings
@@ -87,7 +88,6 @@ def _snapshot_is_ready(snapshot, *, max_age_minutes, now, stale_reasons=None):
         snapshot.unsettled_cash,
         snapshot.nav,
         snapshot.reserved_cash,
-        snapshot.margin_loan_balance,
     )
     if any(value is None or not value.is_finite() for value in required_amounts):
         return False
@@ -95,9 +95,6 @@ def _snapshot_is_ready(snapshot, *, max_age_minutes, now, stale_reasons=None):
         snapshot.currency != "USD"
         or not snapshot.source_reference.strip()
         or snapshot.nav <= 0
-        or snapshot.reserved_cash > snapshot.settled_cash
-        or snapshot.uses_margin is not False
-        or snapshot.margin_loan_balance != Decimal("0")
         or not isinstance(snapshot.positions_summary, dict)
         or not isinstance(snapshot.open_obligations, dict)
     ):
@@ -250,7 +247,7 @@ def index(request):
             state = "数据不可用"
             account_blockers.append(f"{account_name}尚无容量快照")
         elif stale_reasons:
-            state = "投资组合已变化，待重新确认"
+            state = "投资组合已变化，待更新容量"
             account_blockers.append(f"{account_name}容量快照已失效：{'；'.join(stale_reasons)}")
         elif not ready:
             state = "证据不完整或已过期"
@@ -265,12 +262,14 @@ def index(request):
                 "ready": ready,
                 "state": state,
                 "max_age_minutes": max_age_minutes,
+                "margin_capacity": (
+                    max(snapshot.settled_cash - snapshot.reserved_cash, Decimal("0")) * 2
+                    if snapshot and snapshot.settled_cash is not None and snapshot.reserved_cash is not None
+                    else None
+                ),
                 "stale_reasons": stale_reasons,
                 "preview": None,
                 "preview_error": "",
-                "confirm_no_margin": False,
-                "confirm_no_open_orders": False,
-                "confirm_save_snapshot": False,
             }
         )
 
@@ -294,50 +293,35 @@ def index(request):
         )
         if target_card is None:
             raise PermissionDenied("该账户不属于当前家庭的车轮参与账户。")
-        target_card["confirm_no_margin"] = (
-            request.POST.get("confirm_no_margin") == "yes"
-        )
-        target_card["confirm_no_open_orders"] = (
-            request.POST.get("confirm_no_open_orders") == "yes"
-        )
-        target_card["confirm_save_snapshot"] = (
-            request.POST.get("confirm_save_snapshot") == "yes"
-        )
         try:
             evidence = build_portfolio_capacity(
                 account_id=account_id,
-                confirm_no_margin=target_card["confirm_no_margin"],
-                confirm_no_open_orders=target_card["confirm_no_open_orders"],
             )
         except CapacityImportError as exc:
             target_card["preview_error"] = str(exc)
         else:
             target_card["preview"] = {
                 "evidence": evidence,
-                "available_cash": evidence.settled_cash - evidence.reserved_cash,
+                "available_cash": max(evidence.settled_cash - evidence.reserved_cash, Decimal("0")),
+                "margin_capacity": max(evidence.settled_cash - evidence.reserved_cash, Decimal("0")) * 2,
                 "position_count": evidence.positions_summary.get("count", 0),
                 "obligation_count": evidence.open_obligations.get("count", 0),
             }
             if action == "save_capacity":
-                if not target_card["confirm_save_snapshot"]:
-                    target_card["preview_error"] = (
-                        "保存前必须再次确认将当前预演结果写入正式容量快照。"
+                result = import_portfolio_capacity(evidence=evidence, commit=True)
+                if result.snapshot_created:
+                    messages.success(
+                        request,
+                        f"已保存 {target_card['name']} 的正式容量快照；"
+                        "投资组合、现金、持仓和订单均未修改。",
                     )
                 else:
-                    result = import_portfolio_capacity(evidence=evidence, commit=True)
-                    if result.snapshot_created:
-                        messages.success(
-                            request,
-                            f"已保存 {target_card['name']} 的正式容量快照；"
-                            "投资组合、现金、持仓和订单均未修改。",
-                        )
-                    else:
-                        messages.success(
-                            request,
-                            f"{target_card['name']} 的同一份容量证据已存在，"
-                            "本次没有重复写入。",
-                        )
-                    return redirect(reverse("option_wheel:index"))
+                    messages.success(
+                        request,
+                        f"{target_card['name']} 的同一份容量证据已存在，"
+                        "本次没有重复写入。",
+                    )
+                return redirect(reverse("option_wheel:index"))
 
     decisions = WheelDecision.objects.filter(family=family)
     latest_decision = (
@@ -480,9 +464,6 @@ def refresh_analysis(request):
     family = _request_family(request)
     if not request.user.is_superuser:
         raise PermissionDenied("只有管理员可以刷新正式只读分析。")
-    if request.POST.get("confirm_read_only") != "yes":
-        return HttpResponseBadRequest("必须确认本操作仅保存分析证据且不会下单。")
-
     try:
         account_ids = {int(value) for value in request.POST.getlist("account_ids")}
     except (TypeError, ValueError):
@@ -494,6 +475,17 @@ def refresh_analysis(request):
     }
     if not account_ids or not symbols:
         return HttpResponseBadRequest("至少选择一个账户和一个标的。")
+    try:
+        expiry_weeks = int(request.POST.get("expiry_weeks", "0"))
+    except ValueError:
+        return HttpResponseBadRequest("目标到期周无效。")
+    if expiry_weeks not in range(4):
+        return HttpResponseBadRequest("目标到期周无效。")
+    ny_today = timezone.now().astimezone(ZoneInfo("America/New_York")).date()
+    days_to_friday = (4 - ny_today.weekday()) % 7 or 7
+    target_expiration = (
+        ny_today + timedelta(days=days_to_friday + 7 * expiry_weeks)
+    ).isoformat()
 
     accounts = list(
         InvestmentAccount.objects.filter(
@@ -527,7 +519,7 @@ def refresh_analysis(request):
     except (signing.BadSignature, KeyError, TypeError, ValueError):
         return HttpResponseBadRequest("提交凭证无效或过期，请重新打开页面。")
     try:
-        job = enqueue(family, request.user, key, {"account_ids": sorted(account_ids), "symbols": sorted(symbols)})
+        job = enqueue(family, request.user, key, {"account_ids": sorted(account_ids), "symbols": sorted(symbols), "target_expiration": target_expiration})
     except WheelAnalysisError as exc:
         return HttpResponseBadRequest(str(exc))
     job.refresh_from_db()
@@ -570,8 +562,31 @@ def decision_detail(request, pk):
 
 @login_required
 def holdings(request):
+    from .open_puts import open_put_rows
+    from .models import WheelPositionReview, WheelPutQuoteJob
+    from portfolio.models import InvestmentTransaction, TradeStatusChoices, TradeTypeChoices
+
     family = _request_family(request)
+    quote_job = WheelPutQuoteJob.objects.filter(family=family).order_by("-created_at").first()
+    quote_snapshot = WheelPutQuoteJob.objects.filter(family=family, status="saved").order_by("-finished_at").first()
+    open_puts = open_put_rows(
+        family, quotes=quote_snapshot.quotes if quote_snapshot else None,
+        quote_time=quote_snapshot.finished_at if quote_snapshot else None,
+    )
+    reviews = WheelPositionReview.objects.filter(family=family).select_related(
+        "account__bank_account", "security", "linked_transaction", "created_by",
+    )[:50]
+    for review in reviews:
+        if review.linked_transaction_id is None:
+            review.linkable_trades = InvestmentTransaction.objects.filter(
+                account=review.account, security=review.security,
+                status__in=[TradeStatusChoices.COMPLETED, TradeStatusChoices.PARTIAL],
+                trade_type=TradeTypeChoices.BUY, position_effect=InvestmentTransaction.EFFECT_CLOSE,
+            ).order_by("-trade_date", "-pk")[:20]
     cycles = WheelCycle.objects.filter(family=family).select_related(
         "account__bank_account", "underlying"
     ).prefetch_related("legs__transaction_links", "legs__collateral_reservations").order_by("status", "underlying__symbol", "-opened_on")
-    return render(request, "option_wheel/holdings.html", {"cycles": cycles})
+    return render(request, "option_wheel/holdings.html", {
+        "cycles": cycles, "open_puts": open_puts, "reviews": reviews,
+        "quote_job": quote_job, "quote_snapshot": quote_snapshot,
+    })

@@ -11,6 +11,9 @@ if __name__ == "__main__":
         django.setup()
         from portfolio.futu_option_probe import run_probe
         arguments = sys.argv[1:]
+        screening = bool(arguments and arguments[0] == "--screen")
+        if screening:
+            arguments.pop(0)
         calls_for = set()
         if arguments and arguments[0].startswith("--calls-for="):
             calls_for = {
@@ -18,10 +21,14 @@ if __name__ == "__main__":
                 for value in arguments.pop(0).split("=", 1)[1].split(",")
                 if value
             }
+        target_expiration = None
+        if arguments and arguments[0].startswith("--expiration="):
+            target_expiration = arguments.pop(0).split("=", 1)[1]
         result = run_probe(
-            arguments, profile="m1-gate", max_expirations=3,
-            max_contracts_per_expiration=1,
+            arguments, profile="screen" if screening else "m1-gate", max_expirations=1,
+            max_contracts_per_expiration=12 if screening else 3,
             covered_call_symbols=calls_for,
+            target_expiration=target_expiration,
         )
         # run_probe closes the SDK context and verifies subscriptions before returning.
         print("\nWHEEL_LIVE:" + json.dumps(result, ensure_ascii=True), flush=True)

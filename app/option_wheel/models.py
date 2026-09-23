@@ -36,6 +36,7 @@ class WheelAnalysisJob(TimestampedModel):
     finished_at = models.DateTimeField(null=True, blank=True)
     expires_at = models.DateTimeField()
     decision_ids = models.JSONField(default=list)
+    screening_results = models.JSONField(default=list, blank=True)
 
     class Meta:
         ordering = ("-created_at",)
@@ -43,6 +44,24 @@ class WheelAnalysisJob(TimestampedModel):
             fields=("family",), condition=Q(status__in=("queued", "running")),
             name="wheel_one_active_analysis_per_family",
         )]
+
+
+class WheelWatchItem(TimestampedModel):
+    """Family's independent option watchlist; portfolio securities are untouched."""
+
+    family = models.ForeignKey(Family, on_delete=models.PROTECT, related_name="wheel_watch_items")
+    symbol = models.CharField(max_length=12)
+    name = models.CharField(max_length=100, blank=True)
+    price = models.DecimalField(max_digits=20, decimal_places=6, null=True, blank=True)
+    price_as_of = models.DateTimeField(null=True, blank=True)
+    next_earnings = models.DateField(null=True, blank=True)
+    next_dividend = models.DateField(null=True, blank=True)
+    events_checked_at = models.DateTimeField(null=True, blank=True)
+    events_covered_until = models.DateField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("symbol",)
+        constraints = [models.UniqueConstraint(fields=("family", "symbol"), name="wheel_watch_family_symbol_unique")]
 
 
 class AppendOnlyQuerySet(models.QuerySet):
@@ -1117,13 +1136,6 @@ class WheelDecision(AppendOnlyEvidenceMixin, TimestampedModel):
                 or not _finite_decimal(account_snapshot.nav)
                 or account_snapshot.nav <= 0
                 or not _finite_decimal(account_snapshot.reserved_cash)
-                or account_snapshot.reserved_cash
-                > account_snapshot.settled_cash
-                or account_snapshot.uses_margin is not False
-                or not _finite_decimal(
-                    account_snapshot.margin_loan_balance
-                )
-                or account_snapshot.margin_loan_balance != 0
                 or not isinstance(account_snapshot.positions_summary, dict)
                 or not isinstance(account_snapshot.open_obligations, dict)
                 or policy is None
@@ -1134,7 +1146,7 @@ class WheelDecision(AppendOnlyEvidenceMixin, TimestampedModel):
                 )
             ):
                 errors["account_snapshot"] = (
-                    "可执行决策要求完整 USD 现金证据且禁止融资。"
+                    "可执行决策要求完整 USD 账户与持仓证据。"
                 )
             market_snapshot = (
                 self.market_snapshot if self.market_snapshot_id else None
@@ -1489,16 +1501,14 @@ class WheelCandidate(AppendOnlyEvidenceMixin, TimestampedModel):
                     and _finite_decimal(account_snapshot.settled_cash)
                     and _finite_decimal(account_snapshot.reserved_cash)
                     and _finite_decimal(account_snapshot.nav)
-                    and self.required_cash
-                    <= account_snapshot.settled_cash
-                    - account_snapshot.reserved_cash
-                    and existing_exposure + self.required_cash
-                    <= account_snapshot.nav
-                    * self.decision.policy.max_underlying_nav_ratio
+                    and self.required_cash <= max(
+                        account_snapshot.settled_cash - account_snapshot.reserved_cash,
+                        Decimal("0"),
+                    ) * 2
                 )
                 if not capacity_ok:
                     errors["required_cash"] = (
-                        "可执行候选必须满足未占用现金和 NAV 暴露上限。"
+                        "可执行候选必须满足剩余现金两倍的容量上限。"
                     )
         if errors:
             raise ValidationError(errors)
@@ -1789,3 +1799,67 @@ class WheelCollateralReservation(TimestampedModel):
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+class WheelPositionReview(TimestampedModel):
+    """Human decision note; linking a real transaction never creates a trade."""
+
+    CHOICES = [
+        ("hold", "继续持有"), ("buy_back", "考虑买回"),
+        ("roll_out", "考虑同价延后"), ("roll_down_out", "考虑降价延后"),
+        ("assignment", "等待核实指派"), ("pause", "暂停操作"),
+    ]
+    family = models.ForeignKey(Family, on_delete=models.PROTECT, related_name="wheel_position_reviews")
+    account = models.ForeignKey(InvestmentAccount, on_delete=models.PROTECT, related_name="wheel_position_reviews")
+    security = models.ForeignKey(Security, on_delete=models.PROTECT, related_name="wheel_position_reviews")
+    choice = models.CharField(max_length=20, choices=CHOICES)
+    note = models.TextField(blank=True)
+    frozen_facts = models.JSONField(default=dict)
+    linked_transaction = models.ForeignKey(
+        InvestmentTransaction, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="wheel_position_reviews",
+    )
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+
+    class Meta:
+        verbose_name = "车轮人工决策记录"
+        verbose_name_plural = "车轮人工决策记录"
+        ordering = ["-created_at", "-pk"]
+
+    def clean(self):
+        errors = {}
+        if self.account_id and self.family_id and self.account.family_id != self.family_id:
+            errors["account"] = "账户不属于此家庭。"
+        if self.linked_transaction_id and (
+            self.linked_transaction.account_id != self.account_id
+            or self.linked_transaction.security_id != self.security_id
+        ):
+            errors["linked_transaction"] = "只能关联同账户、同合约的真实交易。"
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+
+class WheelPutQuoteJob(TimestampedModel):
+    """On-demand Futu observation of recorded short Put contracts."""
+
+    id = models.UUIDField(primary_key=True, default=uuid4, editable=False)
+    family = models.ForeignKey(Family, on_delete=models.PROTECT)
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    status = models.CharField(max_length=16, default="queued", choices=[
+        ("queued", "等待启动"), ("running", "查询与清理中"),
+        ("saved", "已保存"), ("failed", "未保存"), ("interrupted", "运行已中断"),
+    ])
+    quotes = models.JSONField(default=dict)
+    message = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "未平仓 Put 行情任务"
+        verbose_name_plural = "未平仓 Put 行情任务"
+        ordering = ["-created_at"]

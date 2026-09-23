@@ -64,6 +64,7 @@ TECHNICAL = "technical"
 
 CASH_INSUFFICIENT = "cash_insufficient"
 NAV_RATIO = "nav_ratio"
+MARGIN_CAPACITY_EXCEEDED = "margin_capacity_exceeded"
 
 EXECUTION_GATE_CLOSED = "execution_gate_closed"
 
@@ -310,22 +311,17 @@ def evaluate_sell_put(
     ):
         reasons.append(ACCOUNT_AGE_EXPIRED)
 
-    if not isinstance(account.uses_margin, bool):
-        warnings.append(ACCOUNT_MARGIN_STATUS_UNKNOWN)
-    elif account.uses_margin is True:
-        warnings.append(ACCOUNT_MARGIN_ACTIVE)
-
-    margin_known = _is_decimal(account.margin_loan_balance)
-    if not margin_known:
-        warnings.append(ACCOUNT_MARGIN_BALANCE_UNKNOWN)
-    elif account.margin_loan_balance != Decimal(0):
+    # Portfolio does not record the broker's live loan balance.  The two
+    # participating accounts are margin accounts; unknown fields must not
+    # create a recurring request for a declaration from the user.
+    if _is_decimal(account.margin_loan_balance) and account.margin_loan_balance > Decimal(0):
         warnings.append(ACCOUNT_MARGIN_ACTIVE)
 
     nav_known = _is_decimal(account.nav)
     if not nav_known:
-        reasons.append(ACCOUNT_NAV_MISSING)
+        warnings.append(ACCOUNT_NAV_MISSING)
     elif account.nav <= Decimal(0):
-        reasons.append(ACCOUNT_NAV_NONPOSITIVE)
+        warnings.append(ACCOUNT_NAV_NONPOSITIVE)
 
     cash_known = _is_decimal(account.settled_cash)
     if not cash_known:
@@ -343,9 +339,9 @@ def evaluate_sell_put(
 
     exposure_known = _is_decimal(account.already_exposed_notional)
     if not exposure_known:
-        reasons.append(ACCOUNT_EXPOSURE_MISSING)
+        warnings.append(ACCOUNT_EXPOSURE_MISSING)
     elif account.already_exposed_notional < Decimal(0):
-        reasons.append(ACCOUNT_EXPOSURE_NEGATIVE)
+        warnings.append(ACCOUNT_EXPOSURE_NEGATIVE)
 
     count_ok = (
         _is_strict_int(contract_count)
@@ -538,14 +534,21 @@ def evaluate_sell_put(
             / Decimal(quote.dte)
         )
 
+    margin_capacity: Decimal | None = None
     if cash_known and reserved_known:
         unreserved_cash = account.settled_cash - account.reserved_cash
+        if account.settled_cash >= 0 and account.reserved_cash >= 0:
+            margin_capacity = max(unreserved_cash, Decimal(0)) * Decimal(2)
         if (
             calculation_ready
             and required_cash is not None
             and required_cash > unreserved_cash
         ):
             warnings.append(CASH_INSUFFICIENT)
+    if required_cash is not None and margin_capacity is not None and required_cash > margin_capacity:
+        reasons.append(MARGIN_CAPACITY_EXCEEDED)
+    if margin_capacity is None:
+        reasons.append(MARGIN_CAPACITY_EXCEEDED)
 
     if exposure_known and required_cash is not None:
         assignment_exposure = (
@@ -558,7 +561,7 @@ def evaluate_sell_put(
         and config_ok
         and assignment_exposure > account.nav * nav_ratio
     ):
-        reasons.append(NAV_RATIO)
+        warnings.append(NAV_RATIO)
 
     premium_preference_match = False
     dte_preference_match = False
@@ -592,6 +595,7 @@ def evaluate_sell_put(
         "break_even": _json_scalar(break_even),
         "annualized_premium_rate": _json_scalar(annualized),
         "unreserved_cash": _json_scalar(unreserved_cash),
+        "margin_capacity": _json_scalar(margin_capacity),
         "assignment_exposure": _json_scalar(assignment_exposure),
         "spread_ratio": _json_scalar(observed_spread),
         "contract_count": _json_scalar(contract_count),

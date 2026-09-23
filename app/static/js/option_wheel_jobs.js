@@ -11,7 +11,8 @@
   const labels = {queued: '等待启动', running: '分析与订阅清理中', saved: '分析已保存', failed: '本次未保存分析', interrupted: '任务超时或中断，需核对'};
   let submitted = false;
   let attempts = 0;
-  const maxSymbols = 9;
+  const screening = form?.getAttribute('data-screening') === 'true';
+  const maxSymbols = screening ? 20 : 9;
   const safePath = (url) => typeof url === 'string' && /^\/option-wheel\/(jobs\/[0-9a-f-]+\/(status\/)?|decisions\/[0-9]+\/)$/.test(url);
   async function request(url, options = {}) {
     const controller = new AbortController();
@@ -33,7 +34,8 @@
   }
   function display(job) {
     feedback.hidden = false;
-    status.textContent = labels[job.status];
+    status.textContent = job.status === 'running' && job.selection?.mode === 'screening_close_v2'
+      ? '收盘数据查询中' : labels[job.status];
     detail.textContent = job.message;
     elapsed.textContent = `任务 ${job.id} · 提交时间 ${new Date(job.created_at).toLocaleString()}`;
     let results = document.getElementById('wheel-job-results');
@@ -46,6 +48,10 @@
       a.href = item.url; a.textContent = item.label; p.appendChild(a); results.appendChild(p);
     }
     check.hidden = false;
+    if (job.status === 'saved' && ((screening && form) || (page?.getAttribute('data-screening') === 'true' && !document.querySelector('.wheel-results-table')))) {
+      window.location.reload();
+      return false;
+    }
     if (form) form.setAttribute('aria-busy', ['queued', 'running'].includes(job.status) ? 'true' : 'false');
     return ['queued', 'running'].includes(job.status);
   }
@@ -69,11 +75,11 @@
     if (submitted || !form.reportValidity()) return;
     const body = new FormData(form);
     feedback.hidden = false;
-    if (!body.getAll('account_ids').length || !body.getAll('symbols').length) {
-      status.textContent = '尚未提交'; detail.textContent = '请至少选择一个账户和一个标的。'; return;
+    if ((!screening && !body.getAll('account_ids').length) || !body.getAll('symbols').length) {
+      status.textContent = '尚未提交'; detail.textContent = screening ? '请至少选择一只股票。' : '请至少选择一个账户和一个标的。'; return;
     }
     if (body.getAll('symbols').length > maxSymbols) {
-      status.textContent = '尚未提交'; detail.textContent = '每次最多选择 9 个标的。'; return;
+      status.textContent = '尚未提交'; detail.textContent = `每次最多选择 ${maxSymbols} 个标的。`; return;
     }
     submitted = true;
     for (const control of form.elements) control.disabled = true;

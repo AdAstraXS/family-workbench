@@ -158,15 +158,26 @@ class SellPutRulesTest(TestCase):
         self.assertIn("cash_insufficient", result.warning_codes)
         self.assertEqual(result.calculation_details["unreserved_cash"], "9000")
 
-    def test_nav_limit_includes_existing_exposure(self):
+    def test_nav_concentration_is_warning(self):
         account = self.account(
             nav=Decimal("20000"),
             already_exposed_notional=Decimal("5000"),
         )
         result = self.evaluate(context=self.context(account=account))
-        self.assertEqual(result.status, "blocked")
-        self.assertIn("nav_ratio", result.reason_codes)
+        self.assertEqual(result.status, "executable")
+        self.assertIn("nav_ratio", result.warning_codes)
         self.assertEqual(result.calculation_details["assignment_exposure"], "15000")
+
+    def test_margin_capacity_boundary_and_cash_warning(self):
+        account = self.account(settled_cash=Decimal("6000"), nav=Decimal("5000"))
+        at_limit = self.evaluate(context=self.context(account=account), quote=self.quote(strike=Decimal("120")))
+        over_limit = self.evaluate(context=self.context(account=account), quote=self.quote(strike=Decimal("121")))
+        self.assertEqual(at_limit.status, "executable")
+        self.assertIn("cash_insufficient", at_limit.warning_codes)
+        self.assertIn("nav_ratio", at_limit.warning_codes)
+        self.assertEqual(at_limit.calculation_details["margin_capacity"], "12000")
+        self.assertEqual(over_limit.status, "blocked")
+        self.assertIn("margin_capacity_exceeded", over_limit.reason_codes)
 
     def test_provider_physical_settlement_is_accepted(self):
         result = self.evaluate(

@@ -8,6 +8,7 @@ from django.test import SimpleTestCase
 from option_wheel.close_data import (
     CloseDataError, NY, calendar_target, collect, daily_row, fetch_close_report, technical_summary,
 )
+from option_wheel.screen_close import collect as collect_screen_close
 
 TARGET = date(2026, 9, 2)
 NOW = datetime(2026, 9, 3, 8, tzinfo=NY)
@@ -47,6 +48,9 @@ class FakeQuote:
         self.calls.append("chain")
         return 0, self.chain
 
+    def get_option_underlying_overview(self, **kwargs):
+        return 0, [{"code": "US.TSLA", "iv_percentile": "63"}]
+
     def get_option_exercise_probability(self, **kwargs):
         return 0, [self.analytics]
 
@@ -55,6 +59,60 @@ class FakeQuote:
 
 
 class CloseDataTests(SimpleTestCase):
+    def test_screen_close_uses_exact_previous_day_without_subscriptions(self):
+        quote = FakeQuote()
+        report = collect_screen_close(quote, ["TSLA"], date(2026, 9, 9), NOW)
+        self.assertEqual(report["reference_date"], "2026-09-02")
+        contract = report["symbols"][0]["contracts"][0]
+        self.assertEqual(contract["close"], "3.20")
+        self.assertEqual(contract["probability"], "25.25")
+        self.assertEqual(contract["iv"], "40.1")
+        self.assertEqual(report["symbols"][0]["underlying_iv_percentile"], "63")
+        self.assertNotIn("subscribe", quote.calls)
+
+    @patch("option_wheel.screen_close.time.sleep")
+    def test_second_symbol_chain_rate_limit_retries_once_without_losing_first(self, sleeper):
+        class TwoSymbols(FakeQuote):
+            attempts = 0
+
+            def request_history_kline(self, **kwargs):
+                if kwargs["code"] == "US.GOOG":
+                    return 0, [{"code": "US.GOOG", "time_key": "2026-09-02", "close": "200"}], None
+                if kwargs["code"].startswith("US.GOOG"):
+                    return 0, [{"code": kwargs["code"], "time_key": "2026-09-02", "close": "2", "volume": 10}], None
+                return super().request_history_kline(**kwargs)
+
+            def get_option_chain(self, **kwargs):
+                if kwargs["code"] == "US.GOOG":
+                    self.attempts += 1
+                    if self.attempts == 1:
+                        return 1, "request frequency limit"
+                    return 0, [{**self.chain[0], "code": "US.GOOG260909P200000",
+                                "stock_owner": "US.GOOG", "strike_price": "200"}]
+                return super().get_option_chain(**kwargs)
+
+        quote = TwoSymbols()
+        report = collect_screen_close(quote, ["TSLA", "GOOG"], date(2026, 9, 9), NOW)
+        self.assertEqual([len(item["contracts"]) for item in report["symbols"]], [1, 1])
+        self.assertEqual(quote.attempts, 2)
+        sleeper.assert_called_once_with(31)
+
+    def test_chain_provider_error_is_categorized_and_other_symbols_survive(self):
+        class TwoSymbols(FakeQuote):
+            def request_history_kline(self, **kwargs):
+                if kwargs["code"] == "US.GOOG":
+                    return 0, [{"code": "US.GOOG", "time_key": "2026-09-02", "close": "200"}], None
+                return super().request_history_kline(**kwargs)
+
+            def get_option_chain(self, **kwargs):
+                if kwargs["code"] == "US.GOOG":
+                    return 1, "permission denied: private-account-token"
+                return super().get_option_chain(**kwargs)
+
+        report = collect_screen_close(TwoSymbols(), ["TSLA", "GOOG"], date(2026, 9, 9), NOW)
+        self.assertEqual(len(report["symbols"][0]["contracts"]), 1)
+        self.assertEqual(report["symbols"][1]["issues"], ["get_option_chain：行情权限不足"])
+
     def test_daily_evidence_and_no_live_quote_dependency(self):
         report = collect(FakeQuote(), "TSLA", NOW)
         item = report["candidates"][0]

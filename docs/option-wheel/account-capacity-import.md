@@ -19,32 +19,27 @@
 投资组合现有大量历史现金流水没有填写结算日。根据当前产品口径，这些流水已由用户在投资组合页面
 人工核对为当前账户余额，因此视为已结算；只有明确填写且晚于估值日的结算日才计入待结算资金。
 
-投资组合目前不保存券商融资余额和未成交订单。因此每次生成快照时必须人工确认：
-
-1. 账户当前没有融资或借贷；
-2. 券商端没有尚未录入投资组合的未成交订单。
-
-这两个确认会冻结进快照证据，但不会连接券商核验。以后如接入券商只读 API，可替换这两项人工确认，
-无需改变车轮规则引擎。
+投资组合目前不保存券商融资余额和未成交订单。2026-09-21 起，容量预演与保存不再要求重复人工确认
+这两项；新快照将券商融资和未录入订单状态记为未知，不伪造“无融资”或“无订单”的证据。
+规则将未知融资显示为风险提示，候选仍按已录入的账户 NAV、现金、持仓和义务计算。
+用户在券商端自行判断实际保证金、融资和流动性；系统不连接券商，也不下单。
 
 ## 操作方式
 
-家庭成员可在 `/option-wheel/` 的对应账户卡片中勾选两项确认后点击“只读预演账户容量”。该页面使用
+家庭成员可在 `/option-wheel/` 的对应账户卡片中点击“只读预演账户容量”。该页面使用
 POST 明确触发计算，结果仅在当前页面临时展示；刷新后消失，不生成容量快照。GET 页面仍不计算估值、
 不联网、不写数据库。
 
 默认只预演，不写数据库：
 
 ```text
-python manage.py import_wheel_portfolio_capacity --account-id ACCOUNT_ID \
-  --confirm-no-margin --confirm-no-open-orders
+python manage.py import_wheel_portfolio_capacity --account-id ACCOUNT_ID
 ```
 
 核对输出中的已结算现金、待结算现金、已占用现金、可用现金、NAV、持仓数和义务数后，再显式写入：
 
 ```text
-python manage.py import_wheel_portfolio_capacity --account-id ACCOUNT_ID \
-  --confirm-no-margin --confirm-no-open-orders --commit
+python manage.py import_wheel_portfolio_capacity --account-id ACCOUNT_ID --commit
 ```
 
 同一账户、同一估值日、相同投资组合状态重复执行不会创建重复快照。页面展示的既有容量仍只读取最新
@@ -55,4 +50,4 @@ python manage.py import_wheel_portfolio_capacity --account-id ACCOUNT_ID \
 - 先在 `/portfolio/` 更新现金流水、交易和持仓；
 - 确认持仓价格和汇率没有缺失或过期；
 - 将已经成交的期权录入投资组合；
-- 若券商仍有未成交订单，先不要生成可用容量快照。
+- 页面仅根据已录入的投资组合事实作决策辅助；券商端未录入订单不包含在容量计算中。
