@@ -53,6 +53,7 @@ from .research_ai import (
 )
 from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
+from .tenk_chapters import tenk_chapter_coverage
 
 PAGE_SIZE = 20
 logger = logging.getLogger(__name__)
@@ -240,8 +241,16 @@ def detail(request, pk):
     research_groups = []
     for version in available_versions:
         segments = document_segments(version)
+        chapters = tenk_chapter_coverage(
+            version, (index for version_id, index in completed_segments if version_id == version.pk),
+        )
         for segment in segments:
             segment["completed"] = (version.pk, segment["index"]) in completed_segments
+            segment["chapter_codes"] = "、".join(
+                chapter["code"] for chapter in chapters
+                if chapter["located"] and chapter["start"] < segment["end"]
+                and chapter["end"] > segment["start"]
+            )
         research_groups.append({"version": version, "segments": segments})
     first_pending = next(
         (segment for group in research_groups for segment in group["segments"] if not segment["completed"]),
@@ -448,6 +457,18 @@ def document_detail(request, pk, document_pk):
     elif any(key in request.GET for key in ("start", "end", "hash")):
         raise Http404("引用缺少正文版本。")
     current_version = document.content_versions.first() if document.source == "sec" else None
+    chapter_version = selected_version or current_version
+    chapter_coverage = []
+    if chapter_version and document.document_type == "10-k":
+        completed_indexes = []
+        for analysis in AiAnalysisRequest.objects.filter(
+            member=member, family=member.family, module="investment_research",
+            analysis_type="document_draft", status=AiAnalysisRequest.STATUS_SUCCESS,
+        ).only("scope"):
+            scope = analysis.scope or {}
+            if scope.get("dossier_id") == dossier.pk and scope.get("version_id") == chapter_version.pk:
+                completed_indexes.append(scope.get("segment_index", 0))
+        chapter_coverage = tenk_chapter_coverage(chapter_version, completed_indexes)
     return render(
         request,
         "investment_research/document_detail.html",
@@ -458,6 +479,8 @@ def document_detail(request, pk, document_pk):
             "current_content_version": current_version,
             "selected_version": selected_version,
             "highlighted": highlighted,
+            "chapter_version": chapter_version,
+            "chapter_coverage": chapter_coverage,
         },
     )
 
