@@ -27,6 +27,35 @@ METRICS = (
      r"(?:total finance lease assets|finance lease.*(?:right.of.use|assets|property, plant and equipment))"),
 )
 
+# 公司专属披露不能互相改名或汇总；每项同时限制公司、分类维度和原文行。
+COMPANY_METRICS = {
+    "MSFT": (
+        ("company_revenue", "Microsoft Cloud 收入", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+         "duration", r"^Our Microsoft Cloud revenue,", "msft:ProductsOrServicesSecondaryCategorizationAxis",
+         "msft:MicrosoftCloudMember"),
+        ("uncommenced_lease", "尚未开始的租赁（未来承诺）",
+         "us-gaap:UnrecordedUnconditionalPurchaseObligationBalanceSheetAmount", "instant",
+         r"additional leases.*had not yet commenced", "us-gaap:LeaseContractualTermAxis",
+         "msft:OperatingLeaseMember"),
+    ),
+    "AAPL": (
+        ("company_revenue", "Services 收入", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+         "duration", r"^Services\s*\|", "srt:ProductOrServiceAxis", "us-gaap:ServiceMember"),
+        ("uncommenced_lease", "尚未开始的租赁（未来承诺）",
+         "us-gaap:UnrecordedUnconditionalPurchaseObligationBalanceSheetAmount", "instant",
+         r"fixed payment obligations under additional leases.*had not yet commenced",
+         "us-gaap:UnrecordedUnconditionalPurchaseObligationByCategoryOfItemPurchasedAxis",
+         "us-gaap:OperatingLeaseLeaseNotYetCommencedMember"),
+    ),
+    "TSLA": (
+        ("company_revenue", "Energy generation and storage 收入",
+         "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", "duration",
+         r"^Energy generation and storage\s*\|", "srt:ProductOrServiceAxis",
+         "tsla:EnergyGenerationAndStorageMember"),
+    ),
+}
+COMPANY_CIK = {"MSFT": 789019, "AAPL": 320193, "TSLA": 1318605}
+
 
 class _IXBRL(HTMLParser):
     def __init__(self):
@@ -120,58 +149,115 @@ def _citation(text, item8, fact, label_pattern):
     return {"start": start, "end": end, "hash": quote_digest(quote), "quote": quote}
 
 
-def tenk_metric_rows(version):
-    """返回最新财年的已核实指标；未匹配的项目明确标记，不产出猜测值。"""
+def _full_year_end_dates(parser, report_end):
+    """只用整公司经营现金流确定本文件实际列示的最多三个完整财年。"""
+    candidates = set()
+    for fact in parser.facts:
+        attrs = fact["attrs"]
+        if attrs.get("name") != "us-gaap:NetCashProvidedByUsedInOperatingActivities":
+            continue
+        ctx = parser.contexts.get(attrs.get("contextref")) or {}
+        if ctx.get("dimensioned") or parser.units.get(attrs.get("unitref"), "").upper() != "ISO4217:USD":
+            continue
+        try:
+            start, end = date.fromisoformat(ctx["startdate"]), date.fromisoformat(ctx["enddate"])
+        except (KeyError, ValueError):
+            continue
+        if 350 <= (end - start).days <= 380 and 0 <= (report_end - end).days <= 900:
+            candidates.add(end)
+    if report_end not in candidates:
+        return [report_end]
+    years = set()
+    selected = []
+    for end in sorted(candidates, reverse=True):
+        if end.year not in years:
+            selected.append(end)
+            years.add(end.year)
+        if len(selected) == 3:
+            break
+    return selected
+
+
+def _metric_cell(parser, version, item8, spec, end):
+    code, label, concept, kind, line_pattern, *dimension = spec
+    axis, member = dimension if dimension else (None, None)
+    matches = []
+    for fact in parser.facts:
+        attrs = fact["attrs"]
+        ctx = parser.contexts.get(attrs.get("contextref")) or {}
+        if attrs.get("name") != concept:
+            continue
+        if axis:
+            if ctx.get("axis") != axis or ctx.get("members") != [member]:
+                continue
+        elif ctx.get("dimensioned"):
+            continue
+        if parser.units.get(attrs.get("unitref"), "").upper() != "ISO4217:USD":
+            continue
+        if kind == "duration":
+            try:
+                days = (end - date.fromisoformat(ctx.get("startdate", ""))).days
+            except ValueError:
+                continue
+            if ctx.get("enddate") != end.isoformat() or not 350 <= days <= 380:
+                continue
+        elif ctx.get("instant") != end.isoformat():
+            continue
+        matches.append(fact)
+    cell = {"status": "本文件未见匹配的 XBRL 事实"}
+    identities = {(str(_amount(f)), f["text"].strip(), f["attrs"].get("contextref")) for f in matches}
+    if matches and len(identities) == 1:
+        fact = matches[0]
+        amount = _amount(fact)
+        citation = _citation(version.content_text, item8, fact, line_pattern)
+        fact_id = fact["attrs"].get("id")
+        if amount is not None and citation and fact_id and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", fact_id):
+            cell.update(status="已核对", amount=amount / Decimal("100000000"),
+                        citation=citation, fact_id=fact_id)
+        else:
+            cell["status"] = "原文引用待核对"
+    elif len(matches) > 1:
+        cell["status"] = "同期间存在多个事实，待核对"
+    return cell
+
+
+def tenk_metric_grid(version):
+    """返回本文件最多三个完整财年的核对表；每个单元独立拒错。"""
     period_end = version.document.period_end
     if not period_end:
-        return [], "这份资料缺少报告期截止日，无法核对完整财年。"
+        return [], [], "这份资料缺少报告期截止日，无法核对完整财年。"
     try:
         raw = gzip.decompress(version.raw_gzip)
     except (OSError, EOFError):
-        return [], "保存的 SEC 原件无法读取，暂不展示指标。"
+        return [], [], "保存的 SEC 原件无法读取，暂不展示指标。"
     parser = _IXBRL()
     parser.feed(raw.decode("utf-8", errors="replace"))
     parser.close()
     if not parser.facts:
-        return [], "这份原件没有可核对的 iXBRL 数字。"
+        return [], [], "这份原件没有可核对的 iXBRL 数字。"
     item8 = next((x for x in tenk_chapter_coverage(version) if x["code"] == "8" and x["located"]), None)
     if item8 is None:
-        return [], "未定位到 Item 8 财务报表，暂不展示指标。"
-    end = period_end.isoformat()
+        return [], [], "未定位到 Item 8 财务报表，暂不展示指标。"
+    periods = _full_year_end_dates(parser, period_end)
+    symbol = getattr(getattr(version.document, "security", None), "symbol", "").upper()
+    try:
+        cik = int((getattr(version.document, "metadata", None) or {}).get("cik"))
+    except (TypeError, ValueError):
+        cik = None
+    company_specs = COMPANY_METRICS.get(symbol, ()) if COMPANY_CIK.get(symbol) == cik else ()
+    specs = [(*metric, None, None) for metric in METRICS] + list(company_specs)
     rows = []
-    for code, label, concept, kind, line_pattern in METRICS:
-        matches = []
-        for fact in parser.facts:
-            attrs = fact["attrs"]
-            ctx = parser.contexts.get(attrs.get("contextref")) or {}
-            if attrs.get("name") != concept or ctx.get("dimensioned"):
-                continue
-            if parser.units.get(attrs.get("unitref"), "").upper() != "ISO4217:USD":
-                continue
-            if kind == "duration":
-                try:
-                    days = (date.fromisoformat(end) - date.fromisoformat(ctx.get("startdate", ""))).days
-                except ValueError:
-                    continue
-                if ctx.get("enddate") != end or not 350 <= days <= 380:
-                    continue
-            elif ctx.get("instant") != end:
-                continue
-            matches.append(fact)
-        row = {"code": code, "label": label, "status": "本文件未见匹配的 XBRL 事实"}
-        # 同一事实可在报表与附注重复标记；仅在期间、金额和呈现值全同时合并。
-        identities = {(str(_amount(f)), f["text"].strip(), f["attrs"].get("contextref")) for f in matches}
-        if matches and len(identities) == 1:
-            fact = matches[0]
-            amount = _amount(fact)
-            citation = _citation(version.content_text, item8, fact, line_pattern)
-            fact_id = fact["attrs"].get("id")
-            if amount is not None and citation and fact_id and re.fullmatch(r"[A-Za-z0-9_-]{1,100}", fact_id):
-                row.update(status="已核对", amount=amount / Decimal("100000000"),
-                           citation=citation, fact_id=fact_id)
-            else:
-                row["status"] = "原文引用待核对"
-        elif len(matches) > 1:
-            row["status"] = "同期间存在多个事实，待核对"
-        rows.append(row)
-    return rows, None
+    for spec in specs:
+        rows.append({"code": spec[0], "label": spec[1],
+                     "cells": [_metric_cell(parser, version, item8, spec, end) for end in periods]})
+    operating, capital = rows[:2]
+    free_cash_cells = []
+    for cash, spending in zip(operating["cells"], capital["cells"]):
+        if "amount" in cash and "amount" in spending and spending["amount"] >= 0:
+            free_cash_cells.append({"status": "由上两行相减", "derived": True,
+                                    "amount": cash["amount"] - spending["amount"]})
+        else:
+            free_cash_cells.append({"status": "基础金额未全部核对"})
+    rows.insert(2, {"code": "simple_fcf", "label": "简化自由现金流（经营现金流－固定资产现金支出）",
+                    "cells": free_cash_cells})
+    return periods, rows, None

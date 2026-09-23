@@ -55,7 +55,7 @@ from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
 from .tenk_chapters import tenk_chapter_coverage
 from .tenk_financial_index import tenk_item8_index
-from .tenk_metrics import tenk_metric_rows
+from .tenk_metrics import tenk_metric_grid
 
 PAGE_SIZE = 20
 logger = logging.getLogger(__name__)
@@ -512,10 +512,10 @@ def document_metrics(request, pk, document_pk):
         )
     else:
         version = document.content_versions.first()
-    rows, problem = tenk_metric_rows(version) if version else ([], "请先提取这份 10-K 的正文。")
+    periods, rows, problem = tenk_metric_grid(version) if version else ([], [], "请先提取这份 10-K 的正文。")
     return render(request, "investment_research/document_metrics.html", {
         "dossier": dossier, "document": document, "version": version,
-        "rows": rows, "problem": problem,
+        "periods": periods, "rows": rows, "problem": problem,
     })
 
 

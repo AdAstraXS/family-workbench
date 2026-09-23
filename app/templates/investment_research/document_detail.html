@@ -37,7 +37,7 @@
   {% endif %}
 
   {% if document.document_type == "10-k" and chapter_version %}
-    <p><a class="button" href="{% url 'investment_research:document_metrics' dossier.pk document.pk %}?version={{ chapter_version.pk }}">查看现金流与租赁指标核对</a></p>
+    <p><a class="button" href="{% url 'investment_research:document_metrics' dossier.pk document.pk %}?version={{ chapter_version.pk }}">查看跨期指标核对</a></p>
     <section class="research-document-body" aria-labelledby="research-chapters-heading">
       <h2 id="research-chapters-heading">10-K 章节与阅读覆盖</h2>
       <p class="research-private-note">按正文第 {{ chapter_version.version_number }} 版的 Item 标题定位。章节边界是自动估计；“已生成草稿”只表示涉及的 16,000 字区段曾被模型处理，不代表结论已核实。</p>
