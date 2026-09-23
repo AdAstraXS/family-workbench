@@ -6,6 +6,7 @@ from django.conf import settings
 
 from portfolio.futu_option_probe import _is_standard_contract, records_from, sdk_call_with_timeout_retry
 
+from .probe_diagnostics import _issue_text
 from .put_quote_probe import CODE, PutQuoteError, fetch_exact_option_quotes, quote_code
 
 
@@ -52,10 +53,13 @@ def fetch_position_scan(position, target_expiration):
         response = sdk_call_with_timeout_retry(
             context, "get_option_chain", RET_OK, symbol,
             start=target_expiration.isoformat(), end=target_expiration.isoformat(),
-            option_type=OptionType.ALL,
+            option_type=OptionType.PUT if contract.option_type == "put" else OptionType.CALL,
         )
         if response["status"] != "ok":
-            raise PutQuoteError("Futu 未返回所选到期日的完整期权链。")
+            raise PutQuoteError("Futu " + _issue_text({
+                "source": "chain", "category": response.get("category"),
+                "error": response.get("error"),
+            }))
         rows = [row for row in records_from(response["data"])
                 if str(row.get("strike_time") or row.get("expiration_date") or "")[:10]
                 == target_expiration.isoformat()]

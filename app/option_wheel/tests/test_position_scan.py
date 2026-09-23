@@ -18,6 +18,7 @@ from option_wheel.models import WheelPositionScanJob
 from option_wheel.position_scan import comparison_rows, fetch_position_scan, select_chain_rows
 from option_wheel.position_scan_jobs import run_job
 from option_wheel.position_summary import option_position_rows
+from option_wheel.put_quote_probe import PutQuoteError
 
 
 class PositionScanTests(TestCase):
@@ -104,6 +105,20 @@ class PositionScanTests(TestCase):
         self.assertEqual(result["sample_count"], 1)
         self.assertEqual(result["candidates"][0]["code"], row["code"])
         self.assertEqual(len(quotes.call_args.args[0]), 2)
+        self.assertEqual(chain.call_args.kwargs["option_type"], "PUT")
+        context.return_value.close.assert_called_once()
+
+    @patch("option_wheel.position_scan.sdk_call_with_timeout_retry")
+    @patch("futu.OpenQuoteContext")
+    def test_chain_failure_explains_known_reason_without_provider_text(self, context, chain):
+        chain.return_value = {
+            "status": "error", "category": "provider_error",
+            "error": "timeout account=private-account-token",
+        }
+        with self.assertRaises(PutQuoteError) as raised:
+            fetch_position_scan(self.position, self.expiry + timedelta(days=7))
+        self.assertIn("服务提示超时", str(raised.exception))
+        self.assertNotIn("private-account-token", str(raised.exception))
         context.return_value.close.assert_called_once()
 
     @patch("option_wheel.position_scan_jobs.launch_job")
