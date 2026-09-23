@@ -525,11 +525,17 @@ def generate_draft(request, pk):
         return redirect("investment_research:detail", pk=pk)
     except Exception as exc:
         # 生产错误只记类型和调用位置，不把正文、判断、请求体或异常消息写入日志。
+        cause = getattr(exc, "__cause__", None)
+        diag = getattr(cause, "diag", None)
         locations = " -> ".join(
             f"{frame.filename.rsplit('/', 1)[-1]}:{frame.lineno}:{frame.name}"
             for frame in traceback.extract_tb(exc.__traceback__)[-8:]
         )
-        logger.error("研究草稿意外失败：%s；位置：%s", type(exc).__name__, locations)
+        logger.error(
+            "研究草稿意外失败：%s；SQLSTATE=%s；约束=%s；列=%s；位置：%s",
+            type(exc).__name__, getattr(cause, "sqlstate", None),
+            getattr(diag, "constraint_name", None), getattr(diag, "column_name", None), locations,
+        )
         messages.error(request, "草稿生成失败，未自动重试。请稍后再试。")
         return redirect("investment_research:detail", pk=pk)
     return redirect("investment_research:draft_detail", pk=pk, request_pk=analysis.pk)
