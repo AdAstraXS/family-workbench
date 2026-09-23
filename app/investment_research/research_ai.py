@@ -17,7 +17,7 @@ from .models import OfficialResearchContentVersion, ResearchDossier
 from .services import DossierNotFound, ResearchValidationError, _require_writer
 
 PROMPT_VERSION = "research-document-v1"
-PROMPT_TEMPLATE_VERSION = "research-segment-v2"
+PROMPT_TEMPLATE_VERSION = "research-segment-v3"
 MAX_DOCUMENT_CHARS = 16000
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_TEXT = 600
@@ -125,9 +125,18 @@ def _evidence(version, segment_index):
 def _safe_text(value, limit):
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > limit:
         raise ResearchAiError("AI 返回的文字字段不符合要求。")
-    if QUANTIFIED_AMOUNT.search(value):
-        raise ResearchAiError("AI 草稿包含未经核对的金额或数量，未保存草稿；请以原文为准。")
     return value.strip()
+
+
+def _redact_quantified_sentences(value):
+    """隐藏模型重述的金额及所在句；保留服务端绑定的原文引用。"""
+    parts = re.split(r"(?<=[。！？；])", value)
+    redactions = 0
+    for index, part in enumerate(parts):
+        if QUANTIFIED_AMOUNT.search(part):
+            parts[index] = "本句涉及金额或数量，具体数值及变化口径请查看引用原文。"
+            redactions += 1
+    return "".join(parts), redactions
 
 
 def _validate_output(raw, evidence, version):
@@ -140,7 +149,10 @@ def _validate_output(raw, evidence, version):
     if not isinstance(result, dict):
         raise ResearchAiError("AI 返回结构不正确。")
     mapping = {part["id"]: part for part in evidence}
-    clean = {"summary": _safe_text(result.get("summary"), 1500)}
+    redactions = 0
+    summary, count = _redact_quantified_sentences(_safe_text(result.get("summary"), 1500))
+    redactions += count
+    clean = {"summary": summary}
     for field in ("supports", "weakens"):
         items = result.get(field)
         if not isinstance(items, list) or len(items) > MAX_ITEMS:
@@ -153,8 +165,10 @@ def _validate_output(raw, evidence, version):
             if (not isinstance(ids, list) or not 1 <= len(ids) <= 3
                     or any(not isinstance(ref, str) or ref not in mapping for ref in ids)):
                 raise ResearchAiError("AI 引用了未提供的原文片段。")
+            item_text, count = _redact_quantified_sentences(_safe_text(item.get("text"), MAX_TEXT))
+            redactions += count
             clean[field].append({
-                "text": _safe_text(item.get("text"), MAX_TEXT),
+                "text": item_text,
                 "citations": [{"version_id": version.pk, "start": mapping[ref]["start"],
                                "end": mapping[ref]["end"], "hash": mapping[ref]["hash"],
                                "label": ref} for ref in dict.fromkeys(ids)],
@@ -163,13 +177,16 @@ def _validate_output(raw, evidence, version):
         items = result.get(field)
         if not isinstance(items, list) or len(items) > MAX_ITEMS:
             raise ResearchAiError("AI 返回的问题列表不符合要求。")
-        clean[field] = [_safe_text(item, MAX_TEXT) for item in items]
+        clean[field] = []
+        for item in items:
+            item_text, count = _redact_quantified_sentences(_safe_text(item, MAX_TEXT))
+            redactions += count
+            clean[field].append(item_text)
     suggestion = result.get("suggested_revision", "")
     if not isinstance(suggestion, str) or len(suggestion) > 2000:
         raise ResearchAiError("AI 修订建议格式不正确。")
-    if QUANTIFIED_AMOUNT.search(suggestion):
-        raise ResearchAiError("AI 草稿包含未经核对的金额或数量，未保存草稿；请以原文为准。")
-    clean["suggested_revision"] = suggestion.strip()
+    clean["suggested_revision"], count = _redact_quantified_sentences(suggestion.strip())
+    clean["amount_redactions"] = redactions + count
     return clean
 
 

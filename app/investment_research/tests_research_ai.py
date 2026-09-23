@@ -95,24 +95,31 @@ class ResearchAiTests(TestCase):
         page = self.client.get(reverse("investment_research:draft_detail", args=[self.dossier.pk, analysis.pk]))
         self.assertContains(page, "查看原文 E1")
         self.assertContains(page, "仅自己可见")
-        self.assertContains(page, "本草稿禁止模型重述金额和数量")
+        self.assertContains(page, "本草稿已隐藏 0 句模型重述的金额或数量")
         dossier_page = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
         self.assertContains(dossier_page, "最近请求")
         self.assertContains(dossier_page, "成功")
 
-    def test_unverified_amount_is_rejected_without_saving_a_draft(self):
+    def test_unverified_amount_sentence_is_hidden_but_citation_remains(self):
         response = json.loads(self.response())
         content = json.loads(response["choices"][0]["message"]["content"])
-        content["supports"][0]["text"] = "经营现金流增加 182.9 亿美元。"
+        content["summary"] = "经营现金流达到 $182.9 billion。现金流压力仍需核对。"
+        content["supports"][0]["text"] = "经营现金流增加 182.9 亿美元。仍需核对持续性。"
         response["choices"][0]["message"]["content"] = json.dumps(content)
-        with self.assertRaisesMessage(ResearchAiError, "未经核对的金额"):
-            self.generate(transport=lambda request, **kwargs: json.dumps(response).encode())
+        analysis = self.generate(transport=lambda request, **kwargs: json.dumps(response).encode())
+        item = analysis.result.result_json["supports"][0]
+        self.assertNotIn("182.9", item["text"])
+        self.assertIn("仍需核对持续性", item["text"])
+        self.assertEqual(item["citations"][0]["label"], "E1")
+        self.assertNotIn("$182.9", analysis.result.result_json["summary"])
+        self.assertIn("现金流压力仍需核对", analysis.result.result_json["summary"])
+        self.assertEqual(analysis.result.result_json["amount_redactions"], 2)
         analysis = AiAnalysisRequest.objects.get(module="investment_research")
-        self.assertEqual(analysis.status, AiAnalysisRequest.STATUS_FAILED)
-        self.assertFalse(AiAnalysisResult.objects.filter(request=analysis).exists())
+        self.assertEqual(analysis.status, AiAnalysisRequest.STATUS_SUCCESS)
         self.client.force_login(self.user)
-        dossier_page = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
-        self.assertContains(dossier_page, "失败")
+        page = self.client.get(reverse("investment_research:draft_detail", args=[self.dossier.pk, analysis.pk]))
+        self.assertContains(page, "已隐藏 2 句")
+        self.assertNotContains(page, "182.9 亿美元")
 
     def test_old_draft_displays_amount_warning(self):
         analysis = self.generate()
