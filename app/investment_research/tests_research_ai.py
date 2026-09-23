@@ -95,6 +95,32 @@ class ResearchAiTests(TestCase):
         page = self.client.get(reverse("investment_research:draft_detail", args=[self.dossier.pk, analysis.pk]))
         self.assertContains(page, "查看原文 E1")
         self.assertContains(page, "仅自己可见")
+        self.assertContains(page, "本草稿禁止模型重述金额和数量")
+        dossier_page = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
+        self.assertContains(dossier_page, "最近请求")
+        self.assertContains(dossier_page, "成功")
+
+    def test_unverified_amount_is_rejected_without_saving_a_draft(self):
+        response = json.loads(self.response())
+        content = json.loads(response["choices"][0]["message"]["content"])
+        content["supports"][0]["text"] = "经营现金流增加 182.9 亿美元。"
+        response["choices"][0]["message"]["content"] = json.dumps(content)
+        with self.assertRaisesMessage(ResearchAiError, "未经核对的金额"):
+            self.generate(transport=lambda request, **kwargs: json.dumps(response).encode())
+        analysis = AiAnalysisRequest.objects.get(module="investment_research")
+        self.assertEqual(analysis.status, AiAnalysisRequest.STATUS_FAILED)
+        self.assertFalse(AiAnalysisResult.objects.filter(request=analysis).exists())
+        self.client.force_login(self.user)
+        dossier_page = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
+        self.assertContains(dossier_page, "失败")
+
+    def test_old_draft_displays_amount_warning(self):
+        analysis = self.generate()
+        analysis.scope = {**analysis.scope, "prompt_version": "research-segment-v1"}
+        analysis.save(update_fields=["scope"])
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("investment_research:draft_detail", args=[self.dossier.pk, analysis.pk]))
+        self.assertContains(page, "这份历史草稿生成时尚无金额防护")
 
     def test_deepseek_uses_documented_json_mode_without_thinking(self):
         self.provider.base_url = "https://api.deepseek.com"

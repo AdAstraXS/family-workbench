@@ -12,6 +12,11 @@
   </div>
   {% if draft %}
     <section class="research-current">
+      {% if amount_guard_applied %}
+        <p class="research-private-note">本草稿禁止模型重述金额和数量；要查看具体数字，请打开引用原文。百分比、因果关系和解释仍需人工核对。</p>
+      {% else %}
+        <p class="research-private-note"><strong>金额提醒：</strong>这份历史草稿生成时尚无金额防护，中文金额、增量与期末额可能有误，请逐项核对引用原文。</p>
+      {% endif %}
       <h2>发生了什么</h2><p>{{ draft.summary|linebreaksbr }}</p>
       <h3>{% if analysis.scope.thesis_revision_id %}支持当时判断的证据{% else %}可能有利的证据{% endif %}</h3>
       {% for item in draft.supports %}

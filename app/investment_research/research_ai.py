@@ -1,6 +1,7 @@
 """成员主动发起的私密投研草稿；证据是已保存的 SEC 正文版本。"""
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -16,11 +17,19 @@ from .models import OfficialResearchContentVersion, ResearchDossier
 from .services import DossierNotFound, ResearchValidationError, _require_writer
 
 PROMPT_VERSION = "research-document-v1"
-PROMPT_TEMPLATE_VERSION = "research-segment-v1"
+PROMPT_TEMPLATE_VERSION = "research-segment-v2"
 MAX_DOCUMENT_CHARS = 16000
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_TEXT = 600
 MAX_ITEMS = 5
+QUANTIFIED_AMOUNT = re.compile(
+    r"(?:[$＄]\s*\d[\d,]*(?:\.\d+)?|"
+    r"\d[\d,]*(?:\.\d+)?\s*(?:万亿|千亿|十亿|百万|亿|万)?\s*(?:美元|美金|人民币|元)|"
+    r"\d[\d,]*(?:\.\d+)?\s*(?:万亿|千亿|十亿|百万|亿)|"
+    r"[一二三四五六七八九十百千万零两〇]+\s*(?:万亿|千亿|十亿|百万|亿)?\s*(?:美元|美金|人民币|元)|"
+    r"\d[\d,]*(?:\.\d+)?\s*(?:billion|million|trillion)\b)",
+    re.IGNORECASE,
+)
 
 
 class ResearchAiError(ResearchValidationError):
@@ -116,6 +125,8 @@ def _evidence(version, segment_index):
 def _safe_text(value, limit):
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > limit:
         raise ResearchAiError("AI 返回的文字字段不符合要求。")
+    if QUANTIFIED_AMOUNT.search(value):
+        raise ResearchAiError("AI 草稿包含未经核对的金额或数量，未保存草稿；请以原文为准。")
     return value.strip()
 
 
@@ -156,6 +167,8 @@ def _validate_output(raw, evidence, version):
     suggestion = result.get("suggested_revision", "")
     if not isinstance(suggestion, str) or len(suggestion) > 2000:
         raise ResearchAiError("AI 修订建议格式不正确。")
+    if QUANTIFIED_AMOUNT.search(suggestion):
+        raise ResearchAiError("AI 草稿包含未经核对的金额或数量，未保存草稿；请以原文为准。")
     clean["suggested_revision"] = suggestion.strip()
     return clean
 
@@ -216,6 +229,8 @@ def generate_research_draft(*, actor, dossier_id, version_id, provider_id, conse
         "suggested_revision 字符串。supports/weakens 每条必须引用至少一个本次 E 编号；无法判断就放在 unknown。"
         'JSON 结构示例：{"summary":"摘要","supports":[{"text":"依据","evidence_ids":["E1"]}],'
         '"weakens":[],"unknown":[],"questions":[],"suggested_revision":""}。'
+        "所有字段只写定性解释，不重述或换算原文金额和数量（包括美元、亿、billion、million、$）；"
+        "数字请由成员点击引用核对。必须区分增加额与期末额，不得将 increased by 与 increased to 混淆。"
         "草稿不是用户已确认观点，不能给确定买卖建议。"
     )
     thesis = current.thesis if current else "尚无本人正式判断，当前处于探索阶段。"

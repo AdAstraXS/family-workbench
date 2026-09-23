@@ -69,7 +69,7 @@
       <h2 id="research-ai-heading">研究草稿</h2>
       <p>主动选择已保存的 SEC 正文版本，让 AI 帮你整理支持、反证和待验证问题。草稿仅自己可见，不会改写正式判断。</p>
       {% if recent_drafts %}
-        <p>最近草稿：{% for item in recent_drafts %}<a href="{% url 'investment_research:draft_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+        <p>最近请求：{% for item in recent_drafts %}<a href="{% url 'investment_research:draft_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }}（{{ item.get_status_display }}）</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
       {% endif %}
     </div>
   </section>

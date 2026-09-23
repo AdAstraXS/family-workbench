@@ -48,7 +48,7 @@ from .services import (
 )
 from .providers.sec import SecClientError
 from .research_ai import (
-    MAX_DOCUMENT_CHARS, ResearchAiError, available_research_providers,
+    MAX_DOCUMENT_CHARS, PROMPT_TEMPLATE_VERSION, ResearchAiError, available_research_providers,
     document_segments, generate_research_draft,
 )
 from .sec_content import fetch_sec_document_content
@@ -573,4 +573,5 @@ def draft_detail(request, pk, request_pk):
     return render(request, "investment_research/draft_detail.html", {
         "dossier": dossier, "analysis": analysis, "draft": rendered,
         "content_fetched_at": fetched_at,
+        "amount_guard_applied": (analysis.scope or {}).get("prompt_version") == PROMPT_TEMPLATE_VERSION,
     })
