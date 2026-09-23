@@ -54,6 +54,7 @@ from .research_ai import (
 from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
 from .tenk_chapters import tenk_chapter_coverage
+from .tenk_financial_index import tenk_item8_index
 
 PAGE_SIZE = 20
 logger = logging.getLogger(__name__)
@@ -459,6 +460,8 @@ def document_detail(request, pk, document_pk):
     current_version = document.content_versions.first() if document.source == "sec" else None
     chapter_version = selected_version or current_version
     chapter_coverage = []
+    item8_statements = []
+    item8_notes = []
     if chapter_version and document.document_type == "10-k":
         completed_indexes = []
         for analysis in AiAnalysisRequest.objects.filter(
@@ -469,6 +472,9 @@ def document_detail(request, pk, document_pk):
             if scope.get("dossier_id") == dossier.pk and scope.get("version_id") == chapter_version.pk:
                 completed_indexes.append(scope.get("segment_index", 0))
         chapter_coverage = tenk_chapter_coverage(chapter_version, completed_indexes)
+        item8_entries = tenk_item8_index(chapter_version, chapter_coverage)
+        item8_statements = [entry for entry in item8_entries if entry["kind"] == "statement"]
+        item8_notes = [entry for entry in item8_entries if entry["kind"] == "note"]
     return render(
         request,
         "investment_research/document_detail.html",
@@ -481,6 +487,8 @@ def document_detail(request, pk, document_pk):
             "highlighted": highlighted,
             "chapter_version": chapter_version,
             "chapter_coverage": chapter_coverage,
+            "item8_statements": item8_statements,
+            "item8_notes": item8_notes,
         },
     )
 

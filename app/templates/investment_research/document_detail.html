@@ -56,6 +56,26 @@
       {% else %}
         <p class="research-private-note">这份正文未识别到可靠的 Item 标题，可继续按字符区段阅读和引用原文。</p>
       {% endif %}
+      {% if item8_statements or item8_notes %}
+        <h3>Item 8 · 财务报表与附注目录</h3>
+        <p class="research-private-note">从本版正文标题自动识别，点击可核对原文；未列出的报表或附注仍需查看完整文件。</p>
+        {% if item8_statements %}
+          <h4>财务报表</h4>
+          <ul class="research-financial-index">
+            {% for entry in item8_statements %}
+              <li><a href="{% url 'investment_research:document_detail' dossier.pk document.pk %}?version={{ chapter_version.pk }}&amp;start={{ entry.start }}&amp;end={{ entry.quote_end }}&amp;hash={{ entry.quote_hash }}#research-citation">{{ entry.label }} · {{ entry.title }}</a></li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if item8_notes %}
+          <h4>财务附注</h4>
+          <ol class="research-financial-index">
+            {% for entry in item8_notes %}
+              <li><a href="{% url 'investment_research:document_detail' dossier.pk document.pk %}?version={{ chapter_version.pk }}&amp;start={{ entry.start }}&amp;end={{ entry.quote_end }}&amp;hash={{ entry.quote_hash }}#research-citation">{{ entry.label }} · {{ entry.title }}</a></li>
+            {% endfor %}
+          </ol>
+        {% endif %}
+      {% endif %}
     </section>
   {% endif %}
 
