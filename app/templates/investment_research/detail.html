@@ -39,6 +39,14 @@
     </div>
   </section>
 
+  <section class="research-source-summary" aria-labelledby="metric-focus-heading">
+    <div>
+      <h2 id="metric-focus-heading">重点追踪指标</h2>
+      <p>已选 {{ selected_metric_count }} 项重点指标；经营现金流、固定资产现金支出和简化自由现金流作为基础背景展示。探索档案可先让 AI 提出附原文的候选项，再由你确认。</p>
+    </div>
+    <a class="button" href="{% url 'investment_research:metric_focus' dossier.pk %}">选择追踪指标</a>
+  </section>
+
   {% if dossier.initial_thesis %}<details class="research-initial">
     <summary>最初记录（不会随当前判断修改）</summary>
     <p>{{ dossier.initial_thesis|linebreaksbr }}</p>

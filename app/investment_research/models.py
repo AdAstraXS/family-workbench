@@ -60,6 +60,7 @@ class ResearchDossier(TimestampedModel):
         related_name="research_dossiers",
     )
     initial_thesis = models.TextField("原始持有理由", blank=True)
+    selected_metric_codes = models.JSONField("已确认追踪指标", default=list, blank=True)
     current_revision = models.ForeignKey(
         "ResearchThesisRevision",
         verbose_name="当前判断版本",

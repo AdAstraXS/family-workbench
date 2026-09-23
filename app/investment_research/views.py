@@ -58,6 +58,7 @@ from .tenk_chapters import tenk_chapter_coverage
 from .tenk_financial_index import tenk_item8_index
 from .tenk_history import fill_tenk_history
 from .tenk_metrics import HISTORICAL_LEASE_CODES, tenk_metric_grid
+from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
 
 PAGE_SIZE = 20
 logger = logging.getLogger(__name__)
@@ -284,6 +285,7 @@ def detail(request, pk):
             "research_providers": providers,
             "research_document_limit": MAX_DOCUMENT_CHARS,
             "recent_drafts": recent_drafts,
+            "selected_metric_count": len(dossier.selected_metric_codes or []),
         },
     )
 
@@ -526,15 +528,88 @@ def document_metrics(request, pk, document_pk):
         tenk_metric_grid(version, historical_documents)
         if version else ([], [], "请先提取这份 10-K 的正文。")
     )
+    selected_codes = set(dossier.selected_metric_codes or [])
+    rows = [row for row in rows if row["code"] in CORE_CODES or row["code"] in selected_codes]
     return render(request, "investment_research/document_metrics.html", {
         "dossier": dossier, "document": document, "version": version,
         "periods": periods, "rows": rows, "problem": problem,
+        "selected_metric_count": len(selected_codes),
         "can_fill_history": is_writer(member) and any(
             row["code"] in HISTORICAL_LEASE_CODES and any(
                 cell["status"] in {"该年 10-K 尚未归档", "该年 10-K 正文未保存"}
                 for cell in row["cells"][1:]
             ) for row in rows
         ),
+    })
+
+
+@_method(["GET", "POST"])
+def metric_focus(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if request.method == "POST" and not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能修改追踪指标。")
+    version = (OfficialResearchContentVersion.objects.filter(
+        document__security=dossier.security, document__source="sec",
+        document__document_type="10-k",
+    ).select_related("document", "document__security")
+               .order_by("-document__period_end", "-fetched_at", "-pk").first())
+    if request.method == "POST":
+        if version is None:
+            raise Http404
+        try:
+            if request.POST.get("action") == "save":
+                save_metric_focus(actor=member, dossier_id=dossier.pk,
+                                  version_id=version.pk, codes=request.POST.getlist("codes"))
+                messages.success(request, "追踪指标已保存。")
+            elif request.POST.get("action") == "generate":
+                generate_metric_suggestions(
+                    actor=member, dossier_id=dossier.pk, version_id=version.pk,
+                    provider_id=_positive_id_or_404(request.POST.get("provider")),
+                    consent=request.POST.get("one_time_consent") == "yes",
+                )
+                messages.success(request, "AI 候选指标已生成；请核对原文后手动保存。")
+            else:
+                raise Http404
+        except DossierNotFound:
+            raise Http404
+        except (ResearchValidationError, ResearchAiError) as exc:
+            messages.error(request, str(exc))
+        return redirect("investment_research:metric_focus", pk=pk)
+    choices = []
+    if version:
+        _, rows, problem = tenk_metric_grid(version)
+        if not problem:
+            selected = set(dossier.selected_metric_codes or [])
+            choices = [{"code": row["code"], "label": row["label"],
+                        "checked": row["code"] in selected,
+                        "available": bool(row["cells"][0].get("citation"))}
+                       for row in rows if row["code"] not in CORE_CODES]
+        else:
+            messages.warning(request, problem)
+    latest = next((analysis for analysis in AiAnalysisRequest.objects.filter(
+        member=member, family=member.family, module="investment_research",
+        analysis_type="metric_focus", status=AiAnalysisRequest.STATUS_SUCCESS,
+    ).order_by("-created_at")[:30]
+        if (analysis.scope or {}).get("dossier_id") == dossier.pk and
+        (analysis.scope or {}).get("version_id") == getattr(version, "pk", None)), None)
+    suggestions = []
+    if latest:
+        for item in latest.result.result_json.get("suggestions", []):
+            rendered = dict(item)
+            rendered["citations"] = [{**citation, "url": (
+                reverse("investment_research:document_detail", args=[pk, version.document_id])
+                + "?" + urlencode({"version": citation["version_id"],
+                                   "start": citation["start"], "end": citation["end"],
+                                   "hash": citation["hash"]}) + "#research-citation")}
+                for citation in item.get("citations", [])]
+            suggestions.append(rendered)
+    return render(request, "investment_research/metric_focus.html", {
+        "dossier": dossier, "version": version, "choices": choices,
+        "suggestions": suggestions, "can_write": is_writer(member),
+        "providers": available_research_providers() if is_writer(member) else [],
     })
 
 
