@@ -10,8 +10,10 @@
       <p class="research-private-note">本档案仅自己可见。</p>
     </div>
     <div class="research-actions">
-      {% if can_write %}
+      {% if can_write and revision %}
         <a class="button" href="{% url 'investment_research:edit' dossier.pk %}">编辑判断</a>
+      {% elif can_write %}
+        <a class="button" href="{% url 'investment_research:first_thesis' dossier.pk %}">保存我的第一版判断</a>
       {% endif %}
       <a class="button" href="{% url 'investment_research:history' dossier.pk %}">历史版本</a>
     </div>
@@ -37,10 +39,10 @@
     </div>
   </section>
 
-  <details class="research-initial">
-    <summary>原始持有理由（创建后不再修改）</summary>
+  {% if dossier.initial_thesis %}<details class="research-initial">
+    <summary>最初记录（不会随当前判断修改）</summary>
     <p>{{ dossier.initial_thesis|linebreaksbr }}</p>
-  </details>
+  </details>{% endif %}
 
   {% if revision %}
     <article class="research-current">
@@ -59,7 +61,46 @@
       {% else %}<p class="research-none">（无）</p>{% endif %}
     </article>
   {% else %}
-    <p class="research-empty">还没有判断版本。</p>
+    <p class="research-empty">正在了解这家公司。可以先查看官方资料，再决定是否形成自己的判断。</p>
+  {% endif %}
+
+  <section class="research-source-summary" aria-labelledby="research-ai-heading">
+    <div>
+      <h2 id="research-ai-heading">研究草稿</h2>
+      <p>主动选择已保存的 SEC 正文版本，让 AI 帮你整理支持、反证和待验证问题。草稿仅自己可见，不会改写正式判断。</p>
+      {% if recent_drafts %}
+        <p>最近草稿：{% for item in recent_drafts %}<a href="{% url 'investment_research:draft_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+      {% endif %}
+    </div>
+  </section>
+  {% if can_write and available_versions and research_providers %}
+    <details class="research-initial">
+      <summary>生成一份带原文引用的草稿</summary>
+      <form method="post" action="{% url 'investment_research:generate_draft' dossier.pk %}" class="research-form">
+        {% csrf_token %}
+        <label for="research-selection">选择 SEC 正文版本与阅读区段</label>
+        <select id="research-selection" name="selection" required>
+          {% for group in research_groups %}
+            <optgroup label="{{ group.version.document.title }} · 正文第 {{ group.version.version_number }} 版 · {{ group.version.content_text|length }} 字">
+              {% for segment in group.segments %}
+                <option value="{{ group.version.pk }}:{{ segment.index }}"{% if segment.selected %} selected{% endif %}>第 {{ forloop.counter }}/{{ group.segments|length }} 区段 · 字符 {{ segment.start }}–{{ segment.end }}{% if segment.completed %} · 已生成草稿{% else %} · 尚未生成草稿{% endif %}</option>
+              {% endfor %}
+            </optgroup>
+          {% endfor %}
+        </select>
+        <label for="research-provider">选择文本模型</label>
+        <select id="research-provider" name="provider" required>
+          {% for provider in research_providers %}
+            <option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }} · 已配置单次费用上限 ${{ provider.extra_data.research_max_estimated_usd|default:"待核对" }}</option>
+          {% endfor %}
+        </select>
+        <p class="research-private-note">每个区段最多 {{ research_document_limit }} 字，按原文位置顺序划分，未必对应 SEC 自身章节。每次仅发送所选区段；其他区段仍需分别生成草稿。若已有正式判断，还会发送当前判断、关键假设和待验证问题。模型只能引用本次发送的片段。已生成草稿只表示模型读过该区段，不代表内容已由你核实。</p>
+        <label><input type="checkbox" name="one_time_consent" value="yes" required> 我确认本次将所选正文区段及我的当前判断发送给所选云端模型；仅授权这一次。</label>
+        <button type="submit">生成私密草稿</button>
+      </form>
+    </details>
+  {% elif can_write %}
+    <p class="research-none">{% if not available_versions %}请先在官方资料中提取一份 SEC 正文。{% else %}尚未配置获准处理投研资料的云端文本模型。{% endif %}</p>
   {% endif %}
 </section>
 {% endblock %}

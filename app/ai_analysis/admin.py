@@ -16,8 +16,14 @@ class AiAnalysisRequestAdmin(admin.ModelAdmin):
     list_filter = ("family", "member", "provider", "module", "status", "created_at")
     search_fields = ("prompt", "analysis_type", "error_message")
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).exclude(module="investment_research")
+
 
 @admin.register(AiAnalysisResult)
 class AiAnalysisResultAdmin(admin.ModelAdmin):
     list_display = ("request", "tokens_used", "cost_estimate", "created_at")
     search_fields = ("result_text",)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).exclude(request__module="investment_research")

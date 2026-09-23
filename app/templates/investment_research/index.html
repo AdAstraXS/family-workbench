@@ -10,7 +10,10 @@
       <p class="research-private-note">本模块当前仅自己可见，其他家庭成员（含管理员）看不到你的研究内容。</p>
     </div>
     {% if can_write %}
-      <a class="button" href="{% url 'investment_research:create' %}">＋ 新建研究档案</a>
+      <div class="research-actions">
+        <a class="button" href="{% url 'investment_research:explore' %}">先了解一家公司</a>
+        <a class="button" href="{% url 'investment_research:create' %}">已有判断，直接建档</a>
+      </div>
     {% endif %}
   </div>
 
@@ -23,7 +26,7 @@
         {% for dossier in page.object_list %}
           <tr>
             <td data-label="标的">{{ dossier.security.name }}（{{ dossier.security.symbol }} · {{ dossier.security.market }}）</td>
-            <td data-label="当前判断" class="research-snippet">{{ dossier.current_revision.thesis|truncatechars:60 }}</td>
+            <td data-label="当前判断" class="research-snippet">{% if dossier.current_revision %}{{ dossier.current_revision.thesis|truncatechars:60 }}{% else %}正在了解 · 尚无正式判断{% endif %}</td>
             <td data-label="更新时间">{{ dossier.updated_at|date:"Y-m-d H:i" }}</td>
             <td><a href="{% url 'investment_research:detail' dossier.pk %}">查看</a></td>
           </tr>
@@ -38,7 +41,7 @@
       </nav>
     {% endif %}
   {% else %}
-    <p class="research-empty">你还没有研究档案。{% if can_write %}<a href="{% url 'investment_research:create' %}">创建第一份档案</a>。{% endif %}</p>
+    <p class="research-empty">你还没有研究档案。{% if can_write %}<a href="{% url 'investment_research:explore' %}">先了解一家公司</a>。{% endif %}</p>
   {% endif %}
 </section>
 {% endblock %}

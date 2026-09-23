@@ -7,10 +7,14 @@
 - 429/503 做有限次数线性退避重试，其他 HTTP 错误不盲目重试；
 - 响应体超过上限抛错，错误信息不得包含完整响应正文。
 """
+import gzip
+import io
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
+import zlib
 from datetime import datetime
 from urllib.parse import unquote, urlsplit
 
@@ -31,6 +35,8 @@ REQUIRED_FILING_COLUMNS = (
 RETRY_STATUSES = frozenset({429, 503})
 _TITLE_MAX_LENGTH = 500
 _CIK_DIGITS = 10
+_SHARED_REQUEST_LOCK = threading.Lock()
+_SHARED_LAST_REQUEST_AT = None
 
 
 class SecClientError(Exception):
@@ -61,6 +67,10 @@ class SecResponseTooLarge(SecClientError):
     """响应体超过大小上限。"""
 
 
+class SecEncodingError(SecClientError):
+    """SEC 响应的压缩格式不受支持或内容损坏。"""
+
+
 class SecTickerNotFoundError(SecClientError):
     """ticker 映射中找不到对应公司，或映射结构异常。"""
 
@@ -71,6 +81,32 @@ class SecFilingsParseError(SecClientError):
 
 class SecDocumentUrlError(SecClientError):
     """primaryDocument/accession 不合法，无法构造 Archives URL。"""
+
+
+def _validate_sec_request_url(url, *, archives_only=False):
+    parts = urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise SecClientError("SEC 请求地址的端口无效。") from exc
+    if parts.scheme != "https":
+        raise SecClientError("SEC 请求必须使用 HTTPS。")
+    if (parts.hostname not in OFFICIAL_HOSTS or parts.username
+            or parts.password or port not in (None, 443)):
+        raise SecClientError("SEC 请求只允许无凭据的官方主机。")
+    if archives_only and (parts.hostname != "www.sec.gov"
+                          or not parts.path.startswith("/Archives/edgar/data/")
+                          or parts.query or parts.fragment):
+        raise SecDocumentUrlError("SEC 正文必须来自官方 Archives 路径。")
+
+
+class _OfficialRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        archives_only = urlsplit(req.full_url).path.startswith("/Archives/edgar/data/")
+        _validate_sec_request_url(newurl, archives_only=archives_only)
+        if archives_only and newurl != req.full_url:
+            raise SecDocumentUrlError("SEC 正文重定向到其他文件，已停止抓取。")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def _validate_positive_number(value, label, *, maximum=None):
@@ -88,6 +124,34 @@ def _validate_non_negative_number(value, label):
         raise SecConfigError(f"{label} 应为数值：{value!r}")
     if value < 0:
         raise SecConfigError(f"{label} 不应为负，当前为 {value!r}。")
+
+
+def _decode_response(body, encoding, limit):
+    encoding = (encoding or "identity").strip().lower()
+    if encoding in ("identity", ""):
+        return body
+    try:
+        if encoding == "gzip":
+            with gzip.GzipFile(fileobj=io.BytesIO(body)) as stream:
+                decoded = stream.read(limit + 1)
+        elif encoding == "deflate":
+            try:
+                stream = zlib.decompressobj()
+                decoded = stream.decompress(body, limit + 1)
+            except zlib.error:
+                stream = zlib.decompressobj(-zlib.MAX_WBITS)
+                decoded = stream.decompress(body, limit + 1)
+            if len(decoded) <= limit:
+                decoded += stream.flush(limit + 1 - len(decoded))
+            if len(decoded) <= limit and not stream.eof:
+                raise SecEncodingError("SEC 压缩响应不完整。")
+        else:
+            raise SecEncodingError("SEC 返回了不支持的压缩格式。")
+    except (OSError, EOFError, zlib.error) as exc:
+        raise SecEncodingError("SEC 压缩响应无法解码。") from exc
+    if len(decoded) > limit:
+        raise SecResponseTooLarge(f"SEC 解压后响应超过 {limit} 字节上限。")
+    return decoded
 
 
 def _pad_cik(cik):
@@ -232,15 +296,28 @@ class SecClient:
         self.rate_limit_per_second = rate_limit_per_second
         self.max_retries = max_retries
         self.backoff_seconds = backoff_seconds
-        self._opener = opener or urllib.request.urlopen
+        self._opener = opener or urllib.request.build_opener(_OfficialRedirectHandler()).open
         self._clock = clock or time.monotonic
         self._sleeper = sleeper or time.sleep
         self._last_request_at = None
+        # 真实客户端在同一进程内共享节流状态；批量同步逐证券建客户端时不能重置配额。
+        self._shared_throttle = opener is None and clock is None and sleeper is None
 
     # -- 底层请求 -------------------------------------------------------
 
     def _throttle(self):
+        global _SHARED_LAST_REQUEST_AT
         interval = 1.0 / self.rate_limit_per_second
+        if self._shared_throttle:
+            with _SHARED_REQUEST_LOCK:
+                now = self._clock()
+                if _SHARED_LAST_REQUEST_AT is not None:
+                    wait_until = _SHARED_LAST_REQUEST_AT + interval
+                    if now < wait_until:
+                        self._sleeper(wait_until - now)
+                        now = self._clock()
+                _SHARED_LAST_REQUEST_AT = now
+            return
         now = self._clock()
         if self._last_request_at is not None:
             wait_until = self._last_request_at + interval
@@ -249,13 +326,13 @@ class SecClient:
                 now = self._clock()
         self._last_request_at = now
 
-    def _get(self, url):
-        parts = urlsplit(url)
-        if parts.scheme != "https":
-            raise SecClientError(f"SEC 请求必须使用 HTTPS：{url}")
-        if parts.hostname not in OFFICIAL_HOSTS:
-            raise SecClientError(f"非 SEC 官方主机：{parts.hostname}")
-        request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
+    def _get(self, url, *, max_bytes=None, archives_only=False):
+        _validate_sec_request_url(url, archives_only=archives_only)
+        limit = self.max_response_bytes if max_bytes is None else max_bytes
+        _validate_positive_number(limit, "max_bytes")
+        request = urllib.request.Request(
+            url, headers={"User-Agent": self.user_agent, "Accept-Encoding": "gzip, deflate"},
+        )
         attempt = 0
         while True:
             attempt += 1
@@ -266,23 +343,40 @@ class SecClient:
                 if exc.code in RETRY_STATUSES and attempt <= self.max_retries:
                     self._sleeper(self.backoff_seconds * attempt)
                     continue
+                message = (
+                    "SEC 返回 HTTP 403；可能是访问限流或出口受限，请暂缓重试并检查 SEC 访问状态。"
+                    if exc.code == 403 else f"SEC 返回 HTTP {exc.code}"
+                )
                 raise SecHTTPError(
-                    f"SEC 返回 HTTP {exc.code}", status=exc.code
+                    message, status=exc.code
                 ) from exc
             except TimeoutError as exc:
                 raise SecTimeoutError(f"SEC 请求超时（{self.timeout}s）。") from exc
             except urllib.error.URLError as exc:
+                if isinstance(exc.reason, TimeoutError):
+                    raise SecTimeoutError(f"SEC 请求超时（{self.timeout}s）。") from exc
                 raise SecNetworkError(f"SEC 网络错误：{exc.reason}") from exc
             except OSError as exc:
                 # ConnectionResetError 等底层 OSError 统一归为网络错误，不泄漏原文
                 raise SecNetworkError(f"SEC 连接异常：{type(exc).__name__}") from exc
             with response:
-                body = response.read(self.max_response_bytes + 1)
-            if len(body) > self.max_response_bytes:
+                if hasattr(response, "geturl"):
+                    final_url = response.geturl()
+                    _validate_sec_request_url(final_url, archives_only=archives_only)
+                    if archives_only and final_url != url:
+                        raise SecDocumentUrlError("SEC 正文最终链接与所选文件不同。")
+                body = response.read(limit + 1)
+                headers = getattr(response, "headers", None)
+                encoding = headers.get("Content-Encoding") if headers is not None else None
+            if len(body) > limit:
                 raise SecResponseTooLarge(
-                    f"SEC 响应超过 {self.max_response_bytes} 字节上限。"
+                    f"SEC 响应超过 {limit} 字节上限。"
                 )
-            return body
+            return _decode_response(body, encoding, limit)
+
+    def get_document_html(self, url, *, max_bytes):
+        """仅获取已校验的 SEC Archives 主 HTML；不跟随站外跳转。"""
+        return self._get(url, max_bytes=max_bytes, archives_only=True)
 
     def get_json(self, url):
         body = self._get(url)

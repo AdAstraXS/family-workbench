@@ -1,0 +1,33 @@
+{% extends "investment_research/base.html" %}
+{% block title %}研究草稿 - {{ dossier.security.name }}{% endblock %}
+{% block research_content %}
+<article class="research-page">
+  <div class="research-header">
+    <div>
+      <h1>{{ dossier.security.name }} · AI 研究草稿</h1>
+      <p class="research-private-note">仅自己可见 · {{ analysis.created_at|date:"Y-m-d H:i" }} · {{ analysis.provider.name }} / {{ analysis.provider.model_name }}</p>
+      <p class="research-private-note">资料：{{ analysis.scope.document_title }}（{% if analysis.scope.document_published_at %}发布日期 {{ analysis.scope.document_published_at }} · {% endif %}正文获取于 {{ content_fetched_at|date:"Y-m-d H:i"|default:"时间未知" }}）。{% if analysis.scope.segment_count %}本次仅使用正文版本 {{ analysis.scope.version_id }} 的第 {{ analysis.scope.segment_index|add:"1" }}/{{ analysis.scope.segment_count }} 区段，字符位置 {{ analysis.scope.segment_start }}–{{ analysis.scope.segment_end }}，共 {{ analysis.sanitized_input.provided_characters }} / {{ analysis.sanitized_input.document_characters }} 字；其他区段未在本次发送，不能据此推断全文。{% else %}本次使用正文版本 {{ analysis.scope.version_id }} 的前 {{ analysis.sanitized_input.provided_characters }} / {{ analysis.sanitized_input.document_characters }} 字，{% if analysis.scope.truncated %}仅覆盖开头部分{% else %}覆盖该版本全部正文{% endif %}。{% endif %}{% if analysis.scope.thesis_revision_id %}对照本人第 {{ analysis.scope.thesis_revision_number }} 版判断{% else %}探索阶段，尚无本人正式判断{% endif %}。</p>
+    </div>
+    <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a>
+  </div>
+  {% if draft %}
+    <section class="research-current">
+      <h2>发生了什么</h2><p>{{ draft.summary|linebreaksbr }}</p>
+      <h3>{% if analysis.scope.thesis_revision_id %}支持当时判断的证据{% else %}可能有利的证据{% endif %}</h3>
+      {% for item in draft.supports %}
+        <p>{{ item.text|linebreaksbr }} {% for citation in item.citations %}<a href="{{ citation.url }}">查看原文 {{ citation.label }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+      {% empty %}<p class="research-none">未找到足够的支持证据。</p>{% endfor %}
+      <h3>{% if analysis.scope.thesis_revision_id %}削弱当时判断的证据{% else %}可能不利的证据{% endif %}</h3>
+      {% for item in draft.weakens %}
+        <p>{{ item.text|linebreaksbr }} {% for citation in item.citations %}<a href="{{ citation.url }}">查看原文 {{ citation.label }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+      {% empty %}<p class="research-none">未找到足够的反向证据。</p>{% endfor %}
+      <h3>证据不足</h3><ul>{% for item in draft.unknown %}<li>{{ item }}</li>{% empty %}<li>本次未列出。</li>{% endfor %}</ul>
+      <h3>待验证问题</h3><ul>{% for item in draft.questions %}<li>{{ item }}</li>{% empty %}<li>本次未列出。</li>{% endfor %}</ul>
+      {% if draft.suggested_revision %}<h3>{% if analysis.scope.thesis_revision_id %}修订建议草稿{% else %}第一版判断建议草稿{% endif %}</h3><p>{{ draft.suggested_revision|linebreaksbr }}</p>{% endif %}
+      <p class="research-private-note">这是 AI 草稿，未成为你的正式判断。请对照原文核查后，再到档案页手动保存。</p>
+    </section>
+  {% else %}
+    <div class="research-document-empty"><strong>草稿未生成</strong><p>{{ analysis.error_message|default:"本次请求没有可展示的结果。" }}</p></div>
+  {% endif %}
+</article>
+{% endblock %}

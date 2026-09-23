@@ -7,6 +7,7 @@
 from django.db import IntegrityError, transaction
 
 from family_core.models import FamilyMember
+from portfolio.models import Security
 
 from .models import ResearchDossier, ResearchThesisRevision
 
@@ -132,6 +133,49 @@ def create_dossier(*, actor, security, initial_thesis, pillars, questions):
         dossier.current_revision = revision
         dossier.save(update_fields=["current_revision", "updated_at"])
     return dossier
+
+
+def create_exploration(*, actor, security):
+    """先建立私密探索档案；还没有用户正式判断或版本。"""
+    _require_writer(actor)
+    if security.market != "US" or security.asset_type != Security.TYPE_STOCK:
+        raise ResearchValidationError("探索入口目前只支持已有美股普通股。")
+    try:
+        with transaction.atomic():
+            return ResearchDossier.objects.create(
+                family=actor.family, owner=actor, security=security, initial_thesis="",
+            )
+    except IntegrityError:
+        existing = ResearchDossier.objects.filter(owner=actor, security=security).first()
+        if existing is None:
+            raise
+        raise DuplicateDossier(existing) from None
+
+
+def save_first_thesis(*, actor, dossier_id, thesis, pillars, questions):
+    """探索档案首次确认判断；并发或重复提交只能产生一版。"""
+    _require_writer(actor)
+    clean_thesis = _clean_thesis(thesis)
+    pillars = _clean_list_field(pillars, "关键假设")
+    questions = _clean_list_field(questions, "待验证问题")
+    with transaction.atomic():
+        dossier = (
+            ResearchDossier.objects.select_for_update()
+            .filter(pk=dossier_id, owner=actor, family=actor.family)
+            .first()
+        )
+        if dossier is None:
+            raise DossierNotFound("档案不存在或不属于你。")
+        if dossier.current_revision_id or dossier.initial_thesis:
+            raise ThesisRevisionConflict(dossier)
+        revision = ResearchThesisRevision.objects.create(
+            dossier=dossier, revision_number=1, thesis=clean_thesis,
+            pillars=pillars, questions=questions, created_by=actor,
+        )
+        dossier.initial_thesis = clean_thesis
+        dossier.current_revision = revision
+        dossier.save(update_fields=["initial_thesis", "current_revision", "updated_at"])
+    return revision
 
 
 def save_thesis_revision(

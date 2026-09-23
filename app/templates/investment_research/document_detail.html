@@ -19,7 +19,34 @@
     </div>
   </div>
 
-  {% if document.content_text %}
+  {% if can_write and can_fetch_sec %}
+    <form method="post" action="{% url 'investment_research:fetch_sec_content' dossier.pk document.pk %}">
+      {% csrf_token %}
+      <button class="button" type="submit">{% if current_content_version %}重新检查正文{% else %}提取这份正文{% endif %}</button>
+    </form>
+  {% endif %}
+  {% if current_content_version %}
+    <p class="research-private-note">正文版本 {{ current_content_version.version_number }} · 获取于 {{ current_content_version.fetched_at|date:"Y-m-d H:i" }}</p>
+    <form method="post" action="{% url 'investment_research:create_citation' dossier.pk document.pk %}" class="research-form">
+      {% csrf_token %}
+      <input type="hidden" name="version" value="{{ selected_version.pk|default:current_content_version.pk }}">
+      <label for="research-quote">复制一段原文，生成固定引用</label>
+      <textarea id="research-quote" name="quote" rows="3" maxlength="500" required></textarea>
+      <button class="button" type="submit">定位原文</button>
+    </form>
+  {% endif %}
+
+  {% if highlighted %}
+    <section class="research-document-body" aria-label="引用所用正文版本">
+      <p class="research-private-note">固定引用：正文版本 {{ selected_version.version_number }}。浏览器地址可用于回到这段原文。</p>
+      <div class="research-document-text">{{ highlighted.0 }}<mark id="research-citation">{{ highlighted.1 }}</mark>{{ highlighted.2 }}</div>
+    </section>
+  {% elif selected_version %}
+    <section class="research-document-body" aria-label="历史正文版本">
+      <p class="research-private-note">正文版本 {{ selected_version.version_number }}</p>
+      <div class="research-document-text">{{ selected_version.content_text }}</div>
+    </section>
+  {% elif document.content_text %}
     <section class="research-document-body" aria-label="提取正文">
       <div class="research-document-text">{{ document.content_text }}</div>
     </section>
