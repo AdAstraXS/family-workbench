@@ -13,6 +13,14 @@
 
 提取器标识从 `sec-html-v1` 升为 `sec-html-v2`；同一原始文件若曾由旧提取器建立版本，再次主动提取会追加新版本，旧正文和旧引用不被改写。离线回归已覆盖该行为。这里验证的是文件正文与引用链路，不代表 AI 对整份长报告的分析质量：当前 AI 草稿仍只取正文前 16,000 字并明确标注部分覆盖。
 
-## 生产前条件
+## 生产部署与单文件试运行
 
-隔离投研分支与 NAS 运行提交 `2895dbd5fc35637859c2840d2b20256b4445f2cf` 从共同基线分叉；后者包含期权车轮的后续生产改动。部署前须合并该运行提交、复跑测试并检查迁移和跨模块影响；然后按 NAS 技能建立可验证数据库备份，核对生产数据基线，再安装精确提交。真实生产试运行只对明确选定的一家公司和文件进行，不做全量历史抓取。
+投研分支已合并 NAS 原运行提交 `2895dbd5fc35637859c2840d2b20256b4445f2cf`，保留其中的期权车轮改动。合并后 `investment_research ipo portfolio option_wheel` 共 693 项测试通过、1 项跳过；Django `check`、迁移检查及 `git diff --check` 通过。`app/requirements.txt`、`app/Dockerfile` 和 `docker-compose.yml` 未变化。目标提交 `422a0e753eda836077fa8feb883cb98882acfcf6` 已推送 GitHub。
+
+部署前 NAS PostgreSQL 备份为 `/volume1/docker/family-workbench/backups/family-workbench-pre-research-20260923-1055.dump`，SHA-256 为 `20eb18a85542aabf707c1a212405740339a690dc525a6e9c8a54551c03f94ae3`；受限部署包装器验证了非空及 `pg_restore -l`。源码回滚包为 `/volume1/docker/family-workbench/backups/source-predeploy-2895dbd5fc35637859c2840d2b20256b4445f2cf-20260923-105345.tar.gz`，SHA-256 为 `7f18cdb00d5e13b92c7b34aaf5dfa86e00f7cddc88bfb50c2d62683b8f39da82`。上传归档哈希与本地精确提交归档一致。只重启 Web，启动日志显示 `investment_research.0003` 和 `0004` 均迁移成功，生产 Django 检查无问题。
+
+部署前后业务基线一致：InvestmentAccount 35、InvestmentPosition 474、InvestmentTransaction 1061、PortfolioSnapshot 2023、PortfolioSnapshotPositionLine 12534、DailyPortfolioValuationRun 69，最新快照日期 2026-09-23。数据库和 OpenD 容器保持健康，`.env` 哈希未变化；内外网研究入口正常跳转登录页。NAS 已标记运行提交为 `422a0e753eda836077fa8feb883cb98882acfcf6`。
+
+在已登录的生产研究页面，仅对现有微软档案的 2026-07-29 10-K（accession `0001193125-26-323660`）点击一次“提取这份正文”。页面显示“SEC 正文已保存”和正文版本 1；`Total revenue` 表格行保持 `331,839 / 281,724 / 245,122` 的列顺序。用该行生成的固定引用回到版本 1，并高亮完全相同的原句。没有同步其他公司、调用生产云端 AI 或修改正式判断。
+
+限制：这次生产试运行只覆盖一份 10-K。10-Q、8-K 以及苹果的真实内容已在隔离数据库通过，未批量写入生产。长文 AI 草稿仍只使用前 16,000 字，真实云端模型质量和费用配置未在本次验收。
