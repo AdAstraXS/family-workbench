@@ -52,8 +52,21 @@
   .research-financial-index { padding-left:22px; margin:8px 0 20px; columns:2; column-gap:32px; }
   .research-financial-index li { break-inside:avoid; padding:5px 0; line-height:1.5; }
   .research-financial-index a { overflow-wrap:anywhere; }
+  .research-metric-table { width:100%; border-collapse:collapse; background:#fff; border:1px solid #e2e6ef; border-radius:12px; }
+  .research-metric-table th,.research-metric-table td { padding:14px 16px; border-bottom:1px solid #e2e6ef; text-align:left; vertical-align:top; }
+  .research-metric-table thead th { background:#f7f8fb; color:#586174; font-size:14px; }
+  .research-metric-table tbody tr:last-child th,.research-metric-table tbody tr:last-child td { border-bottom:0; }
+  .research-metric-table td:nth-child(2) { font-variant-numeric:tabular-nums; font-weight:650; white-space:nowrap; }
+  .research-metric-table a { display:inline-block; margin-right:8px; }
   .research-document-empty { background:#f7f8fb; border:1px dashed #cfd5e2; border-radius:12px; padding:24px; color:#586174; line-height:1.7; }
   @media(max-width:640px) {
+    .research-metric-table,.research-metric-table tbody,.research-metric-table tr,.research-metric-table th,.research-metric-table td { display:block; width:100%; box-sizing:border-box; }
+    .research-metric-table thead { display:none; }
+    .research-metric-table tr { border:1px solid #e2e6ef; border-radius:12px; margin:12px 0; background:#fff; }
+    .research-metric-table th,.research-metric-table td { border:0; padding:7px 14px; }
+    .research-metric-table th { padding-top:14px; }
+    .research-metric-table td:last-child { padding-bottom:14px; }
+    .research-metric-table td[data-label]::before { content:attr(data-label); display:block; color:#687386; font-size:12px; font-weight:400; margin-bottom:2px; }
     .research-financial-index { columns:1; }
     .research-page h1 { font-size:24px; }
     .research-current,.research-revision,.research-form { padding:16px; }

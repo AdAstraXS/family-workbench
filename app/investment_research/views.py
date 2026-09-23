@@ -55,6 +55,7 @@ from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
 from .tenk_chapters import tenk_chapter_coverage
 from .tenk_financial_index import tenk_item8_index
+from .tenk_metrics import tenk_metric_rows
 
 PAGE_SIZE = 20
 logger = logging.getLogger(__name__)
@@ -491,6 +492,31 @@ def document_detail(request, pk, document_pk):
             "item8_notes": item8_notes,
         },
     )
+
+
+@_method(["GET"])
+def document_metrics(request, pk, document_pk):
+    """按已保存的 10-K 正文版本核对 iXBRL，不触发 SEC 请求或写库。"""
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    document = get_object_or_404(
+        OfficialResearchDocument, pk=document_pk, security=dossier.security,
+        source="sec", document_type="10-k",
+    )
+    if "version" in request.GET:
+        version = get_object_or_404(
+            OfficialResearchContentVersion,
+            pk=_positive_id_or_404(request.GET["version"]), document=document,
+        )
+    else:
+        version = document.content_versions.first()
+    rows, problem = tenk_metric_rows(version) if version else ([], "请先提取这份 10-K 的正文。")
+    return render(request, "investment_research/document_metrics.html", {
+        "dossier": dossier, "document": document, "version": version,
+        "rows": rows, "problem": problem,
+    })
 
 
 @_method(["POST"])

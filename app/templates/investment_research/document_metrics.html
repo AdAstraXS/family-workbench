@@ -1,0 +1,43 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}10-K 指标核对 · {{ document.title }}{% endblock %}
+
+{% block research_content %}
+<article class="research-page">
+  <div class="research-header">
+    <div>
+      <p class="research-private-note">{{ document.title }} · 10-K · 报告期至 {{ document.period_end|date:"Y-m-d" }}</p>
+      <h1>现金流与租赁指标核对</h1>
+    </div>
+    <div class="research-actions">
+      <a class="button" href="{% url 'investment_research:document_detail' dossier.pk document.pk %}{% if version %}?version={{ version.pk }}{% endif %}">返回 10-K 正文</a>
+      <a class="button" href="{{ document.source_url }}" target="_blank" rel="noopener noreferrer">SEC 原文</a>
+    </div>
+  </div>
+  <p class="research-private-note">仅核对已保存正文第 {{ version.version_number|default:"—" }} 版中的完整财年或期末事实；单位为亿美元。点击“本地原文”可回到这一版的确切句子。未显示金额的行不能当作零。固定资产现金支出的具体口径请看原文，不把租赁存量或未来承诺当作当期资本支出。</p>
+  {% if problem %}
+    <p class="research-private-note">{{ problem }}</p>
+  {% else %}
+    <div>
+      <table class="research-metric-table">
+        <thead><tr><th scope="col">指标</th><th scope="col">金额（亿美元）</th><th scope="col">核对状态</th><th scope="col">依据</th></tr></thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <th scope="row">{{ row.label }}</th>
+              <td data-label="金额（亿美元）">{% if row.citation %}{{ row.amount|floatformat:2 }}{% else %}—{% endif %}</td>
+              <td data-label="核对状态">{{ row.status }}</td>
+              <td data-label="依据">
+                {% if row.citation %}
+                  <a href="{% url 'investment_research:document_detail' dossier.pk document.pk %}?version={{ version.pk }}&amp;start={{ row.citation.start }}&amp;end={{ row.citation.end }}&amp;hash={{ row.citation.hash }}#research-citation">本地原文</a>
+                  · <a href="{{ version.source_url }}#{{ row.fact_id }}" target="_blank" rel="noopener noreferrer">SEC 数字</a>
+                {% else %}请查看完整附注{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</article>
+{% endblock %}

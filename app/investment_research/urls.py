@@ -22,6 +22,11 @@ urlpatterns = [
         name="document_detail",
     ),
     path(
+        "<int:pk>/documents/<int:document_pk>/metrics/",
+        views.document_metrics,
+        name="document_metrics",
+    ),
+    path(
         "<int:pk>/documents/<int:document_pk>/fetch/",
         views.fetch_sec_content,
         name="fetch_sec_content",
