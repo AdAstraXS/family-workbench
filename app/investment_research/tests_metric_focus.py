@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from datetime import date
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -14,7 +15,7 @@ from family_core.models import Family, FamilyMember
 from portfolio.models import Security
 
 from .citations import resolve_quote
-from .metric_focus import generate_metric_suggestions, save_metric_focus
+from .metric_focus import _suggestion_candidates, generate_metric_suggestions, save_metric_focus
 from .models import OfficialResearchContentVersion, OfficialResearchDocument
 from .research_ai import ResearchAiError
 from .services import ResearchValidationError, create_exploration
@@ -22,6 +23,18 @@ from .tests_tenk_metrics import _version
 
 
 class MetricFocusTests(TestCase):
+    def test_small_lease_is_not_ai_candidate_but_remains_manual_choice(self):
+        rows = [
+            {"code": "operating_cash", "cells": [{"amount": Decimal("1000")}]},
+            {"code": "finance_liability", "cells": [{"amount": Decimal("12")}]},
+            {"code": "company_revenue", "cells": [{"amount": Decimal("900")}]},
+        ]
+        self.assertEqual([row["code"] for row in _suggestion_candidates(rows, None)],
+                         ["company_revenue"])
+        revision = type("Revision", (), {"thesis": "关注租赁承诺", "pillars": [], "questions": []})()
+        self.assertIn("finance_liability",
+                      [row["code"] for row in _suggestion_candidates(rows, revision)])
+
     @classmethod
     def setUpTestData(cls):
         family = Family.objects.create(name="Focus family")
