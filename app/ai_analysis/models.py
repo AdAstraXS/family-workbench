@@ -39,6 +39,10 @@ class AiAnalysisRequest(TimestampedModel):
     sanitized_input = models.JSONField("脱敏后的输入数据", default=dict, blank=True)
     status = models.CharField("状态", max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
     error_message = models.TextField("错误信息", blank=True)
+    # 生产库曾运行全局 AI 会话迁移。这些非空列必须在创建投研请求时一并写入。
+    idempotency_key = models.CharField("幂等键", max_length=100, blank=True, default="")
+    request_fingerprint = models.CharField("请求指纹", max_length=64, blank=True, default="")
+    execution_token = models.CharField("执行令牌", max_length=64, blank=True, default="")
 
     class Meta:
         verbose_name = "AI 分析请求"
