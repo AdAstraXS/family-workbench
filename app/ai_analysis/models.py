@@ -8,6 +8,10 @@ class AiProvider(TimestampedModel):
     provider_type = models.CharField("服务商类型", max_length=50)
     base_url = models.URLField("API 地址", max_length=500, blank=True)
     model_name = models.CharField("默认模型", max_length=100, blank=True)
+    execution_location = models.CharField(
+        "运行位置", max_length=20,
+        choices=[("cloud", "云端"), ("local", "本地")], default="cloud",
+    )
     is_active = models.BooleanField("是否启用", default=True)
     extra_data = models.JSONField("扩展字段", default=dict, blank=True)
 
