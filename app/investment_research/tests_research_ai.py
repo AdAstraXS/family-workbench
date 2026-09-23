@@ -160,6 +160,23 @@ class ResearchAiTests(TestCase):
         detail = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
         self.assertContains(detail, "最初记录（不会随当前判断修改）")
 
+    def test_formal_thesis_is_included_without_changing_it(self):
+        save_first_thesis(
+            actor=self.actor, dossier_id=self.dossier.pk,
+            thesis="看好未来增长", pillars=["收入持续增长"], questions=["现金流如何变化？"],
+        )
+        sent = []
+
+        def transport(request, **kwargs):
+            sent.append(json.loads(request.data)["messages"][1]["content"])
+            return self.response()
+
+        analysis = self.generate(transport=transport)
+        self.assertIn("看好未来增长", sent[0])
+        self.assertIn("收入持续增长", sent[0])
+        self.assertEqual(analysis.scope["thesis_revision_number"], 1)
+        self.assertEqual(ResearchThesisRevision.objects.count(), 1)
+
     def test_one_time_consent_and_provider_opt_in_are_required(self):
         with self.assertRaises(ResearchAiError):
             self.generate(consent=False)
@@ -206,6 +223,17 @@ class ResearchAiTests(TestCase):
         with patch("investment_research.views.generate_research_draft") as generate:
             self.assertEqual(self.client.post(url, {**data, "one_time_consent": "yes"}).status_code, 404)
             generate.assert_not_called()
+
+    def test_unexpected_error_does_not_log_private_details_or_return_500(self):
+        url = reverse("investment_research:generate_draft", args=[self.dossier.pk])
+        self.client.force_login(self.user)
+        with patch("investment_research.views.generate_research_draft", side_effect=RuntimeError("private thesis")):
+            with self.assertLogs("investment_research.views", level="ERROR") as captured:
+                response = self.client.post(url, {"selection": f"{self.version.pk}:0",
+                                                  "provider": self.provider.pk, "one_time_consent": "yes"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("RuntimeError", captured.output[0])
+        self.assertNotIn("private thesis", captured.output[0])
 
     def test_detail_get_does_not_call_model(self):
         self.client.force_login(self.user)

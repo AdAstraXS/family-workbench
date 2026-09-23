@@ -6,6 +6,8 @@
 异常顺序：ThesisRevisionConflict / DuplicateDossier 先于父类
 ResearchValidationError；DossierNotFound 转 404。
 """
+import logging
+import traceback
 from urllib.parse import urlencode
 
 from ai_analysis.models import AiAnalysisRequest
@@ -53,6 +55,7 @@ from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
 
 PAGE_SIZE = 20
+logger = logging.getLogger(__name__)
 
 
 def _positive_id_or_404(raw):
@@ -519,6 +522,15 @@ def generate_draft(request, pk):
         raise Http404
     except ResearchAiError as exc:
         messages.error(request, str(exc))
+        return redirect("investment_research:detail", pk=pk)
+    except Exception as exc:
+        # 生产错误只记类型和调用位置，不把正文、判断、请求体或异常消息写入日志。
+        locations = " -> ".join(
+            f"{frame.filename.rsplit('/', 1)[-1]}:{frame.lineno}:{frame.name}"
+            for frame in traceback.extract_tb(exc.__traceback__)[-8:]
+        )
+        logger.error("研究草稿意外失败：%s；位置：%s", type(exc).__name__, locations)
+        messages.error(request, "草稿生成失败，未自动重试。请稍后再试。")
         return redirect("investment_research:detail", pk=pk)
     return redirect("investment_research:draft_detail", pk=pk, request_pk=analysis.pk)
 
