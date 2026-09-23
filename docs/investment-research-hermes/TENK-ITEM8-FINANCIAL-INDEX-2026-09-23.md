@@ -15,3 +15,9 @@
 [EdgarTools](https://github.com/dgunning/edgartools) 已有报表、附注和 XBRL 导航能力，[sec-parser](https://github.com/alphanome-ai/sec-parser) 能构建 HTML 语义树。这次借鉴了**报表与附注分层导航的产品功能**，没有复制或引入其代码：现有产品的引用指向已经保存的规范化正文字符位置，直接替换解析器会改变这些位置；而为了几种已验证的标题引入新的解析依赖也会扩大 NAS 镜像变更。以后需要跨文件的结构化财务事实或复杂 HTML 时，应以原文坐标可校验为条件，再评估这些库。
 
 离线测试覆盖三种标题样式、Item 8 边界、附注序号及排除表内行标题，并检查页面链接能回到固定版本原文。投研、AI、IPO、组合与期权轮回归共 718 项通过、1 项跳过；迁移检查无变化。
+
+## 生产验收
+
+源码提交 `f5062a809891639f75f4f953f16cd22454ff0b70` 已推送、部署并记录为 NAS 的 `DEPLOYED_COMMIT`。部署前备份 `/volume1/docker/family-workbench/backups/family-workbench-pre-item8-index-20260923.dump`，SHA-256 `82c06bd2f1eafc7e0253dbf25dd0532c5be71d0bb7977955bac2e7824ac2c35e`；源码回滚包 `/volume1/docker/family-workbench/backups/source-predeploy-643014a70b0ff84b772d44f2bf21a120fb7b493d-20260923-175955.tar.gz`。本次无模型迁移、无主动生产数据库写入；部署前后投资账户 35、持仓 474、流水 1061、快照 2023、快照明细 12534、最新快照日 2026-09-23，均未变化。
+
+NAS 容器、Django 检查和迁移状态检查通过。已登录页面显示微软 5 张报表和 18 条附注，Note 6 与 Note 13 的链接分别准确高亮 `NOTE 6 — PROPERTY AND EQUIPMENT` 和 `NOTE 13 — LEASES`；匿名外部访问仍跳转登录。
