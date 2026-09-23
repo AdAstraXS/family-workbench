@@ -17,7 +17,7 @@ from .models import OfficialResearchContentVersion, ResearchDossier
 from .services import DossierNotFound, ResearchValidationError, _require_writer
 
 PROMPT_VERSION = "research-document-v1"
-PROMPT_TEMPLATE_VERSION = "research-segment-v3"
+PROMPT_TEMPLATE_VERSION = "research-segment-v4"
 MAX_DOCUMENT_CHARS = 16000
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_TEXT = 600
@@ -150,6 +150,7 @@ def _validate_output(raw, evidence, version):
         raise ResearchAiError("AI 返回结构不正确。")
     mapping = {part["id"]: part for part in evidence}
     redactions = 0
+    dropped_evidence_items = 0
     summary, count = _redact_quantified_sentences(_safe_text(result.get("summary"), 1500))
     redactions += count
     clean = {"summary": summary}
@@ -163,8 +164,11 @@ def _validate_output(raw, evidence, version):
                 raise ResearchAiError("AI 返回的证据条目不符合要求。")
             ids = item.get("evidence_ids")
             if (not isinstance(ids, list) or not 1 <= len(ids) <= 3
-                    or any(not isinstance(ref, str) or ref not in mapping for ref in ids)):
-                raise ResearchAiError("AI 引用了未提供的原文片段。")
+                    or any(not isinstance(ref, str) for ref in ids)):
+                raise ResearchAiError("AI 返回的证据编号格式不正确。")
+            if any(ref not in mapping for ref in ids):
+                dropped_evidence_items += 1
+                continue
             item_text, count = _redact_quantified_sentences(_safe_text(item.get("text"), MAX_TEXT))
             redactions += count
             clean[field].append({
@@ -187,6 +191,15 @@ def _validate_output(raw, evidence, version):
         raise ResearchAiError("AI 修订建议格式不正确。")
     clean["suggested_revision"], count = _redact_quantified_sentences(suggestion.strip())
     clean["amount_redactions"] = redactions + count
+    clean["dropped_evidence_items"] = dropped_evidence_items
+    if dropped_evidence_items:
+        clean["summary"] = "模型部分判断引用了未提供的原文，已隐藏；请只查看下方仍有原文链接的条目。"
+        clean["suggested_revision"] = ""
+        warning = "有模型判断因引用无效被隐藏，不能据此修订正式判断。"
+        if len(clean["unknown"]) == MAX_ITEMS:
+            clean["unknown"][-1] = warning
+        else:
+            clean["unknown"].append(warning)
     return clean
 
 

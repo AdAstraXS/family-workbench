@@ -245,13 +245,31 @@ class ResearchAiTests(TestCase):
             self.generate()
         self.assertEqual(AiAnalysisRequest.objects.count(), 0)
 
-    def test_bad_evidence_fails_closed_and_preserves_dossier(self):
-        with self.assertRaises(ResearchAiError):
-            self.generate(transport=lambda request, **kwargs: self.response("E999"))
-        analysis = AiAnalysisRequest.objects.get()
-        self.assertEqual(analysis.status, AiAnalysisRequest.STATUS_FAILED)
-        self.assertFalse(AiAnalysisResult.objects.exists())
+    def test_bad_evidence_item_is_hidden_and_valid_citation_survives(self):
+        response = json.loads(self.response())
+        content = json.loads(response["choices"][0]["message"]["content"])
+        content["weakens"][0]["evidence_ids"] = ["E999"]
+        response["choices"][0]["message"]["content"] = json.dumps(content)
+        analysis = self.generate(transport=lambda request, **kwargs: json.dumps(response).encode())
+        result = analysis.result.result_json
+        self.assertEqual(result["dropped_evidence_items"], 1)
+        self.assertEqual(result["supports"][0]["citations"][0]["label"], "E1")
+        self.assertEqual(result["weakens"], [])
+        self.assertNotIn("现金流下降", json.dumps(result, ensure_ascii=False))
+        self.assertEqual(result["suggested_revision"], "")
         self.assertEqual(ResearchThesisRevision.objects.count(), 0)
+        self.client.force_login(self.user)
+        page = self.client.get(reverse("investment_research:draft_detail", args=[self.dossier.pk, analysis.pk]))
+        self.assertContains(page, "1 条判断引用了未提供的原文")
+
+    def test_malformed_evidence_ids_still_fail_closed(self):
+        response = json.loads(self.response())
+        content = json.loads(response["choices"][0]["message"]["content"])
+        content["supports"][0]["evidence_ids"] = ["E1", 42]
+        response["choices"][0]["message"]["content"] = json.dumps(content)
+        with self.assertRaisesMessage(ResearchAiError, "证据编号格式"):
+            self.generate(transport=lambda request, **kwargs: json.dumps(response).encode())
+        self.assertFalse(AiAnalysisResult.objects.exists())
 
     def test_draft_and_admin_privacy(self):
         analysis = self.generate()

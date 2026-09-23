@@ -14,6 +14,7 @@
     <section class="research-current">
       {% if amount_guard_applied %}
         <p class="research-private-note">本草稿已隐藏 {{ draft.amount_redactions }} 句模型重述的金额或数量；具体数值及增减口径请打开引用原文。百分比、因果关系和解释仍需人工核对。</p>
+        {% if draft.dropped_evidence_items %}<p class="research-private-note"><strong>引用提醒：</strong>另有 {{ draft.dropped_evidence_items }} 条判断引用了未提供的原文，已隐藏；本草稿不能直接用于修订正式判断。</p>{% endif %}
       {% else %}
         <p class="research-private-note"><strong>金额提醒：</strong>这份历史草稿生成时尚无金额防护，中文金额、增量与期末额可能有误，请逐项核对引用原文。</p>
       {% endif %}
