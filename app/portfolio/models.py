@@ -792,6 +792,14 @@ class InvestmentTransaction(TimestampedModel):
     EFFECT_OPEN = "open"
     EFFECT_CLOSE = "close"
     POSITION_EFFECT_CHOICES = [(EFFECT_OPEN, "开仓"), (EFFECT_CLOSE, "平仓")]
+    OPTION_PURPOSE_CHOICES = [
+        ("wheel_short_put", "车轮策略 · 卖出 Put"),
+        ("wheel_covered_call", "车轮策略 · 备兑 Call"),
+        ("protective_put", "保护已有正股 · 买入 Put"),
+        ("long_call", "长期看涨 · 买入 Call"),
+        ("long_put", "独立看跌 · 买入 Put"),
+        ("other_option", "其他期权用途"),
+    ]
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     account = models.ForeignKey(InvestmentAccount, verbose_name="投资账户", on_delete=models.CASCADE, related_name="transactions")
@@ -816,6 +824,7 @@ class InvestmentTransaction(TimestampedModel):
         limit_choices_to={"category": InvestmentOption.CATEGORY_TRANSACTION_TYPE},
     )
     position_effect = models.CharField("开平仓", max_length=10, choices=POSITION_EFFECT_CHOICES, blank=True)
+    option_purpose = models.CharField("期权用途", max_length=30, choices=OPTION_PURPOSE_CHOICES, blank=True)
     transaction_no = models.CharField(
         "交易编号",
         max_length=40,

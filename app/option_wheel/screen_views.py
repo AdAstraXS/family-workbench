@@ -29,8 +29,10 @@ SYMBOL_PATTERN = re.compile(r"[A-Z][A-Z0-9.]{0,10}")
 
 def account_summary(family):
     from .position_evidence import stock_evidence
+    from .position_summary import option_position_rows
 
     stock_rows = stock_evidence(family)
+    option_rows = option_position_rows(family, stocks=stock_rows)
     groups = {name: [] for name in PARTICIPATING_ACCOUNTS}
     accounts = InvestmentAccount.objects.filter(
         bank_account__family=family,
@@ -42,10 +44,11 @@ def account_summary(family):
     result = []
     for name, matches in groups.items():
         account, ambiguous = _select_participating_account(matches)
-        row = {"name": name, "cash": None, "nav": None, "as_of": None, "note": "尚无投资组合快照", "stocks": []}
+        row = {"name": name, "cash": None, "nav": None, "as_of": None, "note": "尚无投资组合快照", "stocks": [], "options": []}
         if ambiguous:
             row["note"] = "账户映射不唯一"
         elif account is not None:
+            row["options"] = [item for item in option_rows if item["account_id"] == account.pk]
             row["stocks"] = sorted(
                 (stock for (account_id, _), stock in stock_rows.items() if account_id == account.pk),
                 key=lambda stock: stock["symbol"],

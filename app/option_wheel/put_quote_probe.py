@@ -41,11 +41,11 @@ def quote_code(contract):
     return f"US.{root}{contract.expiration_date:%y%m%d}{option_type}{int(strike)}"
 
 
-def fetch_exact_put_quotes(codes):
+def fetch_exact_option_quotes(codes):
     """Subscribe only requested contracts and verify all subscription counts return."""
     codes = sorted(set(codes))
     if not codes or len(codes) > 20 or any(not CODE.fullmatch(code) for code in codes):
-        raise PutQuoteError("未平仓 Put 合约代码缺失或超过单次 20 张上限。")
+        raise PutQuoteError("期权合约代码缺失或超过单次 20 张上限。")
     lock = ProbeLock()
     if not lock.acquire():
         raise PutQuoteError("已有 Futu 期权查询正在运行；本次没有订阅。")
@@ -130,3 +130,7 @@ def fetch_exact_put_quotes(codes):
     if query_error:
         raise PutQuoteError(query_error)
     return quotes
+
+
+# Keep the existing Put quote job interface stable.
+fetch_exact_put_quotes = fetch_exact_option_quotes

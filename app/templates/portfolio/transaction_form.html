@@ -70,6 +70,7 @@
         {% include "includes/form_field.html" with field=form.trade_date %}
         {% include "includes/form_field.html" with field=form.trade_type_option %}
         {% include "includes/form_field.html" with field=form.position_effect %}
+        {% include "includes/form_field.html" with field=form.option_purpose %}
         {% include "includes/form_field.html" with field=form.currency %}
         {% include "includes/form_field.html" with field=form.quantity %}
         {% include "includes/form_field.html" with field=form.price %}
@@ -124,6 +125,7 @@
     const price = document.getElementById("id_price");
     const amount = document.getElementById("id_amount");
     const positionEffect = document.getElementById("id_position_effect");
+    const optionPurpose = document.getElementById("id_option_purpose");
     const strategy = document.getElementById("id_strategy_option");
     const strategyOther = document.getElementById("id_strategy_other");
 
@@ -259,6 +261,7 @@
       bondSection.hidden = !(bondMode && createBond.checked);
       bondSection.style.display = bondMode && createBond.checked ? "" : "none";
       setFieldVisible(positionEffect, optionMode, true);
+      setFieldVisible(optionPurpose, optionMode && positionEffect.value === "open", true);
       setFieldVisible(security, Boolean(assetType.value));
 
       const creatingSecurity = createOption.checked || createBond.checked;
@@ -317,6 +320,7 @@
     });
     createOption.addEventListener("change", updateSpecialFields);
     createBond.addEventListener("change", updateSpecialFields);
+    positionEffect.addEventListener("change", updateSpecialFields);
     optionMultiplier.addEventListener("input", updateAmount);
     bondQuoteBasis.addEventListener("change", updateAmount);
     bondMarket.addEventListener("change", filterBondExchanges);
@@ -329,6 +333,7 @@
     setFieldVisible(createOption, false);
     setFieldVisible(createBond, false);
     setFieldVisible(positionEffect, false);
+    setFieldVisible(optionPurpose, false);
     optionFields.forEach((field) => setFieldVisible(field, false));
     bondFields.forEach((field) => setFieldVisible(field, false));
     updateStrategyOther();

@@ -1,18 +1,70 @@
 """Human review of real portfolio positions, without brokerage actions."""
 
+from datetime import date, timedelta
+from zoneinfo import ZoneInfo
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseBadRequest
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from portfolio.models import InvestmentPosition, InvestmentTransaction, OptionContract, Security, TradeStatusChoices, TradeTypeChoices
 
-from .models import WheelPositionReview
+from .models import WheelPositionReview, WheelPositionScanJob
 from .position_evidence import participating_accounts
+from .position_scan import comparison_rows
+from .position_scan_jobs import enqueue as enqueue_position_scan
+from .position_summary import option_position_rows
 from .put_quote_jobs import enqueue as enqueue_put_quotes
 from .views import PARTICIPATING_ACCOUNTS, _request_family
+
+
+@login_required
+def position_detail(request, pk):
+    family = _request_family(request)
+    row = next((item for item in option_position_rows(family) if item["position"].pk == pk), None)
+    if row is None:
+        from django.http import Http404
+        raise Http404("未找到当前家庭的期权持仓。")
+    job = WheelPositionScanJob.objects.filter(family=family, position=row["position"]).first()
+    position_changed = bool(job and job.status == "saved" and (
+        job.result.get("position_quantity") != str(row["position"].quantity)
+        or job.result.get("position_avg_cost") != str(row["position"].avg_cost)
+        or job.result.get("position_date") != row["position"].position_date.isoformat()
+    ))
+    comparison = comparison_rows(row, job.result) if job and job.status == "saved" and not position_changed else None
+    today = timezone.now().astimezone(ZoneInfo("America/New_York")).date()
+    suggested = max(row["contract"].expiration_date + timedelta(days=7), today + timedelta(days=1))
+    return render(request, "option_wheel/position_detail.html", {
+        "item": row, "job": job, "comparison": comparison,
+        "suggested_expiration": suggested, "position_changed": position_changed,
+    })
+
+
+@login_required
+@require_POST
+def scan_position(request, pk):
+    family = _request_family(request)
+    if not request.user.is_superuser:
+        raise PermissionDenied("只有管理员可查询 Futu 持仓候选。")
+    row = next((item for item in option_position_rows(family) if item["position"].pk == pk), None)
+    if row is None:
+        from django.http import Http404
+        raise Http404("未找到当前家庭的期权持仓。")
+    try:
+        target = date.fromisoformat(request.POST.get("target_expiration", ""))
+    except ValueError:
+        return HttpResponseBadRequest("请选择有效的目标到期日。")
+    today = timezone.now().astimezone(ZoneInfo("America/New_York")).date()
+    if target <= today or target > today + timedelta(days=190):
+        return HttpResponseBadRequest("目标到期日须在未来 190 天内。")
+    job = enqueue_position_scan(family, request.user, row["position"], target)
+    if job.position_id != row["position"].pk:
+        messages.warning(request, "已有另一张持仓的行情任务正在运行；请等它结束后再提交。")
+    return redirect("option_wheel:position_detail", pk=pk)
 
 
 @login_required

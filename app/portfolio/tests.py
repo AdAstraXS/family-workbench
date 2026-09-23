@@ -586,6 +586,7 @@ class TransactionFormTests(TestCase):
                 "trade_date": trade_date.isoformat(),
                 "trade_type_option": buy_option.pk,
                 "position_effect": InvestmentTransaction.EFFECT_OPEN,
+                "option_purpose": "protective_put",
                 "currency": "",
                 "quantity": "1",
                 "price": "2.50",
@@ -610,6 +611,7 @@ class TransactionFormTests(TestCase):
         self.assertEqual(contract.strike_price, Decimal("370"))
         self.assertEqual(transaction.security, contract.security)
         self.assertEqual(transaction.amount, Decimal("250.00"))
+        self.assertEqual(transaction.option_purpose, "protective_put")
         self.assertEqual(contract.security.symbol, f"MSFT{expiration_date:%y%m%d}P00370000")
         self.assertEqual(
             SecurityQuoteConfig.objects.get(security=contract.security).max_age_hours,
