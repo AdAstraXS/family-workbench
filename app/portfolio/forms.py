@@ -961,7 +961,8 @@ class InvestmentTransactionForm(BaseModelForm):
         self.fields["option_purpose"].label = "期权用途 / 策略归属"
         self.fields["option_purpose"].help_text = "仅在期权开仓时选择；历史持仓未录入用途时显示待归类。"
         self.fields["information_source_option"].label = "信息来源"
-        self.fields["strategy_option"].label = "交易类型（策略）"
+        self.fields["strategy_option"].label = "复盘策略标签（可选）"
+        self.fields["strategy_option"].help_text = "仅供交易复盘；期权用途请在上方单独选择。"
         self.fields["emotion_option"].label = "交易情绪"
         self.fields["currency"].required = False
         self.fields["currency"].widget = forms.Select(
