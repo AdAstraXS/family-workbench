@@ -96,6 +96,30 @@ class ResearchAiTests(TestCase):
         self.assertContains(page, "查看原文 E1")
         self.assertContains(page, "仅自己可见")
 
+    def test_deepseek_uses_documented_json_mode_without_thinking(self):
+        self.provider.base_url = "https://api.deepseek.com"
+        self.provider.model_name = "deepseek-v4-pro"
+        self.provider.save(update_fields=["base_url", "model_name"])
+        sent = []
+
+        def transport(request, **kwargs):
+            sent.append(json.loads(request.data))
+            return self.response()
+
+        self.generate(transport=transport)
+        self.assertEqual(sent[0]["thinking"], {"type": "disabled"})
+        self.assertEqual(sent[0]["response_format"], {"type": "json_object"})
+        self.assertEqual(len(sent), 1)
+
+    def test_truncated_model_output_is_recorded_without_result(self):
+        response = json.loads(self.response())
+        response["choices"][0]["finish_reason"] = "length"
+        with self.assertRaisesMessage(ResearchAiError, "长度上限"):
+            self.generate(transport=lambda request, **kwargs: json.dumps(response).encode())
+        request = AiAnalysisRequest.objects.get(module="investment_research")
+        self.assertEqual(request.status, AiAnalysisRequest.STATUS_FAILED)
+        self.assertFalse(AiAnalysisResult.objects.filter(request=request).exists())
+
     def test_later_segment_sends_only_selected_text_and_cites_original_offsets(self):
         body = ("FIRST_ONLY " * 1600)[:16000] + "SECOND_ONLY " * 600
         version = OfficialResearchContentVersion.objects.create(

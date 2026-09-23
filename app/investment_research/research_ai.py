@@ -214,6 +214,8 @@ def generate_research_draft(*, actor, dossier_id, version_id, provider_id, conse
         "仅分析本次给出的正文区段，不得声称读过未提供的区段或全文。摘要、支持与反证均限于本区段。输出简体中文 JSON 对象，字段："
         "summary 字符串；supports、weakens 为至多五个 {text,evidence_ids}；unknown、questions 为至多五个字符串；"
         "suggested_revision 字符串。supports/weakens 每条必须引用至少一个本次 E 编号；无法判断就放在 unknown。"
+        'JSON 结构示例：{"summary":"摘要","supports":[{"text":"依据","evidence_ids":["E1"]}],'
+        '"weakens":[],"unknown":[],"questions":[],"suggested_revision":""}。'
         "草稿不是用户已确认观点，不能给确定买卖建议。"
     )
     thesis = current.thesis if current else "尚无本人正式判断，当前处于探索阶段。"
@@ -229,11 +231,16 @@ def generate_research_draft(*, actor, dossier_id, version_id, provider_id, conse
     input_chars = len(system) + len(user_prompt)
     if input_chars > policy["max_input_chars"]:
         raise ResearchAiError("所选资料与判断超过该模型的单次投研输入上限。")
-    request_body = json.dumps({"model": provider.model_name, "temperature": 0,
-                               "max_tokens": policy["max_output_tokens"],
-                               "messages": [{"role": "system", "content": system},
-                                            {"role": "user", "content": user_prompt}]},
-                              ensure_ascii=False).encode("utf-8")
+    request_payload = {"model": provider.model_name, "temperature": 0,
+                       "max_tokens": policy["max_output_tokens"],
+                       "messages": [{"role": "system", "content": system},
+                                    {"role": "user", "content": user_prompt}]}
+    if (urllib.parse.urlsplit(provider.base_url).hostname == "api.deepseek.com"
+            and provider.model_name in {"deepseek-flash", "deepseek-v4-pro"}):
+        # DeepSeek defaults to thinking mode; its documented JSON mode needs an explicit switch.
+        request_payload["thinking"] = {"type": "disabled"}
+        request_payload["response_format"] = {"type": "json_object"}
+    request_body = json.dumps(request_payload, ensure_ascii=False).encode("utf-8")
     # UTF-8 字节数是比字符数更保守的输入 token 预算近似值，包含 JSON 包装开销。
     worst_cost = _cost(len(request_body), policy["max_output_tokens"], policy)
     if worst_cost > policy["max_cost"]:
@@ -268,6 +275,8 @@ def generate_research_draft(*, actor, dossier_id, version_id, provider_id, conse
         if len(body) > MAX_RESPONSE_BYTES:
             raise ResearchAiError("AI 返回内容超过大小上限。")
         payload = json.loads(body.decode("utf-8"))
+        if payload["choices"][0].get("finish_reason") == "length":
+            raise ResearchAiError("AI 输出达到长度上限，未生成完整草稿。")
         raw_result = payload["choices"][0]["message"]["content"]
         result = _validate_output(raw_result, evidence, version)
         usage = payload.get("usage") or {}
