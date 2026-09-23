@@ -17,7 +17,7 @@ from .providers.sec import ARCHIVES_BASE, SecDocumentUrlError, filing_url
 from .services import DossierNotFound, ResearchValidationError, _require_writer
 from .source_sync import _default_sec_client
 
-EXTRACTOR_VERSION = "sec-html-v1"
+EXTRACTOR_VERSION = "sec-html-v2"
 MAX_CONTENT_CHARS = 2_000_000
 _BLOCKS = frozenset({"p", "div", "section", "article", "h1", "h2", "h3", "h4", "h5", "h6", "br", "li", "tr"})
 _IGNORED = frozenset({"script", "style", "noscript", "svg", "ix:hidden", "ix:header"})
@@ -29,6 +29,7 @@ class _ReadableHTML(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts = []
         self.ignored = []
+        self.cell_depth = 0
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -36,10 +37,11 @@ class _ReadableHTML(HTMLParser):
             if tag not in _VOID:
                 self.ignored.append(tag)
             return
-        if tag in _BLOCKS:
-            self.parts.append("\n" if tag in {"br", "tr"} else "\n\n")
-        elif tag in {"td", "th"}:
+        if tag in {"td", "th"}:
+            self.cell_depth += 1
             self.parts.append(" | ")
+        elif tag in _BLOCKS:
+            self.parts.append("\n" if tag in {"br", "tr"} else " " if self.cell_depth else "\n\n")
 
     def handle_endtag(self, tag):
         if self.ignored:
@@ -47,12 +49,14 @@ class _ReadableHTML(HTMLParser):
                 while self.ignored:
                     if self.ignored.pop() == tag:
                         break
+        elif tag in {"td", "th"}:
+            self.cell_depth = max(0, self.cell_depth - 1)
         elif tag in _BLOCKS:
-            self.parts.append("\n" if tag == "tr" else "\n\n")
+            self.parts.append("\n" if tag == "tr" else " " if self.cell_depth else "\n\n")
 
     def handle_data(self, data):
         if not self.ignored:
-            self.parts.append(data)
+            self.parts.append(re.sub(r"\s+", " ", data) if self.cell_depth or not data.strip() else data)
 
 
 def extract_sec_html(raw):
@@ -75,7 +79,7 @@ def extract_sec_html(raw):
     parser = _ReadableHTML()
     parser.feed(html)
     parser.close()
-    lines = [re.sub(r"[ \t\r\f\v]+", " ", line).strip(" |") for line in "".join(parser.parts).splitlines()]
+    lines = [re.sub(r"[^\S\n]+", " ", line).strip(" |") for line in "".join(parser.parts).splitlines()]
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
     if len(text) < 30 or len(text) > MAX_CONTENT_CHARS:
         raise ResearchValidationError("SEC 正文为空、过短或超过可读长度上限。")
@@ -129,7 +133,7 @@ def fetch_sec_document_content(*, actor, dossier_id, document_id, client=None):
     with transaction.atomic():
         document = OfficialResearchDocument.objects.select_for_update().get(pk=document.pk)
         latest = document.content_versions.first()
-        if latest and latest.raw_sha256 == raw_hash:
+        if latest and latest.raw_sha256 == raw_hash and latest.extractor_version == EXTRACTOR_VERSION:
             document.fetched_at = now
             document.save(update_fields=["fetched_at", "updated_at"])
             return latest, False

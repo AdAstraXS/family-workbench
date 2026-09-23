@@ -60,6 +60,13 @@ class SecContentTests(TestCase):
         for unwanted in ("NO STYLE", "NO HIDDEN", "NO SCRIPT"):
             self.assertNotIn(unwanted, text)
 
+    def test_nested_table_cell_blocks_keep_labels_and_values_on_one_row(self):
+        html = (b"<html><body><table><tr><td><div>Total revenue</div></td>\n "
+                b"<td>\n<div>331,839</div></td>\n<td><div>281,724</div></td></tr>"
+                b"</table><p>Report body follows.</p></body></html>")
+        text = extract_sec_html(html)
+        self.assertIn("Total revenue | 331,839 | 281,724", text)
+
     def test_snapshot_is_immutable_and_repeated_content_is_idempotent(self):
         client = FakeSecClient(HTML)
         version, created = fetch_sec_document_content(
@@ -85,6 +92,21 @@ class SecContentTests(TestCase):
         self.assertIn("$100", version.content_text)
         self.assertIn("$120", revised.content_text)
         self.assertEqual(OfficialResearchContentVersion.objects.count(), 2)
+
+    def test_new_extractor_version_creates_new_snapshot_from_same_raw_file(self):
+        client = FakeSecClient(HTML)
+        old, _ = fetch_sec_document_content(
+            actor=self.actor, dossier_id=self.dossier.pk, document_id=self.document.pk, client=client,
+        )
+        old.extractor_version = "sec-html-v1"
+        old.save(update_fields=["extractor_version"])
+        revised, created = fetch_sec_document_content(
+            actor=self.actor, dossier_id=self.dossier.pk, document_id=self.document.pk, client=client,
+        )
+        self.assertTrue(created)
+        self.assertEqual(revised.version_number, 2)
+        self.assertEqual(revised.raw_sha256, old.raw_sha256)
+        self.assertNotEqual(revised.pk, old.pk)
 
     def test_bad_url_non_html_and_failure_preserve_old_version(self):
         client = FakeSecClient(HTML)
