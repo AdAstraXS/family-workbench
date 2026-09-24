@@ -1178,5 +1178,8 @@ def recognize_listing_image(request):
             provider_id=request.POST.get("provider"),
         )
     except IpoImageRecognitionError as exc:
-        return JsonResponse({"ok": False, "error": str(exc)}, status=400)
+        error = {"ok": False, "error": str(exc)}
+        if exc.retry_after is not None:
+            error["retry_after"] = exc.retry_after
+        return JsonResponse(error, status=exc.status_code)
     return JsonResponse({"ok": True, "fields": fields})

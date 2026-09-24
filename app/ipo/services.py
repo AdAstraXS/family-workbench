@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 class IpoImageRecognitionError(Exception):
-    pass
+    def __init__(self, message, *, status_code=400, retry_after=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
 
 
 DEFAULT_API_KEY_ENV_VARS = (
@@ -78,6 +81,7 @@ FIELD_SCHEMA = {
 
 VBKR_IPO_URL = "https://www.vbkr.com/ipo/hk/v2/ipo-hk-index"
 DNS_OVER_HTTPS_URL = "https://doh.pub/dns-query"
+VISION_REQUEST_TIMEOUT_SECONDS = 45
 _vbkr_margin_cache = {"fetched_at": None, "data": {}}
 JESSE_LIVERMORE_IPO_URL = "https://www.jesselivermore.com/ipo.html"
 JESSE_LIVERMORE_IPO_API_URL = (
@@ -260,6 +264,12 @@ def _read_url_with_ipv4_doh_fallback(request, timeout):
     except urllib.error.HTTPError:
         raise
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        # A read timeout may mean the model accepted the image and is still
+        # working. Sending the same paid request to another IP duplicates it.
+        if isinstance(exc, TimeoutError) or isinstance(
+            getattr(exc, "reason", None), TimeoutError
+        ):
+            raise
         hostname = urllib.parse.urlsplit(request.full_url).hostname
         if not hostname:
             raise
@@ -270,6 +280,23 @@ def _read_url_with_ipv4_doh_fallback(request, timeout):
         )
         ipv4_address = _resolve_ipv4_with_doh(hostname)
         return _read_https_via_ipv4(request, ipv4_address, timeout)
+
+
+def _read_vision_response(request):
+    hostname = urllib.parse.urlsplit(request.full_url).hostname
+    if hostname in {"ark.cn-beijing.volces.com", "open.bigmodel.cn"}:
+        # NAS logs show its normal route to both vision APIs timing out. Resolve
+        # IPv4 before POST so we do not send a second billable image request.
+        try:
+            ipv4_address = _resolve_ipv4_with_doh(hostname)
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError) as exc:
+            logger.warning("IPO vision IPv4 resolution failed for %s: %s", hostname, exc)
+        else:
+            return _read_https_via_ipv4(
+                request, ipv4_address, VISION_REQUEST_TIMEOUT_SECONDS
+            )
+    with urllib.request.urlopen(request, timeout=VISION_REQUEST_TIMEOUT_SECONDS) as response:
+        return response.read()
 
 
 def strip_json_markdown(text):
@@ -379,43 +406,54 @@ def recognize_ipo_listing_from_image(uploaded_file, provider_id=None):
             }
         ],
     }
+    # Seed 2.0/2.1 defaults to deep thinking. OCR field extraction does not
+    # require it, and the extra latency can exceed the NAS reverse proxy limit.
+    if (
+        urllib.parse.urlsplit(provider.base_url or "").hostname == "ark.cn-beijing.volces.com"
+        and model_name.startswith(("doubao-seed-2-0-", "doubao-seed-2-1-"))
+    ):
+        payload["thinking"] = {"type": "disabled"}
     url = get_chat_completions_url(provider)
     request_body = json.dumps(payload).encode("utf-8")
     try:
-        response_data = None
-        for attempt in range(2):
-            request = urllib.request.Request(
-                url,
-                data=request_body,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                method="POST",
-            )
-            try:
-                response_data = json.loads(
-                    _read_url_with_ipv4_doh_fallback(request, timeout=45).decode("utf-8")
-                )
-                break
-            except urllib.error.HTTPError:
-                raise
-            except (urllib.error.URLError, TimeoutError) as exc:
-                logger.warning("IPO image recognition request failed on attempt %s: %s", attempt + 1, exc)
-                if attempt == 1:
-                    raise
+        request = urllib.request.Request(
+            url,
+            data=request_body,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        # Send the image only once. A read timeout can mean the provider is
+        # still processing it, so an automatic retry is unsafe and costly.
+        response_data = json.loads(_read_vision_response(request).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
         logger.warning("IPO image recognition HTTP error %s: %s", exc.code, error_body[:300])
+        if exc.code == 429:
+            retry_header = (exc.headers or {}).get("Retry-After", "")
+            retry_after = min(max(int(retry_header), 1), 300) if str(retry_header).isdigit() else 60
+            raise IpoImageRecognitionError(
+                f"{provider.name} 当前请求过于频繁，请等待约 {retry_after} 秒后重试；持续出现时请检查服务商账户限额。",
+                status_code=429,
+                retry_after=retry_after,
+            ) from exc
         raise IpoImageRecognitionError(f"AI 识别请求失败：HTTP {exc.code} {error_body[:300]}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise IpoImageRecognitionError(f"AI 识别请求失败，已重试仍未成功：{exc}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        logger.warning("IPO image recognition network failure: %s", exc)
+        raise IpoImageRecognitionError(
+            f"{provider.name} 连接或响应超时，请稍后重试；如反复发生，请检查 NAS 到服务商的网络。"
+        ) from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.warning("IPO image recognition returned non-JSON HTTP response")
+        raise IpoImageRecognitionError("AI 服务返回了无法解析的响应，请稍后重试。") from exc
 
     try:
         content = response_data["choices"][0]["message"]["content"]
         raw_data = json.loads(strip_json_markdown(content))
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-        logger.warning("IPO image recognition returned invalid payload: %s", response_data)
+        logger.warning("IPO image recognition returned invalid response format")
         raise IpoImageRecognitionError("AI 返回内容不是可解析的字段 JSON。") from exc
 
     return normalize_recognized_fields(raw_data)
