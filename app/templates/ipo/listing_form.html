@@ -67,6 +67,14 @@
   const statusBox = document.getElementById("ipo-image-status");
   const recognizeUrl = "{% url 'ipo:recognize_listing_image' %}";
   const csrfToken = document.querySelector("input[name='csrfmiddlewaretoken']").value;
+  const cooldownUntil = new Map();
+  let inFlight = false;
+
+  function updateRecognizeButton() {
+    recognizeButton.disabled = inFlight || (cooldownUntil.get(providerSelect.value) || 0) > Date.now();
+  }
+
+  providerSelect.addEventListener("change", updateRecognizeButton);
 
   function setStatus(message, kind = "") {
     statusBox.textContent = message;
@@ -93,12 +101,14 @@
       setStatus("请先选择一张图片。", "error");
       return;
     }
-    recognizeButton.disabled = true;
+    const providerId = providerSelect.value;
+    inFlight = true;
+    updateRecognizeButton();
     setStatus("正在识别图片内容，较大的截图可能需要等待几十秒...");
     try {
       const formData = new FormData();
       formData.append("image", file);
-      formData.append("provider", providerSelect.value);
+      formData.append("provider", providerId);
       const response = await fetch(recognizeUrl, {
         method: "POST",
         headers: {"X-CSRFToken": csrfToken},
@@ -108,10 +118,20 @@
       try {
         data = await response.json();
       } catch (error) {
-        setStatus("识别服务暂时没有返回有效结果，请稍后重试。", "error");
+        setStatus(
+          response.ok
+            ? "识别服务返回了无法解析的内容，请稍后重试。"
+            : `服务器返回 HTTP ${response.status}，请稍后重试；持续出现时请检查 NAS 服务日志。`,
+          "error"
+        );
         return;
       }
       if (!data.ok) {
+        if (response.status === 429) {
+          const waitSeconds = Math.max(1, Number(data.retry_after) || 60);
+          cooldownUntil.set(providerId, Date.now() + waitSeconds * 1000);
+          setTimeout(updateRecognizeButton, waitSeconds * 1000);
+        }
         setStatus(data.error || "识别失败，请稍后重试。", "error");
         return;
       }
@@ -125,7 +145,8 @@
     } catch (error) {
       setStatus("识别请求失败，请检查网络或 AI 服务配置。", "error");
     } finally {
-      recognizeButton.disabled = false;
+      inFlight = false;
+      updateRecognizeButton();
     }
   });
 })();
