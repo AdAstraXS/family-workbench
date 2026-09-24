@@ -11,10 +11,41 @@ class AiModuleModelForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["provider"].queryset = AiProvider.objects.filter(
+        rows = AiProvider.objects.filter(
             is_active=True, provider_type__in=("openai", "openai_compatible"),
         ).exclude(model_name__in=("", "待配置")).order_by("name", "model_name")
+        module = self.data.get("module") or getattr(self.instance, "module", None)
+        eligible_ids = [
+            provider.pk for provider in rows
+            if (provider.extra_data or {}).get("usage") not in {"vision", "image", "ipo_image_recognition"}
+            and (not module or self._supports_module(provider, module))
+        ]
+        self.fields["provider"].queryset = rows.filter(pk__in=eligible_ids)
         self.fields["provider"].help_text = "只能选择已启用、已配置本模块数据与费用策略的文字模型；修改只影响新任务。"
+
+    @staticmethod
+    def _supports_module(provider, module):
+        if module == AiModuleModel.OPTION_WHEEL:
+            return (provider.model_name in {"deepseek-flash", "deepseek-v4-flash"}
+                    and provider.base_url.rstrip("/") in {"https://api.deepseek.com", "https://api.deepseek.com/v1"})
+        if module == AiModuleModel.INVESTMENT_RESEARCH:
+            from investment_research.research_ai import ResearchAiError, research_provider_policy
+            try:
+                research_provider_policy(provider)
+                return True
+            except ResearchAiError:
+                return False
+        if module == AiModuleModel.INTELLIGENCE:
+            from intelligence.ai_enrichment import IntelligenceAiError, intelligence_provider_policy
+            try:
+                intelligence_provider_policy(provider)
+                return True
+            except IntelligenceAiError:
+                return False
+        if module == AiModuleModel.KNOWLEDGE:
+            return (bool((provider.extra_data or {}).get("api_key_env_var"))
+                    and provider.base_url.rstrip("/") in {"https://api.deepseek.com", "https://api.deepseek.com/v1"})
+        return module == AiModuleModel.GLOBAL_AI
 
     def clean(self):
         values = super().clean()

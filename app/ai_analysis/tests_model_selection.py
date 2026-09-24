@@ -53,20 +53,24 @@ class ModuleModelSelectionTests(TestCase):
             name="Vision", provider_type="openai_compatible", model_name="vision-v1",
             extra_data={"usage": "vision"},
         )
-        for provider, fragment in ((vision, "图片识别"), (self.backup, "只支持已验证")):
+        for provider in (vision, self.backup):
             form = AiModuleModelForm(data={"module": "option_wheel", "provider": provider.pk})
             self.assertFalse(form.is_valid())
-            self.assertIn(fragment, str(form.errors))
+            self.assertNotIn(provider.pk, list(form.fields["provider"].queryset.values_list("pk", flat=True)))
 
     def test_admin_has_separate_module_defaults_page(self):
         url = reverse("admin:ai_analysis_aimodulemodel_changelist")
         user = get_user_model().objects.create_superuser("model-admin", "admin@example.test", "test")
         self.client.force_login(user)
         self.assertEqual(self.client.get(url).status_code, 200)
-        AiModuleModel.objects.create(module="option_wheel", provider=self.flash)
+        setting = AiModuleModel.objects.create(module="option_wheel", provider=self.flash)
         response = self.client.get(url)
         self.assertContains(response, "期权分析建议")
         self.assertEqual(default_provider("option_wheel"), self.flash)
+        edit = self.client.get(reverse("admin:ai_analysis_aimodulemodel_change", args=[setting.pk]))
+        self.assertContains(edit, "DeepSeek Flash")
+        self.assertNotContains(edit, "GLM FlashX")
+        self.assertNotContains(edit, "Vision")
 
     def test_upgrade_preserves_key_reference_and_seeds_each_eligible_module(self):
         from importlib import import_module
