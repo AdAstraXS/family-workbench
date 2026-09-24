@@ -57,6 +57,56 @@ def _version(*, duplicate=False, dimensioned=False, visible=True, zero=False, wr
 
 
 class TenKMetricsTests(SimpleTestCase):
+    def test_company_revenue_uses_exact_business_member_and_cited_item8_line(self):
+        for symbol, cik, code, label, member in (
+            ("AAPL", "320193", "iphone_revenue", "iPhone", "aapl:IPhoneMember"),
+            ("TSLA", "1318605", "automotive_revenue", "Total automotive revenues",
+             "tsla:AutomotiveRevenuesMember"),
+        ):
+            with self.subTest(symbol=symbol):
+                def context(identifier, member_name):
+                    segment = ("<xbrli:entity><xbrli:segment><xbrldi:explicitMember "
+                               "dimension='srt:ProductOrServiceAxis'>" + member_name +
+                               "</xbrldi:explicitMember></xbrli:segment></xbrli:entity>")
+                    return (f"<xbrli:context id='{identifier}'>{segment}<xbrli:period>"
+                            "<xbrli:startDate>2024-01-01</xbrli:startDate>"
+                            "<xbrli:endDate>2024-12-31</xbrli:endDate>"
+                            "</xbrli:period></xbrli:context>")
+
+                def revenue(identifier, amount):
+                    return ("<ix:nonFraction name='us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax' "
+                            f"contextRef='{identifier}' unitRef='usd' scale='6' id='{identifier}'>{amount}"
+                            "</ix:nonFraction>")
+
+                raw = ("<html><body><ix:header><xbrli:unit id='usd'><xbrli:measure>"
+                       "iso4217:USD</xbrli:measure></xbrli:unit>"
+                       "<xbrli:context id='fy'><xbrli:period><xbrli:startDate>2024-01-01"
+                       "</xbrli:startDate><xbrli:endDate>2024-12-31</xbrli:endDate>"
+                       "</xbrli:period></xbrli:context>" + context("right", member) +
+                       context("wrong", "x:OtherMember") +
+                       "</ix:header><h1>ITEM 8. FINANCIAL STATEMENTS AND SUPPLEMENTARY DATA</h1>"
+                       "<table><tr><td>Net cash provided by operating activities</td><td>"
+                       "<ix:nonFraction name='us-gaap:NetCashProvidedByUsedInOperatingActivities' "
+                       "contextRef='fy' unitRef='usd' scale='6' id='cash'>100</ix:nonFraction>"
+                       f"</td></tr><tr><td>{label}</td><td>{revenue('right', '200')}</td></tr>"
+                       f"<tr><td>Other revenue</td><td>{revenue('wrong', '900')}</td></tr></table>"
+                       "<p>Other text " + "a " * 100 + "</p>"
+                       "<h1>ITEM 9. CHANGES IN AND DISAGREEMENTS WITH ACCOUNTANTS</h1>"
+                       "</body></html>").encode()
+                document = SimpleNamespace(period_end=date(2024, 12, 31), document_type="10-k",
+                                           security=SimpleNamespace(symbol=symbol), metadata={"cik": cik})
+                version = SimpleNamespace(raw_gzip=gzip.compress(raw),
+                                          content_text=extract_sec_html(raw), document=document)
+                rows, problem = _latest_rows(version)
+                self.assertIsNone(problem)
+                selected = next(row for row in rows if row["code"] == code)
+                self.assertEqual(selected["amount"], Decimal("2"))
+                self.assertEqual(selected["fact_id"], "right")
+                self.assertIn(label, selected["citation"]["quote"])
+                document.metadata = {"cik": "1"}
+                wrong_company_rows, _ = _latest_rows(version)
+                self.assertNotIn(code, [row["code"] for row in wrong_company_rows])
+
     def test_historical_lease_uses_original_filing_and_rejects_wrong_cik(self):
         def filing(year, *, comparative=False, liability=None):
             years = (year, year - 1) if comparative else (year,)

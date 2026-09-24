@@ -44,6 +44,8 @@ COMPANY_METRICS = {
     "AAPL": (
         ("finance_liability", "融资租赁负债（期末）", "us-gaap:FinanceLeaseLiability",
          "instant", r"^Total lease liabilities\s*\|", None, None),
+        ("iphone_revenue", "iPhone 收入", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+         "duration", r"^iPhone\s*\|", "srt:ProductOrServiceAxis", "aapl:IPhoneMember"),
         ("company_revenue", "Services 收入", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
          "duration", r"^Services\s*\|", "srt:ProductOrServiceAxis", "us-gaap:ServiceMember"),
         ("uncommenced_lease", "尚未开始的租赁（未来承诺）",
@@ -53,6 +55,10 @@ COMPANY_METRICS = {
          "us-gaap:OperatingLeaseLeaseNotYetCommencedMember"),
     ),
     "TSLA": (
+        ("automotive_revenue", "汽车业务总收入（含销售、监管积分和租赁）",
+         "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", "duration",
+         r"^Total automotive revenues\s*\|", "srt:ProductOrServiceAxis",
+         "tsla:AutomotiveRevenuesMember"),
         ("company_revenue", "Energy generation and storage 收入",
          "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", "duration",
          r"^Energy generation and storage\s*\|", "srt:ProductOrServiceAxis",
