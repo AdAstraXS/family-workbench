@@ -14,7 +14,7 @@
       <a class="button" href="{{ document.source_url }}" target="_blank" rel="noopener noreferrer">SEC 原文</a>
     </div>
   </div>
-  <p class="research-private-note">以正文第 {{ version.version_number|default:"—" }} 版为基准，核对最多三个完整财年；单位为亿美元。基础指标固定展示，其余仅显示你确认追踪的项目。<a href="{% url 'investment_research:metric_focus' dossier.pk %}">调整重点指标</a>。比较数可能因重列而与原年报不同；出现冲突会留空待核对。空白不能当作零。“简化自由现金流”只由上两行相减，不是投入回报率。租赁存量与尚未开始的租赁均不是当期现金支出，公司专属收入不可跨公司直接比较。</p>
+  <p class="research-private-note">以正文第 {{ version.version_number|default:"—" }} 版为基准，核对最多三个完整财年；金额单位为亿美元，毛利率单独标为百分比。基础指标固定展示，其余仅显示你确认追踪的项目。<a href="{% url 'investment_research:metric_focus' dossier.pk %}">调整重点指标</a>。比较数可能因重列而与原年报不同；出现冲突会留空待核对。空白不能当作零。“简化自由现金流”只由上两行相减，不是投入回报率。租赁存量与尚未开始的租赁均不是当期现金支出，公司专属收入不可跨公司直接比较。</p>
   {% if can_fill_history %}<form method="post" action="{% url 'investment_research:fill_document_metrics_history' dossier.pk document.pk %}" class="research-actions">{% csrf_token %}<input type="hidden" name="version" value="{{ version.pk }}"><button class="button" type="submit">补齐缺失的历史 10-K</button></form>{% endif %}
   {% if problem %}
     <p class="research-private-note">{{ problem }}</p>
@@ -33,7 +33,9 @@
                     <small class="research-metric-source">来源 FY{{ cell.source_report_year }} 10-K · 正文第 {{ cell.source_version_number }} 版{% if cell.status != "已核对" %} · {{ cell.status }}{% endif %}</small>
                     <span class="research-metric-links"><a href="{% url 'investment_research:document_detail' dossier.pk cell.source_document_id %}?version={{ cell.source_version_id }}&amp;start={{ cell.citation.start }}&amp;end={{ cell.citation.end }}&amp;hash={{ cell.citation.hash }}#research-citation">本地原文</a>{% for fact_id in cell.fact_ids %}<a href="{{ cell.source_url }}#{{ fact_id }}" target="_blank" rel="noopener noreferrer">SEC 数字{% if cell.fact_ids|length > 1 %} {{ forloop.counter }}{% endif %}</a>{% endfor %}</span>
                   {% elif cell.derived %}
-                    <strong>{{ cell.amount|floatformat:2 }}</strong><span class="research-private-note">由上两行相减</span>
+                    <strong>{{ cell.amount|floatformat:2 }}{% if row.unit == "percent" %}%{% endif %}</strong>
+                    <small class="research-metric-source">{{ cell.status }} · 计算值，非独立披露</small>
+                    {% if cell.components %}<span class="research-metric-links">{% for component in cell.components %}<a href="{% url 'investment_research:document_detail' dossier.pk component.cell.source_document_id %}?version={{ component.cell.source_version_id }}&amp;start={{ component.cell.citation.start }}&amp;end={{ component.cell.citation.end }}&amp;hash={{ component.cell.citation.hash }}#research-citation">{{ component.label }}原文</a><a href="{{ component.cell.source_url }}#{{ component.cell.fact_id }}" target="_blank" rel="noopener noreferrer">{{ component.label }} SEC 数字</a>{% endfor %}</span>{% endif %}
                   {% else %}
                     <span class="research-private-note">— · {{ cell.status }}</span>
                     {% if cell.pending_document_id %}<span class="research-metric-links"><a href="{% url 'investment_research:document_detail' dossier.pk cell.pending_document_id %}">查看该年 10-K{% if cell.status == "该年 10-K 正文未保存" %}并提取正文{% endif %}</a></span>{% elif "未归档" in cell.status %}<span class="research-metric-links"><a href="{% url 'investment_research:documents' dossier.pk %}">查看资料列表</a></span>{% endif %}

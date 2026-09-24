@@ -1,0 +1,23 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}新财报复核 · {{ dossier.security.name }}{% endblock %}
+
+{% block research_content %}
+<section class="research-page">
+  <div class="research-header"><div><p class="research-private-note">{{ dossier.security.name }}（{{ dossier.security.symbol }}）· 仅自己可见</p><h1>新财报复核</h1></div><a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a></div>
+  {% if not start_date %}
+    <p class="research-document-empty">这份档案还没有正式判断。先了解公司，再由你记录第一版判断，之后发布的 10-Q/10-K 才会进入复核清单。</p>
+    {% if can_write %}<a class="button" href="{% url 'investment_research:first_thesis' dossier.pk %}">记录第一版判断</a>{% endif %}
+  {% else %}
+    <p class="research-private-note">列出第一版判断于 {{ start_date|date:"Y-m-d" }} 保存后发布、已归档的 SEC 10-Q/10-K。这里只提醒并记录你的核查结果；不把新财报自动解释为支持或反证。同日发布的资料需在官方资料页人工查看。</p>
+    {% if items %}<div class="research-document-list">
+      {% for item in items %}<article class="research-document-card">
+        <div class="research-document-meta"><span class="research-document-type">{{ item.document.get_document_type_display }}</span><span>发布于 {{ item.document.published_at|date:"Y-m-d" }} · 报告期至 {{ item.document.period_end|date:"Y-m-d" }}</span></div>
+        <h2><a href="{% url 'investment_research:filing_review' dossier.pk item.document.pk %}">{{ item.document.title }}</a></h2>
+        <p class="research-document-status">{% if item.pending %}{% if item.version %}待复核 · 正文已保存{% else %}待复核 · 请先保存正文{% endif %}{% elif item.needs_revision %}已复核 · 待你修订判断{% else %}已复核 · {{ item.review.created_at|date:"Y-m-d H:i" }}{% endif %}</p>
+        <a href="{% url 'investment_research:filing_review' dossier.pk item.document.pk %}">{% if item.pending %}开始复核{% else %}查看复核记录{% endif %}</a>
+      </article>{% endfor %}
+    </div>{% else %}<p class="research-document-empty">目前没有第一版判断之后发布、已归档的新财报。可返回档案点击“立即同步”；查看本页不会联网抓取。</p>{% endif %}
+  {% endif %}
+</section>
+{% endblock %}

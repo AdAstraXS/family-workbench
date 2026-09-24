@@ -48,6 +48,8 @@ COMPANY_METRICS = {
          "duration", r"^iPhone\s*\|", "srt:ProductOrServiceAxis", "aapl:IPhoneMember"),
         ("company_revenue", "Services 收入", "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
          "duration", r"^Services\s*\|", "srt:ProductOrServiceAxis", "us-gaap:ServiceMember"),
+        ("company_cost", "Services 销售成本", "us-gaap:CostOfGoodsAndServicesSold",
+         "duration", r"^Services\s*\|", "srt:ProductOrServiceAxis", "us-gaap:ServiceMember"),
         ("uncommenced_lease", "尚未开始的租赁（未来承诺）",
          "us-gaap:UnrecordedUnconditionalPurchaseObligationBalanceSheetAmount", "instant",
          r"fixed payment obligations under additional leases.*had not yet commenced",
@@ -63,6 +65,9 @@ COMPANY_METRICS = {
          "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax", "duration",
          r"^Energy generation and storage\s*\|", "srt:ProductOrServiceAxis",
          "tsla:EnergyGenerationAndStorageMember"),
+        ("company_cost", "Energy generation and storage 销售成本", "us-gaap:CostOfRevenue",
+         "duration", r"^Energy generation and storage\s*\|", "srt:ProductOrServiceAxis",
+         "tsla:EnergyGenerationAndStorageMember"),
     ),
 }
 COMPANY_CIK = {"MSFT": 789019, "AAPL": 320193, "TSLA": 1318605}
@@ -70,6 +75,7 @@ HISTORICAL_LEASE_CODES = frozenset({
     "finance_rou_add", "finance_principal", "finance_liability", "finance_rou_asset",
     "uncommenced_lease",
 })
+BUSINESS_CALC_CODES = frozenset({"company_cost", "company_gross_profit", "company_gross_margin"})
 
 
 def _document_cik(document):
@@ -345,4 +351,29 @@ def tenk_metric_grid(version, historical_documents=()):
             free_cash_cells.append({"status": "基础金额未全部核对"})
     rows.insert(2, {"code": "simple_fcf", "label": "简化自由现金流（经营现金流－固定资产现金支出）",
                     "cells": free_cash_cells})
+    if "company_cost" in {row["code"] for row in rows}:
+        revenue = next(row for row in rows if row["code"] == "company_revenue")
+        cost = next(row for row in rows if row["code"] == "company_cost")
+        gross_cells = []
+        margin_cells = []
+        for revenue_cell, cost_cell in zip(revenue["cells"], cost["cells"]):
+            if ("amount" in revenue_cell and "amount" in cost_cell and
+                    revenue_cell["amount"] > 0 and cost_cell["amount"] >= 0):
+                gross = revenue_cell["amount"] - cost_cell["amount"]
+                components = [{"label": "收入", "cell": revenue_cell},
+                              {"label": "成本", "cell": cost_cell}]
+                gross_cells.append({"status": "收入减成本", "derived": True,
+                                    "amount": gross, "components": components})
+                margin_cells.append({"status": "毛利除以收入", "derived": True,
+                                     "amount": gross / revenue_cell["amount"] * Decimal("100"),
+                                     "components": components})
+            else:
+                missing = {"status": "收入和成本未全部核对"}
+                gross_cells.append(missing.copy())
+                margin_cells.append(missing.copy())
+        cost_index = rows.index(cost)
+        rows.insert(cost_index + 1, {"code": "company_gross_profit", "label": "计算毛利（收入－成本）",
+                                     "cells": gross_cells})
+        rows.insert(cost_index + 2, {"code": "company_gross_margin", "label": "计算毛利率（毛利÷收入）",
+                                     "unit": "percent", "cells": margin_cells})
     return periods, rows, None

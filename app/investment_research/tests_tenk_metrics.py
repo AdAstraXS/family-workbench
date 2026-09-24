@@ -57,6 +57,64 @@ def _version(*, duplicate=False, dimensioned=False, visible=True, zero=False, wr
 
 
 class TenKMetricsTests(SimpleTestCase):
+    def test_business_margin_requires_separately_cited_revenue_and_cost(self):
+        for symbol, cik, label, member, cost_concept in (
+            ("AAPL", "320193", "Services", "us-gaap:ServiceMember",
+             "us-gaap:CostOfGoodsAndServicesSold"),
+            ("TSLA", "1318605", "Energy generation and storage",
+             "tsla:EnergyGenerationAndStorageMember", "us-gaap:CostOfRevenue"),
+        ):
+            with self.subTest(symbol=symbol):
+                def build(include_cost):
+                    cost_row = (f"<tr><td>{label}</td><td><ix:nonFraction name='{cost_concept}' "
+                                "contextRef='business' unitRef='usd' scale='6' id='cost'>50"
+                                "</ix:nonFraction></td></tr>") if include_cost else ""
+                    raw = ("<html><body><ix:header><xbrli:unit id='usd'><xbrli:measure>"
+                           "iso4217:USD</xbrli:measure></xbrli:unit>"
+                           "<xbrli:context id='fy'><xbrli:period><xbrli:startDate>2024-01-01"
+                           "</xbrli:startDate><xbrli:endDate>2024-12-31</xbrli:endDate>"
+                           "</xbrli:period></xbrli:context>"
+                           "<xbrli:context id='business'><xbrli:entity><xbrli:segment>"
+                           "<xbrldi:explicitMember dimension='srt:ProductOrServiceAxis'>"
+                           f"{member}</xbrldi:explicitMember></xbrli:segment></xbrli:entity>"
+                           "<xbrli:period><xbrli:startDate>2024-01-01</xbrli:startDate>"
+                           "<xbrli:endDate>2024-12-31</xbrli:endDate></xbrli:period>"
+                           "</xbrli:context></ix:header>"
+                           "<h1>ITEM 8. FINANCIAL STATEMENTS AND SUPPLEMENTARY DATA</h1>"
+                           "<table><tr><td>Net cash provided by operating activities</td><td>"
+                           "<ix:nonFraction name='us-gaap:NetCashProvidedByUsedInOperatingActivities' "
+                           "contextRef='fy' unitRef='usd' scale='6' id='cash'>100</ix:nonFraction>"
+                           f"</td></tr><tr><td>{label}</td><td><ix:nonFraction "
+                           "name='us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax' "
+                           "contextRef='business' unitRef='usd' scale='6' id='revenue'>200"
+                           "</ix:nonFraction></td></tr>" + cost_row + "</table><p>" +
+                           "Other text " * 80 + "</p>"
+                           "<h1>ITEM 9. CHANGES IN AND DISAGREEMENTS WITH ACCOUNTANTS</h1>"
+                           "</body></html>").encode()
+                    document = SimpleNamespace(period_end=date(2024, 12, 31),
+                                               document_type="10-k",
+                                               security=SimpleNamespace(symbol=symbol),
+                                               metadata={"cik": cik})
+                    return SimpleNamespace(raw_gzip=gzip.compress(raw),
+                                           content_text=extract_sec_html(raw), document=document)
+
+                rows, problem = _latest_rows(build(True))
+                self.assertIsNone(problem)
+                by_code = {row["code"]: row for row in rows}
+                self.assertEqual(by_code["company_revenue"]["fact_id"], "revenue")
+                self.assertEqual(by_code["company_cost"]["fact_id"], "cost")
+                self.assertNotEqual(by_code["company_revenue"]["citation"],
+                                    by_code["company_cost"]["citation"])
+                self.assertEqual(by_code["company_gross_profit"]["amount"], Decimal("1.5"))
+                self.assertEqual(by_code["company_gross_margin"]["amount"], Decimal("75"))
+                self.assertEqual([item["cell"]["fact_id"] for item in
+                                  by_code["company_gross_margin"]["components"]],
+                                 ["revenue", "cost"])
+                missing_rows, _ = _latest_rows(build(False))
+                missing = {row["code"]: row for row in missing_rows}
+                self.assertNotIn("amount", missing["company_gross_profit"])
+                self.assertNotIn("amount", missing["company_gross_margin"])
+
     def test_company_revenue_uses_exact_business_member_and_cited_item8_line(self):
         for symbol, cik, code, label, member in (
             ("AAPL", "320193", "iphone_revenue", "iPhone", "aapl:IPhoneMember"),

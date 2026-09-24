@@ -197,6 +197,51 @@ class OfficialResearchContentVersion(models.Model):
         ]
 
 
+class ResearchFilingReview(models.Model):
+    """成员针对一份新财报的复核记录；每次保存追加一条，不改写旧记录。"""
+
+    OUTCOME_SUPPORTS = "supports"
+    OUTCOME_WEAKENS = "weakens"
+    OUTCOME_MIXED = "mixed"
+    OUTCOME_UNCLEAR = "unclear"
+    OUTCOME_CHOICES = [
+        (OUTCOME_SUPPORTS, "总体支持"),
+        (OUTCOME_WEAKENS, "总体削弱"),
+        (OUTCOME_MIXED, "有支持也有反证"),
+        (OUTCOME_UNCLEAR, "证据仍不足"),
+    ]
+    ACTION_KEEP = "keep"
+    ACTION_REVISE = "revise"
+    ACTION_CHOICES = [
+        (ACTION_KEEP, "暂时保持判断"),
+        (ACTION_REVISE, "需要修订判断"),
+    ]
+
+    dossier = models.ForeignKey(ResearchDossier, on_delete=models.PROTECT,
+                                related_name="filing_reviews", verbose_name="研究档案")
+    document = models.ForeignKey(OfficialResearchDocument, on_delete=models.PROTECT,
+                                 related_name="research_reviews", verbose_name="复核财报")
+    content_version = models.ForeignKey(OfficialResearchContentVersion, on_delete=models.PROTECT,
+                                        related_name="research_reviews", verbose_name="引用正文版本")
+    thesis_revision = models.ForeignKey(ResearchThesisRevision, on_delete=models.PROTECT,
+                                        related_name="filing_reviews", verbose_name="复核时的判断")
+    assessments = models.JSONField("逐项假设与问题核查", default=list)
+    outcome = models.CharField("总体结果", max_length=16, choices=OUTCOME_CHOICES)
+    action = models.CharField("判断处理", max_length=16, choices=ACTION_CHOICES)
+    summary = models.TextField("本次复核结论")
+    follow_up = models.TextField("后续待查", blank=True)
+    citation = models.JSONField("固定原文引用", default=dict, blank=True)
+    created_by = models.ForeignKey(FamilyMember, on_delete=models.PROTECT,
+                                   related_name="research_filing_reviews", verbose_name="复核人")
+    created_at = models.DateTimeField("复核时间", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "财报复核"
+        verbose_name_plural = "财报复核"
+        ordering = ["-created_at", "-pk"]
+        indexes = [models.Index(fields=["dossier", "document", "-created_at"])]
+
+
 class ResearchSourceState(TimestampedModel):
     """来源同步状态：每个证券每个来源一条，记录游标与最近同步结果。
 

@@ -21,7 +21,7 @@
     {% if can_write %}
       <form method="post" class="research-form">{% csrf_token %}<input type="hidden" name="action" value="save">
         <h2>我决定追踪</h2>
-        {% for choice in choices %}<label><input type="checkbox" name="codes" value="{{ choice.code }}"{% if choice.checked %} checked{% endif %}> {{ choice.label }}{% if not choice.available %} · 当期原文数字尚未核对{% endif %}</label>{% endfor %}
+        {% for choice in choices %}<label><input type="checkbox" name="codes" value="{{ choice.code }}"{% if choice.checked %} checked{% endif %}> {{ choice.label }}{% if choice.includes_margin %} · 同时显示单独引用的成本、计算毛利和毛利率{% endif %}{% if not choice.available %} · 当期原文数字尚未核对{% endif %}</label>{% endfor %}
         <button type="submit">保存追踪指标</button>
       </form>
       {% if providers %}<details class="research-initial"><summary>让 AI 帮我选择指标</summary>

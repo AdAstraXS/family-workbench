@@ -19,6 +19,12 @@
     </div>
   </div>
 
+  <section class="research-journey" aria-label="研究进度">
+    <div><strong>1 · 了解公司</strong><p>查看 SEC 资料与原文，决定值得核查的指标。</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看资料</a></div>
+    <div><strong>2 · 形成判断</strong><p>{% if revision %}已保存第 {{ revision.revision_number }} 版判断和待验证问题。{% else %}先研究，再由你写下第一版判断。{% endif %}</p>{% if not revision and can_write %}<a href="{% url 'investment_research:first_thesis' dossier.pk %}">记录第一版判断</a>{% endif %}</div>
+    <div><strong>3 · 新财报复核</strong><p>{% if not revision %}保存判断后，才能比较随后发布的财报。{% elif pending_review_count %}{{ pending_review_count }} 份新财报待复核。{% elif needs_revision_count %}已复核，{{ needs_revision_count }} 份提示修订判断。{% else %}暂无待复核的新财报。{% endif %}</p>{% if revision %}<a href="{% url 'investment_research:filing_reviews' dossier.pk %}">查看复核清单</a>{% endif %}</div>
+  </section>
+
   <section class="research-source-summary" aria-labelledby="official-materials-heading">
     <div>
       <h2 id="official-materials-heading">官方资料</h2>
@@ -68,6 +74,13 @@
         <ul>{% for item in revision.questions %}<li>{{ item }}</li>{% endfor %}</ul>
       {% else %}<p class="research-none">（无）</p>{% endif %}
     </article>
+    <section class="research-source-summary" aria-labelledby="filing-review-heading">
+      <div><h2 id="filing-review-heading">下一期财报复核</h2>
+        <p>{% if pending_review_count %}{{ pending_review_count }} 份新财报待你逐项核查假设与问题。{% elif needs_revision_count %}复核已指出需要修订判断；旧判断仍保留，等你确认新版本。{% else %}目前没有待复核的后续 10-Q/10-K。同步官方资料后会在这里出现。{% endif %}</p>
+        {% for item in review_items %}{% if item.pending or item.needs_revision %}<p><a href="{% url 'investment_research:filing_review' dossier.pk item.document.pk %}">{{ item.document.title }}</a> · {{ item.document.published_at|date:"Y-m-d" }}{% if item.needs_revision %} · 待修订判断{% elif not item.version %} · 正文待保存{% endif %}</p>{% endif %}{% endfor %}
+      </div>
+      <a class="button" href="{% url 'investment_research:filing_reviews' dossier.pk %}">全部复核记录</a>
+    </section>
   {% else %}
     <p class="research-empty">正在了解这家公司。可以先查看官方资料，再决定是否形成自己的判断。</p>
   {% endif %}

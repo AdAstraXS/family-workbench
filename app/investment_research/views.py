@@ -24,11 +24,15 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from .citations import locate_quote, resolve_quote
-from .forms import CreateDossierForm, EditThesisForm, ExploreDossierForm, FirstThesisForm
+from .forms import (
+    CreateDossierForm, EditThesisForm, ExploreDossierForm, FilingReviewForm, FirstThesisForm,
+)
+from .filing_review import FilingReviewConflict, reviewable_filings, save_filing_review
 from .models import (
     OfficialResearchContentVersion,
     OfficialResearchDocument,
     ResearchDossier,
+    ResearchFilingReview,
     ResearchSourceState,
 )
 from .permissions import (
@@ -57,7 +61,7 @@ from .source_sync import sync_research_sources
 from .tenk_chapters import tenk_chapter_coverage
 from .tenk_financial_index import tenk_item8_index
 from .tenk_history import fill_tenk_history
-from .tenk_metrics import HISTORICAL_LEASE_CODES, tenk_metric_grid
+from .tenk_metrics import BUSINESS_CALC_CODES, HISTORICAL_LEASE_CODES, tenk_metric_grid
 from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
 
 PAGE_SIZE = 20
@@ -115,6 +119,10 @@ def index(request):
     dossiers = accessible_dossiers(member).order_by("-updated_at", "-pk")
     paginator = Paginator(dossiers, PAGE_SIZE)
     page = paginator.get_page(request.GET.get("page"))
+    for dossier in page.object_list:
+        _, review_items = reviewable_filings(dossier)
+        dossier.pending_review_count = sum(item["pending"] for item in review_items)
+        dossier.needs_revision_count = sum(item["needs_revision"] for item in review_items)
     return render(
         request,
         "investment_research/index.html",
@@ -270,6 +278,7 @@ def detail(request, pk):
         ).select_related("provider").order_by("-created_at")[:30]
         if (analysis.scope or {}).get("dossier_id") == dossier.pk
     ][:5]
+    review_start_date, review_items = reviewable_filings(dossier)
     return render(
         request,
         "investment_research/detail.html",
@@ -286,6 +295,11 @@ def detail(request, pk):
             "research_document_limit": MAX_DOCUMENT_CHARS,
             "recent_drafts": recent_drafts,
             "selected_metric_count": len(dossier.selected_metric_codes or []),
+            "review_start_date": review_start_date,
+            "review_items": [item for item in review_items
+                             if item["pending"] or item["needs_revision"]][:5],
+            "pending_review_count": sum(item["pending"] for item in review_items),
+            "needs_revision_count": sum(item["needs_revision"] for item in review_items),
         },
     )
 
@@ -409,6 +423,89 @@ def history(request, pk):
 
 
 @_method(["GET"])
+def filing_reviews(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    start_date, items = reviewable_filings(dossier)
+    return render(request, "investment_research/filing_reviews.html", {
+        "dossier": dossier, "start_date": start_date, "items": items,
+        "can_write": is_writer(member),
+    })
+
+
+@_method(["GET", "POST"])
+def filing_review(request, pk, document_pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.current_revision_id is None:
+        return redirect("investment_research:first_thesis", pk=pk)
+    _, items = reviewable_filings(dossier)
+    item = next((value for value in items if value["document"].pk == document_pk), None)
+    if item is None:
+        raise Http404("这份资料不在当前档案的新财报清单中。")
+    document = item["document"]
+    version = item["version"]
+    if request.method == "POST" and not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能保存财报复核。")
+    if request.method == "POST" and version is None:
+        raise Http404("请先保存这份财报的正文。")
+    revision = dossier.current_revision
+    form = None
+    if version and is_writer(member):
+        form = FilingReviewForm(
+            revision, request.POST if request.method == "POST" else None,
+            initial={"expected_revision_id": revision.pk, "version_id": version.pk},
+        )
+        if request.method == "POST" and form.is_valid():
+            try:
+                save_filing_review(
+                    actor=member, dossier_id=dossier.pk, document_id=document.pk,
+                    version_id=form.cleaned_data["version_id"],
+                    expected_revision_id=form.cleaned_data["expected_revision_id"],
+                    assessments=form.cleaned_assessments(),
+                    outcome=form.cleaned_data["outcome"], action=form.cleaned_data["action"],
+                    summary=form.cleaned_data["summary"],
+                    follow_up=form.cleaned_data["follow_up"], quote=form.cleaned_data["quote"],
+                )
+            except FilingReviewConflict as exc:
+                form.add_error(None, str(exc))
+                return render(request, "investment_research/filing_review.html", {
+                    "dossier": dossier, "document": document, "version": version,
+                    "revision": revision, "form": form,
+                    "assessment_fields": [{"text": text, "status": form[status_name],
+                                           "note": form[note_name]}
+                                          for _, text, status_name, note_name in form.assessment_fields],
+                    "prior_reviews": [], "can_write": True,
+                    "needs_revision": item["needs_revision"],
+                }, status=409)
+            except DossierNotFound:
+                raise Http404
+            except ResearchValidationError as exc:
+                form.add_error(None, str(exc))
+            else:
+                messages.success(request, "本次财报复核已保存。旧记录和原文引用会保留。")
+                return redirect("investment_research:filing_review", pk=pk,
+                                document_pk=document.pk)
+    prior_reviews = ResearchFilingReview.objects.filter(
+        dossier=dossier, document=document,
+    ).select_related("thesis_revision", "content_version").order_by("-created_at", "-pk")
+    return render(request, "investment_research/filing_review.html", {
+        "dossier": dossier, "document": document, "version": version,
+        "revision": revision, "form": form,
+        "assessment_fields": ([{"text": text, "status": form[status_name],
+                                "note": form[note_name]}
+                               for _, text, status_name, note_name in form.assessment_fields]
+                              if form else []),
+        "prior_reviews": prior_reviews, "can_write": is_writer(member),
+        "needs_revision": item["needs_revision"],
+    })
+
+
+@_method(["GET"])
 def documents(request, pk):
     """档案内官方资料列表；GET 只读，不触发任何来源同步。"""
     member = _get_member_or_403(request)
@@ -529,7 +626,10 @@ def document_metrics(request, pk, document_pk):
         if version else ([], [], "请先提取这份 10-K 的正文。")
     )
     selected_codes = set(dossier.selected_metric_codes or [])
-    rows = [row for row in rows if row["code"] in CORE_CODES or row["code"] in selected_codes]
+    visible_codes = CORE_CODES | selected_codes
+    if "company_revenue" in selected_codes:
+        visible_codes |= BUSINESS_CALC_CODES
+    rows = [row for row in rows if row["code"] in visible_codes]
     return render(request, "investment_research/document_metrics.html", {
         "dossier": dossier, "document": document, "version": version,
         "periods": periods, "rows": rows, "problem": problem,
@@ -585,8 +685,10 @@ def metric_focus(request, pk):
             selected = set(dossier.selected_metric_codes or [])
             choices = [{"code": row["code"], "label": row["label"],
                         "checked": row["code"] in selected,
-                        "available": bool(row["cells"][0].get("citation"))}
-                       for row in rows if row["code"] not in CORE_CODES]
+                        "available": bool(row["cells"][0].get("citation")),
+                        "includes_margin": row["code"] == "company_revenue" and
+                        any(item["code"] == "company_cost" for item in rows)}
+                       for row in rows if row["code"] not in CORE_CODES | BUSINESS_CALC_CODES]
         else:
             messages.warning(request, problem)
     latest = next((analysis for analysis in AiAnalysisRequest.objects.filter(

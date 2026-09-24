@@ -19,7 +19,7 @@ from .research_ai import (
 )
 from .services import DossierNotFound, ResearchValidationError, _require_writer
 from .tenk_chapters import tenk_chapter_coverage
-from .tenk_metrics import tenk_metric_grid
+from .tenk_metrics import BUSINESS_CALC_CODES, tenk_metric_grid
 
 CORE_CODES = frozenset({"operating_cash", "ppe_cash", "simple_fcf"})
 PROMPT_VERSION = "research-metric-focus-v1"
@@ -33,7 +33,7 @@ def metric_choices(version):
     _, rows, problem = tenk_metric_grid(version)
     if problem:
         raise ResearchValidationError(problem)
-    return [row for row in rows if row["code"] not in CORE_CODES]
+    return [row for row in rows if row["code"] not in CORE_CODES | BUSINESS_CALC_CODES]
 
 
 def save_metric_focus(*, actor, dossier_id, version_id, codes):
@@ -94,7 +94,7 @@ def _suggestion_candidates(rows, revision):
     explicit_lease_interest = any(word in thesis_text for word in ("租赁", "lease", "租用"))
     eligible = []
     for row in rows:
-        if row["code"] in CORE_CODES:
+        if row["code"] in CORE_CODES | BUSINESS_CALC_CODES:
             continue
         if row["code"] in LEASE_CODES and not explicit_lease_interest:
             amount = row["cells"][0].get("amount")
@@ -173,7 +173,10 @@ def generate_metric_suggestions(*, actor, dossier_id, version_id, provider_id, c
     if not choices:
         raise ResearchAiError("这份年报暂未形成有证据支持的额外指标候选。")
     allowed = {row["code"]: row["label"] for row in choices}
-    evidence = _source_evidence(version, [row for row in grid if row["code"] in CORE_CODES] + choices)
+    evidence_rows = [row for row in grid if row["code"] in CORE_CODES] + choices
+    if any(row["code"] == "company_revenue" for row in choices):
+        evidence_rows.extend(row for row in grid if row["code"] == "company_cost")
+    evidence = _source_evidence(version, evidence_rows)
     if not evidence:
         raise ResearchAiError("当前年报没有可引用的业务或指标原文。")
     current = dossier.current_revision
@@ -188,6 +191,8 @@ def generate_metric_suggestions(*, actor, dossier_id, version_id, provider_id, c
     )
     lines = [f"标的：{dossier.security.symbol}；10-K：{version.document.title}；正文版本 {version.pk}。",
              "可推荐指标：" + json.dumps(allowed, ensure_ascii=False)]
+    if any(row["code"] == "company_cost" for row in grid):
+        lines.append("选择 company_revenue 后，页面将分别引用收入与成本事实；毛利和毛利率只在两项均核对后计算。")
     if current:
         lines.extend([f"本人判断：{current.thesis[:2000]}",
                       f"关键假设：{json.dumps(current.pillars, ensure_ascii=False)}",
