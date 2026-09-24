@@ -142,6 +142,10 @@ def comparison_rows(position_row, result, queried_at=None):
     old_pnl = ((opening - old_close) if short else (old_close - opening)) if old_close is not None and opening is not None else None
     if old_pnl is not None:
         old_pnl = old_pnl.quantize(Decimal("0.01"))
+    old_pnl_label = (
+        "参考亏损" if old_pnl is not None and old_pnl < 0 else
+        "参考盈利" if old_pnl is not None and old_pnl > 0 else "持平"
+    )
     rows = []
     for item in result.get("candidates", []):
         quote = item.get("quote") or {}
@@ -167,5 +171,7 @@ def comparison_rows(position_row, result, queried_at=None):
             "probability": quote.get("probability"), "as_of": quote.get("as_of"),
         })
     return {"old_close": old_close, "old_pnl": old_pnl, "rows": rows,
+            "old_pnl_abs": abs(old_pnl) if old_pnl is not None else None,
+            "old_pnl_label": old_pnl_label,
             "old_quote_as_of": old_quote.get("as_of"),
             "reference": quote_reference(result, queried_at)}

@@ -103,6 +103,7 @@ class PositionScanTests(TestCase):
         self.assertContains(page, "历史报价参考")
         self.assertContains(page, "不是当前可成交报价")
         self.assertContains(page, "报价时间相差超过 1 分钟")
+        self.assertContains(page, "参考亏损 $140.00")
         self.assertContains(page, "参考净支出 $360.00")
 
     def test_chain_selects_only_standard_puts_of_the_selected_date(self):
