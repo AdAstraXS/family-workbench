@@ -1,6 +1,7 @@
 """成员主动发起的私密投研草稿；证据是已保存的 SEC 正文版本。"""
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -16,11 +17,19 @@ from .models import OfficialResearchContentVersion, ResearchDossier
 from .services import DossierNotFound, ResearchValidationError, _require_writer
 
 PROMPT_VERSION = "research-document-v1"
-PROMPT_TEMPLATE_VERSION = "research-segment-v1"
+PROMPT_TEMPLATE_VERSION = "research-segment-v4"
 MAX_DOCUMENT_CHARS = 16000
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_TEXT = 600
 MAX_ITEMS = 5
+QUANTIFIED_AMOUNT = re.compile(
+    r"(?:[$＄]\s*\d[\d,]*(?:\.\d+)?|"
+    r"\d[\d,]*(?:\.\d+)?\s*(?:万亿|千亿|十亿|百万|亿|万)?\s*(?:美元|美金|人民币|元)|"
+    r"\d[\d,]*(?:\.\d+)?\s*(?:万亿|千亿|十亿|百万|亿)|"
+    r"[一二三四五六七八九十百千万零两〇]+\s*(?:万亿|千亿|十亿|百万|亿)?\s*(?:美元|美金|人民币|元)|"
+    r"\d[\d,]*(?:\.\d+)?\s*(?:billion|million|trillion)\b)",
+    re.IGNORECASE,
+)
 
 
 class ResearchAiError(ResearchValidationError):
@@ -119,6 +128,17 @@ def _safe_text(value, limit):
     return value.strip()
 
 
+def _redact_quantified_sentences(value):
+    """隐藏模型重述的金额及所在句；保留服务端绑定的原文引用。"""
+    parts = re.split(r"(?<=[。！？；])", value)
+    redactions = 0
+    for index, part in enumerate(parts):
+        if QUANTIFIED_AMOUNT.search(part):
+            parts[index] = "本句涉及金额或数量，具体数值及变化口径请查看引用原文。"
+            redactions += 1
+    return "".join(parts), redactions
+
+
 def _validate_output(raw, evidence, version):
     if isinstance(raw, str) and raw.strip().startswith("```"):
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -129,7 +149,11 @@ def _validate_output(raw, evidence, version):
     if not isinstance(result, dict):
         raise ResearchAiError("AI 返回结构不正确。")
     mapping = {part["id"]: part for part in evidence}
-    clean = {"summary": _safe_text(result.get("summary"), 1500)}
+    redactions = 0
+    dropped_evidence_items = 0
+    summary, count = _redact_quantified_sentences(_safe_text(result.get("summary"), 1500))
+    redactions += count
+    clean = {"summary": summary}
     for field in ("supports", "weakens"):
         items = result.get(field)
         if not isinstance(items, list) or len(items) > MAX_ITEMS:
@@ -140,10 +164,15 @@ def _validate_output(raw, evidence, version):
                 raise ResearchAiError("AI 返回的证据条目不符合要求。")
             ids = item.get("evidence_ids")
             if (not isinstance(ids, list) or not 1 <= len(ids) <= 3
-                    or any(not isinstance(ref, str) or ref not in mapping for ref in ids)):
-                raise ResearchAiError("AI 引用了未提供的原文片段。")
+                    or any(not isinstance(ref, str) for ref in ids)):
+                raise ResearchAiError("AI 返回的证据编号格式不正确。")
+            if any(ref not in mapping for ref in ids):
+                dropped_evidence_items += 1
+                continue
+            item_text, count = _redact_quantified_sentences(_safe_text(item.get("text"), MAX_TEXT))
+            redactions += count
             clean[field].append({
-                "text": _safe_text(item.get("text"), MAX_TEXT),
+                "text": item_text,
                 "citations": [{"version_id": version.pk, "start": mapping[ref]["start"],
                                "end": mapping[ref]["end"], "hash": mapping[ref]["hash"],
                                "label": ref} for ref in dict.fromkeys(ids)],
@@ -152,11 +181,25 @@ def _validate_output(raw, evidence, version):
         items = result.get(field)
         if not isinstance(items, list) or len(items) > MAX_ITEMS:
             raise ResearchAiError("AI 返回的问题列表不符合要求。")
-        clean[field] = [_safe_text(item, MAX_TEXT) for item in items]
+        clean[field] = []
+        for item in items:
+            item_text, count = _redact_quantified_sentences(_safe_text(item, MAX_TEXT))
+            redactions += count
+            clean[field].append(item_text)
     suggestion = result.get("suggested_revision", "")
     if not isinstance(suggestion, str) or len(suggestion) > 2000:
         raise ResearchAiError("AI 修订建议格式不正确。")
-    clean["suggested_revision"] = suggestion.strip()
+    clean["suggested_revision"], count = _redact_quantified_sentences(suggestion.strip())
+    clean["amount_redactions"] = redactions + count
+    clean["dropped_evidence_items"] = dropped_evidence_items
+    if dropped_evidence_items:
+        clean["summary"] = "模型部分判断引用了未提供的原文，已隐藏；请只查看下方仍有原文链接的条目。"
+        clean["suggested_revision"] = ""
+        warning = "有模型判断因引用无效被隐藏，不能据此修订正式判断。"
+        if len(clean["unknown"]) == MAX_ITEMS:
+            clean["unknown"][-1] = warning
+        else:
+            clean["unknown"].append(warning)
     return clean
 
 
@@ -216,6 +259,8 @@ def generate_research_draft(*, actor, dossier_id, version_id, provider_id, conse
         "suggested_revision 字符串。supports/weakens 每条必须引用至少一个本次 E 编号；无法判断就放在 unknown。"
         'JSON 结构示例：{"summary":"摘要","supports":[{"text":"依据","evidence_ids":["E1"]}],'
         '"weakens":[],"unknown":[],"questions":[],"suggested_revision":""}。'
+        "所有字段只写定性解释，不重述或换算原文金额和数量（包括美元、亿、billion、million、$）；"
+        "数字请由成员点击引用核对。必须区分增加额与期末额，不得将 increased by 与 increased to 混淆。"
         "草稿不是用户已确认观点，不能给确定买卖建议。"
     )
     thesis = current.thesis if current else "尚无本人正式判断，当前处于探索阶段。"

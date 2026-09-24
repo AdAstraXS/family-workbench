@@ -36,6 +36,50 @@
     </form>
   {% endif %}
 
+  {% if document.document_type == "10-k" and chapter_version %}
+    <p><a class="button" href="{% url 'investment_research:document_metrics' dossier.pk document.pk %}?version={{ chapter_version.pk }}">查看跨期指标核对</a></p>
+    <section class="research-document-body" aria-labelledby="research-chapters-heading">
+      <h2 id="research-chapters-heading">10-K 章节与阅读覆盖</h2>
+      <p class="research-private-note">按正文第 {{ chapter_version.version_number }} 版的 Item 标题定位。章节边界是自动估计；“已生成草稿”只表示涉及的 16,000 字区段曾被模型处理，不代表结论已核实。</p>
+      {% if chapter_coverage %}
+        <ol class="research-chapters">
+          {% for chapter in chapter_coverage %}
+            <li>
+              {% if chapter.located %}
+                <a href="{% url 'investment_research:document_detail' dossier.pk document.pk %}?version={{ chapter_version.pk }}&amp;start={{ chapter.start }}&amp;end={{ chapter.quote_end }}&amp;hash={{ chapter.quote_hash }}#research-citation">Item {{ chapter.code }} · {{ chapter.label }}</a>
+                <span>涉及区段 {{ chapter.covered_count }}/{{ chapter.segment_count }} 已生成草稿</span>
+              {% else %}
+                Item {{ chapter.code }} · {{ chapter.label }} <span>未识别到独立标题，可能未单列；请核对原文</span>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ol>
+      {% else %}
+        <p class="research-private-note">这份正文未识别到可靠的 Item 标题，可继续按字符区段阅读和引用原文。</p>
+      {% endif %}
+      {% if item8_statements or item8_notes %}
+        <h3>Item 8 · 财务报表与附注目录</h3>
+        <p class="research-private-note">从本版正文标题自动识别，点击可核对原文；未列出的报表或附注仍需查看完整文件。</p>
+        {% if item8_statements %}
+          <h4>财务报表</h4>
+          <ul class="research-financial-index">
+            {% for entry in item8_statements %}
+              <li><a href="{% url 'investment_research:document_detail' dossier.pk document.pk %}?version={{ chapter_version.pk }}&amp;start={{ entry.start }}&amp;end={{ entry.quote_end }}&amp;hash={{ entry.quote_hash }}#research-citation">{{ entry.label }} · {{ entry.title }}</a></li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if item8_notes %}
+          <h4>财务附注</h4>
+          <ol class="research-financial-index">
+            {% for entry in item8_notes %}
+              <li><a href="{% url 'investment_research:document_detail' dossier.pk document.pk %}?version={{ chapter_version.pk }}&amp;start={{ entry.start }}&amp;end={{ entry.quote_end }}&amp;hash={{ entry.quote_hash }}#research-citation">{{ entry.label }} · {{ entry.title }}</a></li>
+            {% endfor %}
+          </ol>
+        {% endif %}
+      {% endif %}
+    </section>
+  {% endif %}
+
   {% if highlighted %}
     <section class="research-document-body" aria-label="引用所用正文版本">
       <p class="research-private-note">固定引用：正文版本 {{ selected_version.version_number }}。浏览器地址可用于回到这段原文。</p>

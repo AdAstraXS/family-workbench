@@ -879,6 +879,7 @@ class IpoImageRecognitionApiKeyTests(TestCase):
 
         with (
             patch.dict(os.environ, {"ZHIPU_API_KEY": "valid-looking-key"}, clear=True),
+            patch("ipo.services._resolve_ipv4_with_doh", side_effect=OSError("DNS unavailable")),
             patch("ipo.services.urllib.request.urlopen", side_effect=error) as urlopen,
         ):
             with self.assertRaisesMessage(IpoImageRecognitionError, "HTTP 401"):
@@ -932,6 +933,7 @@ class IpoImageRecognitionApiKeyTests(TestCase):
 
         with (
             patch.dict(os.environ, {"ARK_API_KEY": "ark-test-key"}, clear=True),
+            patch("ipo.services._resolve_ipv4_with_doh", side_effect=OSError("DNS unavailable")),
             patch("ipo.services.urllib.request.urlopen", return_value=response_body) as urlopen,
         ):
             fields = recognize_ipo_listing_from_image(upload, provider_id=provider.pk)
@@ -941,11 +943,12 @@ class IpoImageRecognitionApiKeyTests(TestCase):
         image_url = payload["messages"][0]["content"][1]["image_url"]
         self.assertEqual(request.full_url, "https://ark.cn-beijing.volces.com/api/v3/chat/completions")
         self.assertEqual(payload["model"], "doubao-seed-2-0-lite-260215")
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
         self.assertEqual(image_url["detail"], "high")
-        self.assertTrue(image_url["url"].startswith("data:image/png;base64,"))
+        self.assertEqual(image_url["url"], "data:image/png;base64,aW1hZ2U=")
         self.assertEqual(fields["stock_code"], "09999.HK")
 
-    def test_doubao_request_uses_ipv4_doh_fallback_after_connection_reset(self):
+    def test_read_timeout_returns_error_without_replaying_image(self):
         provider = AiProvider.objects.create(
             name="豆包视觉",
             provider_type="vision",
@@ -954,30 +957,68 @@ class IpoImageRecognitionApiKeyTests(TestCase):
             extra_data={"api_key_env_var": "ARK_API_KEY"},
         )
         upload = SimpleUploadedFile("ipo.png", b"image", content_type="image/png")
-        doh_payload = {
-            "Status": 0,
-            "Answer": [
-                {
-                    "name": "ark.cn-beijing.volces.com.",
-                    "type": 1,
-                    "TTL": 60,
-                    "data": "14.103.169.114",
-                }
-            ],
-        }
+
+        with (
+            patch.dict(os.environ, {"ARK_API_KEY": "ark-test-key"}, clear=True),
+            patch("ipo.services._resolve_ipv4_with_doh", side_effect=OSError("DNS unavailable")),
+            patch(
+                "ipo.services.urllib.request.urlopen",
+                side_effect=urllib.error.URLError(TimeoutError("read timed out")),
+            ) as urlopen,
+        ):
+            with self.assertRaisesMessage(IpoImageRecognitionError, "连接或响应超时"):
+                recognize_ipo_listing_from_image(upload, provider_id=provider.pk)
+
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 45)
+
+    def test_rate_limit_preserves_retry_after_without_immediate_retry(self):
+        provider = AiProvider.objects.create(
+            name="智谱视觉",
+            provider_type="vision",
+            base_url="https://open.bigmodel.cn/api/paas/v4",
+            model_name="glm-5v-turbo",
+            extra_data={"api_key_env_var": "ZHIPU_API_KEY"},
+        )
+        upload = SimpleUploadedFile("ipo.png", b"image", content_type="image/png")
+        error = urllib.error.HTTPError(
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            429,
+            "Too Many Requests",
+            {"Retry-After": "90"},
+            io.BytesIO(b'{"error":{"code":"1302"}}'),
+        )
+
+        with (
+            patch.dict(os.environ, {"ZHIPU_API_KEY": "test-key"}, clear=True),
+            patch("ipo.services._resolve_ipv4_with_doh", side_effect=OSError("DNS unavailable")),
+            patch("ipo.services.urllib.request.urlopen", side_effect=error) as urlopen,
+        ):
+            with self.assertRaises(IpoImageRecognitionError) as raised:
+                recognize_ipo_listing_from_image(upload, provider_id=provider.pk)
+
+        self.assertEqual(urlopen.call_count, 1)
+        self.assertEqual(raised.exception.status_code, 429)
+        self.assertEqual(raised.exception.retry_after, 90)
+        self.assertIn("请求过于频繁", str(raised.exception))
+
+    def test_doubao_request_uses_ipv4_before_sending_image(self):
+        provider = AiProvider.objects.create(
+            name="豆包视觉",
+            provider_type="vision",
+            base_url="https://ark.cn-beijing.volces.com/api/v3",
+            model_name="doubao-seed-2-0-lite-260215",
+            extra_data={"api_key_env_var": "ARK_API_KEY"},
+        )
+        upload = SimpleUploadedFile("ipo.png", b"image", content_type="image/png")
         response_body = json.dumps(
             {"choices": [{"message": {"content": '{"stock_code":"09999.HK"}'}}]}
         ).encode()
 
         with (
             patch.dict(os.environ, {"ARK_API_KEY": "ark-test-key"}, clear=True),
-            patch(
-                "ipo.services.urllib.request.urlopen",
-                side_effect=[
-                    urllib.error.URLError(ConnectionResetError(104, "reset")),
-                    io.BytesIO(json.dumps(doh_payload).encode()),
-                ],
-            ),
+            patch("ipo.services._resolve_ipv4_with_doh", return_value="14.103.169.114") as doh,
+            patch("ipo.services.urllib.request.urlopen") as urlopen,
             patch(
                 "ipo.services._read_https_via_ipv4",
                 return_value=response_body,
@@ -986,6 +1027,8 @@ class IpoImageRecognitionApiKeyTests(TestCase):
             fields = recognize_ipo_listing_from_image(upload, provider_id=provider.pk)
 
         direct_ipv4.assert_called_once()
+        doh.assert_called_once_with("ark.cn-beijing.volces.com")
+        urlopen.assert_not_called()
         self.assertEqual(direct_ipv4.call_args.args[1], "14.103.169.114")
         self.assertEqual(fields["stock_code"], "09999.HK")
 
@@ -1015,6 +1058,22 @@ class IpoUploadValidationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("JPG", response.json()["error"])
 
+    def test_image_recognition_returns_rate_limit_json_for_browser_cooldown(self):
+        upload = SimpleUploadedFile("image.png", b"image", content_type="image/png")
+        with patch(
+            "ipo.views.recognize_ipo_listing_from_image",
+            side_effect=IpoImageRecognitionError(
+                "请等待 90 秒", status_code=429, retry_after=90
+            ),
+        ):
+            response = self.client.post(
+                reverse("ipo:recognize_listing_image"), {"image": upload}
+            )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.json()["retry_after"], 90)
+        self.assertIn("请等待", response.json()["error"])
+
     def test_image_recognition_rejects_file_larger_than_eight_megabytes(self):
         upload = SimpleUploadedFile(
             "large.jpg",
@@ -1034,7 +1093,7 @@ class IpoUploadValidationTests(TestCase):
         response = self.client.get(reverse("ipo:listing_create"))
 
         self.assertContains(response, 'formData.append("image", file)')
-        self.assertContains(response, 'formData.append("provider", providerSelect.value)')
+        self.assertContains(response, 'formData.append("provider", providerId)')
         self.assertNotContains(response, "createImageBitmap")
         self.assertNotContains(response, "canvas.toBlob")
 

@@ -1,0 +1,37 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}复核 {{ document.title }}{% endblock %}
+
+{% block research_content %}
+<section class="research-page">
+  <div class="research-header"><div><p class="research-private-note">{{ dossier.security.name }} · {{ document.get_document_type_display }} · 发布于 {{ document.published_at|date:"Y-m-d" }}</p><h1>复核新财报</h1></div><a class="button" href="{% url 'investment_research:filing_reviews' dossier.pk %}">返回复核清单</a></div>
+  <section class="research-source-summary"><div><h2>{{ document.title }}</h2><p>报告期至 {{ document.period_end|date:"Y-m-d" }}。请先阅读这份文件，再逐项判断它对你当前假设的影响。</p></div><div class="research-actions"><a class="button" href="{% url 'investment_research:document_detail' dossier.pk document.pk %}{% if version %}?version={{ version.pk }}{% endif %}">查看保存的正文</a><a class="button" href="{{ document.source_url }}" target="_blank" rel="noopener noreferrer">SEC 官方原文</a></div></section>
+  <article class="research-current"><h2>复核依据：第 {{ revision.revision_number }} 版判断</h2><p>{{ revision.thesis|linebreaksbr }}</p>{% if revision.pillars %}<h3>关键假设</h3><ul>{% for text in revision.pillars %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}{% if revision.questions %}<h3>待验证问题</h3><ul>{% for text in revision.questions %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}</article>
+  {% if current_plan %}<section class="research-current"><h2>你确认的下期核查计划</h2><p><a href="{% url 'investment_research:review_plan' dossier.pk %}">查看计划与历史原文</a></p>{% for item in current_plan.items %}<p><strong>{% if item.kind == "pillar" %}假设{% else %}问题{% endif %}：{{ item.text }}</strong><br>核查：{{ item.check }}<br>支持迹象：{{ item.support_signal }}；削弱迹象：{{ item.weakening_signal }}</p>{% endfor %}</section>{% endif %}
+  {% if needs_revision and can_write %}<p class="research-document-empty">上次复核认为需要修订判断，当前仍是当时的判断版本。<a href="{% url 'investment_research:edit' dossier.pk %}">保存新版本判断</a>后，这条提醒会消失，旧判断和复核记录仍可查看。</p>{% endif %}
+  {% if not version %}
+    <p class="research-document-empty">这份财报尚未保存正文。保存后可用不可变正文版本固定引文，再记录复核；只看元数据不能得出支持或反证结论。</p>
+    {% if can_write %}<form method="post" action="{% url 'investment_research:fetch_sec_content' dossier.pk document.pk %}">{% csrf_token %}<button type="submit">保存 SEC 正文</button></form>{% endif %}
+  {% elif form %}
+    <form method="post" class="research-form">{% csrf_token %}{{ form.expected_revision_id }}{{ form.version_id }}
+      <h2>记录本次复核</h2><p class="research-private-note">逐项选择“支持、削弱或仍未回答”，并复制一段本版财报原文。计算指标仍应回到各自来源核对；AI 草稿不会替你保存判断。</p>
+      {{ form.non_field_errors }}
+      {% for item in assessment_fields %}<div class="research-review-assessment"><label for="{{ item.status.id_for_label }}">{{ item.status.label }}</label>{{ item.status }}{{ item.status.errors }}<label for="{{ item.note.id_for_label }}">{{ item.note.label }}（可选）</label>{{ item.note }}{{ item.note.errors }}</div>{% endfor %}
+      <label for="{{ form.outcome.id_for_label }}">{{ form.outcome.label }}</label>{{ form.outcome }}{{ form.outcome.errors }}
+      <label for="{{ form.action.id_for_label }}">{{ form.action.label }}</label>{{ form.action }}{{ form.action.errors }}
+      <label for="{{ form.summary.id_for_label }}">{{ form.summary.label }}</label>{{ form.summary }}{{ form.summary.errors }}
+      <label for="{{ form.quote.id_for_label }}">{{ form.quote.label }}</label>{{ form.quote }}{{ form.quote.errors }}
+      <p class="research-private-note">“证据仍不足”可不填引文；其他总体结论必须引用这份财报中唯一出现的原文。复制完整句子或表格行，避免短词重复。</p>
+      <label for="{{ form.follow_up.id_for_label }}">{{ form.follow_up.label }}</label>{{ form.follow_up }}{{ form.follow_up.errors }}
+      <button type="submit">保存复核记录</button>
+    </form>
+  {% endif %}
+  {% if prior_reviews %}<section class="research-current"><h2>历次复核记录</h2>
+    {% for review in prior_reviews %}<article class="research-revision"><p><strong>{{ review.created_at|date:"Y-m-d H:i" }} · {{ review.get_outcome_display }} · {{ review.get_action_display }}</strong> · 基于第 {{ review.thesis_revision.revision_number }} 版判断</p><p>{{ review.summary|linebreaksbr }}</p>
+      {% if review.assessments %}<ul>{% for assessment in review.assessments %}<li>{% if assessment.kind == "pillar" %}假设{% else %}问题{% endif %}：{{ assessment.text }} · {% if assessment.status == "supports" %}支持{% elif assessment.status == "weakens" %}削弱{% else %}仍未回答{% endif %}{% if assessment.note %} · {{ assessment.note }}{% endif %}</li>{% endfor %}</ul>{% endif %}
+      {% if review.citation %}<p><a href="{% url 'investment_research:document_detail' dossier.pk document.pk %}?version={{ review.content_version_id }}&amp;start={{ review.citation.start }}&amp;end={{ review.citation.end }}&amp;hash={{ review.citation.hash }}#research-citation">核对本次引用的原文</a></p>{% endif %}
+      {% if review.follow_up %}<p>后续待查：{{ review.follow_up|linebreaksbr }}</p>{% endif %}
+    </article>{% endfor %}
+  </section>{% endif %}
+</section>
+{% endblock %}

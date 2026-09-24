@@ -8,6 +8,7 @@ ResearchValidationError；DossierNotFound 转 404。
 """
 import logging
 import traceback
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from ai_analysis.models import AiAnalysisRequest
@@ -23,11 +24,16 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from .citations import locate_quote, resolve_quote
-from .forms import CreateDossierForm, EditThesisForm, ExploreDossierForm, FirstThesisForm
+from .forms import (
+    CreateDossierForm, EditThesisForm, ExploreDossierForm, FilingReviewForm, FirstThesisForm,
+)
+from .filing_review import FilingReviewConflict, reviewable_filings, save_filing_review
 from .models import (
     OfficialResearchContentVersion,
     OfficialResearchDocument,
     ResearchDossier,
+    ResearchFilingReview,
+    ResearchReviewPlan,
     ResearchSourceState,
 )
 from .permissions import (
@@ -48,11 +54,19 @@ from .services import (
 )
 from .providers.sec import SecClientError
 from .research_ai import (
-    MAX_DOCUMENT_CHARS, ResearchAiError, available_research_providers,
+    MAX_DOCUMENT_CHARS, PROMPT_TEMPLATE_VERSION, ResearchAiError, available_research_providers,
     document_segments, generate_research_draft,
 )
 from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
+from .tenk_chapters import tenk_chapter_coverage
+from .tenk_financial_index import tenk_item8_index
+from .tenk_history import fill_tenk_history
+from .tenk_metrics import BUSINESS_CALC_CODES, HISTORICAL_LEASE_CODES, tenk_metric_grid
+from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
+from .review_plan import (
+    confirm_review_plan, generate_review_plan, latest_plan_source, plan_context,
+)
 
 PAGE_SIZE = 20
 logger = logging.getLogger(__name__)
@@ -109,6 +123,10 @@ def index(request):
     dossiers = accessible_dossiers(member).order_by("-updated_at", "-pk")
     paginator = Paginator(dossiers, PAGE_SIZE)
     page = paginator.get_page(request.GET.get("page"))
+    for dossier in page.object_list:
+        _, review_items = reviewable_filings(dossier)
+        dossier.pending_review_count = sum(item["pending"] for item in review_items)
+        dossier.needs_revision_count = sum(item["needs_revision"] for item in review_items)
     return render(
         request,
         "investment_research/index.html",
@@ -240,8 +258,16 @@ def detail(request, pk):
     research_groups = []
     for version in available_versions:
         segments = document_segments(version)
+        chapters = tenk_chapter_coverage(
+            version, (index for version_id, index in completed_segments if version_id == version.pk),
+        )
         for segment in segments:
             segment["completed"] = (version.pk, segment["index"]) in completed_segments
+            segment["chapter_codes"] = "、".join(
+                chapter["code"] for chapter in chapters
+                if chapter["located"] and chapter["start"] < segment["end"]
+                and chapter["end"] > segment["start"]
+            )
         research_groups.append({"version": version, "segments": segments})
     first_pending = next(
         (segment for group in research_groups for segment in group["segments"] if not segment["completed"]),
@@ -256,6 +282,10 @@ def detail(request, pk):
         ).select_related("provider").order_by("-created_at")[:30]
         if (analysis.scope or {}).get("dossier_id") == dossier.pk
     ][:5]
+    review_start_date, review_items = reviewable_filings(dossier)
+    current_plan = (ResearchReviewPlan.objects.filter(
+        dossier=dossier, thesis_revision_id=dossier.current_revision_id,
+    ).first() if dossier.current_revision_id else None)
     return render(
         request,
         "investment_research/detail.html",
@@ -271,6 +301,13 @@ def detail(request, pk):
             "research_providers": providers,
             "research_document_limit": MAX_DOCUMENT_CHARS,
             "recent_drafts": recent_drafts,
+            "selected_metric_count": len(dossier.selected_metric_codes or []),
+            "review_start_date": review_start_date,
+            "review_items": [item for item in review_items
+                             if item["pending"] or item["needs_revision"]][:5],
+            "pending_review_count": sum(item["pending"] for item in review_items),
+            "needs_revision_count": sum(item["needs_revision"] for item in review_items),
+            "current_plan": current_plan,
         },
     )
 
@@ -394,6 +431,178 @@ def history(request, pk):
 
 
 @_method(["GET"])
+def filing_reviews(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    start_date, items = reviewable_filings(dossier)
+    return render(request, "investment_research/filing_reviews.html", {
+        "dossier": dossier, "start_date": start_date, "items": items,
+        "can_write": is_writer(member),
+    })
+
+
+@_method(["GET", "POST"])
+def review_plan(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if request.method == "POST" and not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能生成或确认复核计划。")
+    version = latest_plan_source(dossier)
+    if request.method == "POST":
+        try:
+            if request.POST.get("action") == "generate":
+                if version is None:
+                    raise ResearchValidationError("请先保存最新 10-K 正文。")
+                generate_review_plan(
+                    actor=member, dossier_id=dossier.pk, version_id=version.pk,
+                    provider_id=_positive_id_or_404(request.POST.get("provider")),
+                    consent=request.POST.get("one_time_consent") == "yes",
+                )
+                messages.success(request, "AI 复核计划草稿已生成；请逐项核对后再确认。")
+            elif request.POST.get("action") == "confirm":
+                try:
+                    indexes = [int(value) for value in request.POST.getlist("selected_indexes")]
+                except ValueError as exc:
+                    raise ResearchValidationError("复核计划条目编号无效。") from exc
+                confirm_review_plan(
+                    actor=member, dossier_id=dossier.pk,
+                    analysis_id=_positive_id_or_404(request.POST.get("analysis_id")),
+                    selected_indexes=indexes,
+                )
+                messages.success(request, "已确认的复核计划保存到当前判断版本。")
+            else:
+                raise Http404
+        except DossierNotFound:
+            raise Http404
+        except (ResearchValidationError, ResearchAiError) as exc:
+            messages.error(request, str(exc))
+        return redirect("investment_research:review_plan", pk=pk)
+    revision = dossier.current_revision
+    confirmed = (ResearchReviewPlan.objects.filter(
+        dossier=dossier, thesis_revision=revision,
+    ).select_related("source_analysis").first() if revision else None)
+    latest = next((analysis for analysis in AiAnalysisRequest.objects.filter(
+        member=member, family=member.family, module="investment_research",
+        analysis_type="next_filing_plan", status=AiAnalysisRequest.STATUS_SUCCESS,
+    ).order_by("-created_at", "-pk")[:30]
+        if (analysis.scope or {}).get("dossier_id") == dossier.pk and
+        (analysis.scope or {}).get("thesis_revision_id") == getattr(revision, "pk", None) and
+        (analysis.scope or {}).get("version_id") == getattr(version, "pk", None) and
+        (analysis.scope or {}).get("selected_metric_codes") == (dossier.selected_metric_codes or [])), None)
+
+    def linked_items(items, document_id):
+        rendered = []
+        for index, item in enumerate(items):
+            citations = [{**citation, "url": (
+                reverse("investment_research:document_detail", args=[pk, document_id])
+                + "?" + urlencode({"version": citation["version_id"],
+                                   "start": citation["start"], "end": citation["end"],
+                                   "hash": citation["hash"]}) + "#research-citation")}
+                for citation in item.get("citations", [])]
+            rendered.append({**item, "item_index": index, "citations": citations})
+        return rendered
+
+    suggestions = (linked_items(latest.result.result_json.get("items", []),
+                                latest.scope["document_id"]) if latest else [])
+    confirmed_items = (linked_items(confirmed.items,
+                                    confirmed.source_analysis.scope["document_id"])
+                       if confirmed else [])
+    metrics, evidence, source_problem = {}, [], ""
+    if version and revision:
+        try:
+            metrics, evidence = plan_context(dossier, version)
+        except ResearchAiError as exc:
+            source_problem = str(exc)
+    return render(request, "investment_research/review_plan.html", {
+        "dossier": dossier, "revision": revision, "version": version,
+        "metrics": metrics, "evidence": evidence, "source_problem": source_problem,
+        "latest": latest, "suggestions": suggestions,
+        "confirmed": confirmed, "confirmed_items": confirmed_items,
+        "can_write": is_writer(member),
+        "providers": available_research_providers() if is_writer(member) else [],
+    })
+
+
+@_method(["GET", "POST"])
+def filing_review(request, pk, document_pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.current_revision_id is None:
+        return redirect("investment_research:first_thesis", pk=pk)
+    _, items = reviewable_filings(dossier)
+    item = next((value for value in items if value["document"].pk == document_pk), None)
+    if item is None:
+        raise Http404("这份资料不在当前档案的新财报清单中。")
+    document = item["document"]
+    version = item["version"]
+    if request.method == "POST" and not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能保存财报复核。")
+    if request.method == "POST" and version is None:
+        raise Http404("请先保存这份财报的正文。")
+    revision = dossier.current_revision
+    current_plan = ResearchReviewPlan.objects.filter(
+        dossier=dossier, thesis_revision=revision,
+    ).first()
+    form = None
+    if version and is_writer(member):
+        form = FilingReviewForm(
+            revision, request.POST if request.method == "POST" else None,
+            initial={"expected_revision_id": revision.pk, "version_id": version.pk},
+        )
+        if request.method == "POST" and form.is_valid():
+            try:
+                save_filing_review(
+                    actor=member, dossier_id=dossier.pk, document_id=document.pk,
+                    version_id=form.cleaned_data["version_id"],
+                    expected_revision_id=form.cleaned_data["expected_revision_id"],
+                    assessments=form.cleaned_assessments(),
+                    outcome=form.cleaned_data["outcome"], action=form.cleaned_data["action"],
+                    summary=form.cleaned_data["summary"],
+                    follow_up=form.cleaned_data["follow_up"], quote=form.cleaned_data["quote"],
+                )
+            except FilingReviewConflict as exc:
+                form.add_error(None, str(exc))
+                return render(request, "investment_research/filing_review.html", {
+                    "dossier": dossier, "document": document, "version": version,
+                    "revision": revision, "form": form,
+                    "assessment_fields": [{"text": text, "status": form[status_name],
+                                           "note": form[note_name]}
+                                          for _, text, status_name, note_name in form.assessment_fields],
+                    "prior_reviews": [], "can_write": True,
+                    "needs_revision": item["needs_revision"],
+                    "current_plan": current_plan,
+                }, status=409)
+            except DossierNotFound:
+                raise Http404
+            except ResearchValidationError as exc:
+                form.add_error(None, str(exc))
+            else:
+                messages.success(request, "本次财报复核已保存。旧记录和原文引用会保留。")
+                return redirect("investment_research:filing_review", pk=pk,
+                                document_pk=document.pk)
+    prior_reviews = ResearchFilingReview.objects.filter(
+        dossier=dossier, document=document,
+    ).select_related("thesis_revision", "content_version").order_by("-created_at", "-pk")
+    return render(request, "investment_research/filing_review.html", {
+        "dossier": dossier, "document": document, "version": version,
+        "revision": revision, "form": form,
+        "assessment_fields": ([{"text": text, "status": form[status_name],
+                                "note": form[note_name]}
+                               for _, text, status_name, note_name in form.assessment_fields]
+                              if form else []),
+        "prior_reviews": prior_reviews, "can_write": is_writer(member),
+        "needs_revision": item["needs_revision"],
+        "current_plan": current_plan,
+    })
+
+
+@_method(["GET"])
 def documents(request, pk):
     """档案内官方资料列表；GET 只读，不触发任何来源同步。"""
     member = _get_member_or_403(request)
@@ -448,6 +657,23 @@ def document_detail(request, pk, document_pk):
     elif any(key in request.GET for key in ("start", "end", "hash")):
         raise Http404("引用缺少正文版本。")
     current_version = document.content_versions.first() if document.source == "sec" else None
+    chapter_version = selected_version or current_version
+    chapter_coverage = []
+    item8_statements = []
+    item8_notes = []
+    if chapter_version and document.document_type == "10-k":
+        completed_indexes = []
+        for analysis in AiAnalysisRequest.objects.filter(
+            member=member, family=member.family, module="investment_research",
+            analysis_type="document_draft", status=AiAnalysisRequest.STATUS_SUCCESS,
+        ).only("scope"):
+            scope = analysis.scope or {}
+            if scope.get("dossier_id") == dossier.pk and scope.get("version_id") == chapter_version.pk:
+                completed_indexes.append(scope.get("segment_index", 0))
+        chapter_coverage = tenk_chapter_coverage(chapter_version, completed_indexes)
+        item8_entries = tenk_item8_index(chapter_version, chapter_coverage)
+        item8_statements = [entry for entry in item8_entries if entry["kind"] == "statement"]
+        item8_notes = [entry for entry in item8_entries if entry["kind"] == "note"]
     return render(
         request,
         "investment_research/document_detail.html",
@@ -458,8 +684,162 @@ def document_detail(request, pk, document_pk):
             "current_content_version": current_version,
             "selected_version": selected_version,
             "highlighted": highlighted,
+            "chapter_version": chapter_version,
+            "chapter_coverage": chapter_coverage,
+            "item8_statements": item8_statements,
+            "item8_notes": item8_notes,
         },
     )
+
+
+@_method(["GET"])
+def document_metrics(request, pk, document_pk):
+    """按已保存的 10-K 正文版本核对 iXBRL，不触发 SEC 请求或写库。"""
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    document = get_object_or_404(
+        OfficialResearchDocument, pk=document_pk, security=dossier.security,
+        source="sec", document_type="10-k",
+    )
+    if "version" in request.GET:
+        version = get_object_or_404(
+            OfficialResearchContentVersion,
+            pk=_positive_id_or_404(request.GET["version"]), document=document,
+        )
+    else:
+        version = document.content_versions.first()
+    historical_documents = (
+        OfficialResearchDocument.objects.filter(
+            security=dossier.security, source="sec", document_type="10-k",
+            period_end__lt=document.period_end,
+            period_end__gte=document.period_end - timedelta(days=900),
+        ).exclude(pk=document.pk).prefetch_related("content_versions")
+        if version and document.period_end else ()
+    )
+    periods, rows, problem = (
+        tenk_metric_grid(version, historical_documents)
+        if version else ([], [], "请先提取这份 10-K 的正文。")
+    )
+    selected_codes = set(dossier.selected_metric_codes or [])
+    visible_codes = CORE_CODES | selected_codes
+    if "company_revenue" in selected_codes:
+        visible_codes |= BUSINESS_CALC_CODES
+    rows = [row for row in rows if row["code"] in visible_codes]
+    return render(request, "investment_research/document_metrics.html", {
+        "dossier": dossier, "document": document, "version": version,
+        "periods": periods, "rows": rows, "problem": problem,
+        "selected_metric_count": len(selected_codes),
+        "can_fill_history": is_writer(member) and any(
+            row["code"] in HISTORICAL_LEASE_CODES and any(
+                cell["status"] in {"该年 10-K 尚未归档", "该年 10-K 正文未保存"}
+                for cell in row["cells"][1:]
+            ) for row in rows
+        ),
+    })
+
+
+@_method(["GET", "POST"])
+def metric_focus(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if request.method == "POST" and not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能修改追踪指标。")
+    version = (OfficialResearchContentVersion.objects.filter(
+        document__security=dossier.security, document__source="sec",
+        document__document_type="10-k",
+    ).select_related("document", "document__security")
+               .order_by("-document__period_end", "-fetched_at", "-pk").first())
+    if request.method == "POST":
+        if version is None:
+            raise Http404
+        try:
+            if request.POST.get("action") == "save":
+                save_metric_focus(actor=member, dossier_id=dossier.pk,
+                                  version_id=version.pk, codes=request.POST.getlist("codes"))
+                messages.success(request, "追踪指标已保存。")
+            elif request.POST.get("action") == "generate":
+                generate_metric_suggestions(
+                    actor=member, dossier_id=dossier.pk, version_id=version.pk,
+                    provider_id=_positive_id_or_404(request.POST.get("provider")),
+                    consent=request.POST.get("one_time_consent") == "yes",
+                )
+                messages.success(request, "AI 候选指标已生成；请核对原文后手动保存。")
+            else:
+                raise Http404
+        except DossierNotFound:
+            raise Http404
+        except (ResearchValidationError, ResearchAiError) as exc:
+            messages.error(request, str(exc))
+        return redirect("investment_research:metric_focus", pk=pk)
+    choices = []
+    if version:
+        _, rows, problem = tenk_metric_grid(version)
+        if not problem:
+            selected = set(dossier.selected_metric_codes or [])
+            choices = [{"code": row["code"], "label": row["label"],
+                        "checked": row["code"] in selected,
+                        "available": bool(row["cells"][0].get("citation")),
+                        "includes_margin": row["code"] == "company_revenue" and
+                        any(item["code"] == "company_cost" for item in rows)}
+                       for row in rows if row["code"] not in CORE_CODES | BUSINESS_CALC_CODES]
+        else:
+            messages.warning(request, problem)
+    latest = next((analysis for analysis in AiAnalysisRequest.objects.filter(
+        member=member, family=member.family, module="investment_research",
+        analysis_type="metric_focus", status=AiAnalysisRequest.STATUS_SUCCESS,
+    ).order_by("-created_at")[:30]
+        if (analysis.scope or {}).get("dossier_id") == dossier.pk and
+        (analysis.scope or {}).get("version_id") == getattr(version, "pk", None)), None)
+    suggestions = []
+    if latest:
+        for item in latest.result.result_json.get("suggestions", []):
+            rendered = dict(item)
+            rendered["citations"] = [{**citation, "url": (
+                reverse("investment_research:document_detail", args=[pk, version.document_id])
+                + "?" + urlencode({"version": citation["version_id"],
+                                   "start": citation["start"], "end": citation["end"],
+                                   "hash": citation["hash"]}) + "#research-citation")}
+                for citation in item.get("citations", [])]
+            suggestions.append(rendered)
+    return render(request, "investment_research/metric_focus.html", {
+        "dossier": dossier, "version": version, "choices": choices,
+        "suggestions": suggestions, "can_write": is_writer(member),
+        "providers": available_research_providers() if is_writer(member) else [],
+    })
+
+
+@_method(["POST"])
+def fill_document_metrics_history(request, pk, document_pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    document = get_object_or_404(
+        OfficialResearchDocument, pk=document_pk, security=dossier.security,
+        source="sec", document_type="10-k",
+    )
+    version = get_object_or_404(
+        OfficialResearchContentVersion,
+        pk=_positive_id_or_404(request.POST.get("version")), document=document,
+    )
+    try:
+        outcome = fill_tenk_history(actor=member, dossier=dossier, version=version)
+    except (ResearchValidationError, SecClientError, ValueError) as exc:
+        messages.error(request, f"历史年报补齐失败：{exc}")
+    else:
+        message = (f"历史年报：新增归档 {outcome['archived']} 份，保存正文 "
+                   f"{outcome['saved']} 份。")
+        if outcome["missing"]:
+            messages.warning(request, message + "仍缺 FY" +
+                             "、FY".join(map(str, outcome["missing"])) + "。")
+        else:
+            messages.success(request, message)
+    return redirect(f"{reverse('investment_research:document_metrics', args=[pk, document_pk])}"
+                    f"?{urlencode({'version': version.pk})}")
 
 
 @_method(["POST"])
@@ -573,4 +953,5 @@ def draft_detail(request, pk, request_pk):
     return render(request, "investment_research/draft_detail.html", {
         "dossier": dossier, "analysis": analysis, "draft": rendered,
         "content_fetched_at": fetched_at,
+        "amount_guard_applied": (analysis.scope or {}).get("prompt_version") == PROMPT_TEMPLATE_VERSION,
     })

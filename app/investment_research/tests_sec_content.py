@@ -13,6 +13,8 @@ from .models import OfficialResearchContentVersion, OfficialResearchDocument
 from .providers.sec import SecClient, SecClientError, SecResponseTooLarge, _OfficialRedirectHandler
 from .sec_content import extract_sec_html, fetch_sec_document_content
 from .services import ResearchValidationError, create_dossier
+from .tenk_chapters import tenk_chapter_coverage
+from .tenk_financial_index import tenk_item8_index
 
 
 class FakeSecClient:
@@ -179,6 +181,53 @@ class SecContentTests(TestCase):
             self.client.force_login(self.actor.user)
             self.assertEqual(self.client.post(fetch_url).status_code, 403)
             factory.assert_called_once()
+
+    def test_tenk_chapter_index_links_to_immutable_source_version(self):
+        html = (b"<html><body><h1>ITEM 1. BUSINESS</h1><p>Company products and services.</p>"
+                b"<h1>ITEM 1A. RISK FACTORS</h1><p>Demand may change.</p>"
+                b"<h1>ITEM 7. MANAGEMENT'S DISCUSSION AND ANALYSIS</h1>"
+                b"<p>Results for the fiscal year.</p></body></html>")
+        version, _ = fetch_sec_document_content(
+            actor=self.actor, dossier_id=self.dossier.pk, document_id=self.document.pk,
+            client=FakeSecClient(html),
+        )
+        self.client.force_login(self.actor.user)
+        url = reverse("investment_research:document_detail", args=[self.dossier.pk, self.document.pk])
+        page = self.client.get(url)
+        self.assertContains(page, "10-K 章节与阅读覆盖")
+        self.assertContains(page, "Item 1 · 业务")
+        self.assertContains(page, "涉及区段 0/1 已生成草稿")
+        chapter = tenk_chapter_coverage(version)[0]
+        source = self.client.get(url, {
+            "version": version.pk, "start": chapter["start"],
+            "end": chapter["quote_end"], "hash": chapter["quote_hash"],
+        })
+        self.assertContains(source, '<mark id="research-citation">')
+        self.client.force_login(self.other.user)
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_item8_index_links_to_financial_note_in_saved_version(self):
+        html = (b"<html><body><h1>ITEM 8. FINANCIAL STATEMENTS AND SUPPLEMENTARY DATA</h1>"
+                b"<h2>BALANCE SHEETS</h2><p>Assets and liabilities.</p>"
+                b"<h2>NOTES TO FINANCIAL STATEMENTS</h2>"
+                b"<h3>NOTE 1 - ACCOUNTING POLICIES</h3><p>Accounting policy.</p>"
+                b"<h3>NOTE 2 - LEASES</h3><p>Lease commitments.</p>"
+                b"<h1>ITEM 9. CHANGES IN AND DISAGREEMENTS WITH ACCOUNTANTS</h1></body></html>")
+        version, _ = fetch_sec_document_content(
+            actor=self.actor, dossier_id=self.dossier.pk, document_id=self.document.pk,
+            client=FakeSecClient(html),
+        )
+        self.client.force_login(self.actor.user)
+        url = reverse("investment_research:document_detail", args=[self.dossier.pk, self.document.pk])
+        page = self.client.get(url)
+        self.assertContains(page, "Item 8 · 财务报表与附注目录")
+        self.assertContains(page, "附注 2 · NOTE 2 - LEASES")
+        note = tenk_item8_index(version)[-1]
+        source = self.client.get(url, {
+            "version": version.pk, "start": note["start"],
+            "end": note["quote_end"], "hash": note["quote_hash"],
+        })
+        self.assertContains(source, '<mark id="research-citation">NOTE 2 - LEASES</mark>')
 
     def test_citation_stays_on_old_version_and_rejects_forgery(self):
         client = FakeSecClient(HTML)

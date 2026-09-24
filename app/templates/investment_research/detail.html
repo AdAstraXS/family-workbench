@@ -19,6 +19,12 @@
     </div>
   </div>
 
+  <section class="research-journey" aria-label="研究进度">
+    <div><strong>1 · 了解公司</strong><p>查看 SEC 资料与原文，决定值得核查的指标。</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看资料</a></div>
+    <div><strong>2 · 形成判断</strong><p>{% if revision %}已保存第 {{ revision.revision_number }} 版判断和待验证问题。{% else %}先研究，再由你写下第一版判断。{% endif %}</p>{% if not revision and can_write %}<a href="{% url 'investment_research:first_thesis' dossier.pk %}">记录第一版判断</a>{% endif %}</div>
+    <div><strong>3 · 新财报复核</strong><p>{% if not revision %}保存判断后，才能比较随后发布的财报。{% elif pending_review_count %}{{ pending_review_count }} 份新财报待复核。{% elif needs_revision_count %}已复核，{{ needs_revision_count }} 份提示修订判断。{% else %}暂无待复核的新财报。{% endif %}</p>{% if revision %}<a href="{% url 'investment_research:review_plan' dossier.pk %}">{% if current_plan %}查看已确认的下期计划{% else %}制定下期复核计划{% endif %}</a> · <a href="{% url 'investment_research:filing_reviews' dossier.pk %}">查看复核清单</a>{% endif %}</div>
+  </section>
+
   <section class="research-source-summary" aria-labelledby="official-materials-heading">
     <div>
       <h2 id="official-materials-heading">官方资料</h2>
@@ -37,6 +43,14 @@
         </form>
       {% endif %}
     </div>
+  </section>
+
+  <section class="research-source-summary" aria-labelledby="metric-focus-heading">
+    <div>
+      <h2 id="metric-focus-heading">重点追踪指标</h2>
+      <p>已选 {{ selected_metric_count }} 项重点指标；经营现金流、固定资产现金支出和简化自由现金流作为基础背景展示。探索档案可先让 AI 提出附原文的候选项，再由你确认。</p>
+    </div>
+    <a class="button" href="{% url 'investment_research:metric_focus' dossier.pk %}">选择追踪指标</a>
   </section>
 
   {% if dossier.initial_thesis %}<details class="research-initial">
@@ -60,6 +74,13 @@
         <ul>{% for item in revision.questions %}<li>{{ item }}</li>{% endfor %}</ul>
       {% else %}<p class="research-none">（无）</p>{% endif %}
     </article>
+    <section class="research-source-summary" aria-labelledby="filing-review-heading">
+      <div><h2 id="filing-review-heading">下一期财报复核</h2>
+        <p>{% if pending_review_count %}{{ pending_review_count }} 份新财报待你逐项核查假设与问题。{% elif needs_revision_count %}复核已指出需要修订判断；旧判断仍保留，等你确认新版本。{% else %}目前没有待复核的后续 10-Q/10-K。同步官方资料后会在这里出现。{% endif %}</p>
+        {% for item in review_items %}{% if item.pending or item.needs_revision %}<p><a href="{% url 'investment_research:filing_review' dossier.pk item.document.pk %}">{{ item.document.title }}</a> · {{ item.document.published_at|date:"Y-m-d" }}{% if item.needs_revision %} · 待修订判断{% elif not item.version %} · 正文待保存{% endif %}</p>{% endif %}{% endfor %}
+      </div>
+      <a class="button" href="{% url 'investment_research:filing_reviews' dossier.pk %}">全部复核记录</a>
+    </section>
   {% else %}
     <p class="research-empty">正在了解这家公司。可以先查看官方资料，再决定是否形成自己的判断。</p>
   {% endif %}
@@ -69,7 +90,7 @@
       <h2 id="research-ai-heading">研究草稿</h2>
       <p>主动选择已保存的 SEC 正文版本，让 AI 帮你整理支持、反证和待验证问题。草稿仅自己可见，不会改写正式判断。</p>
       {% if recent_drafts %}
-        <p>最近草稿：{% for item in recent_drafts %}<a href="{% url 'investment_research:draft_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+        <p>最近请求：{% for item in recent_drafts %}<a href="{% url 'investment_research:draft_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }}（{{ item.get_status_display }}）</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
       {% endif %}
     </div>
   </section>
@@ -83,7 +104,7 @@
           {% for group in research_groups %}
             <optgroup label="{{ group.version.document.title }} · 正文第 {{ group.version.version_number }} 版 · {{ group.version.content_text|length }} 字">
               {% for segment in group.segments %}
-                <option value="{{ group.version.pk }}:{{ segment.index }}"{% if segment.selected %} selected{% endif %}>第 {{ forloop.counter }}/{{ group.segments|length }} 区段 · 字符 {{ segment.start }}–{{ segment.end }}{% if segment.completed %} · 已生成草稿{% else %} · 尚未生成草稿{% endif %}</option>
+                <option value="{{ group.version.pk }}:{{ segment.index }}"{% if segment.selected %} selected{% endif %}>第 {{ forloop.counter }}/{{ group.segments|length }} 区段 · 字符 {{ segment.start }}–{{ segment.end }}{% if segment.chapter_codes %} · 涉及 Item {{ segment.chapter_codes }}{% endif %}{% if segment.completed %} · 已生成草稿{% else %} · 尚未生成草稿{% endif %}</option>
               {% endfor %}
             </optgroup>
           {% endfor %}
@@ -94,7 +115,7 @@
             <option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }} · 已配置单次费用上限 ${{ provider.extra_data.research_max_estimated_usd|default:"待核对" }}</option>
           {% endfor %}
         </select>
-        <p class="research-private-note">每个区段最多 {{ research_document_limit }} 字，按原文位置顺序划分，未必对应 SEC 自身章节。每次仅发送所选区段；其他区段仍需分别生成草稿。若已有正式判断，还会发送当前判断、关键假设和待验证问题。模型只能引用本次发送的片段。已生成草稿只表示模型读过该区段，不代表内容已由你核实。</p>
+        <p class="research-private-note">每个区段最多 {{ research_document_limit }} 字，按原文位置顺序划分；Item 标签来自自动识别的标题，章节边界仍需核对。每次仅发送所选区段；其他区段仍需分别生成草稿。若已有正式判断，还会发送当前判断、关键假设和待验证问题。模型只能引用本次发送的片段。已生成草稿只表示模型读过该区段，不代表内容已由你核实。</p>
         <label><input type="checkbox" name="one_time_consent" value="yes" required> 我确认本次将所选正文区段及我的当前判断发送给所选云端模型；仅授权这一次。</label>
         <button type="submit">生成私密草稿</button>
       </form>

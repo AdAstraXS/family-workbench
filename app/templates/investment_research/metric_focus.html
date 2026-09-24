@@ -1,0 +1,38 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}重点追踪指标 · {{ dossier.security.name }}{% endblock %}
+
+{% block research_content %}
+<section class="research-page">
+  <div class="research-header">
+    <div><p class="research-private-note">{{ dossier.security.name }}（{{ dossier.security.symbol }}）· 仅自己可见</p><h1>重点追踪指标</h1></div>
+    <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a>
+  </div>
+  <p class="research-private-note">经营现金流、固定资产现金支出和简化自由现金流始终作为基础背景。下面只列目前能从 10-K 核对的其他指标；选择或取消选择均由你决定，不改变正式投资判断。</p>
+  {% if version %}
+    <p>依据：<a href="{% url 'investment_research:document_detail' dossier.pk version.document_id %}?version={{ version.pk }}">{{ version.document.title }} · 正文第 {{ version.version_number }} 版</a></p>
+    {% if suggestions %}
+      <section class="research-current" aria-labelledby="suggestion-heading">
+        <h2 id="suggestion-heading">AI 候选指标（待你确认）</h2>
+        <p class="research-private-note">建议只根据下方列明的原文摘录形成，不代表已审阅整份年报，也不会自动勾选或保存。</p>
+        <ul>{% for item in suggestions %}<li><strong>{{ item.label }}</strong>：{{ item.reason }}<br>建议验证：{{ item.question }}<br>{% for citation in item.citations %}<a href="{{ citation.url }}">核对原文 {{ citation.label }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</li>{% endfor %}</ul>
+      </section>
+    {% endif %}
+    {% if can_write %}
+      <form method="post" class="research-form">{% csrf_token %}<input type="hidden" name="action" value="save">
+        <h2>我决定追踪</h2>
+        {% for choice in choices %}<label><input type="checkbox" name="codes" value="{{ choice.code }}"{% if choice.checked %} checked{% endif %}> {{ choice.label }}{% if choice.includes_margin %} · 同时显示单独引用的成本、计算毛利和毛利率{% endif %}{% if not choice.available %} · 当期原文数字尚未核对{% endif %}</label>{% endfor %}
+        <button type="submit">保存追踪指标</button>
+      </form>
+      {% if providers %}<details class="research-initial"><summary>让 AI 帮我选择指标</summary>
+        <form method="post" class="research-form">{% csrf_token %}<input type="hidden" name="action" value="generate">
+          <label for="focus-provider">文本模型</label><select id="focus-provider" name="provider" required>{% for provider in providers %}<option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }}</option>{% endfor %}</select>
+          <p class="research-private-note">本次发送标的、候选指标名称、这份 10-K 的 Item 1/7 开头摘录及已核对指标的原文行；若已有正式判断，还发送当前判断、关键假设和待验证问题。未发送整份年报。AI 仅建议目前支持核对的指标，结果保留原文链接，须由你手动确认。</p>
+          <label><input type="checkbox" name="one_time_consent" value="yes" required> 我确认本次将上述内容发送给所选云端模型，仅授权这一次。</label>
+          <button type="submit">生成候选清单</button>
+        </form>
+      </details>{% else %}<p class="research-none">尚未配置获准处理投研资料的云端文本模型。</p>{% endif %}
+    {% endif %}
+  {% else %}<p class="research-none">请先同步官方资料，并保存一份 SEC 10-K 正文，再选择追踪指标。</p>{% endif %}
+</section>
+{% endblock %}
