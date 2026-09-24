@@ -1122,8 +1122,12 @@ def probe_symbol(
     expirations = []
     expiration_details = []
     rejected_expirations = []
-    expiration_response = sdk_call(
-        context, "get_option_expiration_date", ret_ok, symbol
+    # A user-selected screening date is exact. Query that date directly:
+    # the provider's expiration list can omit a valid weekly contract.
+    expiration_response = (
+        {"status": "ok", "data": [{"strike_time": target_expiration}]}
+        if config["profile"] == "screen" and target_expiration is not None
+        else sdk_call(context, "get_option_expiration_date", ret_ok, symbol)
     )
     if expiration_response["status"] == "ok":
         expiration_rows = records_from(expiration_response["data"])
@@ -1193,28 +1197,41 @@ def probe_symbol(
         chain_ranges = [(expirations[0], expirations[-1])]
     else:
         chain_ranges = [(expiration, expiration) for expiration in expirations]
+    chain_requests = [(all_options, None)]
+    if config["profile"] == "screen":
+        chain_requests = [(getattr(option_type, "PUT", "PUT"), "PUT")]
+        if include_covered_call:
+            chain_requests.append((getattr(option_type, "CALL", "CALL"), "CALL"))
     for range_start, range_end in chain_ranges:
-        chain_response = sdk_call_with_timeout_retry(
-            context,
-            "get_option_chain",
-            ret_ok,
-            symbol,
-            start=range_start,
-            end=range_end,
-            option_type=all_options,
-            sleeper=sleeper,
-        )
-        if chain_response["status"] != "ok":
-            partial = True
+        for requested_type, expected_kind in chain_requests:
+            chain_response = sdk_call_with_timeout_retry(
+                context,
+                "get_option_chain",
+                ret_ok,
+                symbol,
+                start=range_start,
+                end=range_end,
+                option_type=requested_type,
+                sleeper=sleeper,
+            )
             source = (
-                "option_chain"
-                if config.get("profile") in {"m1-gate", "screen"}
+                f"option_chain_{expected_kind.lower()}" if expected_kind
+                else "option_chain" if config["profile"] == "m1-gate"
                 else f"chain_{range_start}"
             )
-            errors.append(_sdk_issue(source, chain_response))
-        else:
+            if chain_response["status"] != "ok":
+                partial = True
+                errors.append(_sdk_issue(source, chain_response))
+                continue
             chain_available = True
-            for row in records_from(chain_response["data"]):
+            matching_rows = [
+                row for row in records_from(chain_response["data"])
+                if expected_kind is None or str(row.get("option_type", "")).upper() == expected_kind
+            ]
+            if not matching_rows and expected_kind:
+                partial = True
+                errors.append({"source": source, "category": "empty"})
+            for row in matching_rows:
                 expiration = str(
                     row.get("strike_time") or row.get("expiration_date") or ""
                 )[:10]

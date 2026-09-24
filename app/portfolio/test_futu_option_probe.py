@@ -1157,7 +1157,35 @@ class DynamicProbeTest(SimpleTestCase):
         contracts = result["representative_contracts"]
         self.assertEqual(sum(row["option_type"] == "PUT" for row in contracts), 12)
         self.assertEqual(sum(row["option_type"] == "CALL" for row in contracts), 4)
-        self.assertEqual(len([call for call in context.calls if call[0] == "get_option_chain"]), 1)
+        self.assertEqual(len([call for call in context.calls if call[0] == "get_option_chain"]), 2)
+        self.assertNotIn("get_option_expiration_date", [call[0] for call in context.calls])
+
+    def test_screen_selected_date_queries_call_when_put_chain_fails(self):
+        class CallOnlyContext(DynamicContext):
+            def get_option_expiration_date(self, symbol):
+                raise AssertionError("selected screening date must not depend on expiration listing")
+
+            def get_option_chain(self, symbol, start=None, end=None, option_type=None):
+                self.calls.append(("get_option_chain", start, end, option_type))
+                if option_type == "PUT":
+                    return 1, "put chain unavailable"
+                return 0, [{
+                    "code": f"{symbol}-{start}-C210", "option_type": "CALL",
+                    "strike_price": 210, "option_standard_type": "STANDARD",
+                    "strike_time": start, "expiration_date": start, "lot_size": 100,
+                    "stock_owner": symbol, "option_settlement_mode": "PHYSICAL",
+                }]
+
+        context = CallOnlyContext()
+        result = probe_symbol(
+            context, FakeFutu(), "US.MSFT",
+            resolve_profile("screen", False, False, False, False, False), 1, 12,
+            set(), [], target_expiration=DYNAMIC_EXPIRY, include_covered_call=True,
+            sleeper=lambda seconds: None,
+        )
+        self.assertEqual([row["option_type"] for row in result["representative_contracts"]], ["CALL"])
+        self.assertEqual(len([call for call in context.calls if call[0] == "get_option_chain"]), 2)
+        self.assertTrue(any(isinstance(error, dict) and error["source"] == "option_chain_put" for error in result["errors"]))
 
     def test_m1_gate_rejects_premarket_even_with_fresh_quotes(self):
         class PremarketContext(DynamicContext):

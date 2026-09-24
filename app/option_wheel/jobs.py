@@ -15,7 +15,7 @@ from family_core.models import Family
 from portfolio.models import InvestmentAccount
 from .analysis_service import WheelAnalysisError, covered_position, persist_probe_symbol
 from .models import WheelAnalysisJob, WheelBrokerAccountSnapshot, WheelPolicy
-from .probe_diagnostics import probe_failure_summary
+from .probe_diagnostics import _issue_text, probe_failure_summary
 
 ACTIVE = ("queued", "running")
 JOB_SECONDS = 720
@@ -258,7 +258,14 @@ def run_job(job_id):
                 sampled = sum(len(item.get("representative_contracts", [])) for item in rows)
                 job.message = f"Futu 抽样 {sampled} 张合约，列出 {len(results)} 张；临时订阅已恢复。"
                 if not results:
-                    job.message += " 所选到期日没有取得可用 Bid；可能是非交易时段、期权链为空或报价缺失。可选择上一交易日收盘参考分析。"
+                    issues = list(dict.fromkeys(
+                        _issue_text(issue)
+                        for row in rows for issue in row.get("errors", [])
+                    ))
+                    job.message += (
+                        " 本次未取得可比较合约。" +
+                        (" 查询诊断：" + "、".join(issues[:3]) + "。" if issues else " 请核对所选到期日的期权链与报价。")
+                    )
                 job.finished_at = timezone.now()
                 job.save(update_fields=["status", "screening_results", "message", "finished_at", "updated_at"])
             return
