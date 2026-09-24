@@ -35,7 +35,10 @@ def position_detail(request, pk):
         or job.result.get("position_avg_cost") != str(row["position"].avg_cost)
         or job.result.get("position_date") != row["position"].position_date.isoformat()
     ))
-    comparison = comparison_rows(row, job.result) if job and job.status == "saved" and not position_changed else None
+    comparison = (
+        comparison_rows(row, job.result, job.started_at or job.created_at)
+        if job and job.status == "saved" and not position_changed else None
+    )
     today = timezone.now().astimezone(ZoneInfo("America/New_York")).date()
     suggested = max(row["contract"].expiration_date + timedelta(days=7), today + timedelta(days=1))
     return render(request, "option_wheel/position_detail.html", {
