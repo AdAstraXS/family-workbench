@@ -75,17 +75,26 @@ def _validate_plan(raw, *, revision, evidence, metrics, version):
                 raise ResearchAiError("AI 复核计划缺少清晰的核查动作或判断条件。")
             fields[field] = text.strip()
         codes, refs = item.get("metric_codes"), item.get("evidence_ids")
-        if (not isinstance(codes, list) or len(codes) > 3 or len(set(codes)) != len(codes)
-                or any(not isinstance(code, str) or code not in metrics for code in codes)
-                or not isinstance(refs, list) or len(refs) > 3
-                or len(set(refs)) != len(refs) or any(not isinstance(ref, str) or ref not in by_id for ref in refs)
-                or not refs and not fields["gap"]):
-            raise ResearchAiError("AI 复核计划含有无效指标、原文编号或未注明证据缺口。")
+        if not isinstance(codes, list) or not isinstance(refs, list):
+            raise ResearchAiError("AI 复核计划缺少指标或原文编号列表。")
+        valid_codes = list(dict.fromkeys(code for code in codes
+                                         if isinstance(code, str) and code in metrics))[:3]
+        valid_refs = list(dict.fromkeys(ref for ref in refs
+                                        if isinstance(ref, str) and ref in by_id))[:3]
+        warnings = []
+        if len(valid_codes) != len(codes):
+            warnings.append("模型提到的部分指标不在已核对清单中，已移除。")
+        if len(valid_refs) != len(refs):
+            warnings.append("模型给出的部分历史原文编号无效，已移除。")
+        if not valid_refs:
+            warnings.append("历史摘录未提供可验证引文；需在下期财报中重新核查。")
+        if warnings:
+            fields["gap"] = " ".join(filter(None, [fields["gap"], *warnings]))
         cleaned.append({**target, **fields,
-                        "metrics": [{"code": code, "label": metrics[code]} for code in codes],
+                        "metrics": [{"code": code, "label": metrics[code]} for code in valid_codes],
                         "citations": [{"version_id": version.pk, "start": by_id[ref]["start"],
                                        "end": by_id[ref]["end"], "hash": by_id[ref]["hash"],
-                                       "label": ref} for ref in refs]})
+                                       "label": ref} for ref in valid_refs]})
     return cleaned
 
 

@@ -81,7 +81,7 @@ class ReviewPlanTests(TestCase):
         )
 
     @staticmethod
-    def response(evidence="E1"):
+    def response(evidence="E1", metric_code="operating_cash"):
         items = []
         for kind in ("pillar", "question"):
             items.append({"kind": kind, "index": 0,
@@ -89,7 +89,7 @@ class ReviewPlanTests(TestCase):
                           "support_signal": "现金表现和需求披露同时改善。",
                           "weakening_signal": "需求增长但现金表现转弱。",
                           "gap": "仍需下期业务披露。",
-                          "metric_codes": ["operating_cash"],
+                          "metric_codes": [metric_code],
                           "evidence_ids": [evidence]})
         result = {"items": items}
         return json.dumps({"choices": [{"message": {"content": json.dumps(result)}}],
@@ -150,8 +150,12 @@ class ReviewPlanTests(TestCase):
             generate_review_plan(actor=self.actor, dossier_id=self.dossier.pk,
                                  version_id=self.version.pk, provider_id=self.provider.pk,
                                  consent=False)
-        with self.assertRaises(ResearchAiError):
-            self.generate(response=self.response(evidence="E999"))
+        invalid = self.generate(response=self.response(evidence="E999"))
+        self.assertEqual(invalid.result.result_json["items"][0]["citations"], [])
+        self.assertIn("原文编号无效", invalid.result.result_json["items"][0]["gap"])
+        invalid_metric = self.generate(response=self.response(metric_code="fabricated_ratio"))
+        self.assertEqual(invalid_metric.result.result_json["items"][0]["metrics"], [])
+        self.assertIn("已移除", invalid_metric.result.result_json["items"][0]["gap"])
         self.assertEqual(ResearchReviewPlan.objects.count(), 0)
         analysis = self.generate()
         with self.assertRaises(ResearchValidationError):
