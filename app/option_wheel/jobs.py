@@ -233,6 +233,9 @@ def run_job(job_id):
                                + ("；" + "；".join(issues) if issues else ""))
                 job.finished_at = timezone.now()
                 job.save(update_fields=["status", "screening_results", "message", "finished_at", "updated_at"])
+                if job.selection.get("ai_enabled"):
+                    from .screen_advice_jobs import enqueue_for_screening
+                    transaction.on_commit(lambda: enqueue_for_screening(job_id))
             return
         if job.selection.get("mode") == "screening_v2":
             from .screening import compare_probe_rows, covered_stock
@@ -268,6 +271,9 @@ def run_job(job_id):
                     )
                 job.finished_at = timezone.now()
                 job.save(update_fields=["status", "screening_results", "message", "finished_at", "updated_at"])
+                if job.selection.get("ai_enabled"):
+                    from .screen_advice_jobs import enqueue_for_screening
+                    transaction.on_commit(lambda: enqueue_for_screening(job_id))
             return
         call_symbols = covered_call_symbols(
             job.family, accounts, job.selection["symbols"]
@@ -308,11 +314,17 @@ def job_payload(job):
         status, message = "interrupted", (
             "运行超时或中断，未取得完成确认。不会自动重试。" if close_mode else INTERRUPTED
         )
+    if status == "saved" and job.selection.get("mode") in ("screening_v2", "screening_close_v2"):
+        from .screen_advice import context_for_job
+        ai_status = context_for_job(job)["status"]
+    else:
+        ai_status = "disabled"
     return {
         "kind": "option-wheel-job-v1", "id": str(job.pk), "status": status,
         "label": dict(WheelAnalysisJob._meta.get_field("status").choices).get(status, status),
         "message": "当前任务：" + " / ".join(job.selection.get("account_names", []) + job.selection.get("symbols", [])) + ("；目标到期日 " + job.selection["target_expiration"] if job.selection.get("target_expiration") else "") + "。" + (message or (("正在查询 Futu 历史收盘数据，请勿重复提交。" if close_mode else "正在查询行情及核对订阅清理，请勿重复提交。") if status == "running" else "任务已受理，等待分析进程启动。")),
         "selection": job.selection, "created_at": job.created_at.isoformat(),
+        "ai_status": ai_status,
         "status_url": reverse("option_wheel:job_status", args=[job.pk]),
         "detail_url": reverse("option_wheel:job_detail", args=[job.pk]),
         "results": [{"id": pk, "url": reverse("option_wheel:decision_detail", args=[pk])} for pk in job.decision_ids],

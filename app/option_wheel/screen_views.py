@@ -93,15 +93,23 @@ def index(request):
         job.day_number = counts[key]
     latest = next((job for job in jobs if job.selection.get("mode") in ("screening_v2", "screening_close_v2")), None)
     visible_results = []
+    ai_status = "disabled"
+    ai_pending = False
     if latest and latest.status == "saved":
-        from .screening import present_results
-        visible_results = present_results(latest.screening_results, latest.selection)
+        from .screen_advice import context_for_job
+        advice = context_for_job(latest)
+        visible_results = advice["rows"]
+        ai_status, ai_pending = advice["status"], advice["pending"]
     ny_now = timezone.now().astimezone(NY)
     key = uuid4()
     return render(request, "option_wheel/screen_index.html", {
         "accounts": account_summary(family), "watchlist": watch, "jobs": jobs,
         "latest_job": latest,
         "visible_results": visible_results,
+        "ai_status": ai_status, "ai_pending": ai_pending,
+        "ai_error": advice["error"] if latest and latest.status == "saved" else "",
+        "ai_requested": bool(latest and latest.selection.get("ai_enabled")),
+        "ai_status_url": reverse("option_wheel:job_status", args=[latest.pk]) if latest else "",
         "analysis_request_token": signing.dumps({"family": family.pk, "key": str(key)}, salt="wheel-live-job-v1"),
         "analysis_status_url": reverse("option_wheel:job_status", args=[key]),
         "today_ny": ny_now.date(),
@@ -191,6 +199,7 @@ def analyze(request):
         "premium_min": str(premium_min), "premium_max": str(premium_max),
         "allow_earnings": request.POST.get("allow_earnings") == "on",
         "allow_dividend": request.POST.get("allow_dividend") == "on",
+        "ai_enabled": request.POST.get("ai_enabled") == "on",
     }
     try:
         job = enqueue(family, request.user, key, selection)

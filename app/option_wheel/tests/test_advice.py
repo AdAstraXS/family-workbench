@@ -199,7 +199,7 @@ class AdviceJobTests(AdvicePageTests):
         request.refresh_from_db()
         self.assertEqual(request.status, "success")
         self.assertEqual(request.result.tokens_used, 1100)
-        self.assertEqual(request.result.cost_estimate, Decimal("0.000168"))
+        self.assertEqual(request.result.cost_estimate, Decimal("0.000420"))
         self.assertEqual(self.submit().pk, request.pk)
         self.assertContains(self.client.get(self.url), "本份证据下暂不操作")
 

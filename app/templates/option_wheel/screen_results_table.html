@@ -1,4 +1,5 @@
-<div class="wheel-panel wheel-results-panel">
+<div class="wheel-panel wheel-results-panel" data-ai-status="{{ ai_status }}" data-ai-status-url="{{ ai_status_url }}">
+  {% if ai_requested %}<p class="wheel-ai-state">AI 建议：{% if ai_status == "success" %}已生成；与规则建议分别标注。{% elif ai_status == "pending" %}正在按批生成，规则结果已可查看。{% elif ai_status == "partial" %}部分批次未生成。{% else %}未生成；规则建议仍可查看。{% endif %}{% if ai_error %} {{ ai_error }}{% endif %}</p>{% endif %}
   <table class="wheel-table wheel-results-table">
     <colgroup><col class="wheel-col-contract"><col class="wheel-col-premium"><col class="wheel-col-strike"><col class="wheel-col-break-even"><col class="wheel-col-delta"><col class="wheel-col-iv"><col class="wheel-col-iv-rank"><col class="wheel-col-probability"><col class="wheel-col-annual"><col class="wheel-col-risks"></colgroup>
     <thead><tr><th>合约</th><th>权利金</th><th>行权价</th><th>盈亏平衡价</th><th>Delta</th><th>合约 IV</th><th>标的 IV 百分位</th><th>预计到期价内概率</th><th>年化权利金率</th><th>风险提示与分析</th></tr></thead>
@@ -14,12 +15,12 @@
           <td>{% if item.underlying_iv_percentile is not None %}{{ item.underlying_iv_percentile }}%<span class="wheel-info" tabindex="0" aria-label="标的 IV 百分位说明"><span aria-hidden="true">!</span><span class="wheel-info-tip" role="tooltip">Futu 返回的标的 IV 百分位，历史窗口未披露。{% if item.reference_date %}此值为最新查询结果，不对应 {{ item.reference_date }} 收盘；{% if item.underlying_iv_queried_at %}查询时间：{{ item.underlying_iv_queried_at }}（美东）。{% endif %}{% endif %}</span></span>{% else %}—{% endif %}</td>
           <td>{% if item.probability is not None %}{{ item.probability }}%{% else %}—{% endif %}</td>
           <td>{% if item.annualized_premium_rate is not None %}{{ item.annualized_premium_rate }}%{% else %}—{% endif %}</td>
-          <td><span class="wheel-analysis">规则比较：{{ item.display_analysis }}</span>{% for risk in item.risks %}<span class="wheel-risk">{{ risk }}</span>{% endfor %}</td>
+<td><span class="wheel-analysis">规则建议：{{ item.display_analysis }}</span>{% if ai_requested %}<span class="wheel-analysis wheel-ai-analysis">DeepSeek AI 建议：{% if item.ai_advice %}{{ item.ai_advice }}{% elif ai_pending %}生成中{% else %}未生成{% endif %}</span>{% endif %}{% for risk in item.risks %}<span class="wheel-risk">{{ risk }}</span>{% endfor %}</td>
         </tr>
       {% empty %}
         <tr><td colspan="10">本次取得的 Put 中没有符合所设权利金范围的合约；不会硬凑范围外合约。Covered Call 不受 Put 权利金范围限制。</td></tr>
       {% endfor %}
     </tbody>
   </table>
-  <footer class="wheel-table-note">{% if basis == "screening_close_v2" %}收盘观察：权利金按 Futu 期权日线收盘成交价 × 100 计算，仅供比较；当前 Bid、Delta 和可成交权利金未知。年化率按历史收盘日至到期日简单年化，不代表可成交收益。{% else %}交易时段权利金按 Futu Bid × 合约乘数估算；年化率按 DTE 简单年化。{% endif %}概率为 Futu 模型估算的到期价内概率，不等于实际提前指派概率。表内建议按规则比较，未调用 AI。</footer>
+<footer class="wheel-table-note">{% if basis == "screening_close_v2" %}收盘观察：权利金按 Futu 期权日线收盘成交价 × 100 计算，仅供比较；当前 Bid、Delta 和可成交权利金未知。年化率按历史收盘日至到期日简单年化，不代表可成交收益。{% else %}交易时段权利金按 Futu Bid × 合约乘数估算；年化率按 DTE 简单年化。{% endif %}概率为 Futu 模型估算的到期价内概率，不等于实际提前指派概率。{% if ai_requested %}规则建议与 DeepSeek AI 建议分别标注；AI 只解释冻结的公开合约指标。{% else %}表内仅有规则建议，未调用 AI。{% endif %}</footer>
 </div>

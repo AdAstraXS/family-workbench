@@ -27,11 +27,12 @@ class AdviceError(ValueError):
 
 def provider_configuration(provider=None):
     providers = AiProvider.objects.filter(is_active=True, provider_type="openai_compatible",
-        model_name="deepseek-v4-flash", base_url__in=("https://api.deepseek.com", "https://api.deepseek.com/", "https://api.deepseek.com/v1"))
+        model_name__in=("deepseek-v4-flash", "deepseek-flash"),
+        base_url__in=("https://api.deepseek.com", "https://api.deepseek.com/", "https://api.deepseek.com/v1"))
     if provider is None:
         rows = list(providers[:2])
         if len(rows) != 1:
-            raise AdviceError("需要唯一的已启用 DeepSeek V4 Flash 配置；请在 AI 服务商中核对。")
+            raise AdviceError("需要唯一的已启用 DeepSeek Flash 配置；请在 AI 服务商中核对。")
         provider = rows[0]
     elif not providers.filter(pk=provider.pk).exists():
         raise AdviceError("原 DeepSeek 配置已停用或改变，请重新核对。")
@@ -51,12 +52,16 @@ def provider_configuration(provider=None):
             raise ValueError
     except (KeyError, TypeError, ValueError, InvalidOperation):
         raise AdviceError("DeepSeek 已有费用或长度限制不完整，尚不能发起调用。") from None
+    # DeepSeek's 2026-09-10 V4.1 Flash peak prices are higher than the old
+    # V4 Flash configuration. Never use a stale lower rate for the cost gate.
     config = {"provider_id": provider.pk, "model": provider.model_name,
-        "api_key_env_var": env_name, "input_price": str(prices[0]), "output_price": str(prices[1]),
+        "api_key_env_var": env_name,
+        "input_price": str(max(prices[0], Decimal("0.30"))),
+        "output_price": str(max(prices[1], Decimal("1.20"))),
         "max_cost": str(min(prices[2], Decimal("0.01"))),
         "max_output_tokens": output_limit, "max_input_characters": input_limit,
         "data_scope": "wheel_public_market_v1", "thinking": "disabled",
-        "pricing_verified_on": "2026-09-04",
+        "pricing_verified_on": "2026-09-24",
         "prompt_hash": sha256(PROMPT.encode()).hexdigest()}
     config["fingerprint"] = sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()
     return provider, config

@@ -299,7 +299,7 @@ class ScreeningTests(TestCase):
             self.assertNotContains(page, "US.INTC-OUT")
             self.assertNotContains(page, "<th>到期日</th>", html=False)
             self.assertNotContains(page, "标的 IV 百分位是 Futu 最新查询值")
-            self.assertContains(page, "规则比较")
+            self.assertContains(page, "规则建议")
 
     def test_close_screen_does_not_pad_with_out_of_range_puts(self):
         selection = self.selection()

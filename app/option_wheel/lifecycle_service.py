@@ -143,8 +143,6 @@ def sync_transaction(transaction_item):
         else:
             if cycle.assigned_cost_basis is None:
                 raise WheelLifecycleError("Covered Call 缺少本周期的指派或买入成本。")
-            if contract.strike_price < cycle.assigned_cost_basis:
-                raise WheelLifecycleError("Covered Call 行权价低于本周期指派或买入成本。")
             already_reserved = WheelCollateralReservation.objects.select_for_update().filter(
                 account=cycle.account, kind=WheelCollateralReservation.SHARES,
                 released_at__isnull=True, leg__cycle=cycle,

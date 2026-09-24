@@ -43,6 +43,9 @@
 .wheel-check{width:17px;height:17px;accent-color:#087e7b}
 .wheel-link-danger{background:none;border:0;color:#a64335;cursor:pointer}
 .wheel-preferences{padding:20px 22px}
+.wheel-ai-option{padding:15px 22px;margin-bottom:12px}
+.wheel-ai-option .wheel-inline-check{font-weight:700;padding-bottom:3px}
+.wheel-ai-option p{margin:3px 0 0;color:#647381;font-size:12px;line-height:1.5}
 .wheel-fields{display:flex;align-items:end;flex-wrap:wrap;gap:16px 25px}
 .wheel-fields>label{font-weight:700;font-size:13px}
 .wheel-fields select{display:block;min-width:155px;margin-top:7px}
@@ -70,6 +73,8 @@
 .wheel-info:hover .wheel-info-tip,.wheel-info:focus .wheel-info-tip{display:block}
 .wheel-risk{display:block;color:#9d6214;font-size:12px;margin:0 0 5px}
 .wheel-analysis{display:block;color:#345769;font-size:12px;margin-bottom:7px}
+.wheel-ai-analysis{color:#075e59}
+.wheel-ai-state{margin:0;padding:10px 15px;background:#f3faf8;color:#345769;font-size:12px;line-height:1.5}
 .wheel-table-note{border-top:1px solid #e9eef0;padding:12px 17px;color:#647381;font-size:12px}
 .wheel-history>a{display:flex;justify-content:space-between;gap:15px;padding:15px 18px;color:#182735;text-decoration:none;border-bottom:1px solid #e9eef0}
 .wheel-history>a:last-child{border-bottom:0}

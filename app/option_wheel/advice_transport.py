@@ -11,12 +11,22 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def call_deepseek(request):
-    from .advice import validate_advice_result
+    from .advice import SCHEMA as LEGACY_SCHEMA, validate_advice_result
     from .advice_jobs import provider_configuration, check_request_cost
-    _, config = provider_configuration(request.provider)
+    from .screen_advice import SCHEMA as SCREEN_SCHEMA, validate_result
+    from .screen_advice_jobs import estimated_cost, screen_provider_configuration
+    if request.analysis_type == SCREEN_SCHEMA:
+        _, config = screen_provider_configuration(request.provider)
+        estimated_cost(request.sanitized_input, config)
+        validator = validate_result
+    elif request.analysis_type == LEGACY_SCHEMA:
+        _, config = provider_configuration(request.provider)
+        check_request_cost(request.sanitized_input, config)
+        validator = validate_advice_result
+    else:
+        raise ValueError("unsupported advice schema")
     if config["fingerprint"] != request.scope["config_hash"]:
         raise ValueError("configuration changed")
-    check_request_cost(request.sanitized_input, config)
     payload = {"model": config["model"], "thinking": {"type": "disabled"},
         "max_tokens": config["max_output_tokens"], "response_format": {"type": "json_object"},
         "messages": [{"role": "system", "content": request.prompt},
@@ -31,7 +41,7 @@ def call_deepseek(request):
     choice = decoded["choices"][0]
     if choice.get("finish_reason") != "stop":
         raise ValueError("incomplete response")
-    result = validate_advice_result(json.loads(choice["message"]["content"]), request.sanitized_input)
+    result = validator(json.loads(choice["message"]["content"]), request.sanitized_input)
     return {"result": result, "usage": decoded.get("usage", {})}
 
 
