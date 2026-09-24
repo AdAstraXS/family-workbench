@@ -33,6 +33,7 @@ from .models import (
     OfficialResearchDocument,
     ResearchDossier,
     ResearchFilingReview,
+    ResearchReviewPlan,
     ResearchSourceState,
 )
 from .permissions import (
@@ -63,6 +64,9 @@ from .tenk_financial_index import tenk_item8_index
 from .tenk_history import fill_tenk_history
 from .tenk_metrics import BUSINESS_CALC_CODES, HISTORICAL_LEASE_CODES, tenk_metric_grid
 from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
+from .review_plan import (
+    confirm_review_plan, generate_review_plan, latest_plan_source, plan_context,
+)
 
 PAGE_SIZE = 20
 logger = logging.getLogger(__name__)
@@ -279,6 +283,9 @@ def detail(request, pk):
         if (analysis.scope or {}).get("dossier_id") == dossier.pk
     ][:5]
     review_start_date, review_items = reviewable_filings(dossier)
+    current_plan = (ResearchReviewPlan.objects.filter(
+        dossier=dossier, thesis_revision_id=dossier.current_revision_id,
+    ).first() if dossier.current_revision_id else None)
     return render(
         request,
         "investment_research/detail.html",
@@ -300,6 +307,7 @@ def detail(request, pk):
                              if item["pending"] or item["needs_revision"]][:5],
             "pending_review_count": sum(item["pending"] for item in review_items),
             "needs_revision_count": sum(item["needs_revision"] for item in review_items),
+            "current_plan": current_plan,
         },
     )
 
@@ -436,6 +444,90 @@ def filing_reviews(request, pk):
 
 
 @_method(["GET", "POST"])
+def review_plan(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if request.method == "POST" and not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能生成或确认复核计划。")
+    version = latest_plan_source(dossier)
+    if request.method == "POST":
+        try:
+            if request.POST.get("action") == "generate":
+                if version is None:
+                    raise ResearchValidationError("请先保存最新 10-K 正文。")
+                generate_review_plan(
+                    actor=member, dossier_id=dossier.pk, version_id=version.pk,
+                    provider_id=_positive_id_or_404(request.POST.get("provider")),
+                    consent=request.POST.get("one_time_consent") == "yes",
+                )
+                messages.success(request, "AI 复核计划草稿已生成；请逐项核对后再确认。")
+            elif request.POST.get("action") == "confirm":
+                try:
+                    indexes = [int(value) for value in request.POST.getlist("selected_indexes")]
+                except ValueError as exc:
+                    raise ResearchValidationError("复核计划条目编号无效。") from exc
+                confirm_review_plan(
+                    actor=member, dossier_id=dossier.pk,
+                    analysis_id=_positive_id_or_404(request.POST.get("analysis_id")),
+                    selected_indexes=indexes,
+                )
+                messages.success(request, "已确认的复核计划保存到当前判断版本。")
+            else:
+                raise Http404
+        except DossierNotFound:
+            raise Http404
+        except (ResearchValidationError, ResearchAiError) as exc:
+            messages.error(request, str(exc))
+        return redirect("investment_research:review_plan", pk=pk)
+    revision = dossier.current_revision
+    confirmed = (ResearchReviewPlan.objects.filter(
+        dossier=dossier, thesis_revision=revision,
+    ).select_related("source_analysis").first() if revision else None)
+    latest = next((analysis for analysis in AiAnalysisRequest.objects.filter(
+        member=member, family=member.family, module="investment_research",
+        analysis_type="next_filing_plan", status=AiAnalysisRequest.STATUS_SUCCESS,
+    ).order_by("-created_at", "-pk")[:30]
+        if (analysis.scope or {}).get("dossier_id") == dossier.pk and
+        (analysis.scope or {}).get("thesis_revision_id") == getattr(revision, "pk", None) and
+        (analysis.scope or {}).get("version_id") == getattr(version, "pk", None) and
+        (analysis.scope or {}).get("selected_metric_codes") == (dossier.selected_metric_codes or [])), None)
+
+    def linked_items(items, document_id):
+        rendered = []
+        for index, item in enumerate(items):
+            citations = [{**citation, "url": (
+                reverse("investment_research:document_detail", args=[pk, document_id])
+                + "?" + urlencode({"version": citation["version_id"],
+                                   "start": citation["start"], "end": citation["end"],
+                                   "hash": citation["hash"]}) + "#research-citation")}
+                for citation in item.get("citations", [])]
+            rendered.append({**item, "item_index": index, "citations": citations})
+        return rendered
+
+    suggestions = (linked_items(latest.result.result_json.get("items", []),
+                                latest.scope["document_id"]) if latest else [])
+    confirmed_items = (linked_items(confirmed.items,
+                                    confirmed.source_analysis.scope["document_id"])
+                       if confirmed else [])
+    metrics, evidence, source_problem = {}, [], ""
+    if version and revision:
+        try:
+            metrics, evidence = plan_context(dossier, version)
+        except ResearchAiError as exc:
+            source_problem = str(exc)
+    return render(request, "investment_research/review_plan.html", {
+        "dossier": dossier, "revision": revision, "version": version,
+        "metrics": metrics, "evidence": evidence, "source_problem": source_problem,
+        "latest": latest, "suggestions": suggestions,
+        "confirmed": confirmed, "confirmed_items": confirmed_items,
+        "can_write": is_writer(member),
+        "providers": available_research_providers() if is_writer(member) else [],
+    })
+
+
+@_method(["GET", "POST"])
 def filing_review(request, pk, document_pk):
     member = _get_member_or_403(request)
     if member is None:
@@ -454,6 +546,9 @@ def filing_review(request, pk, document_pk):
     if request.method == "POST" and version is None:
         raise Http404("请先保存这份财报的正文。")
     revision = dossier.current_revision
+    current_plan = ResearchReviewPlan.objects.filter(
+        dossier=dossier, thesis_revision=revision,
+    ).first()
     form = None
     if version and is_writer(member):
         form = FilingReviewForm(
@@ -481,6 +576,7 @@ def filing_review(request, pk, document_pk):
                                           for _, text, status_name, note_name in form.assessment_fields],
                     "prior_reviews": [], "can_write": True,
                     "needs_revision": item["needs_revision"],
+                    "current_plan": current_plan,
                 }, status=409)
             except DossierNotFound:
                 raise Http404
@@ -502,6 +598,7 @@ def filing_review(request, pk, document_pk):
                               if form else []),
         "prior_reviews": prior_reviews, "can_write": is_writer(member),
         "needs_revision": item["needs_revision"],
+        "current_plan": current_plan,
     })
 
 

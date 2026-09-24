@@ -10,6 +10,7 @@ urlpatterns = [
     path("explore/new/", views.explore, name="explore"),
     path("<int:pk>/", views.detail, name="detail"),
     path("<int:pk>/metric-focus/", views.metric_focus, name="metric_focus"),
+    path("<int:pk>/review-plan/", views.review_plan, name="review_plan"),
     path("<int:pk>/first/", views.first_thesis, name="first_thesis"),
     path("<int:pk>/reviews/", views.filing_reviews, name="filing_reviews"),
     path("<int:pk>/reviews/<int:document_pk>/", views.filing_review, name="filing_review"),

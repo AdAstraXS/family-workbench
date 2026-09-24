@@ -242,6 +242,28 @@ class ResearchFilingReview(models.Model):
         indexes = [models.Index(fields=["dossier", "document", "-created_at"])]
 
 
+class ResearchReviewPlan(models.Model):
+    """成员逐项确认的下期财报复核计划；判断变更后旧计划保留但不再适用。"""
+
+    dossier = models.ForeignKey(ResearchDossier, on_delete=models.PROTECT,
+                                related_name="review_plans", verbose_name="研究档案")
+    thesis_revision = models.ForeignKey(ResearchThesisRevision, on_delete=models.PROTECT,
+                                        related_name="review_plans", verbose_name="判断版本")
+    source_analysis = models.ForeignKey("ai_analysis.AiAnalysisRequest", on_delete=models.PROTECT,
+                                        related_name="confirmed_research_review_plans",
+                                        verbose_name="AI 草稿")
+    items = models.JSONField("已确认的核查事项", default=list)
+    created_by = models.ForeignKey(FamilyMember, on_delete=models.PROTECT,
+                                   related_name="research_review_plans", verbose_name="确认人")
+    created_at = models.DateTimeField("确认时间", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "财报复核计划"
+        verbose_name_plural = "财报复核计划"
+        ordering = ["-created_at", "-pk"]
+        indexes = [models.Index(fields=["dossier", "thesis_revision", "-created_at"])]
+
+
 class ResearchSourceState(TimestampedModel):
     """来源同步状态：每个证券每个来源一条，记录游标与最近同步结果。
 

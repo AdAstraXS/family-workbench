@@ -1,0 +1,28 @@
+{% extends "investment_research/base.html" %}
+
+{% block title %}下期财报复核计划 · {{ dossier.security.name }}{% endblock %}
+
+{% block research_content %}
+<section class="research-page">
+  <div class="research-header"><div><p class="research-private-note">{{ dossier.security.name }}（{{ dossier.security.symbol }}）· 仅自己可见</p><h1>下期财报复核计划</h1></div><a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a></div>
+  <p class="research-private-note">这是下一份财报发布前的核查清单。历史 10-K 摘录只说明已有证据和缺口，不能当作未来财报的结论。AI 草稿不会自动改变你的判断或确认计划。</p>
+  {% if not revision %}<p class="research-document-empty">请先保存包含关键假设或待验证问题的正式判断。</p>{% if can_write %}<a class="button" href="{% url 'investment_research:first_thesis' dossier.pk %}">记录第一版判断</a>{% endif %}
+  {% else %}
+    <article class="research-current"><h2>当前判断 · 第 {{ revision.revision_number }} 版</h2><p>{{ revision.thesis|linebreaksbr }}</p>{% if revision.pillars %}<h3>关键假设</h3><ul>{% for text in revision.pillars %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}{% if revision.questions %}<h3>待验证问题</h3><ul>{% for text in revision.questions %}<li>{{ text }}</li>{% endfor %}</ul>{% endif %}<p class="research-private-note">如果判断发生修订，旧计划保留供回顾；新版本需要重新确认计划。</p></article>
+    {% if confirmed %}<section class="research-current"><h2>已确认的计划</h2><p class="research-private-note">{{ confirmed.created_at|date:"Y-m-d H:i" }} 确认 · 依据第 {{ revision.revision_number }} 版判断</p>
+      {% for item in confirmed_items %}<article class="research-review-assessment"><h3>{% if item.kind == "pillar" %}假设{% else %}问题{% endif %}：{{ item.text }}</h3><p>下期核查：{{ item.check }}</p><p>支持迹象：{{ item.support_signal }}；削弱迹象：{{ item.weakening_signal }}</p>{% if item.metrics %}<p>相关指标：{% for metric in item.metrics %}{{ metric.label }}{% if not forloop.last %}、{% endif %}{% endfor %}</p>{% endif %}{% if item.gap %}<p>尚缺证据：{{ item.gap }}</p>{% endif %}{% for citation in item.citations %}<a href="{{ citation.url }}">核对历史原文 {{ citation.label }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</article>{% endfor %}
+    </section>{% endif %}
+    {% if latest and suggestions %}<section class="research-current"><h2>AI 草稿 · 待你确认</h2><p class="research-private-note">生成于 {{ latest.created_at|date:"Y-m-d H:i" }}。逐项核对原文和判断条件，只勾选你愿意追踪的事项；未勾选的不会进入计划。</p>
+      {% if can_write %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="confirm"><input type="hidden" name="analysis_id" value="{{ latest.pk }}">{% endif %}
+      {% for item in suggestions %}<article class="research-review-assessment"><h3>{% if can_write %}<label><input type="checkbox" name="selected_indexes" value="{{ item.item_index }}"> {% endif %}{% if item.kind == "pillar" %}假设{% else %}问题{% endif %}：{{ item.text }}{% if can_write %}</label>{% endif %}</h3><p>下期核查：{{ item.check }}</p><p>支持迹象：{{ item.support_signal }}；削弱迹象：{{ item.weakening_signal }}</p>{% if item.metrics %}<p>相关指标：{% for metric in item.metrics %}{{ metric.label }}{% if not forloop.last %}、{% endif %}{% endfor %}</p>{% endif %}{% if item.gap %}<p>尚缺证据：{{ item.gap }}</p>{% endif %}{% for citation in item.citations %}<a href="{{ citation.url }}">核对历史原文 {{ citation.label }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</article>{% endfor %}
+      {% if can_write %}<button type="submit">保存勾选的复核计划</button></form>{% endif %}
+    </section>{% endif %}
+    {% if version %}<section class="research-current"><h2>本次可供 AI 阅读的范围</h2><p><a href="{% url 'investment_research:document_detail' dossier.pk version.document_id %}?version={{ version.pk }}">{{ version.document.title }} · 正文第 {{ version.version_number }} 版</a></p><p>会发送当前判断、关键假设、待验证问题、下列已确认或基础指标名称及历史原文摘录；不会发送整份年报，也不会发送其他档案。当前共 {{ evidence|length }} 段摘录。</p>
+      {% if metrics %}<p>指标：{% for code, label in metrics.items %}{{ label }}{% if not forloop.last %}、{% endif %}{% endfor %}</p>{% endif %}
+      <details><summary>展开本次原文摘录</summary>{% for item in evidence %}<p><strong>{{ item.id }}</strong>：{{ item.text }}</p>{% empty %}<p>暂无可引用摘录。</p>{% endfor %}</details>
+      {% if source_problem %}<p class="research-source-error">{{ source_problem }}</p>{% endif %}
+      {% if can_write and providers and evidence and not source_problem %}<form method="post" class="research-form">{% csrf_token %}<input type="hidden" name="action" value="generate"><label for="plan-provider">文本模型</label><select id="plan-provider" name="provider" required>{% for provider in providers %}<option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }}</option>{% endfor %}</select><label><input type="checkbox" name="one_time_consent" value="yes" required> 我确认仅这一次把上述私人判断和摘录发送给所选云端模型。</label><button type="submit">生成下期复核计划草稿</button></form>{% elif can_write and not providers %}<p class="research-none">尚未配置获准处理投研资料的云端文本模型。</p>{% endif %}
+    </section>{% else %}<p class="research-document-empty">请先保存最新 10-K 正文，才能生成附历史原文的复核计划草稿。</p>{% endif %}
+  {% endif %}
+</section>
+{% endblock %}

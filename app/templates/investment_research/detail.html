@@ -22,7 +22,7 @@
   <section class="research-journey" aria-label="研究进度">
     <div><strong>1 · 了解公司</strong><p>查看 SEC 资料与原文，决定值得核查的指标。</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看资料</a></div>
     <div><strong>2 · 形成判断</strong><p>{% if revision %}已保存第 {{ revision.revision_number }} 版判断和待验证问题。{% else %}先研究，再由你写下第一版判断。{% endif %}</p>{% if not revision and can_write %}<a href="{% url 'investment_research:first_thesis' dossier.pk %}">记录第一版判断</a>{% endif %}</div>
-    <div><strong>3 · 新财报复核</strong><p>{% if not revision %}保存判断后，才能比较随后发布的财报。{% elif pending_review_count %}{{ pending_review_count }} 份新财报待复核。{% elif needs_revision_count %}已复核，{{ needs_revision_count }} 份提示修订判断。{% else %}暂无待复核的新财报。{% endif %}</p>{% if revision %}<a href="{% url 'investment_research:filing_reviews' dossier.pk %}">查看复核清单</a>{% endif %}</div>
+    <div><strong>3 · 新财报复核</strong><p>{% if not revision %}保存判断后，才能比较随后发布的财报。{% elif pending_review_count %}{{ pending_review_count }} 份新财报待复核。{% elif needs_revision_count %}已复核，{{ needs_revision_count }} 份提示修订判断。{% else %}暂无待复核的新财报。{% endif %}</p>{% if revision %}<a href="{% url 'investment_research:review_plan' dossier.pk %}">{% if current_plan %}查看已确认的下期计划{% else %}制定下期复核计划{% endif %}</a> · <a href="{% url 'investment_research:filing_reviews' dossier.pk %}">查看复核清单</a>{% endif %}</div>
   </section>
 
   <section class="research-source-summary" aria-labelledby="official-materials-heading">
