@@ -13,6 +13,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from ai_analysis.models import AiAnalysisRequest, AiAnalysisResult, AiProvider
+from ai_analysis.model_selection import default_provider
 from family_core.models import Family, FamilyMember
 from .advice import PROMPT, SCHEMA, validate_advice_result
 
@@ -30,11 +31,13 @@ def provider_configuration(provider=None):
         model_name__in=("deepseek-v4-flash", "deepseek-flash"),
         base_url__in=("https://api.deepseek.com", "https://api.deepseek.com/", "https://api.deepseek.com/v1"))
     if provider is None:
-        rows = list(providers[:2])
-        if len(rows) != 1:
-            raise AdviceError("需要唯一的已启用 DeepSeek Flash 配置；请在 AI 服务商中核对。")
-        provider = rows[0]
-    elif not providers.filter(pk=provider.pk).exists():
+        provider = default_provider(MODULE)
+        if provider is None:
+            rows = list(providers[:2])
+            if len(rows) != 1:
+                raise AdviceError("请在后台‘模块默认模型’选择期权分析使用的 DeepSeek Flash。")
+            provider = rows[0]
+    if not providers.filter(pk=provider.pk).exists():
         raise AdviceError("原 DeepSeek 配置已停用或改变，请重新核对。")
     extra = provider.extra_data or {}
     env_name = extra.get("api_key_env_var", "")

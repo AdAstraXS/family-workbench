@@ -11,6 +11,7 @@ from django.db import transaction
 from django.db.models import Max
 
 from ai_analysis.models import AiAnalysisRequest, AiAnalysisResult, AiProvider
+from ai_analysis.model_selection import default_provider
 
 from .models import KnowledgeProposal, KnowledgeProposalRun, normalize_taxonomy_name
 from .taxonomy import taxonomy_choices
@@ -45,14 +46,20 @@ def _active_provider(provider_id=None):
             provider = providers.get(pk=provider_id)
         except AiProvider.DoesNotExist as exc:
             raise KnowledgeAiError("所选 AI 服务商不可用。") from exc
-        if (provider.extra_data or {}).get("usage") == "ipo_image_recognition":
+        if (provider.extra_data or {}).get("usage") in {"ipo_image_recognition", "vision", "image"}:
             raise KnowledgeAiError("所选 AI 服务商只用于图片识别，不能整理知识正文。")
+        return provider
+    preferred = default_provider("knowledge")
+    if preferred:
+        provider = next((item for item in providers if item.pk == preferred.pk), None)
+        if provider is None:
+            raise KnowledgeAiError("后台选定的知识整理默认模型已停用，请重新选择。")
         return provider
     provider = next(
         (
             item
             for item in providers
-            if (item.extra_data or {}).get("usage") != "ipo_image_recognition"
+            if (item.extra_data or {}).get("usage") not in {"ipo_image_recognition", "vision", "image"}
         ),
         None,
     )
@@ -242,6 +249,9 @@ def generate_proposals(document, *, cloud_ai_consent="source", requested_by=None
             {"role": "user", "content": user_prompt},
         ],
     }
+    if (provider.model_name in {"deepseek-flash", "deepseek-v4-flash"}
+            and provider.base_url.rstrip("/") in {"https://api.deepseek.com", "https://api.deepseek.com/v1"}):
+        request_payload["thinking"] = {"type": "disabled"}
     request = urllib.request.Request(
         chat_url,
         data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),

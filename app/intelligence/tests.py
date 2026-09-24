@@ -2008,8 +2008,11 @@ class M3EventAnalysisTests(IntelligenceTestBase):
             selection=IntelligenceEvent.SELECTION_REVIEW,
             title="自动循环高相关事件",
         )
+        # The digest selects the current local day; a one-hour-old fixture
+        # belongs to yesterday when this test runs just after midnight.
+        event.occurred_at = timezone.now()
         event.relevance_score = 65
-        event.save(update_fields=["relevance_score", "updated_at"])
+        event.save(update_fields=["occurred_at", "relevance_score", "updated_at"])
         provider = self.make_provider()
         validate_url.return_value = "https://api.example.com/v1/chat/completions"
         urlopen.return_value = FakeAiResponse(self.ai_payload(event))

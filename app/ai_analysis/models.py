@@ -33,6 +33,33 @@ class AiProvider(TimestampedModel):
         return f"{self.name} {self.model_name}".strip()
 
 
+class AiModuleModel(TimestampedModel):
+    """Administrator-selected default for a text AI feature."""
+
+    OPTION_WHEEL = "option_wheel"
+    INVESTMENT_RESEARCH = "investment_research"
+    INTELLIGENCE = "intelligence"
+    KNOWLEDGE = "knowledge"
+    GLOBAL_AI = "global_ai"
+    MODULE_CHOICES = [
+        (OPTION_WHEEL, "期权分析建议"),
+        (INVESTMENT_RESEARCH, "投资研究"),
+        (INTELLIGENCE, "AI 情报"),
+        (KNOWLEDGE, "知识整理"),
+        (GLOBAL_AI, "全局 AI（尚未启用）"),
+    ]
+
+    module = models.CharField("分析模块", max_length=40, choices=MODULE_CHOICES, unique=True)
+    provider = models.ForeignKey(AiProvider, verbose_name="默认文字模型", on_delete=models.PROTECT)
+
+    class Meta:
+        verbose_name = "模块默认模型"
+        verbose_name_plural = "模块默认模型"
+
+    def __str__(self):
+        return self.get_module_display()
+
+
 class AiConversation(TimestampedModel):
     SCOPE_PERSONAL = "personal"
     SCOPE_FAMILY = "family"

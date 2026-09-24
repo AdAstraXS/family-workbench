@@ -101,6 +101,8 @@ def index(request):
         visible_results = advice["rows"]
         ai_status, ai_pending = advice["status"], advice["pending"]
     ny_now = timezone.now().astimezone(NY)
+    from ai_analysis.model_selection import default_provider
+    ai_provider = default_provider("option_wheel")
     key = uuid4()
     return render(request, "option_wheel/screen_index.html", {
         "accounts": account_summary(family), "watchlist": watch, "jobs": jobs,
@@ -114,6 +116,7 @@ def index(request):
         "analysis_status_url": reverse("option_wheel:job_status", args=[key]),
         "today_ny": ny_now.date(),
         "default_close": ny_now.weekday() >= 5 or not time(9, 30) <= ny_now.time() < time(16),
+        "ai_provider": ai_provider,
     })
 
 

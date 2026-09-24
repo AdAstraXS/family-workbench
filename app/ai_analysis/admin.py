@@ -1,6 +1,7 @@
 from django.contrib import admin
 
-from .models import AiAnalysisRequest, AiAnalysisResult, AiProvider
+from .forms import AiModuleModelForm
+from .models import AiAnalysisRequest, AiAnalysisResult, AiModuleModel, AiProvider
 
 
 @admin.register(AiProvider)
@@ -8,6 +9,17 @@ class AiProviderAdmin(admin.ModelAdmin):
     list_display = ("name", "provider_type", "model_name", "is_active", "updated_at")
     list_filter = ("provider_type", "is_active")
     search_fields = ("name", "model_name", "base_url")
+
+
+@admin.register(AiModuleModel)
+class AiModuleModelAdmin(admin.ModelAdmin):
+    form = AiModuleModelForm
+    list_display = ("module", "provider", "provider_model", "updated_at")
+    list_select_related = ("provider",)
+
+    @admin.display(description="实际模型")
+    def provider_model(self, obj):
+        return obj.provider.model_name
 
 
 @admin.register(AiAnalysisRequest)
