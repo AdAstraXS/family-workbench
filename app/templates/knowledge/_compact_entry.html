@@ -4,6 +4,6 @@
     <span>{% if entry.visibility == "family" %}家庭可见{% else %}仅自己{% endif %}</span>
     {% if entry.content_time %}<time>{{ entry.content_time|date:"m-d" }}</time>{% endif %}
   </div>
-  <h3><a href="{{ entry.target_url }}">{{ entry.title }}</a></h3>
+  <h3><a href="{{ entry.target_url }}?return_to={{ request.get_full_path|urlencode }}">{{ entry.title }}</a></h3>
   {% if entry.hit_snippet %}<p>{{ entry.hit_snippet|truncatechars:110 }}</p>{% endif %}
 </article>

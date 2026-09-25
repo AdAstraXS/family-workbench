@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from contextlib import contextmanager
+from contextvars import ContextVar
 
-from django.db.models import Sum
+from django.db.models import OuterRef, Subquery, Sum
+from django.db import transaction
 from django.utils import timezone
 
 from family_core.models import ExchangeRate
@@ -18,6 +21,19 @@ from .models import (
 
 
 ZERO = Decimal("0")
+_rate_cache = ContextVar("valuation_rate_cache", default=None)
+
+
+@contextmanager
+def exchange_rate_cache():
+    if _rate_cache.get() is not None:
+        yield
+        return
+    token = _rate_cache.set({})
+    try:
+        yield
+    finally:
+        _rate_cache.reset(token)
 
 
 @dataclass
@@ -53,10 +69,13 @@ def resolve_position_prices(positions, on_date=None):
     cutoff = timezone.make_aware(datetime.combine(on_date, time.max))
     security_ids = {position.security_id for position in positions}
     records = {}
+    latest_price = SecurityPriceRecord.objects.filter(
+        security_id=OuterRef("security_id"), price_as_of__lte=cutoff,
+    ).order_by("-price_as_of", "-pk").values("pk")[:1]
     for item in (
         SecurityPriceRecord.objects.filter(
             security_id__in=security_ids,
-            price_as_of__lte=cutoff,
+            pk=Subquery(latest_price),
         )
         .select_related("security")
         .order_by("security_id", "-price_as_of", "-pk")
@@ -127,7 +146,13 @@ def resolve_position_prices(positions, on_date=None):
     return resolutions
 
 
+@transaction.atomic
 def refresh_position_valuations(*, security_ids=None, on_date=None):
+    from .services import lock_accounts
+    affected = InvestmentPosition.objects.exclude(quantity=0)
+    if security_ids is not None:
+        affected = affected.filter(security_id__in=security_ids)
+    lock_accounts(affected.values_list("account_id", flat=True))
     positions = list(
         InvestmentPosition.objects.exclude(quantity=0)
         .filter(**({"security_id__in": security_ids} if security_ids is not None else {}))
@@ -172,11 +197,22 @@ def refresh_position_valuations(*, security_ids=None, on_date=None):
 
 
 def resolve_exchange_rate(source, target, on_date=None):
+    key = (source.upper(), target.upper(), on_date or date.today())
+    cache = _rate_cache.get()
+    if cache is not None and key in cache:
+        return cache[key]
+    result = _resolve_exchange_rate(*key)
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def _resolve_exchange_rate(source, target, on_date=None):
     source, target = source.upper(), target.upper()
     rate_date = on_date or date.today()
     if source == target:
         return ExchangeRateResolution(Decimal("1"), rate_date)
-    rates = ExchangeRate.objects.filter(rate_date__lte=rate_date)
+    rates = ExchangeRate.objects.filter(rate_date__lte=rate_date, rate__gt=0)
 
     def latest(base, quote):
         return (
@@ -186,17 +222,17 @@ def resolve_exchange_rate(source, target, on_date=None):
         )
 
     direct = latest(source, target)
-    if direct is not None:
+    if direct is not None and direct.rate > 0:
         return ExchangeRateResolution(direct.rate, direct.rate_date)
     inverse = latest(target, source)
-    if inverse and inverse.rate:
+    if inverse and inverse.rate > 0:
         return ExchangeRateResolution(
             Decimal("1") / inverse.rate,
             inverse.rate_date,
         )
     source_cny = latest(source, "CNY")
     target_cny = latest(target, "CNY")
-    if source_cny and target_cny:
+    if source_cny and target_cny and source_cny.rate > 0 and target_cny.rate > 0:
         return ExchangeRateResolution(
             source_cny.rate / target_cny.rate,
             min(source_cny.rate_date, target_cny.rate_date),
@@ -215,6 +251,7 @@ def convert_currency(amount, source, target, on_date=None):
     return None if rate is None else amount * rate
 
 
+@exchange_rate_cache()
 def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=False):
     accounts = list(accounts)
     positions = list(

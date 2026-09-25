@@ -35,6 +35,7 @@ class OptionWheelPageTests(TestCase):
         self.assertContains(response, "两个账户的现金、净值与已录入持仓")
         self.assertContains(response, "Intel")
         self.assertContains(response, "合约对比")
+        self.assertContains(response, '<a href="/option-wheel/" aria-current="page">期权车轮</a>', html=True)
         for retired in ("策略总闸门", "保存为正式容量快照", "风险总闸", "当前阻断项"):
             self.assertNotContains(response, retired)
 

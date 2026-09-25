@@ -1,4 +1,6 @@
 from django.contrib import admin
+from django.db.models import Q
+from family_core.private_admin import PrivateContentAdmin
 
 from .models import InvestmentNote, InvestmentNoteType
 
@@ -13,7 +15,12 @@ class InvestmentNoteTypeAdmin(admin.ModelAdmin):
 
 
 @admin.register(InvestmentNote)
-class InvestmentNoteAdmin(admin.ModelAdmin):
+class InvestmentNoteAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return InvestmentNote.objects.filter(family=member.family).filter(
+            Q(member=member) | Q(visibility=InvestmentNote.VISIBILITY_FAMILY)
+        )
+
     list_display = (
         "title",
         "member",

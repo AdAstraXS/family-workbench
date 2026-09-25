@@ -6,7 +6,11 @@
 {% block content %}
 <section class="headline">
   <h1>首页仪表盘</h1>
-  <p>这里展示家庭投资和收支的核心摘要。</p>
+  <p>金额统一为人民币（CNY）。投资估值日期：{{ valuation_date }}；正式资产快照：{{ latest_snapshot.snapshot_date|default:"暂无" }}。</p>
+  <p>收支按发生日／统计期末日最近可用汇率折算；投资资产与全资产快照存在重叠，不相加。</p>
+  {% if valuation.missing_rates or valuation.missing_prices %}<p role="alert">投资估值缺少价格或汇率，暂不显示总额，请到投资组合查看缺项。</p>{% endif %}
+  {% if valuation.stale_prices %}<p role="alert">部分投资价格已过期，估值仅供参考。</p>{% endif %}
+  {% for error in cashflow_errors %}<p role="alert">{{ error }}</p>{% endfor %}
 </section>
 
 <section class="metrics">

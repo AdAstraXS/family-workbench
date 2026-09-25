@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import Q
 from django.urls import reverse
 
@@ -913,7 +913,24 @@ class InvestmentTransaction(TimestampedModel):
     def save(self, *args, **kwargs):
         if not self.transaction_no:
             self.transaction_no = f"TXN-{uuid.uuid4().hex}"
-        super().save(*args, **kwargs)
+        from .services import lock_accounts
+        with transaction.atomic():
+            account_ids = [self.account_id]
+            if self.pk:
+                account_ids.extend(type(self).objects.filter(pk=self.pk).values_list("account_id", flat=True))
+            lock_accounts(account_ids)
+            super().save(*args, **kwargs)
+
+    @property
+    def is_individually_editable(self):
+        from .services import can_edit_transaction
+        return can_edit_transaction(self)
+
+    def delete(self, *args, **kwargs):
+        from .services import lock_accounts
+        with transaction.atomic():
+            lock_accounts([self.account_id])
+            return super().delete(*args, **kwargs)
 
 
 class DailyExchangeRateFetch(models.Model):

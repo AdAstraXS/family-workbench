@@ -1,6 +1,7 @@
 from django import forms
 from django.contrib import admin
 from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.urls import reverse
 from django.utils.html import format_html
 
@@ -39,7 +40,7 @@ from .models import (
     WatchlistGroup,
     WatchlistItem,
 )
-from .services import rebuild_cash_only_transaction, rebuild_position
+from .services import can_edit_transaction, lock_accounts, rebuild_cash_only_transaction, rebuild_position
 
 
 class SecurityExchangeInline(admin.TabularInline):
@@ -290,6 +291,12 @@ class InvestmentPositionAdmin(admin.ModelAdmin):
 
 @admin.register(InvestmentTransaction)
 class InvestmentTransactionAdmin(admin.ModelAdmin):
+    def has_change_permission(self, request, obj=None):
+        return super().has_change_permission(request, obj) and (obj is None or can_edit_transaction(obj))
+
+    def has_delete_permission(self, request, obj=None):
+        return super().has_delete_permission(request, obj) and (obj is None or can_edit_transaction(obj))
+
     list_display = ("transaction_no", "trade_date", "account", "security", "trade_type_option", "option_purpose", "quantity", "price", "amount", "realized_pnl", "currency")
     list_filter = ("account__bank_account__family", "account__bank_account__member", "trade_type_option", "currency", "trade_date")
     search_fields = ("transaction_no", "account__bank_account__account_name", "security__symbol", "security__name", "remark")
@@ -310,12 +317,18 @@ class InvestmentTransactionAdmin(admin.ModelAdmin):
             Security.objects.get(pk=security_id),
         )
 
+    @transaction.atomic
     def save_model(self, request, obj, form, change):
         old_pair = None
+        old_account_id = None
         if change:
             old = InvestmentTransaction.objects.filter(pk=obj.pk).first()
+            old_account_id = old.account_id if old else None
+            if old and not can_edit_transaction(old):
+                raise PermissionDenied("同步或期权结算流水不能单独修改。")
             if old and old.security_id:
                 old_pair = (old.account_id, old.security_id)
+        lock_accounts([obj.account_id, old_account_id])
         super().save_model(request, obj, form, change)
         if obj.security_id:
             self._rebuild(obj.account_id, obj.security_id)
@@ -325,15 +338,21 @@ class InvestmentTransactionAdmin(admin.ModelAdmin):
             self._rebuild(*old_pair)
 
     def delete_model(self, request, obj):
+        if not can_edit_transaction(obj):
+            raise PermissionDenied("同步或期权结算流水不能单独删除。")
         pair = (obj.account_id, obj.security_id) if obj.security_id else None
         super().delete_model(request, obj)
         if pair:
             self._rebuild(*pair)
 
+    @transaction.atomic
     def delete_queryset(self, request, queryset):
+        if any(not can_edit_transaction(obj) for obj in queryset):
+            raise PermissionDenied("所选记录包含同步或期权结算流水，未删除任何记录。")
+        lock_accounts(queryset.values_list("account_id", flat=True))
         pairs = set(queryset.exclude(security=None).values_list("account_id", "security_id"))
         super().delete_queryset(request, queryset)
-        for pair in pairs:
+        for pair in sorted(pairs):
             self._rebuild(*pair)
 
 

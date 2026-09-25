@@ -1,4 +1,5 @@
 from django.contrib import admin
+from family_core.private_admin import PrivateContentAdmin
 
 from .forms import AiModuleModelForm
 from .models import AiAnalysisRequest, AiAnalysisResult, AiModuleModel, AiProvider
@@ -23,7 +24,10 @@ class AiModuleModelAdmin(admin.ModelAdmin):
 
 
 @admin.register(AiAnalysisRequest)
-class AiAnalysisRequestAdmin(admin.ModelAdmin):
+class AiAnalysisRequestAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return AiAnalysisRequest.objects.filter(member=member, family=member.family)
+
     list_display = ("module", "analysis_type", "member", "provider", "status", "created_at")
     list_filter = ("family", "member", "provider", "module", "status", "created_at")
     search_fields = ("prompt", "analysis_type", "error_message")
@@ -33,7 +37,10 @@ class AiAnalysisRequestAdmin(admin.ModelAdmin):
 
 
 @admin.register(AiAnalysisResult)
-class AiAnalysisResultAdmin(admin.ModelAdmin):
+class AiAnalysisResultAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return AiAnalysisResult.objects.filter(request__member=member, request__family=member.family)
+
     list_display = ("request", "tokens_used", "cost_estimate", "created_at")
     search_fields = ("result_text",)
 

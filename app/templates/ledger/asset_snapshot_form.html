@@ -101,8 +101,8 @@
     </div>
   </form>
 </section>
-<script id="account-member-map" type="application/json">{{ account_member_map|safe }}</script>
-<script id="account-options" type="application/json">{{ account_options|safe }}</script>
+{{ account_member_map|json_script:"account-member-map" }}
+{{ account_options|json_script:"account-options" }}
 <script>
   (function () {
     const mapEl = document.getElementById("account-member-map");
