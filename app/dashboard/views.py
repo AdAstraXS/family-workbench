@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q, Sum
 from django.shortcuts import render
@@ -17,7 +19,8 @@ from .presentation import homepage_details
 @login_required
 def home(request):
     today = timezone.localdate()
-    month_start = today.replace(day=1)
+    previous_month_end = today.replace(day=1) - timedelta(days=1)
+    previous_month_start = previous_month_end.replace(day=1)
     family = get_household_family()
     valuation = value_portfolio(InvestmentAccount.objects.filter(
         bank_account__family=family, bank_account__is_active=True,
@@ -27,12 +30,12 @@ def home(request):
     asset_snapshot_total = latest_snapshot.entries.aggregate(total=Sum("base_amount"))["total"] if latest_snapshot else 0
     asset_snapshot_total = asset_snapshot_total or 0
     income_records = IncomeRecord.objects.filter(family=family).filter(
-        Q(period_start__lte=today, period_end__gte=month_start)
-        | Q(period_start__isnull=True, income_date__year=today.year, income_date__month=today.month)
+        Q(period_start__lte=previous_month_end, period_end__gte=previous_month_start)
+        | Q(period_start__isnull=True, income_date__range=(previous_month_start, previous_month_end))
     )
     expense_records = ExpenseRecord.objects.filter(family=family).filter(
-        Q(period_start__lte=today, period_end__gte=month_start)
-        | Q(period_start__isnull=True, expense_date__year=today.year, expense_date__month=today.month)
+        Q(period_start__lte=previous_month_end, period_end__gte=previous_month_start)
+        | Q(period_start__isnull=True, expense_date__range=(previous_month_start, previous_month_end))
     )
     cashflow_errors = []
     def total(records):
@@ -41,7 +44,7 @@ def home(request):
         except MissingCashflowRate as exc:
             cashflow_errors.append(str(exc))
             return None
-    month_income, month_expense = total(income_records), total(expense_records)
+    previous_month_income, previous_month_expense = total(income_records), total(expense_records)
     recent_transactions = (
         InvestmentTransaction.objects.filter(
             account__bank_account__family=family,
@@ -63,9 +66,10 @@ def home(request):
             "cashflow_errors": cashflow_errors,
             "bank_total": asset_snapshot_total,
             "latest_snapshot": latest_snapshot,
-            "month_income": month_income,
-            "month_expense": month_expense,
-            "month_net": month_income - month_expense if month_income is not None and month_expense is not None else None,
+            "previous_month": previous_month_start,
+            "previous_month_income": previous_month_income,
+            "previous_month_expense": previous_month_expense,
+            "previous_month_net": previous_month_income - previous_month_expense if previous_month_income is not None and previous_month_expense is not None else None,
             "recent_transactions": recent_transactions,
             "recent_expenses": recent_expenses,
         },

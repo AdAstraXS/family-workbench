@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -8,7 +9,7 @@ from django.urls import reverse
 from family_core.models import AssetCategory, Family, FamilyMember
 from family_core.workspace import MODULES
 from knowledge.models import KnowledgeDocument, KnowledgeSource
-from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot
+from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot, ExpenseRecord, IncomeRecord
 from .presentation import homepage_details
 
 
@@ -24,6 +25,33 @@ class SongtingDashboardTests(TestCase):
         snapshot = AssetBalanceSnapshot.objects.create(family=self.family, snapshot_date=snapshot_date, **kwargs)
         AssetBalanceEntry.objects.create(snapshot=snapshot, member=self.member, base_amount=Decimal(amount))
         return snapshot
+
+    @patch("dashboard.views.timezone.localdate", return_value=date(2026, 1, 5))
+    def test_home_cashflow_shows_previous_calendar_month_across_new_year(self, _localdate):
+        IncomeRecord.objects.create(
+            family=self.family, member=self.member, income_date=date(2026, 1, 2),
+            period_start=date(2025, 12, 1), period_end=date(2025, 12, 31),
+            amount=Decimal("200.00"), currency="CNY",
+        )
+        ExpenseRecord.objects.create(
+            family=self.family, member=self.member, expense_date=date(2025, 12, 15),
+            amount=Decimal("75.25"), currency="CNY",
+        )
+        ExpenseRecord.objects.create(
+            family=self.family, member=self.member, expense_date=date(2026, 1, 3),
+            amount=Decimal("999.00"), currency="CNY",
+        )
+
+        response = self.client.get(reverse("dashboard:home"))
+
+        self.assertEqual(response.context["previous_month"], date(2025, 12, 1))
+        self.assertEqual(response.context["previous_month_income"], Decimal("200.00"))
+        self.assertEqual(response.context["previous_month_expense"], Decimal("75.25"))
+        self.assertEqual(response.context["previous_month_net"], Decimal("124.75"))
+        self.assertContains(response, "上个月的收支")
+        self.assertContains(response, "2025 年 12 月")
+        self.assertContains(response, "上月支出")
+        self.assertNotContains(response, "本月支出")
 
     def test_trend_excludes_drafts_and_other_currencies_without_recomputing_saved_amounts(self):
         self.snapshot(1, "777777", snapshot_date=date(2025, 9, 30))

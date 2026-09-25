@@ -9,8 +9,9 @@
   <script src="{% static 'js/workspace-preferences.js' %}?v=20260925"></script>
   {% block extra_head %}{% endblock %}
   <link rel="stylesheet" href="{% static 'css/songting.css' %}?v=20260925">
+  <link rel="stylesheet" href="{% static 'css/module-motion.css' %}?v=20260925-1">
 </head>
-<body class="songting app-{{ request.resolver_match.app_name|default:'site' }}">
+<body class="songting app-{{ request.resolver_match.app_name|default:'site' }} view-{{ request.resolver_match.url_name|default:'page' }}">
   <a class="ws-skip" href="#workspace-main">跳到页面内容</a>
   {% if user.is_authenticated %}
   <aside class="ws-sidebar" id="ws-sidebar" aria-label="工作台导航">
