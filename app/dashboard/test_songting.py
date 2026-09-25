@@ -50,6 +50,23 @@ class SongtingDashboardTests(TestCase):
         self.assertNotContains(response, "PRIVATE_SONGTING_TITLE")
         self.assertEqual(list(response.context["recent_knowledge"]), [])
 
+    def test_allocation_matches_ledger_family_chart_with_mixed_sign_entries(self):
+        from ledger.views import build_overview_asset_charts
+        latest = self.snapshot(5, "100.12")
+        AssetBalanceEntry.objects.create(snapshot=latest, member=self.member, base_amount=Decimal("-20"))
+        AssetBalanceEntry.objects.create(snapshot=latest, member=self.member, base_amount=Decimal("0"))
+        data = homepage_details(self.family, self.member, latest, date(2026, 9, 25))
+        expected = build_overview_asset_charts(latest)[0]["items"]
+        self.assertEqual(data["allocation_total"], Decimal("100.12"))
+        self.assertEqual(data["asset_trend"][0].recorded_total, Decimal("80.12"))
+        self.assertEqual([(g["label"], g["amount"]) for g in data["asset_allocation"]],
+                         [(g["name"], Decimal(str(g["value"]))) for g in expected])
+        response = self.client.get(reverse("dashboard:home"))
+        html = response.content.decode()
+        self.assertLess(html.index('class="panel ws-home-allocation"'), html.index('class="panel ws-agenda"'))
+        self.assertContains(response, 'class="ws-color-donut"')
+        self.assertContains(response, "仅统计正资产")
+
     def test_home_includes_all_existing_modules_and_reads_without_writing(self):
         from django.db import connection
         from django.test.utils import CaptureQueriesContext

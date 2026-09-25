@@ -41,18 +41,25 @@ def homepage_details(family, member, latest_snapshot, today):
             y = Decimal(95) if not span else Decimal(165) - (snapshot.recorded_total - low) / span * 140
             points.append(f"{x:.2f},{y:.2f}")
         result.update(trend_points=" ".join(points), trend_low=low, trend_high=high,
+                      trend_mid=(low + high) / 2, trend_last_y=points[-1].split(",")[1],
                       trend_start=snapshots[0].snapshot_date, trend_end=snapshots[-1].snapshot_date)
-    groups = list(latest_snapshot.entries.order_by().values("asset_category__name").annotate(amount=Sum("base_amount")).order_by("-amount", "asset_category__name"))
+    # Match ledger's family allocation: omit non-positive entries BEFORE grouping.
+    # Net snapshot totals and historical trend values remain unchanged.
+    groups = list(latest_snapshot.entries.filter(base_amount__gt=0).order_by().values("asset_category__name").annotate(amount=Sum("base_amount")).order_by("-amount", "asset_category__name"))
     total = sum((g["amount"] or ZERO for g in groups), ZERO)
-    can_draw = total > 0 and all((g["amount"] or ZERO) >= 0 for g in groups)
+    can_draw = total > 0
+    result["allocation_total"] = total
+    result["allocation_total_wan"] = total / Decimal("10000")
     offset = ZERO
     for i, group in enumerate(groups):
         amount = group["amount"] or ZERO
         percent = amount / total * 100 if can_draw else ZERO
+        # Demo's small gaps separate categories without hiding tiny slices.
+        visible_arc = percent - min(Decimal("1.3"), percent / 4) if len(groups) > 1 else percent
         result["asset_allocation"].append({
             "label": group["asset_category__name"] or "未分类", "amount": amount,
-            "percent": f"{percent:.1f}", "dash": f"{percent:.5f}",
-            "gap": f"{100-percent:.5f}", "offset": f"{-offset:.5f}",
+            "percent": f"{percent:.1f}", "dash": f"{visible_arc:.5f}",
+            "gap": f"{100-visible_arc:.5f}", "offset": f"{-offset:.5f}",
             "color": PALETTE[i % len(PALETTE)],
         })
         offset += percent
