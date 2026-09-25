@@ -14,7 +14,7 @@ MODULES = (
     ("trading_journal", "index", "交易复盘", "report-money", "交易案例 · 功能筹备中", "阅读与积累"),
     ("intelligence", "index", "AI 情报", "sparkles", "动态、人物与资讯线索", "观察与分析"),
     ("macro", "index", "宏观数据", "chart-line", "观察宏观指标与变化", "观察与分析"),
-    ("ai_analysis", "index", "AI 分析", "sparkles", "分析工具与模型服务", "观察与分析"),
+    ("ai_analysis", "index", "AI 检索与问答", "sparkles", "在知识库和已授权资料中查找答案", "观察与分析"),
 )
 
 
