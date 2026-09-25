@@ -48,3 +48,47 @@
   .ai-share-answer { padding: 18px; }
   .ai-share-evidence div { display: block; }
 }
+
+/* Shared answers follow the active Songting palette as well. */
+body.songting.app-ai_analysis .ai-share-back,
+body.songting.app-ai_analysis .ai-share-card header > span,
+body.songting.app-ai_analysis .ai-share-unavailable > span {
+  color: var(--ws-accent);
+}
+body.songting.app-ai_analysis .ai-share-card {
+  background: var(--ws-panel);
+  border-color: var(--ws-line);
+  box-shadow: 0 18px 45px var(--ws-shadow);
+}
+body.songting.app-ai_analysis .ai-share-card h1,
+body.songting.app-ai_analysis .ai-share-evidence h2,
+body.songting.app-ai_analysis .ai-share-evidence strong { color: var(--ws-text); }
+body.songting.app-ai_analysis .ai-share-card header p,
+body.songting.app-ai_analysis .ai-share-scope,
+body.songting.app-ai_analysis .ai-share-evidence div span { color: var(--ws-muted); }
+body.songting.app-ai_analysis .ai-share-answer {
+  background: var(--ws-soft);
+  color: var(--ws-text);
+}
+body.songting.app-ai_analysis .ai-share-answer p { color: var(--ws-text); }
+body.songting.app-ai_analysis .ai-share-evidence { border-color: var(--ws-line); }
+body.songting.app-ai_analysis .ai-share-actions button:not(.secondary):not(.danger),
+body.songting.app-ai_analysis .ai-share-actions .button-link:not(.secondary) {
+  background: var(--ws-accent);
+  color: #fff;
+}
+body.songting.app-ai_analysis .ai-share-actions .secondary,
+body.songting.app-ai_analysis .ai-share-unavailable .secondary {
+  background: var(--ws-soft);
+  color: var(--ws-accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html[data-motion="on"] body.songting.app-ai_analysis .ai-share-card {
+    animation: ai-share-arrive 520ms cubic-bezier(.2,.72,.2,1) both;
+  }
+}
+@keyframes ai-share-arrive {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}

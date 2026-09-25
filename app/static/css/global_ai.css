@@ -25,3 +25,202 @@
 .global-ai-knowledge-source-list{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
 .global-ai-knowledge-source-list span{padding:2px 7px;border-radius:99px;background:#dfeee9;color:#315e52}
 .global-ai-knowledge-source-list em{color:#7d7167;font-style:normal}
+
+/* Songting themes: the assistant uses the same four palette tokens as the workspace. */
+body.songting.app-ai_analysis {
+  --ai-surface: var(--ws-panel);
+  --ai-surface-soft: var(--ws-soft);
+  --ai-text: var(--ws-text);
+  --ai-muted: var(--ws-muted);
+  --ai-accent: var(--ws-accent);
+  --ai-line: var(--ws-line);
+  --ai-tint: color-mix(in srgb, var(--ai-accent) 10%, var(--ai-surface));
+  background: var(--ws-bg);
+  color: var(--ai-text);
+}
+
+.songting.app-ai_analysis .global-ai-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  padding: clamp(24px, 3vw, 38px);
+  border: 1px solid color-mix(in srgb, var(--ws-hero) 25%, var(--ai-line));
+  border-radius: 20px;
+  background: linear-gradient(112deg, var(--ws-hero), color-mix(in srgb, var(--ws-hero) 90%, var(--ws-hero-end)));
+  color: var(--ws-hero-ink);
+  box-shadow: 0 16px 38px var(--ws-shadow);
+}
+.songting.app-ai_analysis .global-ai-hero::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  width: 300px;
+  height: 300px;
+  right: -62px;
+  top: -165px;
+  border: 1px solid color-mix(in srgb, var(--ws-hero-ink) 22%, transparent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 48px color-mix(in srgb, var(--ws-hero-ink) 5%, transparent),
+              0 0 0 98px color-mix(in srgb, var(--ws-hero-ink) 3%, transparent);
+  pointer-events: none;
+}
+.songting.app-ai_analysis .global-ai-hero h1 {
+  color: var(--ws-hero-ink);
+  font-family: var(--ws-serif);
+  font-weight: 500;
+}
+.songting.app-ai_analysis .global-ai-hero p,
+.songting.app-ai_analysis .global-ai-eyebrow { color: var(--ws-hero-ink); }
+.songting.app-ai_analysis .global-ai-privacy {
+  flex-shrink: 0;
+  border-color: color-mix(in srgb, var(--ws-hero-ink) 28%, transparent);
+  background: color-mix(in srgb, var(--ws-hero-ink) 12%, transparent);
+  color: var(--ws-hero-ink);
+  backdrop-filter: blur(8px);
+}
+.songting.app-ai_analysis .global-ai-privacy span { color: var(--ws-hero-ink); }
+
+.songting.app-ai_analysis .global-ai-workspace > .panel,
+.songting.app-ai_analysis .global-ai-module-history {
+  border-color: var(--ai-line);
+  background: var(--ai-surface);
+  box-shadow: 0 10px 30px var(--ws-shadow);
+}
+.songting.app-ai_analysis .global-ai-section-head,
+.songting.app-ai_analysis .global-ai-chat-head,
+.songting.app-ai_analysis .global-ai-authorization,
+.songting.app-ai_analysis .global-ai-composer,
+.songting.app-ai_analysis .global-ai-module-history-list {
+  border-color: var(--ai-line);
+}
+.songting.app-ai_analysis .global-ai-section-head > div > span,
+.songting.app-ai_analysis .global-ai-chat-head > div > span,
+.songting.app-ai_analysis .global-ai-empty-chat > span { color: var(--ai-accent); }
+.songting.app-ai_analysis .global-ai-section-head h2,
+.songting.app-ai_analysis .global-ai-chat-head h2,
+.songting.app-ai_analysis .global-ai-empty-chat h2,
+.songting.app-ai_analysis .global-ai-empty-chat h3 { color: var(--ai-text); }
+.songting.app-ai_analysis .global-ai-hero + .global-ai-readiness.is-ready {
+  border-color: color-mix(in srgb, var(--ai-accent) 25%, var(--ai-line));
+  background: var(--ai-tint);
+}
+.songting.app-ai_analysis .global-ai-readiness.is-ready .global-ai-readiness-icon {
+  background: var(--ai-accent);
+  color: #fff;
+}
+.songting.app-ai_analysis .global-ai-readiness.is-ready strong { color: var(--ai-text); }
+.songting.app-ai_analysis .global-ai-readiness.is-ready p { color: var(--ai-muted); }
+
+.songting.app-ai_analysis .global-ai-create,
+.songting.app-ai_analysis .global-ai-memory-create,
+.songting.app-ai_analysis .global-ai-example-grid div,
+.songting.app-ai_analysis .global-ai-knowledge-scope,
+.songting.app-ai_analysis .global-ai-memory-card,
+.songting.app-ai_analysis .global-ai-request-history {
+  border-color: var(--ai-line);
+  background: var(--ai-surface-soft);
+}
+.songting.app-ai_analysis .global-ai-create > summary,
+.songting.app-ai_analysis .global-ai-memory-create > summary,
+.songting.app-ai_analysis .global-ai-knowledge-scope strong,
+.songting.app-ai_analysis .global-ai-example-grid strong,
+.songting.app-ai_analysis .global-ai-memory-card p,
+.songting.app-ai_analysis .global-ai-auth-options strong { color: var(--ai-text); }
+.songting.app-ai_analysis .global-ai-conversation-item:hover,
+.songting.app-ai_analysis .global-ai-conversation-item.active { background: var(--ai-tint); }
+.songting.app-ai_analysis .global-ai-conversation-list .global-ai-conversation-link { color: var(--ai-text); }
+.songting.app-ai_analysis .global-ai-conversation-item.active .global-ai-conversation-link { color: var(--ai-accent); }
+.songting.app-ai_analysis .global-ai-conversation-list span,
+.songting.app-ai_analysis .global-ai-empty-small,
+.songting.app-ai_analysis .global-ai-chat-head p,
+.songting.app-ai_analysis .global-ai-empty-chat > p,
+.songting.app-ai_analysis .global-ai-example-grid span,
+.songting.app-ai_analysis .global-ai-section-intro,
+.songting.app-ai_analysis .global-ai-composer-note,
+.songting.app-ai_analysis .global-ai-auth-options label,
+.songting.app-ai_analysis .global-ai-knowledge-scope,
+.songting.app-ai_analysis .global-ai-memory-card > div small { color: var(--ai-muted); }
+.songting.app-ai_analysis .global-ai-knowledge-source-list span,
+.songting.app-ai_analysis .global-ai-memory-scope {
+  background: var(--ai-tint);
+  color: var(--ai-accent);
+}
+
+/* The shared panel paragraph rule must never recolor text inside a dark user bubble. */
+.songting.app-ai_analysis .global-ai-message.role-user p {
+  background: var(--ai-accent);
+  color: #fff;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--ai-accent) 17%, transparent);
+}
+.songting.app-ai_analysis .global-ai-message:not(.role-user) p {
+  background: var(--ai-surface-soft);
+  color: var(--ai-text);
+}
+.songting.app-ai_analysis .global-ai-message > span,
+.songting.app-ai_analysis .global-ai-evidence { color: var(--ai-muted); }
+.songting.app-ai_analysis .global-ai-message.role-user p::selection {
+  background: #fff;
+  color: #263b50;
+}
+.songting.app-ai_analysis .global-ai-composer textarea { background: var(--ai-surface); }
+.songting.app-ai_analysis :is(
+  .global-ai-create form,
+  .global-ai-memory-create form,
+  .global-ai-composer,
+  .global-ai-authorization > form,
+  .global-ai-conversation-actions form
+) button:not(.global-ai-text-button):not(.danger) {
+  background: var(--ai-accent);
+  color: #fff;
+}
+.songting.app-ai_analysis .global-ai-text-button {
+  background: transparent;
+  color: var(--ai-accent);
+}
+.songting.app-ai_analysis .global-ai-text-button:hover { background: var(--ai-tint); }
+.songting.app-ai_analysis .global-ai-text-button.danger { color: #a33b3b; }
+
+@media (prefers-reduced-motion: no-preference) {
+  html[data-motion="on"] .songting.app-ai_analysis :is(
+    .global-ai-hero,
+    .global-ai-readiness,
+    .global-ai-workspace > .panel
+  ) {
+    animation: ai-arrive 540ms cubic-bezier(.2,.72,.2,1) both;
+  }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-readiness { animation-delay: 65ms; }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-conversations { animation-delay: 105ms; }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-chat { animation-delay: 155ms; }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-memory { animation-delay: 205ms; }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-message:nth-child(-n+6) {
+    animation: ai-message-enter 420ms cubic-bezier(.2,.72,.2,1) both;
+    animation-delay: min(calc((var(--ai-message-order, 0) + 1) * 45ms), 270ms);
+  }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-message:nth-child(2) { --ai-message-order: 1; }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-message:nth-child(3) { --ai-message-order: 2; }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-message:nth-child(4) { --ai-message-order: 3; }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-message:nth-child(5) { --ai-message-order: 4; }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-message:nth-child(6) { --ai-message-order: 5; }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-workspace > .panel {
+    transition: box-shadow 220ms ease, transform 220ms ease;
+  }
+  html[data-motion="on"] .songting.app-ai_analysis .global-ai-workspace > .panel:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 34px var(--ws-shadow);
+  }
+}
+@keyframes ai-arrive {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes ai-message-enter {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 760px) {
+  .songting.app-ai_analysis .global-ai-hero { padding: 24px 20px; }
+  .songting.app-ai_analysis .global-ai-workspace {
+    grid-template-areas: "conversations" "chat" "memory";
+  }
+}
