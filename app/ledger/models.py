@@ -326,6 +326,12 @@ class AssetBalanceSnapshot(TimestampedModel):
 
 
 class AssetBalanceEntry(TimestampedModel):
+    def clean(self):
+        super().clean()
+        if self.snapshot_id:
+            from .valuation import calculate_base_amount
+            calculate_base_amount(self.snapshot, self.currency, self.original_amount)
+
     snapshot = models.ForeignKey(AssetBalanceSnapshot, verbose_name="资产余额快照", on_delete=models.CASCADE, related_name="entries")
     member = models.ForeignKey(FamilyMember, verbose_name="所属成员", on_delete=models.CASCADE, related_name="asset_balance_entries")
     account = models.ForeignKey(BankAccount, verbose_name="账户名称", on_delete=models.SET_NULL, null=True, blank=True, related_name="asset_balance_entries")

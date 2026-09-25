@@ -7,6 +7,7 @@ from django.db import transaction
 from .models import (
     CashMovementTypeChoices,
     InvestmentCashMovement,
+    InvestmentAccount,
     InvestmentPosition,
     InvestmentTransaction,
     OptionContract,
@@ -17,6 +18,25 @@ from .models import (
 
 
 ZERO = Decimal("0")
+
+
+def lock_accounts(account_ids):
+    """Hold account locks until the surrounding transaction commits.
+
+    NO KEY UPDATE permits concurrent foreign-key checks on new facts. Lock all
+    accounts in ID order before moving a trade between accounts.
+    """
+    return list(InvestmentAccount.objects.filter(
+        pk__in={pk for pk in account_ids if pk is not None},
+    ).order_by("pk").select_for_update(no_key=True))
+
+
+def can_edit_transaction(item):
+    return item.source == TransactionSourceChoices.MANUAL and not (
+        (item.extra_data or {}).get("option_action")
+        or (item.extra_data or {}).get("option_close_transaction_id")
+        or (item.extra_data or {}).get("underlying_transaction_id")
+    )
 
 TRADE_CASH_MOVEMENT_TYPES = {
     TradeTypeChoices.BUY: CashMovementTypeChoices.BUY,
@@ -151,6 +171,7 @@ def calculate_transactions(transactions):
 
 @transaction.atomic
 def rebuild_position(account, security):
+    lock_accounts([account.pk])
     transactions = list(
         InvestmentTransaction.objects.filter(
             account=account,
@@ -255,6 +276,8 @@ def settle_option_position(
     remark="",
     user=None,
 ):
+    lock_accounts([position.account_id])
+    position.refresh_from_db()
     if position.security.asset_type != position.security.TYPE_OPTION:
         raise ValidationError("只有期权持仓可以执行到期作废、行权或指派。")
     if quantity <= 0 or quantity > abs(position.quantity):

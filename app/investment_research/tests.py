@@ -889,4 +889,4 @@ class WiringTests(ResearchViewTestBase):
         member = self.make_member(self.family, "NavUser")
         self.login(member)
         resp = self.client.get(INDEX_URL)
-        self.assertContains(resp, '<a href="/research/">投研</a>')
+        self.assertContains(resp, '<a href="/research/" aria-current="page">投研</a>', html=True)

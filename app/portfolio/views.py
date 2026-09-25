@@ -17,6 +17,7 @@ from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
 from family_core.audit import stamp_actor
+from family_core.navigation import return_url
 from family_core.household import get_household_family, get_site_setting
 from family_core.models import AssetCategory, Currency, FamilyMember
 from ledger.models import AssetBalanceSnapshot, BankAccount
@@ -39,7 +40,7 @@ from .forms import (
     WatchlistGroupForm,
 )
 from .futu_service import FutuQueryError, search_futu_securities
-from .exchange_rate_service import ensure_daily_exchange_rates
+from .exchange_rate_service import cached_daily_exchange_rates
 from .models import (
     DailyPortfolioValuationRun,
     InvestmentAccount,
@@ -73,11 +74,14 @@ from .reconciliation import (
     revert_reconciliation,
 )
 from .services import (
+    lock_accounts,
+    can_edit_transaction,
     rebuild_cash_only_transaction,
     rebuild_position,
     settle_option_position,
 )
 from .valuation import (
+    exchange_rate_cache,
     convert_currency as _convert_currency,
     refresh_position_valuations,
     resolve_position_prices,
@@ -379,6 +383,7 @@ def _latest_positions(accounts, year):
     )
 
 
+@exchange_rate_cache()
 def _account_dashboard_data(request, account=None):
     accounts = _visible_accounts(request)
     if account:
@@ -1261,7 +1266,7 @@ def reconciliation_revert(request):
 
 @login_required
 def account_list(request):
-    rate_info = ensure_daily_exchange_rates()
+    rate_info = cached_daily_exchange_rates()
     context = _account_dashboard_data(request)
     snapshot_data, years, selected_year = _snapshot_balance_data(
         context["accounts"],
@@ -1547,7 +1552,7 @@ def _individual_profit_data(request, account, transactions):
 
 @login_required
 def account_detail(request, pk):
-    rate_info = ensure_daily_exchange_rates()
+    rate_info = cached_daily_exchange_rates()
     account = get_object_or_404(_visible_accounts(request), pk=pk)
     context = _account_dashboard_data(request, account)
     context["rate_info"] = rate_info
@@ -2334,8 +2339,9 @@ def option_position_action(request, pk, action):
 def transaction_list(request):
     transactions = InvestmentTransaction.objects.filter(
         account__in=_visible_accounts(request)
-    ).select_related("account", "security").order_by("-trade_date", "-created_at")[:100]
-    return render(request, "portfolio/transaction_list.html", {"transactions": transactions})
+    ).select_related("account__bank_account", "security").order_by("-trade_date", "-created_at", "-pk")
+    page = Paginator(transactions, 100).get_page(request.GET.get("page"))
+    return render(request, "portfolio/transaction_list.html", {"transactions": page, "page_obj": page})
 
 
 @login_required
@@ -2360,8 +2366,8 @@ def transaction_delete(request, pk):
         InvestmentTransaction.objects.filter(account__in=_visible_accounts(request)),
         pk=pk,
     )
-    if item.source != TransactionSourceChoices.MANUAL:
-        messages.error(request, "同步交易不能在投资组合中删除，请回到来源模块撤销。")
+    if not can_edit_transaction(item):
+        messages.error(request, "同步交易或期权结算关联流水不能单独删除，请回到来源核对完整事件。")
         return redirect(f"{item.account.get_absolute_url()}?tab=transactions")
     account = item.account
     security = item.security
@@ -2369,7 +2375,7 @@ def transaction_delete(request, pk):
     if security:
         rebuild_position(account, security)
     messages.success(request, "交易记录已删除，持仓和现金流水已重新计算。")
-    return redirect(f"{account.get_absolute_url()}?tab=transactions")
+    return redirect(return_url(request, f"{account.get_absolute_url()}?tab=transactions"))
 
 
 @login_required
@@ -2453,6 +2459,10 @@ def transaction_form_options(request):
 
 
 def save_transaction_form(request, title, instance=None):
+    if instance and not can_edit_transaction(instance):
+        messages.error(request, "同步交易或期权结算关联流水不能单独修改，请回到来源核对完整事件。")
+        return redirect(f"{instance.account.get_absolute_url()}?tab=transactions")
+    old_account_id = instance.account_id if instance else None
     old_pair = (
         (instance.account_id, instance.security_id)
         if instance and instance.security_id
@@ -2467,6 +2477,10 @@ def save_transaction_form(request, title, instance=None):
         if form.is_valid():
             try:
                 with transaction.atomic():
+                    destination_account, _ = InvestmentAccount.objects.get_or_create(
+                        bank_account=form.cleaned_data["bank_account"],
+                    )
+                    lock_accounts([destination_account.pk, old_account_id])
                     stamp_actor(form.instance, request.user)
                     item = form.save()
                     if (
@@ -2494,9 +2508,9 @@ def save_transaction_form(request, title, instance=None):
                             },
                         )
                     pairs = {old_pair, (item.account_id, item.security_id)}
-                    for account_id, security_id in {
+                    for account_id, security_id in sorted({
                         pair for pair in pairs if pair and pair[1]
-                    }:
+                    }):
                         account = InvestmentAccount.objects.select_related("bank_account").get(pk=account_id)
                         security = Security.objects.get(pk=security_id)
                         rebuild_position(account, security)
@@ -2505,7 +2519,7 @@ def save_transaction_form(request, title, instance=None):
             except ValidationError as exc:
                 form.add_error(None, exc)
             else:
-                return redirect(f"{item.account.get_absolute_url()}?tab=transactions")
+                return redirect(return_url(request, f"{item.account.get_absolute_url()}?tab=transactions"))
     else:
         initial = {}
         selected_position = None

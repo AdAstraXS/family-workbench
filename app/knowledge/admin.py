@@ -1,4 +1,7 @@
 from django.contrib import admin
+from django.db.models import Q
+from family_core.private_admin import PrivateContentAdmin
+from .permissions import accessible_artifacts, accessible_documents, accessible_search_entries
 
 from .models import (
     KnowledgeArtifact,
@@ -38,7 +41,10 @@ class KnowledgeArtifactVersionInline(admin.TabularInline):
 
 
 @admin.register(KnowledgeArtifact)
-class KnowledgeArtifactAdmin(admin.ModelAdmin):
+class KnowledgeArtifactAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return accessible_artifacts(member)
+
     list_display = (
         "title",
         "person_name",
@@ -62,7 +68,10 @@ class KnowledgeArtifactAdmin(admin.ModelAdmin):
 
 
 @admin.register(KnowledgeArtifactEvidence)
-class KnowledgeArtifactEvidenceAdmin(admin.ModelAdmin):
+class KnowledgeArtifactEvidenceAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return KnowledgeArtifactEvidence.objects.filter(version__artifact__in=accessible_artifacts(member)).filter(Q(document__isnull=True) | Q(document__in=accessible_documents(member)))
+
     list_display = (
         "citation_title",
         "citation_date",
@@ -105,7 +114,10 @@ class KnowledgeTagAdmin(admin.ModelAdmin):
 
 
 @admin.register(KnowledgeCurationRevision)
-class KnowledgeCurationRevisionAdmin(admin.ModelAdmin):
+class KnowledgeCurationRevisionAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return KnowledgeCurationRevision.objects.filter(document__in=accessible_documents(member))
+
     list_display = ("document", "sequence", "change_type", "changed_by", "created_at")
     list_filter = ("change_type",)
     search_fields = ("document__title", "summary", "category")
@@ -123,7 +135,10 @@ class KnowledgeCurationRevisionAdmin(admin.ModelAdmin):
 
 
 @admin.register(SourceConnection)
-class SourceConnectionAdmin(admin.ModelAdmin):
+class SourceConnectionAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return SourceConnection.objects.filter(member=member, family=member.family)
+
     list_display = (
         "member",
         "provider",
@@ -151,7 +166,10 @@ class SourceConnectionAdmin(admin.ModelAdmin):
 
 
 @admin.register(KnowledgeSource)
-class KnowledgeSourceAdmin(admin.ModelAdmin):
+class KnowledgeSourceAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return KnowledgeSource.objects.filter(owner=member, family=member.family)
+
     list_display = ("name", "kind", "owner", "visibility", "status", "last_sync_at")
     list_filter = ("family", "kind", "visibility", "status", "is_enabled")
     search_fields = ("name", "external_id", "key")
@@ -167,7 +185,10 @@ class KnowledgeRevisionInline(admin.TabularInline):
 
 
 @admin.register(KnowledgeDocument)
-class KnowledgeDocumentAdmin(admin.ModelAdmin):
+class KnowledgeDocumentAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return accessible_documents(member)
+
     list_display = (
         "title",
         "source",
@@ -192,14 +213,20 @@ class KnowledgeDocumentAdmin(admin.ModelAdmin):
 
 
 @admin.register(KnowledgeAsset)
-class KnowledgeAssetAdmin(admin.ModelAdmin):
+class KnowledgeAssetAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return KnowledgeAsset.objects.filter(revision__document__in=accessible_documents(member))
+
     list_display = ("original_name", "revision", "mime_type", "byte_size", "is_image")
     list_filter = ("mime_type", "is_image")
     search_fields = ("original_name", "external_id", "content_hash")
 
 
 @admin.register(KnowledgeProposal)
-class KnowledgeProposalAdmin(admin.ModelAdmin):
+class KnowledgeProposalAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return KnowledgeProposal.objects.filter(document__in=accessible_documents(member))
+
     list_display = (
         "document",
         "proposal_type",
@@ -227,7 +254,10 @@ class KnowledgeProposalAdmin(admin.ModelAdmin):
 
 
 @admin.register(KnowledgeProposalRun)
-class KnowledgeProposalRunAdmin(admin.ModelAdmin):
+class KnowledgeProposalRunAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return KnowledgeProposalRun.objects.filter(document__in=accessible_documents(member))
+
     list_display = (
         "document",
         "sequence",
@@ -259,7 +289,10 @@ class KnowledgeJobItemInline(admin.TabularInline):
 
 
 @admin.register(KnowledgeJob)
-class KnowledgeJobAdmin(admin.ModelAdmin):
+class KnowledgeJobAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return KnowledgeJob.objects.filter(family=member.family, source__owner=member)
+
     list_display = (
         "id",
         "job_type",
@@ -307,7 +340,10 @@ class KnowledgeImportItemInline(admin.TabularInline):
 
 
 @admin.register(KnowledgeImportBatch)
-class KnowledgeImportBatchAdmin(admin.ModelAdmin):
+class KnowledgeImportBatchAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return KnowledgeImportBatch.objects.filter(family=member.family, source__owner=member)
+
     list_display = (
         "id",
         "source",
@@ -345,7 +381,10 @@ class KnowledgeImportBatchAdmin(admin.ModelAdmin):
 
 
 @admin.register(KnowledgeSearchEntry)
-class KnowledgeSearchEntryAdmin(admin.ModelAdmin):
+class KnowledgeSearchEntryAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return accessible_search_entries(member)
+
     list_display = (
         "title",
         "item_kind",

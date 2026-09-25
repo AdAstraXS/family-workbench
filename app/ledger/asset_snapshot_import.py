@@ -11,6 +11,8 @@ from openpyxl.utils.datetime import from_excel
 from family_core.models import AccountRegion, AccountType, AssetCategory, FamilyMember
 
 from .models import AssetBalanceEntry, AssetBalanceSnapshot, BankAccount
+from .valuation import calculate_base_amount
+from django.core.exceptions import ValidationError
 
 
 WORKSHEET_NAME = "账户余额NEW"
@@ -253,6 +255,12 @@ def import_asset_snapshot_workbook(*, family, source, source_filename=None):
     source_filename = source_filename or Path(getattr(source, "name", str(source))).name
 
     for parsed in parsed_snapshots:
+        candidate = AssetBalanceSnapshot(base_currency="CNY", usd_to_base=parsed.usd_to_base, hkd_to_base=parsed.hkd_to_base)
+        for entry in parsed.entries:
+            try:
+                calculate_base_amount(candidate, entry.currency, entry.original_amount)
+            except ValidationError as exc:
+                raise AssetSnapshotWorkbookError(f"{parsed.snapshot_date}: {'; '.join(exc.messages)}") from exc
         existing = (
             AssetBalanceSnapshot.objects.filter(
                 family=family, snapshot_date=parsed.snapshot_date

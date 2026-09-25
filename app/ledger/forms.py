@@ -448,11 +448,25 @@ class AssetBalanceEntryForm(CurrencyChoiceMixin, BaseModelForm):
         return cleaned_data
 
 
+class AssetBalanceEntryBaseFormSet(forms.BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+        from .valuation import calculate_base_amount
+
+        for form in self.forms:
+            data = form.cleaned_data
+            if data and not data.get("DELETE"):
+                calculate_base_amount(self.instance, data.get("currency"), data.get("original_amount"))
+
+
 def make_asset_balance_entry_formset(extra=0):
     return inlineformset_factory(
         AssetBalanceSnapshot,
         AssetBalanceEntry,
         form=AssetBalanceEntryForm,
+        formset=AssetBalanceEntryBaseFormSet,
         extra=extra,
         can_delete=True,
     )

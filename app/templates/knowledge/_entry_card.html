@@ -16,7 +16,7 @@
       {% if entry.item_kind == "artifact" %}<span class="status-pill{% if entry.artifact.status == 'pending' %} warning{% endif %}">{{ entry.artifact.get_status_display }}</span>{% elif selected_collection == "archive" or selected_collection == "all" %}{% if entry.knowledge_status == "pending" %}<span class="status-pill warning">待整理</span>{% elif entry.item_kind == "investment_note" or entry.document.library_tier == "knowledge" %}<span class="status-pill">精选知识</span>{% else %}<span class="status-pill source">已归档</span>{% endif %}{% endif %}
       {% if entry.category %}<span>分类：{{ entry.category }}</span>{% endif %}
     </div>
-    <h2><a href="{{ entry.target_url }}">{{ entry.title }}</a></h2>
+    <h2><a href="{{ entry.target_url }}?return_to={{ request.get_full_path|urlencode }}">{{ entry.title }}</a></h2>
     <p class="{% if entry.summary %}knowledge-summary{% else %}knowledge-snippet{% endif %}">{{ entry.hit_snippet|truncatechars:240 }}</p>
     {% if entry.tags %}
       <div class="knowledge-tags">

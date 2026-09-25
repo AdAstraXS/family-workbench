@@ -783,9 +783,8 @@ class FakeContext:
         if symbol in self.fail_expiration:
             return 1, "expiration failed"
         return 0, [
-            {"strike_time": "2026-09-04"},
-            {"strike_time": "2026-09-11"},
-            {"strike_time": "2026-09-18"},
+            {"strike_time": (datetime.now(timezone.utc).date() + timedelta(days=days)).isoformat()}
+            for days in (7, 14, 21)
         ]
 
     def get_option_chain(self, symbol, start=None, end=None, option_type=None):

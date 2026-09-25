@@ -7,4 +7,5 @@ def get_household_family():
 
 
 def get_site_setting():
-    return SiteSetting.load()
+    # Reading defaults must not insert a singleton from a GET page.
+    return SiteSetting.objects.filter(pk=1).first() or SiteSetting(pk=1)

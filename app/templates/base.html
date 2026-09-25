@@ -12,16 +12,16 @@
   <header class="topbar">
     <a class="brand" href="{% url 'dashboard:home' %}">{{ site_household_name }}</a>
     <nav>
-      <a href="{% url 'portfolio:overview' %}">投资组合</a>
-      <a href="{% url 'investment_research:index' %}">投研</a>
-      <a href="{% url 'option_wheel:index' %}">期权车轮</a>
-      <a href="{% url 'ledger:overview' %}">家庭账本</a>
-      <a href="{% url 'ipo:index' %}">港股打新</a>
-      <a href="{% url 'notes:index' %}">投资笔记</a>
-      <a href="{% url 'knowledge:index' %}">知识中心</a>
-      <a href="{% url 'intelligence:index' %}">AI 情报</a>
-      <a href="{% url 'macro:index' %}">宏观数据</a>
-      <a href="{% url 'ai_analysis:index' %}">AI 分析</a>
+      <a href="{% url 'portfolio:overview' %}"{% if request.resolver_match.app_name == "portfolio" %} aria-current="page"{% endif %}>投资组合</a>
+      <a href="{% url 'investment_research:index' %}"{% if request.resolver_match.app_name == "investment_research" %} aria-current="page"{% endif %}>投研</a>
+      <a href="{% url 'option_wheel:index' %}"{% if request.resolver_match.app_name == "option_wheel" %} aria-current="page"{% endif %}>期权车轮</a>
+      <a href="{% url 'ledger:overview' %}"{% if request.resolver_match.app_name == "ledger" %} aria-current="page"{% endif %}>家庭账本</a>
+      <a href="{% url 'ipo:index' %}"{% if request.resolver_match.app_name == "ipo" %} aria-current="page"{% endif %}>港股打新</a>
+      <a href="{% url 'notes:index' %}"{% if request.resolver_match.app_name == "notes" %} aria-current="page"{% endif %}>投资笔记</a>
+      <a href="{% url 'knowledge:index' %}"{% if request.resolver_match.app_name == "knowledge" %} aria-current="page"{% endif %}>知识中心</a>
+      <a href="{% url 'intelligence:index' %}"{% if request.resolver_match.app_name == "intelligence" %} aria-current="page"{% endif %}>AI 情报</a>
+      <a href="{% url 'macro:index' %}"{% if request.resolver_match.app_name == "macro" %} aria-current="page"{% endif %}>宏观数据</a>
+      <a href="{% url 'ai_analysis:index' %}"{% if request.resolver_match.app_name == "ai_analysis" %} aria-current="page"{% endif %}>AI 分析</a>
       {% if user.is_staff %}<a href="{% url 'admin:index' %}">后台</a>{% endif %}
     </nav>
     {% if user.is_authenticated %}
@@ -61,6 +61,7 @@
         {% endfor %}
       </div>
     {% endif %}
+    {% if request.resolver_match.app_name == "ledger" %}<p class="muted">明细保留原币；收支汇总为人民币，单笔按发生日、按月录入按统计期末日最近可用汇率折算。</p>{% endif %}
     {% block content %}{% endblock %}
   </main>
   {% block scripts %}{% endblock %}

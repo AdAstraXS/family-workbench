@@ -163,7 +163,7 @@ class OptionWheelPageTests(TestCase):
         self.assertContains(response, "尚无独立持久化证据", count=2)
         self.assertContains(
             response,
-            '<a href="/option-wheel/">期权车轮</a>',
+            '<a href="/option-wheel/" aria-current="page">期权车轮</a>',
             html=True,
         )
 

@@ -37,6 +37,7 @@ class DashboardTests(TestCase):
             symbol="DASH",
             name="Dashboard Security",
             market="HK",
+            currency="CNY",
         )
         InvestmentCashMovement.objects.create(
             account=account,
@@ -49,6 +50,8 @@ class DashboardTests(TestCase):
             account=account,
             security=security,
             position_date=date.today(),
+            quantity=Decimal("2"),
+            current_price=Decimal("100"),
             market_value=Decimal("200"),
         )
         self.client.force_login(user)

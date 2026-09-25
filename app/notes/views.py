@@ -1,24 +1,18 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Q, TextField
+from django.db.models.functions import Cast
 from django.http import Http404, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from family_core.models import FamilyMember
+from family_core.permissions import current_member as _current_member
 
 from .forms import InvestmentNoteForm
 from .models import InvestmentNote, InvestmentNoteType
-
-
-def _current_member(request):
-    try:
-        member = request.user.family_member
-    except FamilyMember.DoesNotExist:
-        return None
-    return member if member.is_active else None
 
 
 def _membership_required_response(request):
@@ -93,16 +87,10 @@ def index(request):
     notes = accessible
     if category:
         notes = notes.filter(note_type__code=category)
-    notes = list(notes)
     if query:
-        normalized_query = query.casefold()
-        notes = [
-            note
-            for note in notes
-            if normalized_query in note.title.casefold()
-            or normalized_query in note.content.casefold()
-            or any(normalized_query in str(tag).casefold() for tag in (note.tags or []))
-        ]
+        notes = notes.annotate(tags_search=Cast("tags", TextField())).filter(
+            Q(title__icontains=query) | Q(content__icontains=query) | Q(tags_search__icontains=query)
+        )
 
     page_obj = Paginator(notes, 12).get_page(request.GET.get("page"))
     return render(

@@ -1,7 +1,7 @@
 {% extends "knowledge_hub/base.html" %}
 
 {% block title %}{{ document.title }} · 知识中心{% endblock %}
-{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:library' %}">资料库</a><span aria-hidden="true">›</span><span>{{ document.title|truncatechars:24 }}</span>{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{{ return_to|default:page_parent_url }}">返回资料列表</a><span aria-hidden="true">›</span><span>{{ document.title|truncatechars:24 }}</span>{% endblock %}
 
 {% block hub_content %}
 <article class="knowledge-document-layout">

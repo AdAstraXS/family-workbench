@@ -18,7 +18,7 @@ from .models import (
     TransactionSourceChoices,
     WatchlistItem,
 )
-from .services import rebuild_position
+from .services import lock_accounts, rebuild_position
 
 
 ZERO = Decimal("0")
@@ -158,6 +158,7 @@ def sync_ipo_trade(ipo_trade_id):
     )
     security = _security(ipo_trade)
     account = _portfolio_account(ipo_trade)
+    lock_accounts([pair[0] for pair in old_pairs] + ([account.pk] if account else []))
     if not account:
         InvestmentTransaction.objects.filter(
             source=TransactionSourceChoices.IPO,
@@ -268,6 +269,7 @@ def delete_synced_ipo_transactions(ipo_trade_id):
             security__isnull=False,
         ).values_list("account_id", "security_id")
     )
+    lock_accounts([pair[0] for pair in pairs])
     InvestmentTransaction.objects.filter(
         source=TransactionSourceChoices.IPO,
         ipo_subscription_trade_id=ipo_trade_id,
