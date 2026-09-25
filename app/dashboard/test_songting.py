@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from family_core.models import Family, FamilyMember
+from family_core.models import AssetCategory, Family, FamilyMember
 from family_core.workspace import MODULES
 from knowledge.models import KnowledgeDocument, KnowledgeSource
 from ledger.models import AssetBalanceEntry, AssetBalanceSnapshot
@@ -20,19 +20,33 @@ class SongtingDashboardTests(TestCase):
         self.client.force_login(self.user)
 
     def snapshot(self, day, amount, **kwargs):
-        snapshot = AssetBalanceSnapshot.objects.create(family=self.family, snapshot_date=date(2026, 9, day), **kwargs)
+        snapshot_date = kwargs.pop("snapshot_date", None) or date(2026, 9, day)
+        snapshot = AssetBalanceSnapshot.objects.create(family=self.family, snapshot_date=snapshot_date, **kwargs)
         AssetBalanceEntry.objects.create(snapshot=snapshot, member=self.member, base_amount=Decimal(amount))
         return snapshot
 
     def test_trend_excludes_drafts_and_other_currencies_without_recomputing_saved_amounts(self):
+        self.snapshot(1, "777777", snapshot_date=date(2025, 9, 30))
+        self.snapshot(1, "1000000", snapshot_date=date(2026, 8, 1))
+        self.snapshot(31, "1000012.50", snapshot_date=date(2026, 8, 31))
         self.snapshot(1, "100.12")
         self.snapshot(2, "999999", is_draft=True)
         self.snapshot(3, "88888", base_currency="USD")
         latest = self.snapshot(4, "120.34")
         data = homepage_details(self.family, self.member, latest, date(2026, 9, 25))
-        self.assertEqual([s.recorded_total for s in data["asset_trend"]], [Decimal("100.12"), Decimal("120.34")])
-        self.assertEqual(data["trend_points"], "20.00,165.00 560.00,25.00")
+        self.assertEqual([(s.snapshot_date, s.recorded_total) for s in data["asset_trend"]],
+                         [(date(2026, 8, 31), Decimal("1000012.50")), (date(2026, 9, 4), Decimal("120.34"))])
+        self.assertEqual(data["trend_points"], "510.91,25.00 560.00,165.00")
+        self.assertEqual(data["trend_chart_points"][0]["wan"], "100.00")
+        self.assertEqual(data["trend_chart_points"][1]["wan"], "0.01")
+        self.assertEqual(data["trend_ticks"][0]["date"], date(2025, 10, 1))
+        self.assertEqual(data["trend_ticks"][-1]["date"], date(2026, 9, 1))
+        self.assertEqual(data["trend_missing_months"], 10)
         self.assertEqual(data["asset_allocation"][0]["amount"], Decimal("120.34"))
+        response = self.client.get(reverse("dashboard:home"))
+        self.assertEqual(response.content.decode().count('class="ws-trend-chart"'), 1)
+        self.assertContains(response, "最近 12 个月 · 每月最新正式快照")
+        self.assertContains(response, "记录金额 · 元")
 
     def test_empty_and_negative_balances_are_not_fabricated_into_a_pie(self):
         data = homepage_details(self.family, self.member, None, date(2026, 9, 25))
@@ -40,7 +54,8 @@ class SongtingDashboardTests(TestCase):
         latest = self.snapshot(2, "-100")
         data = homepage_details(self.family, self.member, latest, date(2026, 9, 25))
         self.assertFalse(data["allocation_can_draw"])
-        self.assertNotIn("trend_points", data)
+        self.assertEqual(data["trend_chart_points"][0]["wan"], "-0.01")
+        self.assertEqual(data["allocation_liabilities"][0]["amount"], Decimal("-100"))
 
     def test_home_does_not_disclose_other_members_private_knowledge(self):
         other = FamilyMember.objects.create(family=self.family, display_name="Other")
@@ -53,11 +68,14 @@ class SongtingDashboardTests(TestCase):
     def test_allocation_matches_ledger_family_chart_with_mixed_sign_entries(self):
         from ledger.views import build_overview_asset_charts
         latest = self.snapshot(5, "100.12")
-        AssetBalanceEntry.objects.create(snapshot=latest, member=self.member, base_amount=Decimal("-20"))
+        credit = AssetCategory.objects.create(family=self.family, name="信用卡", code="credit-card")
+        AssetBalanceEntry.objects.create(snapshot=latest, member=self.member, asset_category=credit, base_amount=Decimal("-20"))
         AssetBalanceEntry.objects.create(snapshot=latest, member=self.member, base_amount=Decimal("0"))
         data = homepage_details(self.family, self.member, latest, date(2026, 9, 25))
         expected = build_overview_asset_charts(latest)[0]["items"]
         self.assertEqual(data["allocation_total"], Decimal("100.12"))
+        self.assertEqual(data["allocation_liabilities"][0]["amount"], Decimal("-20"))
+        self.assertEqual(data["allocation_liabilities"][0]["asset_category__name"], "信用卡")
         self.assertEqual(data["asset_trend"][0].recorded_total, Decimal("80.12"))
         self.assertEqual([(g["label"], g["amount"]) for g in data["asset_allocation"]],
                          [(g["name"], Decimal(str(g["value"]))) for g in expected])
@@ -66,6 +84,9 @@ class SongtingDashboardTests(TestCase):
         self.assertLess(html.index('class="panel ws-home-allocation"'), html.index('class="panel ws-agenda"'))
         self.assertContains(response, 'class="ws-color-donut"')
         self.assertContains(response, "仅统计正资产")
+        self.assertContains(response, "查看分类金额（含负债）")
+        self.assertContains(response, "信用卡")
+        self.assertContains(response, "-20.00")
 
     def test_home_includes_all_existing_modules_and_reads_without_writing(self):
         from django.db import connection

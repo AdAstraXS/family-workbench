@@ -1,0 +1,20 @@
+{% load money workspace_icons %}
+<section class="panel ws-home-trend">
+  <div class="ws-card-heading"><div><h2>资产的稳步积累</h2><small>最近 12 个月 · 每月最新正式快照 · {{ latest_snapshot.base_currency|default:'CNY' }}</small></div><a href="{% url 'ledger:asset_snapshot_list' %}">全部快照 {% workspace_icon 'arrow-right' %}</a></div>
+  {% if trend_chart_points %}
+  <div class="ws-trend-scale"><span>{% with final=trend_chart_points|last %}{{ final.wan }} 万元{% endwith %}</span><small>最近有记录的月份 · {{ trend_end|date:'Y.m' }}</small></div>
+  <div class="ws-trend-scroll"><div class="ws-trend-scroll-inner"><div class="ws-line-chart">
+    <div class="ws-chart-axis" aria-hidden="true"><span>{{ trend_high_wan }}</span><span>{{ trend_mid_wan }}</span><span>{{ trend_low_wan }}</span></div>
+    <svg class="ws-trend-chart" viewBox="0 0 580 195" role="img" aria-label="最近 12 个月正式资产快照趋势，纵坐标单位万元，具体数值见图表数据">
+      <defs><linearGradient id="ws-trend-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="currentColor" stop-opacity=".2"/><stop offset="100%" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>
+      <path class="ws-chart-grid" d="M20 25H560M20 95H560M20 165H560"/>
+      <polygon points="{{ trend_area }}" fill="url(#ws-trend-fill)"/>
+      <polyline class="ws-trend-line" pathLength="1" points="{{ trend_points }}" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+      {% for point in trend_chart_points %}<g class="ws-chart-point"><circle cx="{{ point.x }}" cy="{{ point.y }}" r="3.5" fill="currentColor"><title>{{ point.snapshot.snapshot_date|date:'Y-m-d' }} · {{ point.wan }} 万元</title></circle><text x="{{ point.x }}" y="{{ point.label_y }}" text-anchor="middle">{{ point.wan }}</text></g>{% endfor %}
+    </svg>
+  </div>
+  <div class="ws-trend-months" aria-label="横坐标月份">{% for tick in trend_ticks %}<span title="{{ tick.date|date:'Y年n月' }}">{{ tick.label }}</span>{% endfor %}</div></div></div>
+  <p class="ws-trend-caption">纵坐标与数据标签：万元，保留 2 位小数{% if trend_missing_months %}；无快照月份不补值{% endif %}。<span class="ws-mobile-chart-hint">左右滑动查看完整 12 个月。</span></p>
+  <details class="ws-data-details"><summary>查看图表数据</summary><table><thead><tr><th>月份</th><th>快照日期</th><th>记录金额 · 元</th></tr></thead><tbody>{% for snapshot in asset_trend %}<tr><td>{{ snapshot.snapshot_date|date:'Y年n月' }}</td><td><a href="{% url 'ledger:asset_snapshot_detail' snapshot.pk %}">{{ snapshot.snapshot_date|date:'Y-m-d' }}</a></td><td>{{ snapshot.recorded_total|floatformat:2 }}</td></tr>{% endfor %}</tbody></table></details>
+  {% else %}<div class="ws-empty">最近 12 个月暂无可绘制的正式资产快照。<a href="{% url 'ledger:asset_snapshot_list' %}">查看资产快照 →</a></div>{% endif %}
+</section>

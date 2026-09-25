@@ -1,8 +1,17 @@
 /* Demo chart treatment; final state is always visible without animation. */
 .ws-line-chart { display: flex; align-items: stretch; gap: 8px; margin-top: 12px; }
+.ws-trend-scroll { overflow-x: auto; scrollbar-width: thin; }
 .ws-chart-axis { display: flex; flex-direction: column; justify-content: space-between; padding: 4% 0 6%; font-size: 10px; color: var(--ws-muted); font-variant-numeric: tabular-nums; }
+.ws-chart-axis:after { content: '万元'; color: var(--ws-muted); }
 .ws-line-chart .ws-trend-chart { flex: 1; min-width: 0; width: 0; }
 .ws-trend-line { stroke-dasharray: 1; stroke-dashoffset: 0; }
+.ws-chart-point text { fill: var(--ws-text); font-size: 10px; font-weight: 600; paint-order: stroke; stroke: var(--ws-panel); stroke-width: 3px; stroke-linejoin: round; font-variant-numeric: tabular-nums; }
+.ws-trend-months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); margin-left: 55px; margin-top: 1px; color: var(--ws-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.ws-trend-months span { text-align: center; white-space: nowrap; }
+.ws-trend-caption { margin: 10px 0 0; color: var(--ws-muted); font-size: 10px; }
+.ws-mobile-chart-hint { display: none; }
+.ws-liability-row { color: #a44743; }
+.ws-liability-row small { font-size: 10px; margin-left: 4px; }
 .ws-home-allocation { display: flex; flex-direction: column; }
 .ws-home-allocation .ws-allocation-body { gap: 18px; justify-content: center; flex: 1; }
 .ws-color-donut { width: 170px; height: 170px; position: relative; flex-shrink: 0; }
@@ -23,5 +32,5 @@
 @keyframes ws-demo-ring { from { opacity: 0; transform: scale(.9) rotate(-16deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
 @media (max-width: 1250px) { .ws-color-donut { width: 140px; height: 140px; } .ws-donut-total strong { font-size: 23px; } }
 @media (max-width: 1000px) { .ws-color-donut { width: 170px; height: 170px; } }
-@media (max-width: 760px) { .ws-color-donut { width: 140px; height: 140px; } .ws-home-allocation .ws-allocation-body { gap: 16px; } .ws-chart-axis { font-size: 9px; } }
+@media (max-width: 760px) { .ws-color-donut { width: 140px; height: 140px; } .ws-home-allocation .ws-allocation-body { gap: 16px; } .ws-trend-scroll-inner { min-width: 640px; } .ws-mobile-chart-hint { display: block; margin-top: 4px; } }
 @media (max-width: 370px) { .ws-color-donut { width: 120px; height: 120px; } .ws-home-allocation .ws-legend { min-width: 105px; } }
