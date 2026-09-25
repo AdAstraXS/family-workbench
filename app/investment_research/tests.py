@@ -964,7 +964,9 @@ class WiringTests(ResearchViewTestBase):
         member = self.make_member(self.family, "NavUser")
         self.login(member)
         resp = self.client.get(INDEX_URL)
-        self.assertContains(resp, '<a href="/research/" aria-current="page">投研</a>', html=True)
+        self.assertContains(resp, 'href="/research/" aria-current="page"')
+        active = [item for item in resp.context["workspace_modules"] if item["active"]]
+        self.assertEqual([(item["url"], item["label"]) for item in active], [("/research/", "投研")])
 
 
 class OfficialResearchDocumentModelTests(TestCase):

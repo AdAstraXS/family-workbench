@@ -1,4 +1,4 @@
-{% load static %}
+{% load static workspace_icons %}
 <!doctype html>
 <html lang="zh-hans">
 <head>
@@ -6,35 +6,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site_household_name }}{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20260919-ledger-overview-v1">
+  <script src="{% static 'js/workspace-preferences.js' %}?v=20260925"></script>
   {% block extra_head %}{% endblock %}
+  <link rel="stylesheet" href="{% static 'css/songting.css' %}?v=20260925">
 </head>
-<body class="app-{{ request.resolver_match.app_name|default:'site' }}">
-  <header class="topbar">
-    <a class="brand" href="{% url 'dashboard:home' %}">{{ site_household_name }}</a>
-    <nav>
-      <a href="{% url 'portfolio:overview' %}"{% if request.resolver_match.app_name == "portfolio" %} aria-current="page"{% endif %}>投资组合</a>
-      <a href="{% url 'investment_research:index' %}"{% if request.resolver_match.app_name == "investment_research" %} aria-current="page"{% endif %}>投研</a>
-      <a href="{% url 'option_wheel:index' %}"{% if request.resolver_match.app_name == "option_wheel" %} aria-current="page"{% endif %}>期权车轮</a>
-      <a href="{% url 'ledger:overview' %}"{% if request.resolver_match.app_name == "ledger" %} aria-current="page"{% endif %}>家庭账本</a>
-      <a href="{% url 'ipo:index' %}"{% if request.resolver_match.app_name == "ipo" %} aria-current="page"{% endif %}>港股打新</a>
-      <a href="{% url 'notes:index' %}"{% if request.resolver_match.app_name == "notes" %} aria-current="page"{% endif %}>投资笔记</a>
-      <a href="{% url 'knowledge:index' %}"{% if request.resolver_match.app_name == "knowledge" %} aria-current="page"{% endif %}>知识中心</a>
-      <a href="{% url 'intelligence:index' %}"{% if request.resolver_match.app_name == "intelligence" %} aria-current="page"{% endif %}>AI 情报</a>
-      <a href="{% url 'macro:index' %}"{% if request.resolver_match.app_name == "macro" %} aria-current="page"{% endif %}>宏观数据</a>
-      <a href="{% url 'ai_analysis:index' %}"{% if request.resolver_match.app_name == "ai_analysis" %} aria-current="page"{% endif %}>AI 分析</a>
-      {% if user.is_staff %}<a href="{% url 'admin:index' %}">后台</a>{% endif %}
-    </nav>
-    {% if user.is_authenticated %}
-      <div class="topbar-user">
-        <span>{{ user.get_username }}</span>
-        <form method="post" action="{% url 'logout' %}">
-          {% csrf_token %}
-          <button type="submit">退出</button>
-        </form>
-      </div>
-    {% endif %}
+<body class="songting app-{{ request.resolver_match.app_name|default:'site' }}">
+  <a class="ws-skip" href="#workspace-main">跳到页面内容</a>
+  {% if user.is_authenticated %}
+  <aside class="ws-sidebar" id="ws-sidebar" aria-label="工作台导航">
+    <a class="ws-brand" href="{% url 'dashboard:home' %}"><span>{% workspace_icon 'plant-2' %}</span><div><strong>{{ site_household_name }}</strong><small>把日子，慢慢过好</small></div></a>
+    <nav aria-label="主导航">{% include 'workspace/navigation.html' %}</nav>
+    <div class="ws-sidebar-foot"><p>让今天的积累，<br>成为明天的底气。</p>{% if user.is_staff %}<a href="{% url 'admin:index' %}">{% workspace_icon 'settings' %} 管理后台</a>{% endif %}<span>{{ user.get_username }}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">退出登录</button></form></div>
+  </aside>
+  {% endif %}
+  <div class="ws-workspace{% if not user.is_authenticated %} ws-public{% endif %}">
+  <header class="ws-topbar">
+    {% if user.is_authenticated %}<button type="button" class="ws-icon-button ws-menu-toggle" data-ws-menu aria-controls="ws-sidebar" aria-expanded="false" aria-label="展开所有模块">{% workspace_icon 'layout-grid' %}</button>{% endif %}
+    <div class="ws-breadcrumb"><a href="{% url 'dashboard:home' %}">{{ site_household_name }}</a><span>/</span><b>{{ workspace_title }}</b></div>
+    <div class="ws-top-actions">{% if user.is_authenticated %}<button type="button" class="ws-search-button" data-ws-open="ws-launcher" aria-label="查找模块">{% workspace_icon 'search' %}<span>查找模块</span><kbd>Ctrl K</kbd></button>{% endif %}<button type="button" class="ws-icon-button" data-ws-open="ws-appearance" aria-label="色系与动效设置" title="色系与动效设置">{% workspace_icon 'palette' %}</button>{% if user.is_authenticated %}<span class="ws-avatar" title="{{ user.get_username }}">{{ user.get_username|slice:':1' }}</span>{% endif %}</div>
   </header>
-  <main class="page">
+  <main class="page" id="workspace-main" tabindex="-1">
+
     {% if user.is_authenticated and page_parent_url and request.resolver_match.app_name != "knowledge" and request.resolver_match.app_name != "reading" and request.resolver_match.app_name != "trading_journal" %}
       <nav class="page-context-nav" aria-label="页面快捷导航">
         <a class="button page-nav-back" href="{{ page_parent_url }}">返回上一级</a>
@@ -64,6 +56,10 @@
     {% if request.resolver_match.app_name == "ledger" %}<p class="muted">明细保留原币；收支汇总为人民币，单笔按发生日、按月录入按统计期末日最近可用汇率折算。</p>{% endif %}
     {% block content %}{% endblock %}
   </main>
+  <footer class="ws-footer"><span>{{ site_household_name }} · 共同积累，从容生活</span><a href="{% static 'songting/credits.html' %}" target="_blank" rel="noopener">设计素材鸣谢</a></footer>
+  </div>
+  {% include 'workspace/appearance.html' %}
+  <script src="{% static 'js/workspace.js' %}?v=20260925" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

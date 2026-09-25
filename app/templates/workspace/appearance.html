@@ -1,0 +1,13 @@
+<dialog id="ws-appearance" aria-labelledby="ws-appearance-title">
+  <div class="ws-dialog-head"><div><span class="ws-eyebrow">MAKE IT YOURS</span><h2 id="ws-appearance-title">让空间，适合你。</h2></div><button type="button" class="ws-icon-button" data-ws-close aria-label="关闭外观设置">×</button></div>
+  <p>同一种从容，四种气质。</p>
+  <div class="ws-palettes">
+    <button type="button" data-ws-palette="forest" aria-pressed="false"><i class="ws-swatch forest"></i><b>松庭</b><small>苔绿与米白 · 安静自然</small></button>
+    <button type="button" data-ws-palette="sky" aria-pressed="true"><i class="ws-swatch sky"></i><b>晴空</b><small>雾蓝与云白 · 清透明亮</small></button>
+    <button type="button" data-ws-palette="warm" aria-pressed="false"><i class="ws-swatch warm"></i><b>暖陶</b><small>陶土与燕麦 · 温暖柔和</small></button>
+    <button type="button" data-ws-palette="white" aria-pressed="false"><i class="ws-swatch white"></i><b>素白</b><small>石墨与纯白 · 干净克制</small></button>
+  </div>
+  <label class="ws-motion"><span>细腻动效<small id="ws-motion-description">轻入场、悬停反馈与图表显现</small></span><input type="checkbox" id="ws-motion" role="switch" aria-describedby="ws-motion-description" checked></label>
+  <p class="ws-preference-note">外观保存在此浏览器。动效遵循系统“减少动态效果”设置。</p>
+</dialog>
+<dialog id="ws-launcher" aria-labelledby="ws-launcher-title"><div class="ws-dialog-head"><h2 id="ws-launcher-title">前往工作空间</h2><button type="button" class="ws-icon-button" data-ws-close aria-label="关闭模块搜索">×</button></div><label for="ws-module-query">查找模块</label><input id="ws-module-query" type="search" placeholder="例如：账本、知识、投研" autocomplete="off"><div class="ws-launcher-links">{% for module in workspace_modules %}<a href="{{ module.url }}" data-ws-search="{{ module.label }} {{ module.description }}"><b>{{ module.label }}</b><small>{{ module.description }}</small></a>{% endfor %}</div><p id="ws-module-empty" hidden>没有匹配模块，换个关键词试试。</p><a class="ws-search-knowledge" href="{% url 'knowledge:library' %}">搜索资料正文，请前往知识中心 →</a></dialog>

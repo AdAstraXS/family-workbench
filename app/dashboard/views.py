@@ -11,6 +11,7 @@ from portfolio.models import (
 from portfolio.valuation import value_portfolio
 from ledger.valuation import cashflow_amount, MissingCashflowRate
 from family_core.household import get_household_family
+from .presentation import homepage_details
 
 
 @login_required
@@ -43,17 +44,19 @@ def home(request):
     month_income, month_expense = total(income_records), total(expense_records)
     recent_transactions = (
         InvestmentTransaction.objects.filter(
+            account__bank_account__family=family,
             account__bank_account__is_active=True,
             account__bank_account__supports_investment=True,
         )
         .select_related("account__bank_account", "security")
         .order_by("-trade_date", "-created_at")[:5]
     )
-    recent_expenses = ExpenseRecord.objects.select_related("member", "category").order_by("-period_start", "-expense_date", "-created_at")[:5]
+    recent_expenses = ExpenseRecord.objects.filter(family=family).select_related("member", "category").order_by("-period_start", "-expense_date", "-created_at")[:5]
     return render(
         request,
         "dashboard/home.html",
         {
+            **homepage_details(family, getattr(request, "family_member", None), latest_snapshot, today),
             "total_investment_asset": None if valuation["missing_rates"] or valuation["missing_prices"] else valuation["total_asset"],
             "valuation": valuation,
             "valuation_date": today,

@@ -234,8 +234,10 @@ def page_navigation(request):
 
 
 def site_identity(request):
+    from .workspace import workspace_navigation
     setting = SiteSetting.objects.filter(pk=1).first()
     return {
+        **workspace_navigation(request),
         "site_household_name": setting.household_name if setting else "家庭工作台",
         "site_base_currency": setting.base_currency if setting else "CNY",
     }
