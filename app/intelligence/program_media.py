@@ -9,6 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from .http_client import fetch_public_url, validate_public_http_url
+from .program_network import fetch_source_url, source_proxy
 from .program_sources import CATALOGUE, ProgramError, ProgramConfigurationRequired
 from knowledge.crypto import decrypt_json
 
@@ -93,9 +94,10 @@ def download_asr_result(output):
 
 
 def _yt_command(args, timeout=180):
+    proxy_args = ['--proxy', source_proxy()] if source_proxy() else []
     try:
         completed = subprocess.run([sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-playlist',
-            '--no-warnings', '--socket-timeout', '20', '--retries', '1', *args],
+            '--no-warnings', '--socket-timeout', '20', '--retries', '1', *proxy_args, *args],
             capture_output=True, timeout=timeout, check=True)
         return completed.stdout
     except (subprocess.SubprocessError, OSError) as exc:
@@ -125,7 +127,7 @@ def youtube_captions(info):
                 if variant.get('ext') != 'json3' or (urlsplit(url).hostname or '') not in {'www.youtube.com', 'youtube.com'}:
                     continue
                 try:
-                    data = json.loads(fetch_public_url(url, max_bytes=5000000).body)
+                    data = json.loads(fetch_source_url(url, max_bytes=5000000).body)
                     result = []
                     for event in data.get('events', []):
                         text = ''.join(s.get('utf8', '') for s in event.get('segs', [])).strip()

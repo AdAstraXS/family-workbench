@@ -1,0 +1,34 @@
+services:
+  proxy:
+    image: ghcr.io/metacubex/metacubexd-server:v1.273.1
+    container_name: family-workbench-proxy
+    restart: unless-stopped
+    environment:
+      CONTROL_TOKEN: '${CONTROL_TOKEN:?Set CONTROL_TOKEN in the private .env}'
+      CLASH_SECRET: '${CLASH_SECRET:?Set CLASH_SECRET in the private .env}'
+      DEFAULT_BACKEND_URL: 'http://127.0.0.1:18790'
+      CONTROL_PORT: '8080'
+      CLASH_API_PORT: '9090'
+      MIXED_PORT: '7890'
+      TZ: 'Asia/Shanghai'
+    ports:
+      - '127.0.0.1:18780:8080'
+      - '127.0.0.1:18790:9090'
+    volumes:
+      - ./data:/data
+    networks:
+      workbench:
+        aliases: [family-workbench-proxy]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+networks:
+  workbench:
+    external: true
+    name: family-workbench_default
