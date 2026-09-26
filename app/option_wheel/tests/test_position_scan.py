@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
@@ -82,6 +82,29 @@ class PositionScanTests(TestCase):
         self.assertEqual(compared["rows"][0]["new_open"], Decimal("1340.00"))
         self.assertEqual(compared["rows"][0]["net"], Decimal("-360.00"))
         self.assertIsNone(comparison_rows(row, {"old_quote": {}, "candidates": result["candidates"]})["rows"][0]["net"])
+
+    def test_saved_previous_day_quotes_are_labelled_as_references(self):
+        queried_at = datetime(2026, 9, 23, 12, tzinfo=ZoneInfo("America/New_York"))
+        self.position.refresh_from_db()
+        job = WheelPositionScanJob.objects.create(
+            family=self.family, position=self.position, requested_by=self.user,
+            target_expiration=self.expiry + timedelta(days=7), status="saved",
+            started_at=queried_at, expires_at=timezone.now() + timedelta(minutes=8),
+            result={
+                "old_quote": {"bid": "9.80", "as_of": "2026-09-22 15:59:55"},
+                "candidates": [{"code": "US.AMD270319P150000", "strike": "150",
+                                "quote": {"ask": "13.40", "as_of": "2026-09-22 15:45:40"}}],
+                "position_quantity": str(self.position.quantity),
+                "position_avg_cost": str(self.position.avg_cost),
+                "position_date": self.position.position_date.isoformat(),
+            },
+        )
+        page = self.client.get(reverse("option_wheel:position_detail", args=[job.position_id]))
+        self.assertContains(page, "历史报价参考")
+        self.assertContains(page, "不是当前可成交报价")
+        self.assertContains(page, "报价时间相差超过 1 分钟")
+        self.assertContains(page, "参考亏损 $140.00")
+        self.assertContains(page, "参考净支出 $360.00")
 
     def test_chain_selects_only_standard_puts_of_the_selected_date(self):
         standard = {"option_type": "PUT", "strike_price": "150", "code": "US.AMD270319P150000",

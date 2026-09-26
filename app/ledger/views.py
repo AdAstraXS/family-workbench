@@ -37,9 +37,11 @@ from .investment_goals import (
 )
 from .models import AnnualBudget, AnnualBudgetLine, AssetBalanceSnapshot, BankAccount, ExpenseCategory, ExpenseImportBatch, ExpenseRecord, IncomeCategory, IncomeRecord, InvestmentGoalActualOverride, InvestmentGoalPlan, InvestmentGoalPoint, InvestmentGoalSetting
 from family_core.audit import stamp_actor
+from family_core.navigation import return_url
 from family_core.household import get_household_family
 from family_core.models import Family, FamilyMember
 from portfolio.account_sync import sync_investment_account
+from .valuation import calculate_base_amount, cashflow_amount, MissingCashflowRate
 
 
 def save_form(request, form_class, template_name, success_url_name, title, instance=None):
@@ -57,7 +59,7 @@ def save_form(request, form_class, template_name, success_url_name, title, insta
                 request.session["last_income_member_id"] = obj.member_id
             elif isinstance(obj, ExpenseRecord):
                 request.session["last_expense_member_id"] = obj.member_id
-            return redirect(success_url_name)
+            return redirect(return_url(request, success_url_name))
     else:
         form = form_class(instance=instance, request=request) if form_class in request_aware_forms else form_class(instance=instance)
     return render(request, template_name, {"form": form, "title": title})
@@ -123,7 +125,7 @@ def build_cashflow_monthly_rows(target_year=None):
         year, month = get_record_month(record, "income_date")
         if target_year and year != target_year:
             continue
-        ensure_month(year, month)["income"][record.member_id] += record.amount or Decimal("0")
+        ensure_month(year, month)["income"][record.member_id] += cashflow_amount(record)
 
     for record in expense_records:
         if record.member_id not in member_ids:
@@ -131,7 +133,7 @@ def build_cashflow_monthly_rows(target_year=None):
         year, month = get_record_month(record, "expense_date")
         if target_year and year != target_year:
             continue
-        ensure_month(year, month)["expense"][record.member_id] += record.amount or Decimal("0")
+        ensure_month(year, month)["expense"][record.member_id] += cashflow_amount(record)
 
     today = timezone.localdate()
     if not month_map and not target_year:
@@ -223,13 +225,13 @@ def build_annual_cashflow_rows():
         year = get_record_year(record, "income_date")
         row = ensure_year(record.family, year)
         if record.member_id in row["income"]:
-            row["income"][record.member_id] += record.amount or Decimal("0")
+            row["income"][record.member_id] += cashflow_amount(record)
 
     for record in expense_records:
         year = get_record_year(record, "expense_date")
         row = ensure_year(record.family, year)
         if record.member_id in row["expense"]:
-            row["expense"][record.member_id] += record.amount or Decimal("0")
+            row["expense"][record.member_id] += cashflow_amount(record)
 
     rows = []
     for row in year_map.values():
@@ -338,7 +340,7 @@ def build_expense_category_pie_data(selected_year, selected_month=None, unit="�
                 "amount": Decimal("0"),
             },
         )
-        exact_bucket["amount"] += record.amount or Decimal("0")
+        exact_bucket["amount"] += cashflow_amount(record)
 
     for exact_bucket in exact_category_totals.values():
         amount = exact_bucket["amount"]
@@ -572,14 +574,24 @@ def build_year_cashflow_detail(year, month=None, expense_filters=None):
     income_rows = [make_row(record, "income") for record in income_records]
     expense_rows = [make_row(record, "expense") for record in expense_records]
 
+    cashflow_errors = []
     income_member_totals = {member_id: Decimal("0") for member_id in member_ids}
     expense_member_totals = {member_id: Decimal("0") for member_id in member_ids}
-    for record in income_records:
-        if record.member_id in income_member_totals:
-            income_member_totals[record.member_id] += record.amount or Decimal("0")
-    for record in expense_records:
-        if record.member_id in expense_member_totals:
-            expense_member_totals[record.member_id] += record.amount or Decimal("0")
+    for records, totals in [(income_records, income_member_totals), (expense_records, expense_member_totals)]:
+        for record in records:
+            if record.member_id not in totals:
+                continue
+            try:
+                amount = cashflow_amount(record)
+            except MissingCashflowRate as exc:
+                cashflow_errors.append(str(exc))
+                totals[record.member_id] = None
+            else:
+                if totals[record.member_id] is not None:
+                    totals[record.member_id] += amount
+
+    def complete_total(totals):
+        return None if any(value is None for value in totals.values()) else sum(totals.values(), Decimal("0"))
 
     report = {
         "family": default_family,
@@ -590,26 +602,16 @@ def build_year_cashflow_detail(year, month=None, expense_filters=None):
         "members": members,
         "income_rows": income_rows,
         "expense_rows": expense_rows,
+        "cashflow_errors": cashflow_errors,
         "income_member_totals": [{"member": member, "amount": income_member_totals[member.id]} for member in members],
         "expense_member_totals": [{"member": member, "amount": expense_member_totals[member.id]} for member in members],
-        "income_family_total": sum(income_member_totals.values(), Decimal("0")),
-        "expense_family_total": sum(expense_member_totals.values(), Decimal("0")),
+        "income_family_total": complete_total(income_member_totals),
+        "expense_family_total": complete_total(expense_member_totals),
         "expense_filters": expense_filters,
         "expense_filter_active": any(expense_filters.values()),
     }
     report.update(build_expense_filter_options(default_family))
     return report
-
-
-def calculate_base_amount(snapshot, currency, original_amount):
-    amount = original_amount or Decimal("0")
-    if currency == snapshot.base_currency:
-        return amount
-    if currency == "USD" and snapshot.usd_to_base:
-        return amount * snapshot.usd_to_base
-    if currency == "HKD" and snapshot.hkd_to_base:
-        return amount * snapshot.hkd_to_base
-    return amount
 
 
 def get_period_month(record, fallback_field):
@@ -762,7 +764,7 @@ def get_latest_budget_line_initial():
     return initial_rows or [{} for _ in range(8)]
 
 
-def get_budget_actual_records(budget):
+def get_budget_actual_records(budget, *, currency=None, through_date=None):
     income_records = IncomeRecord.objects.filter(family=budget.family).select_related("member", "category", "category__parent")
     expense_records = ExpenseRecord.objects.filter(family=budget.family).select_related("member", "category", "category__parent")
     income_records = income_records.filter(
@@ -771,6 +773,18 @@ def get_budget_actual_records(budget):
     expense_records = expense_records.filter(
         Q(period_start__year=budget.year) | Q(period_start__isnull=True, expense_date__year=budget.year)
     )
+    if currency:
+        income_records = income_records.filter(currency__iexact=currency)
+        expense_records = expense_records.filter(currency__iexact=currency)
+    if through_date:
+        income_records = income_records.filter(
+            Q(period_start__lte=through_date)
+            | Q(period_start__isnull=True, income_date__lte=through_date)
+        )
+        expense_records = expense_records.filter(
+            Q(period_start__lte=through_date)
+            | Q(period_start__isnull=True, expense_date__lte=through_date)
+        )
     return income_records, expense_records
 
 
@@ -791,7 +805,7 @@ def budget_category_record_ids(category, categories, aliases=None, fallback_path
     }
 
 
-def build_budget_report(budget):
+def build_budget_report(budget, *, currency=None, through_date=None):
     lines = list(
         budget.lines.select_related(
             "income_category",
@@ -800,7 +814,9 @@ def build_budget_report(budget):
             "expense_category__parent",
         )
     )
-    income_records, expense_records = get_budget_actual_records(budget)
+    income_records, expense_records = get_budget_actual_records(
+        budget, currency=currency, through_date=through_date
+    )
     income_records = list(income_records)
     expense_records = list(expense_records)
     income_categories = list(
@@ -831,7 +847,7 @@ def build_budget_report(budget):
             for record in income_records:
                 if category_ids is not None and record.category_id not in category_ids:
                     continue
-                actual += record.amount or Decimal("0")
+                actual += cashflow_amount(record)
         else:
             total_expense_budget += line.annual_amount or Decimal("0")
             category_ids = budget_category_record_ids(
@@ -843,7 +859,7 @@ def build_budget_report(budget):
             for record in expense_records:
                 if category_ids is not None and record.category_id not in category_ids:
                     continue
-                actual += record.amount or Decimal("0")
+                actual += cashflow_amount(record)
 
         budget_amount = line.annual_amount or Decimal("0")
         variance = actual - budget_amount
@@ -889,9 +905,9 @@ def build_budget_report(budget):
     expense_summary_rows.append(build_budget_total_row("支出汇总", expense_line_rows, AnnualBudgetLine.LINE_TYPE_EXPENSE))
 
     for record in income_records:
-        total_income_actual += record.amount or Decimal("0")
+        total_income_actual += cashflow_amount(record)
     for record in expense_records:
-        total_expense_actual += record.amount or Decimal("0")
+        total_expense_actual += cashflow_amount(record)
 
     return {
         "line_rows": line_rows,
@@ -980,13 +996,12 @@ def allow_draft_blank_asset_amounts(formset):
 
 def get_account_member_map():
     accounts = BankAccount.objects.filter(is_active=True).values("id", "member_id")
-    return json.dumps({str(account["id"]): str(account["member_id"]) for account in accounts})
+    return {str(account["id"]): str(account["member_id"]) for account in accounts}
 
 
 def get_account_options():
     accounts = BankAccount.objects.filter(is_active=True).select_related("member").order_by("member__display_name", "account_name")
-    return json.dumps(
-        [
+    return [
             {
                 "id": str(account.id),
                 "member_id": str(account.member_id),
@@ -994,7 +1009,6 @@ def get_account_options():
             }
             for account in accounts
         ]
-    )
 
 
 def get_latest_snapshot_entry_initial():
@@ -1186,10 +1200,10 @@ def get_cashflow_member_totals(family, members, start_date, end_date):
     )
     for record in income_records:
         if record.member_id in member_ids:
-            income_totals[record.member_id] += record.amount or Decimal("0")
+            income_totals[record.member_id] += cashflow_amount(record)
     for record in expense_records:
         if record.member_id in member_ids:
-            expense_totals[record.member_id] += record.amount or Decimal("0")
+            expense_totals[record.member_id] += cashflow_amount(record)
     return {member.id: income_totals[member.id] - expense_totals[member.id] for member in members}
 
 
@@ -1388,14 +1402,14 @@ def overview(request):
     )
     bank_total = latest_snapshot.entries.aggregate(total=Sum("base_amount"))["total"] if latest_snapshot else 0
     bank_total = bank_total or 0
-    year_income = IncomeRecord.objects.filter(family=family).filter(
+    year_income = sum(cashflow_amount(record) for record in IncomeRecord.objects.filter(family=family).filter(
         Q(period_start__year=today.year)
         | Q(period_start__isnull=True, income_date__year=today.year)
-    ).aggregate(total=Sum("amount"))["total"] or 0
-    year_expense = ExpenseRecord.objects.filter(family=family).filter(
+    ))
+    year_expense = sum(cashflow_amount(record) for record in ExpenseRecord.objects.filter(family=family).filter(
         Q(period_start__year=today.year)
         | Q(period_start__isnull=True, expense_date__year=today.year)
-    ).aggregate(total=Sum("amount"))["total"] or 0
+    ))
     budget = (
         AnnualBudget.objects.filter(family=family, year=today.year).first()
         if family
@@ -1664,6 +1678,7 @@ def investment_goal_settings(request):
 
 
 @login_required
+@transaction.atomic
 def investment_goal_actual_override(request):
     family = get_household_family()
     plan = get_object_or_404(InvestmentGoalPlan, family=family, is_active=True)
@@ -1676,7 +1691,7 @@ def investment_goal_actual_override(request):
                 plan=plan,
                 member=member,
                 target_date=target_date,
-                defaults={"created_by": request.user},
+                defaults={"created_by": request.user, "amount": form.cleaned_data["amount"]},
             )
             override.amount = form.cleaned_data["amount"]
             override.remark = form.cleaned_data["remark"]
@@ -1750,6 +1765,7 @@ def annual_budget_detail(request, pk):
 
 
 @login_required
+@transaction.atomic
 def annual_budget_create(request):
     budget = AnnualBudget()
     if request.method == "POST":
@@ -1758,10 +1774,8 @@ def annual_budget_create(request):
         if form.is_valid() and formset.is_valid():
             budget = stamp_actor(form.save(commit=False), request.user)
             budget.save()
-            formset = AnnualBudgetLineFormSet(request.POST, instance=budget)
-            if formset.is_valid():
-                save_budget_formset(formset, budget)
-                return redirect("ledger:annual_budget_detail", pk=budget.pk)
+            save_budget_formset(formset, budget)
+            return redirect("ledger:annual_budget_detail", pk=budget.pk)
     else:
         initial_lines = get_latest_budget_line_initial()
         InitialAnnualBudgetLineFormSet = make_annual_budget_line_formset(extra=len(initial_lines))
@@ -1771,6 +1785,7 @@ def annual_budget_create(request):
 
 
 @login_required
+@transaction.atomic
 def annual_budget_edit(request, pk):
     budget = get_object_or_404(AnnualBudget, pk=pk)
     if request.method == "POST":
@@ -1929,10 +1944,12 @@ def asset_snapshot_detail(request, pk):
 
 
 @login_required
+@transaction.atomic
 def asset_snapshot_create(request):
     snapshot = AssetBalanceSnapshot()
     if request.method == "POST":
         save_as_draft = request.POST.get("save_action") == "draft"
+        snapshot.is_draft = save_as_draft
         form = AssetBalanceSnapshotForm(request.POST, instance=snapshot)
         formset = AssetBalanceEntryFormSet(request.POST, instance=snapshot)
         if save_as_draft:
@@ -1942,18 +1959,9 @@ def asset_snapshot_create(request):
             snapshot.is_draft = save_as_draft
             stamp_actor(snapshot, request.user)
             snapshot.save()
-            formset = AssetBalanceEntryFormSet(request.POST, instance=snapshot)
-            if save_as_draft:
-                allow_draft_blank_asset_amounts(formset)
-            if formset.is_valid():
-                save_asset_snapshot_formset(formset, snapshot)
-                messages.success(
-                    request,
-                    "资产快照草稿已保存。"
-                    if snapshot.is_draft
-                    else "资产快照已保存。",
-                )
-                return redirect("ledger:asset_snapshot_detail", pk=snapshot.pk)
+            save_asset_snapshot_formset(formset, snapshot)
+            messages.success(request, "资产快照草稿已保存。" if snapshot.is_draft else "资产快照已保存。")
+            return redirect("ledger:asset_snapshot_detail", pk=snapshot.pk)
     else:
         initial_entries = get_latest_snapshot_entry_initial()
         InitialAssetBalanceEntryFormSet = make_asset_balance_entry_formset(extra=len(initial_entries))
@@ -1973,10 +1981,12 @@ def asset_snapshot_create(request):
 
 
 @login_required
+@transaction.atomic
 def asset_snapshot_edit(request, pk):
     snapshot = get_object_or_404(AssetBalanceSnapshot, pk=pk)
     if request.method == "POST":
         save_as_draft = request.POST.get("save_action") == "draft"
+        snapshot.is_draft = save_as_draft
         form = AssetBalanceSnapshotForm(request.POST, instance=snapshot)
         formset = AssetBalanceEntryFormSet(request.POST, instance=snapshot)
         if save_as_draft:
@@ -2018,13 +2028,13 @@ def bank_account_list(request):
 
 @login_required
 def bank_account_create(request):
-    return save_form(request, BankAccountForm, "form.html", "ledger:category_list", "新增账户")
+    return save_form(request, BankAccountForm, "form.html", "ledger:bank_account_list", "新增账户")
 
 
 @login_required
 def bank_account_edit(request, pk):
     account = get_object_or_404(BankAccount, pk=pk)
-    return save_form(request, BankAccountForm, "form.html", "ledger:category_list", "编辑账户", account)
+    return save_form(request, BankAccountForm, "form.html", "ledger:bank_account_list", "编辑账户", account)
 
 
 @login_required

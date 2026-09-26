@@ -16,6 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from ai_analysis.models import AiAnalysisRequest, AiAnalysisResult, AiProvider
+from ai_analysis.model_selection import default_provider, prefer_default
 
 from .http_client import SafeHttpError, validate_public_http_url
 from .models import EventAnalysis, IntelligenceEvent, SourceItem
@@ -59,11 +60,11 @@ def text_ai_providers():
         .exclude(model_name__in=["", "待配置"])
         .order_by("-updated_at", "-pk")
     )
-    return [
+    return prefer_default([
         provider
         for provider in providers
         if (provider.extra_data or {}).get("usage") not in DISALLOWED_PROVIDER_USAGES
-    ]
+    ], "intelligence")
 
 
 def provider_is_configured(provider):
@@ -202,6 +203,12 @@ def resolve_text_ai_provider(provider_id=None):
         return provider
     if not providers:
         raise IntelligenceAiError("尚未配置可用于 AI 情报的文本模型。")
+    preferred = default_provider("intelligence")
+    if preferred:
+        provider = next((item for item in providers if item.pk == preferred.pk), None)
+        if provider is None:
+            raise IntelligenceAiError("后台选定的 AI 情报默认模型已停用，请重新选择。")
+        return provider
     return providers[0]
 
 

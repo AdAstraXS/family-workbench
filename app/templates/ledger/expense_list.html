@@ -4,15 +4,16 @@
 {% block title %}{{ report_title }}{% endblock %}
 
 {% block content %}
+{% for error in cashflow_errors %}<p class="app-message warning" role="alert">{{ error }} 对应汇总暂不显示；下方原币明细可正常查看和编辑。</p>{% endfor %}
 <section class="cashflow-hero">
   <div>
     <p class="eyebrow">{{ family }} · {% if month %}{{ year }}年{{ month }}月{% else %}{{ year }}年{% endif %}</p>
     <h1>{{ report_title }}</h1>
   </div>
   <div class="inline-actions">
-    <a class="button ghost" href="{% url 'ledger:income_create' %}">新增收入</a>
+    <a class="button ghost" href="{% url 'ledger:income_create' %}?return_to={{ request.get_full_path|urlencode }}">新增收入</a>
     <a class="button ghost" href="{% url 'ledger:expense_import' %}">Excel 批量导入</a>
-    <a class="button" href="{% url 'ledger:expense_create' %}">手动录入支出</a>
+    <a class="button" href="{% url 'ledger:expense_create' %}?return_to={{ request.get_full_path|urlencode }}">手动录入支出</a>
   </div>
 </section>
 
@@ -44,10 +45,10 @@
             <td class="record-remark">{{ row.remark|default:"-" }}</td>
             <td>
               <div class="row-actions">
-                <a class="text-action" href="{% url 'ledger:income_edit' row.record.id %}">编辑</a>
+                <a class="text-action" href="{% url 'ledger:income_edit' row.record.id %}?return_to={{ request.get_full_path|urlencode }}">编辑</a>
                 <form method="post" action="{% url 'ledger:income_delete' row.record.id %}" onsubmit="return confirm('确认删除这条收入记录吗？');">
                   {% csrf_token %}
-                  <input type="hidden" name="next" value="{{ request.path }}">
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
                   <button type="submit" class="link-danger">删除</button>
                 </form>
               </div>
@@ -163,10 +164,10 @@
             <td class="record-remark">{{ row.remark|default:"-" }}</td>
             <td>
               <div class="row-actions">
-                <a class="text-action" href="{% url 'ledger:expense_edit' row.record.id %}">编辑</a>
+                <a class="text-action" href="{% url 'ledger:expense_edit' row.record.id %}?return_to={{ request.get_full_path|urlencode }}">编辑</a>
                 <form method="post" action="{% url 'ledger:expense_delete' row.record.id %}" onsubmit="return confirm('确认删除这条支出记录吗？');">
                   {% csrf_token %}
-                  <input type="hidden" name="next" value="{{ request.path }}">
+                  <input type="hidden" name="next" value="{{ request.get_full_path }}">
                   <button type="submit" class="link-danger">删除</button>
                 </form>
               </div>

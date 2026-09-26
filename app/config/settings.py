@@ -68,6 +68,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "family_core.middleware.ActiveHouseholdMemberMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "ledger.middleware.FinancialReportMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 

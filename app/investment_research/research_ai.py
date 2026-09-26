@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation, ROUND_UP
 from django.db import transaction
 
 from ai_analysis.models import AiAnalysisRequest, AiAnalysisResult, AiProvider
+from ai_analysis.model_selection import prefer_default
 from knowledge.ai import KnowledgeAiError, _chat_url
 
 from .citations import quote_digest
@@ -94,7 +95,7 @@ def available_research_providers():
             continue
         if os.getenv((provider.extra_data or {})["api_key_env_var"], ""):
             available.append(provider)
-    return available
+    return prefer_default(available, "investment_research")
 
 
 def document_segments(version):

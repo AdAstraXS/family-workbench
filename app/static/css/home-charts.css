@@ -1,0 +1,36 @@
+/* Demo chart treatment; final state is always visible without animation. */
+.ws-line-chart { display: flex; align-items: stretch; gap: 8px; margin-top: 12px; }
+.ws-trend-scroll { overflow-x: auto; scrollbar-width: thin; }
+.ws-chart-axis { display: flex; flex-direction: column; justify-content: space-between; padding: 4% 0 6%; font-size: 10px; color: var(--ws-muted); font-variant-numeric: tabular-nums; }
+.ws-chart-axis:after { content: '万元'; color: var(--ws-muted); }
+.ws-line-chart .ws-trend-chart { flex: 1; min-width: 0; width: 0; }
+.ws-trend-line { stroke-dasharray: 1; stroke-dashoffset: 0; }
+.ws-chart-point text { fill: var(--ws-text); font-size: 10px; font-weight: 600; paint-order: stroke; stroke: var(--ws-panel); stroke-width: 3px; stroke-linejoin: round; font-variant-numeric: tabular-nums; }
+.ws-trend-months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); margin-left: 55px; margin-top: 1px; color: var(--ws-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.ws-trend-months span { text-align: center; white-space: nowrap; }
+.ws-trend-caption { margin: 10px 0 0; color: var(--ws-muted); font-size: 10px; }
+.ws-mobile-chart-hint { display: none; }
+.ws-liability-row { color: #a44743; }
+.ws-liability-row small { font-size: 10px; margin-left: 4px; }
+.ws-home-allocation { display: flex; flex-direction: column; }
+.ws-home-allocation .ws-allocation-body { gap: 18px; justify-content: center; flex: 1; }
+.ws-color-donut { width: 170px; height: 170px; position: relative; flex-shrink: 0; }
+.ws-color-donut .ws-ring { width: 100%; height: 100%; overflow: visible; }
+.ws-donut-total { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; pointer-events: none; }
+.ws-donut-total small { font-size: 11px; color: var(--ws-muted); }
+.ws-donut-total strong { font-size: 26px; font-weight: 500; letter-spacing: -1px; }
+.ws-donut-total strong span { font-size: 12px; margin-left: 4px; }
+.ws-home-allocation .ws-legend { min-width: 125px; }
+.ws-home-allocation .ws-legend li { margin: 5px 0; padding: 7px 4px; border-radius: 7px; }
+.ws-home-allocation .ws-legend li:hover, .ws-home-allocation .ws-legend li:focus-visible { background: var(--ws-soft); }
+.ws-allocation-note { font-size: 10px; color: var(--ws-muted); margin: 15px 0 0; line-height: 1.7; }
+@media (prefers-reduced-motion: no-preference) {
+  html[data-motion=on] .ws-trend-line { animation: ws-trace 1.05s cubic-bezier(.3,.1,.2,1) both; }
+  html[data-motion=on] .ws-color-donut .ws-ring { animation: ws-demo-ring .8s cubic-bezier(.2,.7,.2,1) both; }
+}
+@keyframes ws-trace { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes ws-demo-ring { from { opacity: 0; transform: scale(.9) rotate(-16deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+@media (max-width: 1250px) { .ws-color-donut { width: 140px; height: 140px; } .ws-donut-total strong { font-size: 23px; } }
+@media (max-width: 1000px) { .ws-color-donut { width: 170px; height: 170px; } }
+@media (max-width: 760px) { .ws-color-donut { width: 140px; height: 140px; } .ws-home-allocation .ws-allocation-body { gap: 16px; } .ws-trend-scroll-inner { min-width: 640px; } .ws-mobile-chart-hint { display: block; margin-top: 4px; } }
+@media (max-width: 370px) { .ws-color-donut { width: 120px; height: 120px; } .ws-home-allocation .ws-legend { min-width: 105px; } }

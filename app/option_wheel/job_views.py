@@ -20,9 +20,14 @@ def status(request, pk):
 @require_GET
 def detail(request, pk):
     job = get_object_or_404(WheelAnalysisJob, pk=pk, family=_request_family(request))
-    from .screening import present_results
-    visible_results = (present_results(job.screening_results, job.selection)
-                       if job.selection.get("mode") in ("screening_v2", "screening_close_v2") else [])
+    from .screen_advice import context_for_job
+    advice = (context_for_job(job) if job.status == "saved" and
+              job.selection.get("mode") in ("screening_v2", "screening_close_v2")
+              else {"rows": [], "status": "disabled", "pending": False, "error": ""})
     return render(request, "option_wheel/job_detail.html", {
-        "job": job, "job_state": job_payload(job), "visible_results": visible_results,
+        "job": job, "job_state": job_payload(job), "visible_results": advice["rows"],
+        "ai_status": advice["status"], "ai_pending": advice["pending"],
+        "ai_error": advice["error"],
+        "ai_requested": bool(job.selection.get("ai_enabled")),
+        "ai_status_url": job_payload(job)["status_url"],
     })

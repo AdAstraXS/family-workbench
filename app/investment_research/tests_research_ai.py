@@ -282,8 +282,8 @@ class ResearchAiTests(TestCase):
         self.assertFalse(AiAnalysisRequestAdmin(AiAnalysisRequest, admin.site).get_queryset(request).filter(pk=analysis.pk).exists())
         self.assertFalse(AiAnalysisResultAdmin(AiAnalysisResult, admin.site).get_queryset(request).filter(pk=analysis.result.pk).exists())
         self.client.force_login(request.user)
-        self.assertEqual(self.client.get(reverse("admin:ai_analysis_aianalysisrequest_change", args=[analysis.pk])).status_code, 302)
-        self.assertEqual(self.client.get(reverse("admin:ai_analysis_aianalysisresult_change", args=[analysis.result.pk])).status_code, 302)
+        self.assertEqual(self.client.get(reverse("admin:ai_analysis_aianalysisrequest_change", args=[analysis.pk])).status_code, 403)
+        self.assertEqual(self.client.get(reverse("admin:ai_analysis_aianalysisresult_change", args=[analysis.result.pk])).status_code, 403)
 
     def test_post_requires_explicit_consent_and_owner(self):
         url = reverse("investment_research:generate_draft", args=[self.dossier.pk])

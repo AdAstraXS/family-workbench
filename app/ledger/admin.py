@@ -26,6 +26,8 @@ from .models import (
     InvestmentGoalSetting,
 )
 from .investment_goals import recalculate_future_goal_points
+from .valuation import calculate_base_amount
+from .forms import AssetBalanceEntryBaseFormSet
 from portfolio.models import VisibilityChoices
 
 
@@ -242,15 +244,6 @@ class AccountSelect(forms.Select):
         return option
 
 
-def calculate_base_amount(snapshot, currency, original_amount):
-    currency = (currency or snapshot.base_currency or "CNY").upper()
-    if currency == "USD":
-        return original_amount * snapshot.usd_to_base
-    if currency == "HKD":
-        return original_amount * snapshot.hkd_to_base
-    return original_amount
-
-
 def prepare_asset_entry(entry, snapshot, display_order=None):
     entry.snapshot = snapshot
     entry.account_name = entry.account.account_name if entry.account else entry.account_name
@@ -445,6 +438,7 @@ class AnnualBudgetLineAdmin(admin.ModelAdmin):
 
 class AssetBalanceEntryInline(admin.TabularInline):
     model = AssetBalanceEntry
+    formset = AssetBalanceEntryBaseFormSet
     fields = ("member", "account", "asset_category", "currency", "original_amount", "remark")
     extra = 3
 
@@ -511,6 +505,11 @@ class AssetBalanceSnapshotAdmin(admin.ModelAdmin):
             prepare_asset_entry(instance, form.instance, index)
             instance.save()
         formset.save_m2m()
+
+        # A rate-only edit must also revalue unchanged inline rows.
+        for entry in form.instance.entries.all():
+            prepare_asset_entry(entry, form.instance)
+            entry.save(update_fields=["base_amount"])
 
 
 @admin.register(AssetBalanceEntry)

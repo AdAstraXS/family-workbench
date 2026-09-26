@@ -1,0 +1,17 @@
+{% load money workspace_icons %}
+<section class="panel ws-home-allocation">
+  <div class="ws-card-heading"><div><h2>家庭资产如何分布</h2><small>家庭合计 · {{ latest_snapshot.snapshot_date|date:'Y.m.d'|default:'暂无正式快照' }}</small></div><a href="{% url 'ledger:overview' %}">查看 {% workspace_icon 'arrow-right' %}</a></div>
+  {% if allocation_can_draw %}
+  <div class="ws-allocation-body">
+    <div class="ws-color-donut">
+      <svg viewBox="0 0 180 180" class="ws-ring" role="img" aria-label="最近期家庭合计正资产类别分布，金额及占比见图例">
+        {% for category in asset_allocation %}<circle cx="90" cy="90" r="71" fill="none" stroke="{{ category.color }}" stroke-width="17" pathLength="100" stroke-dasharray="{{ category.dash }} {{ category.gap }}" stroke-dashoffset="{{ category.offset }}" transform="rotate(-90 90 90)"><title>{{ category.label }} · {{ category.amount|floatformat:2 }} · {{ category.percent }}%</title></circle>{% endfor %}
+      </svg>
+      <div class="ws-donut-total"><small>家庭正资产</small><strong>{{ allocation_total_wan|floatformat:2 }}<span>万</span></strong><small>{{ latest_snapshot.base_currency }}</small></div>
+    </div>
+    <ul class="ws-legend">{% for category in asset_allocation %}<li tabindex="0" aria-label="{{ category.label }}，{{ category.amount|floatformat:2 }} {{ latest_snapshot.base_currency }}，占比 {{ category.percent }}%"><i style="background:{{ category.color }}"></i><span>{{ category.label }}</span><b>{{ category.percent }}%</b></li>{% endfor %}</ul>
+  </div>
+  <p class="ws-allocation-note">与账本“最近期资产类别分布 · 家庭合计”一致；仅统计正资产，负值不计入占比。</p>
+  {% else %}<div class="ws-empty">尚无可展示的正资产快照明细。</div>{% endif %}
+  {% if asset_allocation or allocation_liabilities %}<details class="ws-data-details"><summary>查看分类金额（含负债）</summary><table><thead><tr><th>资产类别</th><th>金额 · 元（{{ latest_snapshot.base_currency }}）</th></tr></thead><tbody>{% for category in asset_allocation %}<tr><td>{{ category.label }}</td><td>{{ category.amount|floatformat:2 }}</td></tr>{% endfor %}{% for category in allocation_liabilities %}<tr class="ws-liability-row"><td>{{ category.asset_category__name|default:'未分类' }} <small>负债</small></td><td>{{ category.amount|floatformat:2 }}</td></tr>{% endfor %}</tbody></table></details>{% endif %}
+</section>

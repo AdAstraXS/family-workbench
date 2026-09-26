@@ -193,3 +193,42 @@ class WheelLifecycleServiceTests(TestCase):
 
         with self.assertRaises(WheelLifecycleError):
             sync_transactions(family=self.family, account_ids=[self.account.pk])
+
+    def test_covered_call_below_assigned_cost_is_linked(self):
+        self.create_option_trade()
+        sync_transactions(family=self.family, account_ids=[self.account.pk])
+        stock_trade = InvestmentTransaction.objects.create(
+            account=self.account, security=self.stock, trade_date=date(2026, 9, 4),
+            trade_type=TradeTypeChoices.BUY, status=TradeStatusChoices.COMPLETED,
+            quantity=Decimal("100"), price=Decimal("300"), amount=Decimal("30000"),
+            cash_change=Decimal("-30000"), currency="USD",
+        )
+        self.create_option_trade(
+            trade_date=date(2026, 9, 4), trade_type=TradeTypeChoices.BUY,
+            position_effect=InvestmentTransaction.EFFECT_CLOSE,
+            price=Decimal("0"), amount=Decimal("0"), fee=Decimal("0"), cash_change=Decimal("0"),
+            extra_data={"option_action": "assignment", "underlying_transaction_id": stock_trade.pk},
+        )
+        sync_transactions(family=self.family, account_ids=[self.account.pk])
+        call_security = Security.objects.create(
+            symbol="TSLA260911C00290000", name="TSLA Call", market="US",
+            asset_type=Security.TYPE_OPTION, currency="USD",
+        )
+        OptionContract.objects.create(
+            security=call_security, underlying=self.stock, option_type=OptionContract.CALL,
+            strike_price=Decimal("290"), expiration_date=date(2026, 9, 11), multiplier=100,
+        )
+        call_trade = InvestmentTransaction.objects.create(
+            account=self.account, security=call_security, trade_date=date(2026, 9, 7),
+            trade_type=TradeTypeChoices.SELL, position_effect=InvestmentTransaction.EFFECT_OPEN,
+            status=TradeStatusChoices.COMPLETED, quantity=Decimal("1"), price=Decimal("2"),
+            amount=Decimal("200"), cash_change=Decimal("200"), currency="USD",
+        )
+
+        sync_transactions(family=self.family, account_ids=[self.account.pk])
+
+        cycle = WheelCycle.objects.get()
+        leg = call_trade.wheel_links.get().leg
+        self.assertEqual(leg.option_contract.strike_price, Decimal("290"))
+        self.assertEqual(cycle.assigned_cost_basis, Decimal("300"))
+        self.assertEqual(leg.collateral_reservations.get().share_quantity, Decimal("100"))

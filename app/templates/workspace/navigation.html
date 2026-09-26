@@ -1,0 +1,4 @@
+{% load workspace_icons %}
+<a class="ws-nav-link{% if request.resolver_match.app_name == 'dashboard' %} active{% endif %}" href="{% url 'dashboard:home' %}"{% if request.resolver_match.app_name == 'dashboard' %} aria-current="page"{% endif %}>{% workspace_icon 'home-2' %}<span>家庭概览</span></a>
+{% regroup workspace_modules by group as groups %}
+{% for group in groups %}<div class="ws-nav-group"><span class="ws-nav-label">{{ group.grouper }}</span>{% for module in group.list %}<a class="ws-nav-link{% if module.active %} active{% endif %}" href="{{ module.url }}"{% if module.active %} aria-current="page"{% endif %}>{% workspace_icon module.icon %}<span>{{ module.label }}</span></a>{% endfor %}</div>{% endfor %}

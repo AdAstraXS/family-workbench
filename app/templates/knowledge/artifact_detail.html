@@ -4,6 +4,7 @@
 {% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:people' %}?person={{ artifact.person_name|urlencode }}">{{ artifact.person_name }}</a><span aria-hidden="true">›</span><span>{{ artifact.title|truncatechars:24 }}</span>{% endblock %}
 
 {% block hub_content %}
+{% if return_to %}<a class="button ghost" href="{{ return_to }}">返回资料列表</a>{% endif %}
 <section class="knowledge-page-heading knowledge-artifact-page-heading">
   <div>
     <span class="eyebrow">AI synthesis · {{ artifact.get_artifact_type_display }}</span>

@@ -1,0 +1,3 @@
+{% extends "reading/base.html" %}{% block title %}上传阅读成果{% endblock %}{% block hub_content %}
+<header class="reading-heading"><div><span class="eyebrow">{{ book.title }}</span><h1>上传阅读成果</h1><p>保留外部 AI 整理的导图与知识库，便于回顾。</p></div><a href="{% url 'reading:detail' book.pk %}">返回图书</a></header>
+<form class="reading-panel reading-form" method="post" enctype="multipart/form-data">{% csrf_token %}{{ form.as_p }}<button class="button primary">保存成果</button></form><p class="muted">普通 HTML 可隔离预览，依赖外网的脚本和图片不加载；含标准结构的数据可在工作台中查看、编辑与版本化。外部依据一律标记未核验。</p>{% endblock %}

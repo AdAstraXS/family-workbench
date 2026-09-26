@@ -1717,8 +1717,6 @@ class WheelLeg(TimestampedModel):
                 errors["strike"] = "期权分段必须具备有效到期日和行权价。"
         if self.open_contract_count > self.contract_count:
             errors["open_contract_count"] = "未平合约数不能超过原始合约数。"
-        if self.strategy == Strategy.COVERED_CALL and _finite_decimal(self.cycle.assigned_cost_basis) and _finite_decimal(self.strike) and self.strike < self.cycle.assigned_cost_basis:
-            errors["strike"] = "备兑 Call 行权价不得低于指派或买入成本。"
         if errors:
             raise ValidationError(errors)
 

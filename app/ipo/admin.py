@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db import transaction
 
 from .forms import HkIpoListingForm
 from .models import HkIpoListing, HkIpoListingOption, HkIpoSubscriptionTrade
@@ -16,6 +17,10 @@ class HkIpoListingOptionAdmin(admin.ModelAdmin):
 
 @admin.register(HkIpoListing)
 class HkIpoListingAdmin(admin.ModelAdmin):
+    def has_delete_permission(self, request, obj=None):
+        # Removing a listing must never cascade through audited subscriptions.
+        return False
+
     form = HkIpoListingForm
     list_display = (
         "stock_code",
@@ -244,3 +249,8 @@ class HkIpoSubscriptionTradeAdmin(admin.ModelAdmin):
 
         delete_synced_ipo_transactions(obj.pk)
         super().delete_model(request, obj)
+
+    @transaction.atomic
+    def delete_queryset(self, request, queryset):
+        for obj in queryset.order_by("pk"):
+            self.delete_model(request, obj)

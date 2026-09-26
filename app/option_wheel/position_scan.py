@@ -1,13 +1,19 @@
 """Bounded Futu comparison for one recorded option and one chosen expiration."""
 
+from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
+from django.utils import timezone
 
 from portfolio.futu_option_probe import _is_standard_contract, records_from, sdk_call_with_timeout_retry
 
 from .probe_diagnostics import _issue_text
 from .put_quote_probe import CODE, PutQuoteError, fetch_exact_option_quotes, quote_code
+
+
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 def _number(value):
@@ -88,7 +94,42 @@ def fetch_position_scan(position, target_expiration):
     }
 
 
-def comparison_rows(position_row, result):
+def _quote_time(value):
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed.astimezone(NEW_YORK) if parsed.tzinfo else parsed.replace(tzinfo=NEW_YORK)
+
+
+def quote_reference(result, queried_at=None):
+    """Describe frozen quote timing without claiming a tradable or official close price."""
+    queried_at = queried_at or timezone.now()
+    query_time = queried_at.astimezone(NEW_YORK)
+    quote_values = [(result.get("old_quote") or {}).get("as_of")]
+    quote_values.extend((item.get("quote") or {}).get("as_of") for item in result.get("candidates", []))
+    parsed = [_quote_time(value) for value in quote_values]
+    known = [value for value in parsed if value is not None]
+    dates = {value.date() for value in known}
+    if not known or len(known) != len(parsed):
+        label = "报价时间不完整"
+    elif len(dates) > 1:
+        label = "不同日期的报价参考"
+    elif max(dates) < query_time.date():
+        label = "历史报价参考"
+    elif query_time.weekday() >= 5 or not time(9, 30) <= query_time.time() < time(16):
+        label = "非正常交易时段的报价参考"
+    else:
+        label = "当日报价参考"
+    spread = max(known) - min(known) if known else timedelta(0)
+    return {
+        "label": label,
+        "quote_dates": "、".join(sorted(day.isoformat() for day in dates)) or "未知",
+        "times_differ": spread > timedelta(minutes=1),
+    }
+
+
+def comparison_rows(position_row, result, queried_at=None):
     """Per-contract cash figures; never infer a missing bid or ask."""
     if not result:
         return {"old_close": None, "old_pnl": None, "rows": []}
@@ -101,6 +142,10 @@ def comparison_rows(position_row, result):
     old_pnl = ((opening - old_close) if short else (old_close - opening)) if old_close is not None and opening is not None else None
     if old_pnl is not None:
         old_pnl = old_pnl.quantize(Decimal("0.01"))
+    old_pnl_label = (
+        "参考亏损" if old_pnl is not None and old_pnl < 0 else
+        "参考盈利" if old_pnl is not None and old_pnl > 0 else "持平"
+    )
     rows = []
     for item in result.get("candidates", []):
         quote = item.get("quote") or {}
@@ -111,7 +156,7 @@ def comparison_rows(position_row, result):
         if strike is None:
             analysis = "行权价未知，待核对合约。"
         elif strike == position_row["contract"].strike_price:
-            analysis = "行权价不变；比较新增期限与换仓净收支。"
+            analysis = "行权价不变；比较新增期限与换仓参考净收支。"
         elif position_row["purpose"] == "protective_put":
             analysis = "保护价格提高，成本可能增加。" if strike > position_row["contract"].strike_price else "保护价格降低，正股下跌保护减弱。"
         elif position_row["contract"].option_type == "call" and not short:
@@ -126,4 +171,7 @@ def comparison_rows(position_row, result):
             "probability": quote.get("probability"), "as_of": quote.get("as_of"),
         })
     return {"old_close": old_close, "old_pnl": old_pnl, "rows": rows,
-            "old_quote_as_of": old_quote.get("as_of")}
+            "old_pnl_abs": abs(old_pnl) if old_pnl is not None else None,
+            "old_pnl_label": old_pnl_label,
+            "old_quote_as_of": old_quote.get("as_of"),
+            "reference": quote_reference(result, queried_at)}

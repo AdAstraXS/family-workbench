@@ -1,0 +1,65 @@
+/* Module landing cards share the homepage's calm entrance and lift. */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-motion="on"] body.songting:is(
+    .app-portfolio.view-overview,
+    .app-ledger.view-overview,
+    .app-investment_research.view-index,
+    .app-option_wheel.view-index,
+    .app-ipo.view-index,
+    .app-notes.view-index,
+    .app-knowledge.view-index,
+    .app-reading.view-index,
+    .app-trading_journal.view-index,
+    .app-intelligence.view-index,
+    .app-macro.view-index,
+    .app-ai_analysis.view-index
+  ) :is(
+    .page > .headline,
+    .page > .portfolio-overview-head,
+    .page > .panel,
+    .page > .metrics > .metric,
+    .page > .overview-chart-grid > .panel,
+    .page > .ipo-dashboard-content > .metrics > .metric,
+    .page > .ipo-dashboard-content > .ipo-dashboard-chart-grid > .panel,
+    .page > .notes-metrics > article,
+    .page > .notes-hero,
+    .page > .intel-metrics > article,
+    .page > .intel-hero,
+    .page > .intel-section,
+    .page > .research-page > .research-header,
+    .page > .research-page > .research-list,
+    .page > .option-wheel-page > .option-wheel-hero,
+    .page > .option-wheel-page > .option-wheel-section,
+    .page > .wheel-screen > .wheel-hero,
+    .page > .wheel-screen .wheel-panel,
+    .page > .knowledge-hub-shell .knowledge-home-hero,
+    .page > .knowledge-hub-shell .knowledge-home-grid > .knowledge-home-section,
+    .page > .knowledge-hub-shell .knowledge-home-shortcuts > a,
+    .page > .knowledge-hub-shell .reading-preview-hero,
+    .page > .knowledge-hub-shell .knowledge-roadmap-card
+  ) {
+    animation: ws-arrive 480ms cubic-bezier(.2,.7,.2,1) backwards;
+    animation-delay: min(calc(var(--ws-card-order, 0) * 55ms), 220ms);
+    transition: transform 220ms ease, box-shadow 220ms ease;
+  }
+
+  html[data-motion="on"] body.songting :is(.metrics, .notes-metrics, .intel-metrics, .knowledge-home-shortcuts) > :nth-child(2) { --ws-card-order: 1; }
+  html[data-motion="on"] body.songting :is(.metrics, .notes-metrics, .intel-metrics, .knowledge-home-shortcuts) > :nth-child(3) { --ws-card-order: 2; }
+  html[data-motion="on"] body.songting :is(.metrics, .notes-metrics, .intel-metrics, .knowledge-home-shortcuts) > :nth-child(n+4) { --ws-card-order: 3; }
+
+  html[data-motion="on"] body.songting:is(
+    .app-portfolio.view-overview,
+    .app-ledger.view-overview,
+    .app-notes.view-index,
+    .app-intelligence.view-index,
+    .app-knowledge.view-index
+  ) :is(
+    .page > .metrics > .metric,
+    .page > .notes-metrics > article,
+    .page > .intel-metrics > article,
+    .page > .knowledge-hub-shell .knowledge-home-shortcuts > a
+  ):hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 26px var(--ws-shadow);
+  }
+}

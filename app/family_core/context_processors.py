@@ -1,18 +1,33 @@
 from django.urls import reverse
 
 from .models import SiteSetting
+from .navigation import return_url
 
 
 def page_navigation(request):
     match = getattr(request, "resolver_match", None)
     if not match:
         return {}
+    target = return_url(request)
+    if target:
+        return {"page_parent_url": target, "return_to": target}
     app_name = match.app_name
     url_name = match.url_name
     kwargs = match.kwargs
 
     if app_name == "dashboard":
         return {}
+
+    if app_name in {"investment_research", "option_wheel"}:
+        if url_name == "index":
+            parent_url = reverse("dashboard:home")
+        elif app_name == "investment_research" and url_name in {"edit", "history"}:
+            parent_url = reverse("investment_research:detail", kwargs={"pk": kwargs["pk"]})
+        elif app_name == "option_wheel" and url_name.startswith("close_"):
+            parent_url = reverse("option_wheel:close_index") if url_name != "close_index" else reverse("option_wheel:index")
+        else:
+            parent_url = reverse(f"{app_name}:index")
+        return {"page_parent_url": parent_url}
 
     if app_name == "ledger":
         if url_name == "overview":
@@ -219,8 +234,10 @@ def page_navigation(request):
 
 
 def site_identity(request):
+    from .workspace import workspace_navigation
     setting = SiteSetting.objects.filter(pk=1).first()
     return {
+        **workspace_navigation(request),
         "site_household_name": setting.household_name if setting else "家庭工作台",
         "site_base_currency": setting.base_currency if setting else "CNY",
     }

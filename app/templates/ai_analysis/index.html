@@ -1,23 +1,112 @@
 {% extends "base.html" %}
+{% load static %}
 
-{% block title %}AI 分析{% endblock %}
+{% block title %}AI 助手{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/global_ai.css' %}?v=20260925-theme-v1">{% endblock %}
 
 {% block content %}
-<section class="headline">
-  <h1>AI 分析</h1>
-  <p>第一阶段先保存分析请求和结果，后续再接入具体 AI API。</p>
+<section class="global-ai-hero">
+  <div><span class="global-ai-eyebrow">FAMILY ASSISTANT</span><h1>AI 助手</h1><p>按各模块自己的资料整理、总结和回答。对话与个人背景仅自己可见。</p></div>
+  <div class="global-ai-privacy"><span aria-hidden="true">●</span> {{ current_member.display_name }}的私人空间</div>
 </section>
-<section class="panel">
-  <h2>最近分析请求</h2>
-  <table>
-    <thead><tr><th>时间</th><th>成员</th><th>模块</th><th>类型</th><th>服务商</th><th>状态</th></tr></thead>
-    <tbody>
-      {% for item in recent_requests %}
-        <tr><td>{{ item.created_at }}</td><td>{{ item.member }}</td><td>{{ item.module }}</td><td>{{ item.analysis_type }}</td><td>{{ item.provider }}</td><td>{{ item.get_status_display }}</td></tr>
-      {% empty %}
-        <tr><td colspan="6">暂无数据，请先到后台录入分析请求。</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+
+<section class="global-ai-readiness{% if model_ready %} is-ready{% endif %}" aria-label="AI 助手准备状态">
+  <div class="global-ai-readiness-icon" aria-hidden="true">{% if model_ready %}✓{% else %}○{% endif %}</div>
+  <div>
+    {% if model_ready %}<strong>AI 助手已准备好</strong><p>当前使用 {{ global_provider.name }}{% if global_provider.model_name %} · {{ global_provider.model_name }}{% endif %}。回答需要资料时，只会调用已授权的只读工具。</p>
+    {% elif active_family_scope and provider_ready and not family_financial_allowed %}<strong>全家财务尚未获得家庭授权</strong><p>家庭管理员允许后，每位家庭成员都可以在自己的私人对话中咨询全家财务。</p>
+    {% elif provider_ready %}<strong>请先确认云端资料授权</strong><p>模型已经就绪。至少允许发送“对话”后才能提问；其他资料按需单独授权。</p>
+    {% elif global_provider %}<strong>模型连接尚未就绪</strong><p>{{ provider_error|default:"请核对模型和环境密钥配置。" }}</p>
+    {% else %}<strong>模型尚未配置</strong><p>现在可以先建立私人对话和整理个人背景；提问入口会在模型与费用范围确认后开放。</p>{% endif %}
+  </div>
 </section>
+
+<div class="global-ai-workspace">
+  <aside class="global-ai-conversations panel">
+    <div class="global-ai-section-head"><div><span>我的空间</span><h2>私人对话</h2></div><strong>{{ conversations|length }}</strong></div>
+    <details class="global-ai-create"{% if not conversations %} open{% endif %}>
+      <summary>＋ 新建对话</summary>
+      <form method="post" action="{% url 'ai_analysis:conversation_create' %}">
+        {% csrf_token %}
+        <label>{{ conversation_form.title.label }}{{ conversation_form.title }}</label>
+        <fieldset><legend>{{ conversation_form.financial_scope.label }}</legend>
+          {% for value, label in conversation_form.financial_scope.field.choices %}<label class="global-ai-radio"><input type="radio" name="financial_scope" value="{{ value }}"{% if value == 'personal' %} checked{% endif %}> <span>{{ label }}</span></label>{% endfor %}
+        </fieldset>
+        <p>范围建立后固定；如需切换，请新建对话。</p><button type="submit">建立私人对话</button>
+      </form>
+    </details>
+    <nav class="global-ai-conversation-list" aria-label="私人对话列表">
+      {% for conversation in conversations %}
+        <div class="global-ai-conversation-item{% if active_conversation.pk == conversation.pk %} active{% endif %}">
+          <a class="global-ai-conversation-link" href="{% url 'ai_analysis:conversation' conversation.pk %}"{% if active_conversation.pk == conversation.pk %} aria-current="page"{% endif %}><strong>{{ conversation.title|default:"未命名对话" }}</strong><span>{{ conversation.get_financial_scope_display }} · {{ conversation.updated_at|date:"m-d H:i" }}</span></a>
+          <div class="global-ai-conversation-actions">
+            <details><summary>重命名</summary><form method="post" action="{% url 'ai_analysis:conversation_rename' conversation.pk %}">{% csrf_token %}<input type="text" name="title" value="{{ conversation.title }}" maxlength="200" aria-label="新的对话标题" required><button type="submit">保存</button></form></details>
+            <details class="danger"><summary>删除</summary><p>将删除全部消息和分享内容，无法恢复。</p><form method="post" action="{% url 'ai_analysis:conversation_delete' conversation.pk %}">{% csrf_token %}<input type="hidden" name="confirm_delete" value="yes"><button type="submit">确认删除</button></form></details>
+          </div>
+        </div>
+      {% empty %}<div class="global-ai-empty-small">还没有对话。建立对话不会调用模型或产生费用。</div>{% endfor %}
+    </nav>
+  </aside>
+
+  <main class="global-ai-chat panel">
+    {% if active_conversation %}
+      <header class="global-ai-chat-head">
+        <div><span>仅自己可见</span><h2>{{ active_conversation.title|default:"未命名对话" }}</h2><p>财务范围：{{ active_conversation.get_financial_scope_display }}；知识仍按当前账号权限读取。</p></div>
+        {% if not active_conversation.is_archived %}<form method="post" action="{% url 'ai_analysis:conversation_archive' active_conversation.pk %}">{% csrf_token %}<button class="global-ai-text-button" type="submit">归档对话</button></form>{% endif %}
+      </header>
+      <section class="global-ai-transcript" aria-label="对话内容">
+        {% for message in conversation_messages %}
+          <article class="global-ai-message role-{{ message.role }}"><span>{{ message.get_role_display }}</span><p>{{ message.content|linebreaksbr }}</p>
+        {% if message.role == 'assistant' and message.evidence_refs %}<details class="global-ai-evidence"><summary>查看回答依据（{{ message.evidence_refs|length }}）</summary><ul>{% for reference in message.evidence_refs %}<li>{% if reference.kind == 'ledger_snapshot' %}账本正式资产快照 #{{ reference.snapshot_id }}{% elif reference.kind == 'ledger_cashflow_budget' %}账本 {{ reference.year }} 年收支与预算（截至 {{ reference.as_of_date }}）{% elif reference.kind == 'portfolio_snapshot' %}投资账户 #{{ reference.account_id }} · 持仓快照 #{{ reference.snapshot_id }}{% elif reference.kind == 'portfolio_account' %}投资账户 #{{ reference.account_id }}{% elif reference.kind == 'knowledge' %}知识资料 #{{ reference.document_id }} · 版本 #{{ reference.revision_id }}{% elif reference.kind == 'memory' %}已确认背景 #{{ reference.memory_id }} · 版本 {{ reference.version }}{% else %}已保存的只读资料依据{% endif %}</li>{% endfor %}</ul></details>{% endif %}
+            {% if message.role == 'assistant' %}<div class="global-ai-message-actions">
+              {% if message.current_share.status == 'active' %}<a href="{% url 'ai_analysis:answer_share_detail' message.current_share.pk %}">查看家庭分享</a>
+              {% elif message.current_share %}<a href="{% url 'ai_analysis:answer_share_preview' message.current_share.pk %}">{% if message.current_share.status == 'paused' %}查看暂停原因{% else %}继续预览{% endif %}</a>
+              {% else %}<form method="post" action="{% url 'ai_analysis:answer_share_preview_create' message.pk %}">{% csrf_token %}<button class="global-ai-text-button" type="submit">分享这一条回答</button></form>{% endif %}
+            </div>{% endif %}
+          </article>
+        {% empty %}
+          <div class="global-ai-empty-chat"><span aria-hidden="true">✦</span><h3>这段对话还没有内容</h3><p>可以在这里查询各模块的真实资料。系统会按问题选择所属模块，不会默认合并账本与投资账户。</p>
+            <div class="global-ai-example-grid"><div><strong>查看我的资产配置</strong><span>使用最新正式账本资产快照</span></div><div><strong>解释本月收支</strong><span>使用家庭账本所选期间</span></div><div><strong>在资料中找答案</strong><span>只检索当前账号有权内容</span></div></div>
+          </div>
+        {% endfor %}
+      </section>
+      {% if conversation_requests %}<details class="global-ai-request-history"><summary>本对话运行记录（{{ conversation_requests|length }}）</summary><div>
+        {% for item in conversation_requests %}<article><span class="global-ai-status status-{{ item.status }}">{{ item.get_status_display }}</span><strong>{{ item.created_at|date:"Y-m-d H:i" }}</strong><p>{{ item.prompt|truncatechars:100 }}</p>{% if item.status == 'pending' %}<small>正在等待后台任务启动。</small>{% elif item.status == 'running' %}<small>模型正在读取已授权资料并组织回答。</small>{% elif item.status == 'cancel_requested' %}<small>正在等待后台任务停止。</small>{% elif item.status == 'unknown' %}<small>结果未确认，用量与费用保持未知。</small>{% endif %}{% if item.error_message %}<small>{{ item.error_message }}</small>{% endif %}{% if item.result %}<small>Token：{{ item.result.tokens_used|default:"未知" }}{% if item.result.cost_estimate != None %} · 费用估算 ${{ item.result.cost_estimate }}{% endif %}</small>{% endif %}{% if item.can_recover %}<small>{{ item.recovery_note }}</small><form method="post" action="{% url 'ai_analysis:request_recover' item.pk %}">{% csrf_token %}<button class="global-ai-text-button danger" type="submit">结束异常等待</button></form>{% elif item.status == 'pending' or item.status == 'running' %}<form method="post" action="{% url 'ai_analysis:request_cancel' item.pk %}">{% csrf_token %}<button class="global-ai-text-button danger" type="submit">停止</button></form>{% endif %}</article>{% endfor %}
+      </div></details>{% endif %}
+      {% if model_ready and not active_conversation.is_archived and not request_in_flight %}<form class="global-ai-composer" method="post" action="{% url 'ai_analysis:conversation_ask' active_conversation.pk %}" aria-label="提问入口">{% csrf_token %}{{ prompt_form.idempotency_key }}{{ prompt_form.content }}<button type="submit">发送</button></form>
+      <p class="global-ai-composer-note">问题会发送给 {{ global_provider.name }}；模型只能读取已授权的资料，不能修改业务数据。</p>
+      {% else %}<form class="global-ai-composer" aria-label="提问入口"><textarea disabled placeholder="{% if active_conversation.is_archived %}这段对话已归档{% elif request_in_flight %}上一条问题正在处理{% elif provider_ready %}请先确认云端资料授权{% else %}模型配置完成后即可提问{% endif %}"></textarea><button type="button" disabled>发送</button></form>
+      <p class="global-ai-composer-note">{% if request_in_flight %}回答完成或停止后，可以继续提问。{% elif active_family_scope and provider_ready and not family_financial_allowed %}需要家庭管理员先在右侧允许“全家财务云端使用”；当前不会调用模型。{% elif provider_ready %}在右侧保存资料授权后即可提问；当前不会调用模型，也不会生成示例答案。{% else %}当前不会调用模型，也不会生成示例答案。{% endif %}</p>{% endif %}
+    {% else %}
+      <div class="global-ai-empty-chat global-ai-start"><span aria-hidden="true">✦</span><h2>选择或建立一段私人对话</h2><p>每段对话单独固定“我的财务”或“全家财务”范围。此范围只影响财务查询，不改变知识资料的可见权限。</p></div>
+    {% endif %}
+  </main>
+
+  <aside class="global-ai-memory panel">
+    {% if global_provider %}<section class="global-ai-authorization"><div class="global-ai-section-head"><div><span>家庭统一设置</span><h2>全家财务云端使用</h2></div></div><p class="global-ai-section-intro">当前状态：<strong>{% if family_financial_allowed %}已允许{% else %}未允许{% endif %}</strong>。此设置只涵盖账本快照和投资账户持仓，不包含其他成员的私人对话、个人记忆或私人知识。</p>{% if can_manage_family_financial_authorization %}<form method="post" action="{% url 'ai_analysis:family_financial_authorization_update' %}">{% csrf_token %}<div class="global-ai-auth-options"><label><input type="checkbox" name="is_allowed" value="on"{% if family_financial_allowed %} checked{% endif %}> <span><strong>允许全家财务咨询</strong>家庭成员可在各自私人对话中使用“全家财务”范围</span></label></div><button type="submit">保存家庭授权</button></form>{% else %}<p class="global-ai-section-intro">只有家庭管理员可以修改此设置。</p>{% endif %}</section>
+    <section class="global-ai-authorization"><div class="global-ai-section-head"><div><span>由你控制</span><h2>我的云端资料授权</h2></div></div><p class="global-ai-section-intro">允许发送“对话”才能提问。“知识正文”只允许使用已单独授权来源中、本地检索命中的正式资料摘录；“财务数据”用于“我的财务”范围。</p><form method="post" action="{% url 'ai_analysis:outbound_authorization_update' %}">{% csrf_token %}<div class="global-ai-auth-options">{% for value, label in authorization_labels %}<label><input type="checkbox" name="allowed_data_types" value="{{ value }}"{% if value in allowed_data_types %} checked{% endif %}> <span><strong>{{ label }}</strong>{% if value == 'conversation' %}当前私人对话内容{% elif value == 'memory' %}已人工确认的背景{% elif value == 'knowledge' %}已单独授权来源中命中的正式资料摘录{% else %}“我的财务”范围内的账本快照或投资账户持仓{% endif %}</span></label>{% endfor %}</div><div class="global-ai-knowledge-scope"><p>当前已持续授权来源：<strong>{{ knowledge_cloud_source_count }}</strong> 个。<a href="{% url 'knowledge:sources' %}">管理知识来源</a></p><div class="global-ai-knowledge-source-list">{% for source in knowledge_cloud_sources %}<span>{{ source.name }}</span>{% empty %}<em>暂无；AI 助手目前不会发送知识正文。</em>{% endfor %}</div></div><button type="submit">保存我的授权</button></form>{% if can_run_knowledge_evaluation %}<details class="global-ai-memory-create"><summary>运行 5 题知识检索验收</summary><p class="global-ai-section-intro">会建立一段可见对话，顺序测试交易纪律、仓位、止损、耐心和一个应当查不到的问题，并记录引用、Token 和费用。每题只调用一次。</p><form method="post" action="{% url 'ai_analysis:knowledge_evaluation_run' %}">{% csrf_token %}<button type="submit">开始验收</button></form></details>{% endif %}</section>{% endif %}
+    <div class="global-ai-section-head"><div><span>可核对的背景</span><h2>AI 记忆</h2></div></div>
+    <p class="global-ai-section-intro">只有“已确认”的记录才会用于后续对话。余额、行情和收支会实时查业务模块，不保存在这里。</p>
+    <details class="global-ai-memory-create"><summary>＋ 添加一条背景</summary><form method="post" action="{% url 'ai_analysis:memory_create' %}">{% csrf_token %}<label>{{ memory_form.content.label }}{{ memory_form.content }}</label><label>{{ memory_form.visibility.label }}{{ memory_form.visibility }}</label><button type="submit">加入待确认</button></form></details>
+    {% if candidate_memories %}<section class="global-ai-memory-group"><h3>待确认 <span>{{ candidate_memories|length }}</span></h3>
+      {% for memory in candidate_memories %}<article class="global-ai-memory-card candidate"><div><span class="global-ai-memory-scope">{{ memory.get_visibility_display }}</span><small>{{ memory.created_by.display_name }}添加</small></div><p>{{ memory.content }}</p><div class="global-ai-inline-actions"><form method="post" action="{% url 'ai_analysis:memory_confirm' memory.pk %}">{% csrf_token %}<button type="submit">确认使用</button></form><form method="post" action="{% url 'ai_analysis:memory_delete' memory.pk %}">{% csrf_token %}<button class="global-ai-text-button danger" type="submit">不保留</button></form></div></article>{% endfor %}
+    </section>{% endif %}
+    <section class="global-ai-memory-group"><h3>已确认 <span>{{ confirmed_memories|length }}</span></h3>
+      {% for memory in confirmed_memories %}<article class="global-ai-memory-card"><div><span class="global-ai-memory-scope">{{ memory.get_visibility_display }}</span><small>版本 {{ memory.version }} · {{ memory.updated_at|date:"m-d" }}</small></div><p>{{ memory.content }}</p><details><summary>修改或删除</summary><form method="post" action="{% url 'ai_analysis:memory_revise' memory.pk %}">{% csrf_token %}<textarea name="content" maxlength="2000" required>{{ memory.content }}</textarea><button type="submit">保存新版本</button></form><form method="post" action="{% url 'ai_analysis:memory_delete' memory.pk %}">{% csrf_token %}<button class="global-ai-text-button danger" type="submit">删除这条记录</button></form></details></article>
+      {% empty %}<div class="global-ai-empty-small">暂无已确认背景。</div>{% endfor %}
+    </section>
+  </aside>
+</div>
+
+{% if legacy_requests %}<details class="panel global-ai-module-history"><summary>其他模块的 AI 运行记录（{{ legacy_requests|length }}）</summary><div class="global-ai-module-history-list">{% for item in legacy_requests %}<article><span>{{ item.created_at|date:"m-d H:i" }}</span><strong>{{ item.module }} · {{ item.analysis_type }}</strong><em>{{ item.get_status_display }}</em></article>{% endfor %}</div></details>{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {% if request_in_flight %}
+    <script>
+      window.setTimeout(function () {
+        window.location.reload();
+      }, 3000);
+    </script>
+  {% endif %}
 {% endblock %}

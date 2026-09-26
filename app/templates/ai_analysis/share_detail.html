@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ shared_answer.title }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/global_ai_share.css' %}?v=20260925-theme-v1">{% endblock %}
+
+{% block content %}
+<main class="ai-share-shell">
+  <a class="ai-share-back" href="{% url 'ai_analysis:index' %}">← 返回 AI 助手</a>
+  <section class="ai-share-card">
+    <header><span>家庭内分享 · 单条回答</span><h1>{{ shared_answer.title }}</h1><p>{{ shared_answer.owner_name }} 分享于 {{ shared_answer.published_at|date:"Y-m-d H:i" }}</p></header>
+    <article class="ai-share-answer">{{ shared_answer.answer_text|linebreaks }}</article>
+    <section class="ai-share-evidence"><h2>回答依据</h2>
+      {% for evidence in shared_answer.evidence %}<div><strong>{% if evidence.kind == 'knowledge' %}家庭知识资料{% else %}家庭共同背景{% endif %}</strong><span>{% if evidence.kind == 'knowledge' %}{{ evidence.title }} · 版本 {{ evidence.revision_number }}{% else %}{{ evidence.content }} · 版本 {{ evidence.version }}{% endif %}</span></div>
+      {% empty %}<p>这条回答没有附带知识资料或背景记录。</p>{% endfor %}
+    </section>
+    <p class="ai-share-scope">这份页面不包含原私人对话的提问和其他消息。</p>
+    {% if is_owner %}<div class="ai-share-actions"><a class="button-link secondary" href="{% url 'ai_analysis:answer_share_preview' share.pk %}">管理分享</a></div>{% endif %}
+  </section>
+</main>
+{% endblock %}

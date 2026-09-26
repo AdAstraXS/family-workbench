@@ -37,6 +37,18 @@ def _result(log):
     }
 
 
+def cached_daily_exchange_rates():
+    """Read-only page status. Fetching is reserved for explicit tasks."""
+    log = DailyExchangeRateFetch.objects.order_by("-fetch_date").first()
+    if log:
+        return _result(log)
+    return {
+        "today": timezone.localdate(), "source_date": None,
+        "usd_cny": None, "hkd_cny": None, "status": "pending",
+        "error": "尚未抓取汇率，请运行每日估值任务。", "source_url": "",
+    }
+
+
 def ensure_daily_exchange_rates():
     today = timezone.localdate()
     with transaction.atomic():

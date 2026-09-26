@@ -184,6 +184,8 @@
 {% block scripts %}
 <script>
   (() => {
+    const directory = document.querySelector(".knowledge-library-directory");
+    if (directory && window.matchMedia("(max-width: 980px)").matches) directory.open = false;
     const switcher = document.querySelector("[data-library-display-switcher]");
     if (!switcher) return;
     const cookieName = switcher.dataset.cookieName;

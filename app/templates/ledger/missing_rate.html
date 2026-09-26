@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <h1>收支汇总暂不完整</h1>
+  <p>{{ rate_error }}</p>
+  <p>收支统一折算为人民币：单笔采用发生日，按月录入采用统计期末日；使用该日或此前最近的有效汇率。补齐汇率后即可重新查看，原始记录不受影响。</p>
+  <ul>{% for item in missing_rates %}<li>{{ item.message }} <a href="{% url 'ledger:expense_year_detail' item.year %}">查看当年原币明细</a></li>{% endfor %}</ul>
+  <a href="{% url 'ledger:income_list' %}">查看收入记录</a>
+</section>
+{% endblock %}

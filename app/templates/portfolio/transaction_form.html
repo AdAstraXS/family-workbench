@@ -11,6 +11,7 @@
   </div>
   <form method="post" class="data-form transaction-data-form">
     {% csrf_token %}
+    {% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}">{% endif %}
     {% for field in form.hidden_fields %}{{ field }}{% endfor %}
     {% if form.non_field_errors %}<div class="form-errors">{{ form.non_field_errors }}</div>{% endif %}
 

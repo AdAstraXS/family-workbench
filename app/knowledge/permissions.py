@@ -1,6 +1,8 @@
-from django.db.models import Q
+from django.db.models import CharField, Q
+from django.db.models.functions import Cast
 
 from family_core.models import FamilyMember
+from family_core.permissions import current_member
 
 from .models import (
     KnowledgeArtifact,
@@ -12,20 +14,12 @@ from .models import (
 )
 
 
-def current_member(request):
-    member = getattr(request, "family_member", None)
-    if member is not None and member.is_active:
-        return member
-    try:
-        member = request.user.family_member
-    except FamilyMember.DoesNotExist:
-        return None
-    return member if member.is_active else None
-
-
 def accessible_documents(member):
+    from reading.permissions import accessible_reading_artifacts
     return (
         KnowledgeDocument.objects.filter(family=member.family)
+        .filter(~Q(source__kind=KnowledgeSource.KIND_READING) | Q(
+            reading_archive__version__artifact__in=accessible_reading_artifacts(member)))
         .filter(
             Q(owner=member)
             | Q(
@@ -38,9 +32,21 @@ def accessible_documents(member):
 
 
 def accessible_search_entries(member):
+    from notes.models import InvestmentNote
+
+    notes = InvestmentNote.objects.filter(
+        family=member.family, include_in_knowledge=True,
+    ).filter(Q(member=member) | Q(visibility=KnowledgeVisibility.FAMILY))
     return (
         KnowledgeSearchEntry.objects.filter(family=member.family)
-        .filter(Q(owner=member) | Q(visibility=KnowledgeVisibility.FAMILY))
+        .filter(
+            Q(item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
+              document__in=accessible_documents(member))
+            | Q(item_kind=KnowledgeSearchEntry.KIND_ARTIFACT,
+                artifact__in=accessible_artifacts(member))
+            | Q(item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE,
+                object_id__in=notes.annotate(text_id=Cast("pk", CharField())).values("text_id"))
+        )
         .select_related("owner", "document", "document__source", "artifact")
     )
 

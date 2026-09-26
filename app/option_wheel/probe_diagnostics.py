@@ -14,6 +14,8 @@ STEPS = {
     "underlying_snapshot": "正股快照",
     "expiration_date": "到期日",
     "chain": "期权链",
+    "option_chain_put": "Put 期权链",
+    "option_chain_call": "Call 期权链",
     "subscription": "行情订阅",
     "option_snapshot": "期权快照",
     "option_quote": "期权报价",

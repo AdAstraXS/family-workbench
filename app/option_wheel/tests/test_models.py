@@ -136,19 +136,27 @@ class WheelModelTest(TestCase):
         self.assertEqual(policy.quote_max_age_seconds, 600)
         self.assertEqual(policy.ruleset_version, "decision-v1")
 
-    def test_lifecycle_rejects_covered_call_below_assigned_cost(self):
+    def test_lifecycle_allows_covered_call_below_assigned_cost(self):
         policy = self.policy()
         cycle = WheelCycle.objects.create(
             family=self.family, account=policy.account, underlying=self.tsla,
             opened_on=date(2026, 8, 1), assigned_cost_basis=Decimal("300"),
         )
+        security = Security.objects.create(
+            symbol="TSLA260904C00290000", market="US",
+            asset_type=Security.TYPE_OPTION, currency="USD",
+        )
+        contract = OptionContract.objects.create(
+            security=security, underlying=self.tsla, option_type=OptionContract.CALL,
+            strike_price=Decimal("290"), expiration_date=date(2026, 9, 4), multiplier=100,
+        )
         leg = WheelLeg(
             cycle=cycle, sequence=1, strategy=Strategy.COVERED_CALL,
             status=LegStatus.PLANNED, expiration=date(2026, 9, 4),
-            strike=Decimal("290"),
+            strike=Decimal("290"), option_contract=contract,
         )
-        with self.assertRaises(ValidationError):
-            leg.save()
+        leg.save()
+        self.assertEqual(leg.strike, Decimal("290"))
 
     def test_cash_collateral_requires_usd_and_positive_amount(self):
         policy = self.policy()

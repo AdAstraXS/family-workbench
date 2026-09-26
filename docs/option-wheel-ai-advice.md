@@ -1,5 +1,7 @@
 # 期权车轮 DeepSeek 建议页
 
+2026-09-24 补充：新版合约表另有提交分析时的可选 AI 建议。它对本次已显示的冻结合约分批解释，规则建议与 DeepSeek 建议并列；输入范围和整次费用上限见 `docs/option-wheel/screening-v2.md`。下文描述的是旧版独立决策详情的 AI 页面。
+
 ## 产品边界
 
 建议页解释一份已冻结的规则决策，不能自行抓行情、扩展合约、修改价格和概率或改变候选资格。
@@ -14,8 +16,7 @@
 
 第一版固定复用唯一启用的 `deepseek-v4-flash` 和 `https://api.deepseek.com`，强制非思考模式、
 JSON 输出且拒绝 HTTP 重定向。API Key 只从配置的环境变量读取，不进入数据库、命令行或模型输入。
-模型价格按 2026-09-04 官方页面核对：cache miss 输入 $0.14/百万 Token、输出 $0.28/百万 Token；
-实际价格可能变化，上线前及后续定期复核 [DeepSeek 模型与价格](https://api-docs.deepseek.com/quick_start/pricing)。
+2026-09-24 再次核对官方页面：旧模型名 `deepseek-v4-flash` 暂由 V4.1 Flash 提供服务。费用门禁使用较高的峰时价保守估算：cache miss 输入 $0.30/百万 Token、输出 $1.20/百万 Token；实际价格可能变化，后续定期复核 [DeepSeek 模型与价格](https://api-docs.deepseek.com/quick_start/pricing/)。
 
 每次调用前使用 UTF-8 字节数加协议余量保守估算输入，并以配置的最大输出 Token 计算最坏费用；
 单次上限取已有配置和 $0.01 的较小值。每家庭每日最多 10 个请求，失败也计入以避免自动重试费用。

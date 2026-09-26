@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}分享已停止展示{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/global_ai_share.css' %}?v=20260925-theme-v1">{% endblock %}
+
+{% block content %}
+<main class="ai-share-shell"><section class="ai-share-card ai-share-unavailable">
+  <span>家庭内分享</span><h1>这条回答现在无法查看</h1><p>回答依据的权限、版本或来源状态已经变化，系统已停止展示回答正文。</p>
+  {% if is_owner %}<a class="button-link secondary" href="{% url 'ai_analysis:answer_share_preview' share.pk %}">查看并重新检查</a>{% else %}<a class="button-link secondary" href="{% url 'ai_analysis:index' %}">返回 AI 助手</a>{% endif %}
+</section></main>
+{% endblock %}
