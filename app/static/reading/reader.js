@@ -5,9 +5,11 @@ const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
 const toc = document.querySelector('#toc');
 let view, pdf, pdfEngine, pdfPage=1, rendering=false, ready=false, restoring=false;
 let revision=0, pending=null, savedKey='', saving=false, conflicted=null, saveTimer;
-let selected=null, annotations=[], highlightDraw;
-const setStatus = text => {status.textContent=text;};
-const fail = e => {setStatus(`未完成：${e.message || '请检查网络后重试。'}`);};
+let selected=null, annotations=[], highlightDraw, selectionDocument, annotationSaving=false;
+let pdfScale=1, requestedPDF=null;
+const actions=document.querySelector('#selection-actions');
+const setStatus = (text,important=false) => {status.textContent=text;status.classList.toggle('important',important);};
+const fail = e => {setStatus(`未完成：${e.message || '请检查网络后重试。'}`,true);};
 async function getJSON(url) {
   const response=await fetch(url,{credentials:'same-origin',cache:'no-store'});
   if(!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw Error('登录已失效或图书不可访问，请返回图书重新打开。');
@@ -45,10 +47,17 @@ async function navigate(location) {
   else if(location.cfi) await view.goTo(location.cfi);
   else if(Number.isInteger(location.section)) await view.goTo(location.section);
 }
+function turnPage(direction) {
+  if(!ready)return;
+  actions.hidden=true;
+  (pdf?renderPDF(pdfPage+direction):(direction<0?view.prev():view.next())).catch(fail);
+}
 function selection(doc,index) {
-  const capture=()=>setTimeout(()=>{
+  let timer, pointer=null, touching=false;
+  const capture=()=>{
+    if(touching || !document.querySelector('#selection-note').hidden)return;
     const sel=doc.getSelection(),text=sel?.toString().trim();
-    if(!config.writable || !text || !sel.rangeCount || text.length>4000) return;
+    if(!config.writable || !text || !sel.rangeCount || text.length>4000){actions.hidden=true;return;}
     const range=sel.getRangeAt(0).cloneRange();let anchor;
     if(pdf){
       const page=surface.querySelector('.pdf-page');
@@ -60,12 +69,37 @@ function selection(doc,index) {
       anchor={page:pdfPage,rects};
     }else anchor={cfi:view.getCFI(index,range),section:index};
     selected={quote:text,anchor};
+    selectionDocument=doc;
     document.querySelector('#selected-text').textContent=text;
-    document.querySelector('#selection-note').hidden=false;
+    actions.hidden=false;
+    document.querySelector('#selection-status').textContent='';
     document.querySelector('#annotation-status').textContent='';
-  },40);
-  doc.addEventListener('pointerup',capture);doc.addEventListener('keyup',capture);
-  doc.addEventListener('selectionchange',()=>{clearTimeout(doc.readingSelectionTimer);doc.readingSelectionTimer=setTimeout(capture,300);});
+  };
+  const schedule=()=>{clearTimeout(timer);actions.hidden=true;timer=setTimeout(capture,700);};
+  const inContent=e=>doc!==document || surface.contains(e.target);
+  doc.addEventListener('pointerdown',e=>{
+    if(!inContent(e))return;
+    touching=true;clearTimeout(timer);actions.hidden=true;
+    pointer={x:e.clientX,y:e.clientY,time:performance.now(),selected:!!doc.getSelection()?.toString(),moved:false};
+  });
+  doc.addEventListener('pointermove',e=>{if(pointer && Math.hypot(e.clientX-pointer.x,e.clientY-pointer.y)>8)pointer.moved=true;});
+  doc.addEventListener('pointercancel',()=>{touching=false;pointer=null;schedule();});
+  doc.addEventListener('pointerup',e=>{
+    if(!pointer && !inContent(e))return;
+    touching=false;const start=pointer;pointer=null;
+    if(start && !start.moved && !start.selected && performance.now()-start.time<300 &&
+       !doc.getSelection()?.toString() && !e.target.closest('a,button,input,select,textarea') &&
+       document.querySelector('#selection-note').hidden && document.querySelector('#notes-panel').hidden){
+      const bounds=surface.getBoundingClientRect();
+      const frame=doc.defaultView.frameElement;
+      const x=e.clientX+(frame?frame.getBoundingClientRect().left:0)-bounds.left;
+      if(x>=0 && x<bounds.width*.25)turnPage(-1);
+      else if(x>bounds.width*.75 && x<=bounds.width)turnPage(1);
+    }
+    schedule();
+  });
+  doc.addEventListener('keyup',schedule);
+  doc.addEventListener('selectionchange',schedule);
 }
 function drawPDFNotes(){
   const page=surface.querySelector('.pdf-page');if(!page)return;
@@ -99,7 +133,8 @@ function addToc(items,parent,go) {
   }
 }
 function fontStyle() {
-  return `html{color:#28362e;background:#fffdf7}body{font-family:Georgia,"Noto Serif SC",serif;font-size:${document.querySelector('#font-size').value}px;line-height:1.85}a{color:#38694c}img{max-width:100%;height:auto}`;
+  const spacing={compact:'-.025em',standard:'-.012em',loose:'0em'}[document.querySelector('#letter-spacing').value];
+  return `html{color:#28362e;background:#fffdf7}body{font-family:Georgia,"Noto Serif SC",serif;font-size:${document.querySelector('#font-size').value}px;line-height:1.85;letter-spacing:${spacing}}a{color:#38694c}img{max-width:100%;height:auto}`;
 }
 async function openEPUB(saved) {
   await import('./vendor/foliate/view.js');
@@ -128,25 +163,33 @@ async function openEPUB(saved) {
   view.addEventListener('external-link',e=>e.preventDefault());
   view.addEventListener('relocate',e=>{
     const d=e.detail;
-    if(d.cfi){const current=view.resolveCFI(d.cfi);const link=document.querySelector('#summarize-current');link.href=link.href.split('?')[0]+`?section=${current.index+1}`;}
+    if(d.cfi){const current=view.resolveCFI(d.cfi);const link=document.querySelector('#summarize-current');link.href=link.href.split('?')[0]+`?section=${current.index+1}`;
+      document.querySelector('#chapter-label').textContent=d.tocItem?.label || `第 ${current.index+1} 节`;
+      link.title=`总结：${document.querySelector('#chapter-label').textContent}`;}
     document.querySelector('#page-label').textContent=`约 ${Math.round((d.fraction || 0)*100)}%`;
     if(d.cfi) record({cfi:d.cfi},(d.fraction || 0)*10000);
   });
   await view.open(book);
   view.renderer.setStyles?.(fontStyle());
   document.querySelector('#font-size').onchange=()=>view.renderer.setStyles?.(fontStyle());
+  document.querySelector('#letter-spacing').onchange=()=>view.renderer.setStyles?.(fontStyle());
   addToc(book.toc?.length ? book.toc : manifest.sections.map((s,i)=>({label:`第 ${i+1} 节`,href:i})),toc,async item=>view.goTo(item.href));
   await view.init({lastLocation:saved.location.cfi,showTextStart:true});
   ready=true;
   if(view.lastLocation?.cfi) record({cfi:view.lastLocation.cfi},(view.lastLocation.fraction || 0)*10000);
 }
 async function renderPDF(number) {
-  if(rendering || number<1 || number>pdf.numPages) return;
+  if(!Number.isInteger(number) || number<1 || number>pdf.numPages) return;
+  if(rendering){requestedPDF=number;return;}
   rendering=true;
+  actions.hidden=true;
   try {
     const page=await pdf.getPage(number);
     const base=page.getViewport({scale:1});
-    const scale=Math.min(1.6,Math.max(.3,(surface.clientWidth-24)/base.width))*Number(document.querySelector('#pdf-zoom').value);
+    const mode=document.querySelector('#pdf-zoom').value;
+    const scale=Math.max(.1,Math.min(4,mode==='width'?(surface.clientWidth-16)/base.width:
+      mode==='height'?(surface.clientHeight-16)/base.height:mode==='actual'?1:pdfScale));
+    pdfScale=scale;document.querySelector('#zoom-value').textContent=`${Math.round(scale*100)}%`;
     const viewport=page.getViewport({scale});
     const container=document.createElement('div');container.className='pdf-page';
     container.style.width=`${viewport.width}px`;container.style.height=`${viewport.height}px`;
@@ -161,6 +204,7 @@ async function renderPDF(number) {
     await new pdfEngine.TextLayer({textContentSource:content,container:layer,viewport}).render();
     pdfPage=number;surface.scrollTop=0;
     const link=document.querySelector('#summarize-current');link.textContent='总结当前页';link.href=link.href.split('?')[0]+`?page=${number}`;
+    document.querySelector('#chapter-label').textContent=`第 ${number} 页`;
     document.querySelector('#page-label').textContent=`${number} / ${pdf.numPages} 页`;
     document.querySelector('#page-number').value=number;
     document.querySelector('#prev').disabled=number===1;document.querySelector('#next').disabled=number===pdf.numPages;
@@ -168,12 +212,16 @@ async function renderPDF(number) {
     drawPDFNotes();
     record({page:number},number/pdf.numPages*10000);
     page.cleanup();
-  } finally {rendering=false;}
+  } finally {rendering=false;if(requestedPDF!==null){const target=requestedPDF;requestedPDF=null;renderPDF(target).catch(fail);}}
 }
 async function openPDF(saved) {
   document.querySelector('#font-control').hidden=true;
   document.querySelector('#pdf-zoom-control').hidden=false;
   document.querySelector('#pdf-zoom').onchange=()=>renderPDF(pdfPage).catch(fail);
+  for(const [id,step] of [['zoom-out',-.1],['zoom-in',.1]])document.querySelector('#'+id).onclick=()=>{
+    pdfScale=Math.max(.1,Math.min(4,Math.round((pdfScale+step)*100)/100));
+    document.querySelector('#pdf-zoom').value='custom';renderPDF(pdfPage).catch(fail);
+  };
   document.querySelector('#page-jump').hidden=false;
   pdfEngine=await import('./vendor/pdfjs/pdf.min.mjs');
   const base=new URL('./vendor/pdfjs/',import.meta.url);
@@ -193,27 +241,38 @@ async function openPDF(saved) {
   });
   else toc.textContent='此 PDF 没有可用目录，请按页码跳转。';
 }
-document.querySelector('#prev').onclick=()=>{if(!ready)return;(pdf?renderPDF(pdfPage-1):view.prev()).catch(fail);};
-document.querySelector('#next').onclick=()=>{if(!ready)return;(pdf?renderPDF(pdfPage+1):view.next()).catch(fail);};
+document.querySelector('#prev').onclick=()=>turnPage(-1);
+document.querySelector('#next').onclick=()=>turnPage(1);
 document.querySelector('#page-jump').onsubmit=e=>{e.preventDefault();if(pdf)renderPDF(Number(document.querySelector('#page-number').value)).catch(fail);};
 document.querySelector('#toggle-toc').onclick=()=>{toc.hidden=!toc.hidden;document.querySelector('#toggle-toc').setAttribute('aria-expanded',String(!toc.hidden));};
+document.querySelector('#toggle-settings').onclick=()=>{const panel=document.querySelector('#reader-settings');panel.hidden=!panel.hidden;document.querySelector('#toggle-settings').setAttribute('aria-expanded',String(!panel.hidden));};
 document.querySelector('#save-now').onclick=()=>save().catch(fail);
 document.querySelector('#close-selection').onclick=()=>{document.querySelector('#selection-note').hidden=true;};
 document.querySelector('#toggle-notes').onclick=()=>{const panel=document.querySelector('#notes-panel');panel.hidden=!panel.hidden;};
 document.querySelector('#refresh-notes').onclick=()=>refreshNotes().catch(fail);
-document.querySelector('#annotation-form').onsubmit=async e=>{
-  e.preventDefault();if(!selected)return;
+actions.addEventListener('pointerdown',e=>e.preventDefault());
+document.querySelector('#comment-selection').onclick=()=>{
+  if(!selected)return;actions.hidden=true;document.querySelector('#selection-note').hidden=false;
+  document.querySelector('#annotation-note').focus();
+};
+document.querySelector('#highlight-selection').onclick=()=>saveAnnotation(true);
+document.querySelector('#annotation-form').onsubmit=e=>{e.preventDefault();saveAnnotation(false);};
+async function saveAnnotation(highlightOnly){
+  if(!selected || annotationSaving)return;annotationSaving=true;
   const button=document.querySelector('#save-annotation'),message=document.querySelector('#annotation-status');button.disabled=true;
+  document.querySelector('#highlight-selection').disabled=true;
   try{
     const response=await fetch(config.annotations,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({
-      ...selected,note:document.querySelector('#annotation-note').value,visibility:document.querySelector('#annotation-visibility').value,
+      ...selected,note:highlightOnly?'':document.querySelector('#annotation-note').value,visibility:highlightOnly?'private':document.querySelector('#annotation-visibility').value,
       file_hash:config.file_hash,normalizer_version:config.normalizer_version})});
     if(!response.headers.get('content-type')?.includes('application/json'))throw Error('未保存，请检查登录或权限。');
     const result=await response.json();if(!response.ok)throw Error(result.error);
     selected=null;document.querySelector('#annotation-note').value='';document.querySelector('#selection-note').hidden=true;
-    await refreshNotes();document.querySelector('#notes-panel').hidden=false;setStatus('划线与批注已保存');
-  }catch(error){message.textContent=error.message;}finally{button.disabled=false;}
-};
+    actions.hidden=true;selectionDocument?.getSelection()?.removeAllRanges();
+    await refreshNotes();setStatus(highlightOnly?'划线已保存':'批注已保存');
+  }catch(error){message.textContent=error.message;document.querySelector('#selection-status').textContent=error.message;}
+  finally{button.disabled=false;document.querySelector('#highlight-selection').disabled=false;annotationSaving=false;}
+}
 let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{if(pdf)renderPDF(pdfPage).catch(fail);},250);});
 document.querySelector('#use-server').onclick=async()=>{
   try{
@@ -238,6 +297,7 @@ async function main(){
   if(note)await navigate(note.anchor);
   else if(params.has('section'))await navigate({section:Number(params.get('section'))});
   else if(params.has('page'))await navigate({page:Number(params.get('page'))});
+  if(params.get('toc')==='1'){toc.hidden=false;document.querySelector('#toggle-toc').setAttribute('aria-expanded','true');}
   if(config.format!=='pdf')setStatus(config.writable?'已打开 · 阅读位置自动保存':'只读账户：位置不会保存。');
 }
 main().catch(fail);

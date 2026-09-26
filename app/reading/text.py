@@ -29,7 +29,9 @@ def chapter_text(file, index):
     with zipfile.ZipFile(storage().path(file.normalized_path)) as archive:
         root = parse_xml(archive.read(path))
     body = next((e for e in root.iter() if local_name(e.tag)=="body"), None)
-    title = next(("".join(e.itertext()).strip() for e in root.iter() if local_name(e.tag) in {"h1","h2","title"}), "")
+    title = next(("".join(e.itertext()).strip() for e in root.iter() if local_name(e.tag) in {"h1","h2"}), "")
+    if not title:
+        title = next(("".join(e.itertext()).strip() for e in root.iter() if local_name(e.tag)=="title"), "")
     return {"href":path,"index":index,"title":title or f"第 {index+1} 节", "text":"\n".join(body.itertext()).strip() if body is not None else ""}
 
 
