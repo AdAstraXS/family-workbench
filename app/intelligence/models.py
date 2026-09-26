@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 
 from family_core.models import Family, FamilyMember, TimestampedModel
+from .program_models import ProgramSettings, ProgramSubscription, ProgramEntry, ProgramRevision, ProgramSummaryChunk
 
 
 def normalize_knowledge_author_name(value):

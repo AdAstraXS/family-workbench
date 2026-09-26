@@ -1,4 +1,5 @@
 <nav class="intel-tabs" aria-label="情报功能导航">
+  <a class="{% if request.resolver_match.url_name == 'program_list' or request.resolver_match.url_name == 'program_detail' %}active{% endif %}" href="{% url 'intelligence:program_list' %}">精选订阅</a>
   <a class="{% if request.resolver_match.url_name == 'index' %}active{% endif %}" href="{% url 'intelligence:index' %}">今日精选</a>
   <a class="{% if request.resolver_match.url_name == 'digest_workbench' %}active{% endif %}" href="{% url 'intelligence:digest_workbench' %}">情报简报</a>
   <a class="{% if request.resolver_match.url_name == 'event_list' %}active{% endif %}" href="{% url 'intelligence:event_list' %}">全部动态</a>

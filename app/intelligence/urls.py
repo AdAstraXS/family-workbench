@@ -1,11 +1,18 @@
 from django.urls import path
 
 from . import views
+from . import program_views
 
 
 app_name = "intelligence"
 
 urlpatterns = [
+    path('programs/', program_views.program_list, name='program_list'),
+    path('programs/settings/', program_views.program_settings, name='program_settings'),
+    path('programs/add-video/', program_views.program_add_video, name='program_add_video'),
+    path('programs/<int:pk>/', program_views.program_detail, name='program_detail'),
+    path('programs/<int:pk>/action/', program_views.program_action, name='program_action'),
+    path('programs/<int:pk>/audio/<str:token>/', program_views.program_audio, name='program_audio'),
     path("people/", views.index, name="index"),
     path("people/digests/", views.digest_workbench, name="digest_workbench"),
     path("people/digests/analyze/", views.digest_analyze_batch, name="digest_analyze_batch"),

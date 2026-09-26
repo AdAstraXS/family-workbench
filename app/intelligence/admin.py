@@ -1,4 +1,21 @@
 from django.contrib import admin
+from .program_models import ProgramSettings, ProgramSubscription, ProgramEntry, ProgramRevision, ProgramSummaryChunk
+
+
+@admin.register(ProgramSettings, ProgramSubscription, ProgramEntry, ProgramRevision, ProgramSummaryChunk)
+class ProgramReadOnlyAdmin(admin.ModelAdmin):
+    """Inspection only: mutations use family-scoped pages and processing services."""
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_fields(self, request, obj=None):
+        return [f.name for f in self.model._meta.fields if f.name not in {'encrypted_credentials', 'audio_file', 'audio_url'}]
 
 from .models import (
     CollectionRun,
