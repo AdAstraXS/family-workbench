@@ -131,6 +131,20 @@ class OfficialIRProviderTests(SimpleTestCase):
         self.assertEqual(result.materials[0].document_type,'presentation')
         self.assertEqual(result.periods,[(2026,2)])
 
+    def test_q4_refusal_uses_dated_official_links_without_retry(self):
+        company = BY_KEY['meta']
+        url = 'https://investor.atmeta.com/feed/FinancialReport.svc/GetFinancialReportYearList?LanguageId=1'
+        client = FakeClient({url: IRError('HTTP 429', status=429)})
+        result = OfficialIRProvider(company, client=client, today=date(2026,9,26)).discover()
+        self.assertEqual(client.calls, [url])
+        self.assertEqual(result.directory_error, 'HTTP 429')
+        self.assertEqual(len(result.periods), 4)
+        for material in result.materials:
+            self.assertEqual(official_url(company, material.url), material.url)
+            self.assertEqual(material.metadata['discovery_mode'], 'verified_snapshot')
+        with self.assertRaises(IRError):
+            OfficialIRProvider(company, client=client, today=date(2026,9,25)).discover()
+
     def test_results_page_retains_quarter_and_statement_type(self):
         company=BY_KEY['amd']
         html='<h2>Q2 2026</h2><p>Quarter Ended Jun 27, 2026</p><div><h3>Earnings Release</h3><a href="/news/q2">HTML</a></div><a href="https://d1io3yog0oux5.cloudfront.net/_abc/amd/db/123/tables.pdf">Financial Tables</a>'
@@ -265,6 +279,21 @@ class OfficialIRIntegrationTests(TestCase):
         self.assertEqual(len(response.context['cards']),13)
         self.assertEqual(Security.objects.count(),before)
         self.assertEqual(ResearchDossier.objects.count(),1)
+
+    def test_directory_failure_cannot_replace_a_newer_saved_catalogue(self):
+        self.discover()
+        state = ResearchSourceState.objects.get()
+        original = dict(state.cursor)
+        state.last_checked_at = timezone.now() - timedelta(minutes=3)
+        state.save()
+        fallback = IRDiscovery(directory_error='HTTP 429')
+        with patch('investment_research.official_ir.OfficialIRProvider.discover', return_value=fallback):
+            updated, created = sync_official_ir(self.dossier.security, force=True)
+        self.assertEqual(created, 0)
+        self.assertEqual(updated.cursor['urls'], original['urls'])
+        self.assertEqual(updated.cursor['periods'], original['periods'])
+        self.assertEqual(updated.last_error, 'HTTP 429')
+        self.assertEqual(OfficialResearchDocument.objects.count(), 1)
 
     def test_image_only_attachment_retains_original_without_ai_text(self):
         from .ir_extraction import AttachmentTextUnavailable

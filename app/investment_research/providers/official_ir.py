@@ -121,7 +121,11 @@ class OfficialIRProvider:
         ))
 
     def discover(self):
-        getattr(self, '_' + self.company.adapter)()
+        try:
+            getattr(self, '_' + self.company.adapter)()
+        except IRError as exc:
+            if not self._verified_fallback(exc):
+                raise
         if not self.result.materials:
             raise IRError('官方目录未发现可归档材料，可能尚未发布或页面结构已变化。')
         selected = set(self.result.periods[:4])
@@ -132,6 +136,24 @@ class OfficialIRProvider:
         if len(selected) < 4:
             self.result.warnings.append(f'官方入口目前识别到 {len(selected)} 个已发布季度，未补造更早材料。')
         return self.result
+
+    def _verified_fallback(self, error):
+        snapshots = json.loads(Path(__file__).with_name('ir_verified_links.json').read_text(encoding='utf-8'))
+        snapshot = snapshots.get(self.company.key)
+        if not snapshot or parse_date(snapshot['verified_at']) > self.today:
+            return False
+        # A dated public-link catalogue is usable even when the directory refuses
+        # access. Originals still come directly from the allowed official hosts.
+        self.result = IRDiscovery(directory_error=str(error))
+        self.result.warnings.append(f'实时目录访问失败；目前使用 {snapshot["verified_at"]} 从官网核实的附件链接，不能确认此后新季度是否发布。')
+        for item in snapshot['materials']:
+            self._add(item['url'], item['title'], (item['year'], item['quarter']),
+                      item.get('source', snapshot['source']), kind=item['type'],
+                      published=parse_date(item.get('published_at')),
+                      period_end=parse_date(item.get('period_end')),
+                      metadata={**item.get('metadata', {}), 'verified_at': snapshot['verified_at'],
+                                'discovery_mode': 'verified_snapshot'})
+        return bool(self.result.materials)
 
     def _q4(self):
         origin = 'https://' + urlsplit(self.company.entry).hostname
@@ -301,17 +323,7 @@ class OfficialIRProvider:
             self._add(href, label, period, base, kind='earnings_release')
 
     def _tesla(self):
-        try:
-            soup, source = self._soup(self.company.entry)
-        except IRError as exc:
-            # Explicit dated bootstrap, never claim a fresh automatic discovery.
-            snapshot = json.loads(Path(__file__).with_name('ir_verified_links.json').read_text(encoding='utf-8'))['tsla']
-            self.result.directory_error = str(exc)
-            self.result.warnings.append(f'实时目录访问失败；目前使用 {snapshot["verified_at"]} 从官网核实的附件链接，不能确认此后新季度是否发布。')
-            for item in snapshot['materials']:
-                self._add(item['url'], item['title'], (item['year'], item['quarter']), snapshot['source'],
-                          kind=item['type'], metadata={'verified_at': snapshot['verified_at'], 'discovery_mode': 'verified_snapshot'})
-            return
+        soup, source = self._soup(self.company.entry)
         for row in soup.select('tr'):
             text = row.get_text(' ', strip=True)
             match = re.search(r'\b(20\d{2})\b.*?\bQ([1-4])\b', text)

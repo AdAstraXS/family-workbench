@@ -55,6 +55,14 @@ def sync_official_ir(security, *, client=None, force=False):
         state.save(update_fields=['last_checked_at', 'updated_at'])
     try:
         result = OfficialIRProvider(company, client=client).discover()
+        if result.directory_error and state.cursor.get('urls'):
+            # A bundled bootstrap must never roll an already populated live
+            # catalogue back to the quarters known at software release time.
+            state.last_error = result.directory_error
+            state.cursor = {**state.cursor, 'warnings': [
+                '实时目录未能刷新；沿用此前已保存的材料目录，不能确认是否有新季度发布。']}
+            state.save(update_fields=['last_error', 'cursor', 'updated_at'])
+            return state, 0
         created = 0
         with transaction.atomic():
             for material in result.materials:
