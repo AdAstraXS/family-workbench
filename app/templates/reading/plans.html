@@ -1,0 +1,4 @@
+{% extends "reading/base.html" %}{% block title %}个人读书计划{% endblock %}
+{% block hub_content %}<header class="reading-heading"><div><h1>我的读书计划</h1><p>多本书，一个目标日期。计划和进度只对你可见。</p></div><a href="{% url 'reading:index' %}">返回书架</a></header>
+<section class="reading-panel">{% for plan in plans %}<p><a href="{% url 'reading:plan' plan.pk %}"><strong>{{ plan.title }}</strong></a> · 目标 {{ plan.target_date|date:"Y-m-d" }}</p>{% empty %}<p>还没有计划，可以从本月想读的几本书开始。</p>{% endfor %}</section>
+{% if request.family_member.role != 'viewer' %}<section class="reading-panel"><h2>新建计划</h2><form method="post">{% csrf_token %}{{ form.as_p }}<button class="primary">创建计划</button></form></section>{% endif %}{% endblock %}

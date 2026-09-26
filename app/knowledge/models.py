@@ -152,12 +152,14 @@ class KnowledgeSource(TimestampedModel):
     KIND_HTML_IMPORT = "html_import"
     KIND_MARKDOWN_IMPORT = "markdown_import"
     KIND_INTELLIGENCE = "intelligence"
+    KIND_READING = "reading"
     KIND_CHOICES = [
         (KIND_ONENOTE, "OneNote"),
         (KIND_INTERNAL_NOTES, "随手记"),
         (KIND_HTML_IMPORT, "HTML 历史资料"),
         (KIND_MARKDOWN_IMPORT, "Markdown 历史资料"),
         (KIND_INTELLIGENCE, "AI 情报归档"),
+        (KIND_READING, "阅读成果"),
     ]
 
     ROUTE_KNOWLEDGE = "knowledge"

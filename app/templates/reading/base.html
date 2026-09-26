@@ -1,0 +1,3 @@
+{% extends "knowledge_hub/base.html" %}{% load static %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'reading/library.css' %}">{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'reading:index' %}">在线书库</a>{% endblock %}

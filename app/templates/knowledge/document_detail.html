@@ -8,7 +8,7 @@
   <section class="knowledge-document-reading">
     <header class="knowledge-document-header">
       <div class="knowledge-card-meta">
-        <span class="knowledge-content-label original">原文</span>
+        <span class="knowledge-content-label original">{% if document.source.kind == 'reading' %}阅读成果{% else %}原文{% endif %}</span>
         <span>{{ document.author|default:"作者未标注" }}</span>
         <span>{{ document.content_modified_at|date:"Y-m-d"|default:"日期未知" }}</span>
         <span>{{ document.source.name }}</span>
@@ -72,7 +72,7 @@
       </aside>
     {% endif %}
 
-    <div class="knowledge-original-label"><span>原始正文</span><strong>同步版本 v{{ revision.revision_number|default:"-" }} · AI 无权修改</strong></div>
+    <div class="knowledge-original-label">{% if document.source.kind == 'reading' %}<span>阅读成果发布快照</span><strong>归档后保留当时版本</strong>{% else %}<span>原始正文</span><strong>同步版本 v{{ revision.revision_number|default:"-" }} · AI 无权修改</strong>{% endif %}</div>
     <div class="knowledge-reading-controls" aria-label="正文显示设置">
       <div class="knowledge-reading-control-group">
         <span class="knowledge-reading-control-label">字号</span>
