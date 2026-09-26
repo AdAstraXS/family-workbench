@@ -1,7 +1,7 @@
 from datetime import timedelta
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
-from intelligence.program_models import ProgramEntry, ProgramSubscription
+from intelligence.program_models import ProgramEntry, ProgramSubscription, ProgramSettings
 from intelligence.program_processing import process_entry
 from intelligence.program_sources import collect_subscription, ProgramError
 from family_core.models import Family
@@ -34,8 +34,15 @@ class Command(BaseCommand):
                 failures += 1
                 self.stderr.write(f'订阅 {sub.code} 抓取失败，详情见管理订阅页面。')
         if not options['collect_only']:
+            config = ProgramSettings.objects.filter(family_id=family_id).first()
             entries = ProgramEntry.objects.filter(subscription__family_id=family_id, subscription__enabled=True,
                 requested=True).exclude(state__in=['ready', 'failed', 'uncertain']).order_by('updated_at', 'pk')
+            if not config or not config.allow_asr or not config.encrypted_credentials:
+                entries = entries.exclude(state='waiting_config')
+            elif not config.public_base_url:
+                entries = entries.exclude(state='waiting_config', subscription__code='rhino')
+            if not config or not config.allow_summary or not config.summary_provider_id:
+                entries = entries.exclude(state__in=['text_ready', 'summarizing'])
             for entry in list(entries[:max_steps]):
                 for _ in range(min(3, max_steps - steps)):
                     succeeded = process_entry(entry.pk)

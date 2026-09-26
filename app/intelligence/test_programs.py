@@ -8,7 +8,8 @@ from unittest.mock import patch
 from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
-from django.test import TestCase, override_settings
+from django.test import TestCase, TransactionTestCase, override_settings
+from django.db import connection, connections, close_old_connections
 from django.urls import reverse
 from django.utils import timezone
 
@@ -255,3 +256,71 @@ class ProgramTests(TestCase):
         with patch('intelligence.program_processing.asr_request') as remote:
             self.assertFalse(process_entry(self.entry.pk))
             remote.assert_not_called()
+
+    def test_waiting_for_key_resumes_after_configuration(self):
+        self.config.allow_asr = False
+        self.config.save()
+        self.assertFalse(process_entry(self.entry.pk))
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.state, 'waiting_config')
+        self.assertIsNone(self.entry.submitted_at)
+        self.config.allow_asr = True
+        self.config.save()
+        with patch('intelligence.program_processing.asr_request', return_value={'output': {'task_id': 'resumed-task'}}) as remote:
+            self.assertTrue(process_entry(self.entry.pk))
+            self.assertEqual(remote.call_count, 1)
+
+    def test_later_summary_archive_preserves_previous_knowledge_version(self):
+        revision = self.revision()
+        document = archive_program(revision, self.member)
+        original_revision = document.current_revision
+        revision.refresh_from_db()
+        revision.summary = {'points': [{'topic': 'MSFT', 'kind': '作者观点', 'text': '后续整理', 'refs': [1]}]}
+        revision.summary_complete = True
+        revision.save()
+        updated = archive_program(revision, self.member)
+        self.assertEqual(document.pk, updated.pk)
+        self.assertEqual(updated.current_revision.revision_number, 2)
+        self.assertNotIn('后续整理', original_revision.plain_text)
+        self.assertIn('后续整理', updated.current_revision.plain_text)
+
+    def test_stock_filter_does_not_match_intelligence_as_intel(self):
+        self.revision('Artificial intelligence improves Microsoft products.')
+        response = self.client.get(reverse('intelligence:program_list'), {'stock': 'INTC'})
+        self.assertNotContains(response, 'CEO 访谈')
+        response = self.client.get(reverse('intelligence:program_list'), {'stock': 'MSFT'})
+        self.assertContains(response, 'CEO 访谈')
+
+
+@override_settings(KNOWLEDGE_TOKEN_ENCRYPTION_KEY=Fernet.generate_key().decode())
+class ProgramBudgetConcurrencyTests(TransactionTestCase):
+    def test_parallel_reservations_cannot_exceed_family_budget(self):
+        if connection.vendor != 'postgresql':
+            self.skipTest('Row-lock concurrency requires PostgreSQL.')
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+        family = Family.objects.create(name='并发预算测试')
+        sub = ProgramSubscription.objects.create(family=family, code='good_company')
+        config = ProgramSettings.objects.create(family=family, allow_asr=True, monthly_asr_cny=Decimal('.50'),
+            encrypted_credentials=encrypt_json({'api_key': 'test-only'}))
+        ids = [ProgramEntry.objects.create(subscription=sub, external_id=str(i), title='test', url='https://example.com',
+            audio_url='https://example.com/audio.mp3', duration_seconds=1500).pk for i in range(2)]
+        barrier = Barrier(2)
+        def run(pk):
+            close_old_connections()
+            try:
+                entry = ProgramEntry.objects.select_related('subscription').get(pk=pk)
+                local_config = ProgramSettings.objects.get(pk=config.pk)
+                barrier.wait(timeout=10)
+                submit_asr(entry, local_config)
+                return True
+            except ProgramError:
+                return False
+            finally:
+                connections.close_all()
+        with patch('intelligence.program_processing.asr_request', return_value={'output': {'task_id': 'test-task'}}) as remote:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results = list(executor.map(run, ids))
+            self.assertEqual(sum(results), 1)
+            self.assertEqual(remote.call_count, 1)
+        self.assertEqual(ProgramEntry.objects.filter(state='asr_wait').count(), 1)

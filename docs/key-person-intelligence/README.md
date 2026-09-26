@@ -25,6 +25,8 @@
 10. [M3.3 跨来源事件聚合与人工复核](./m3-3-event-aggregation.md)
 11. [M4 最小可用 AI 情报闭环与每日简报](./m4-minimum-ai-digest.md)
 12. [M4.1 自动情报循环与公开证据摘录](./m4-1-automatic-intelligence.md)
+13. [精选访谈与文字稿需求](./focused-sources-and-transcripts-v1.md)
+14. [精选订阅运行与验收](./program-subscriptions-operations.md)
 
 ## 当前设计结论
 
@@ -56,7 +58,8 @@ python manage.py seed_key_people --follow-all --family-id <家庭ID>
 
 M2 在不增加 Python 依赖的前提下接入 RSS / Atom 和 YouTube 官方频道元数据。M4.1 可对管理员逐个
 启用的 RSS 信源提取少量公开证据段落并自动调用既有文本模型；不保存完整正文、不绕过登录或付费墙。
-YouTube 仍不下载视频、音频或字幕，SEC 与 X 仍未启用。
+上述为 M4.1 范围。2026-09-26 用户确认新增精选订阅：指定 YouTube 频道在字幕缺失时可受控获取音频并转写，
+另接入完整访谈和 Oaktree 备忘录；详见精选订阅运行说明。SEC 仍由投研模块负责，X 未启用。
 
 用户验收后确认采用五段式轻量流水线，并将“关注主题”和“信源”拆开：人物只是关注主题的一种，
 信源可以同时服务于人物、机构、行业、技术、政策和证券主题。详见

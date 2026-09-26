@@ -1,15 +1,53 @@
 {% extends 'base.html' %}{% load static %}
 {% block title %}精选订阅{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}"><link rel="stylesheet" href="{% static 'css/intelligence-programs.css' %}">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}">
+<link rel="stylesheet" href="{% static 'css/intelligence-programs.css' %}">{% endblock %}
 {% block content %}
-<section class="intel-page-head"><div><span class="intel-eyebrow">投资阅读</span><h1>精选订阅</h1><p>每日市场观察、完整访谈和投资方法。先读重点，再回到原文核对。</p></div>{% if can_admin %}<a class="button ghost" href="{% url 'intelligence:program_settings' %}">管理订阅</a>{% endif %}</section>
+<section class="intel-page-head">
+<div>
+<span class="intel-eyebrow">投资阅读</span>
+<h1>精选订阅</h1>
+<p>每日市场观察、完整访谈和投资方法。先读重点，再回到原文核对。</p>
+</div>{% if can_admin %}<a class="button ghost" href="{% url 'intelligence:program_settings' %}">管理订阅</a>{% endif %}</section>
 {% include 'intelligence/_tabs.html' %}
 <nav class="program-stock-tabs" aria-label="关注股票">
   <a href="?source={{ source|urlencode }}" {% if not stock %}aria-current="page"{% endif %}>全部主题</a>
   {% for code,spec in stocks.items %}<a href="?stock={{ code }}&source={{ source|urlencode }}" {% if stock == code %}aria-current="page"{% endif %}>{{ spec.0 }} · {{ code }}</a>{% endfor %}
 </nav>
-<section class="intel-section"><form method="get" class="program-filters"><label>来源<select name="source"><option value="">全部订阅</option>{% for code,spec in catalogue.items %}<option value="{{ code }}" {% if source == code %}selected{% endif %}>{{ spec.name }}</option>{% endfor %}</select></label><label>搜索标题或原文<input name="q" value="{{ query }}" placeholder="微软、风险、估值…"></label><label>内容<select name="state"><option value="">全部</option><option value="readable" {% if request.GET.state == 'readable' %}selected{% endif %}>已有原文</option></select></label><button class="button" type="submit">筛选</button></form></section>
-<section class="program-grid">{% for entry in page %}<article class="intel-section program-card"><div class="program-meta"><span>{{ entry.source_name }}</span><time>{{ entry.published_at|date:'Y-m-d'|default:'日期待核对' }}</time></div><h2><a href="{% url 'intelligence:program_detail' entry.pk %}">{{ entry.title }}</a></h2><p>{{ entry.get_state_display }}{% if entry.current_revision %} · 原文已保存{% endif %}{% if not entry.requested %} · 未自动处理{% endif %}</p>{% if entry.current_revision.summary_complete %}<p>{{ entry.current_revision.summary.points.0.text|truncatechars:180 }}</p>{% endif %}<a href="{% url 'intelligence:program_detail' entry.pk %}">打开阅读 →</a></article>{% empty %}<div class="intel-empty"><h2>从少量高质量来源开始</h2><p>订阅后，新文章和节目会出现在这里。首次只自动处理每个来源的最新一篇，历史内容按需获取。</p>{% if can_admin %}<a class="button" href="{% url 'intelligence:program_settings' %}">选择订阅</a>{% endif %}</div>{% endfor %}</section>
-<nav class="program-pagination">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&source={{ source|urlencode }}&q={{ query|urlencode }}&state={{ request.GET.state|urlencode }}">上一页</a>{% endif %}<span>第 {{ page.number }} / {{ page.paginator.num_pages }} 页</span>{% if page.has_next %}<a href="?page={{ page.next_page_number }}&source={{ source|urlencode }}&q={{ query|urlencode }}&state={{ request.GET.state|urlencode }}">下一页</a>{% endif %}</nav>
-{% if can_admin %}<details class="intel-section"><summary>添加视野环球财经节目链接</summary><form method="post" action="{% url 'intelligence:program_add_video' %}" class="program-filters">{% csrf_token %}<label>公开视频链接<input type="url" name="url" required placeholder="https://www.youtube.com/watch?v=…"></label><button class="button" type="submit">添加到阅读列表</button></form></details>{% endif %}
+<section class="intel-section">
+<form method="get" class="program-filters">
+<input type="hidden" name="stock" value="{{ stock }}">
+<label>来源<select name="source">
+<option value="">全部订阅</option>{% for code,spec in catalogue.items %}<option value="{{ code }}" {% if source == code %}selected{% endif %}>{{ spec.name }}</option>{% endfor %}</select>
+</label>
+<label>搜索标题或原文<input name="q" value="{{ query }}" placeholder="微软、风险、估值…">
+</label>
+<label>内容<select name="state">
+<option value="">全部</option>
+<option value="readable" {% if request.GET.state == 'readable' %}selected{% endif %}>已有原文</option>
+</select>
+</label>
+<button class="button" type="submit">筛选</button>
+</form>
+</section>
+<section class="program-grid">{% for entry in page %}<article class="intel-section program-card">
+<div class="program-meta">
+<span>{{ entry.source_name }}</span>
+<time>{{ entry.published_at|date:'Y-m-d'|default:'日期待核对' }}</time>
+</div>
+<h2>
+<a href="{% url 'intelligence:program_detail' entry.pk %}">{{ entry.title }}</a>
+</h2>
+<p>{{ entry.get_state_display }}{% if entry.current_revision %} · 原文已保存{% endif %}{% if not entry.requested %} · 未自动处理{% endif %}</p>{% if entry.current_revision.summary_complete %}<p>{{ entry.current_revision.summary.points.0.text|truncatechars:180 }}</p>{% endif %}<a href="{% url 'intelligence:program_detail' entry.pk %}">打开阅读 →</a>
+</article>{% empty %}<div class="intel-empty">
+<h2>从少量高质量来源开始</h2>
+<p>订阅后，新文章和节目会出现在这里。首次只自动处理每个来源的最新一篇，历史内容按需获取。</p>{% if can_admin %}<a class="button" href="{% url 'intelligence:program_settings' %}">选择订阅</a>{% endif %}</div>{% endfor %}</section>
+<nav class="program-pagination">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&stock={{ stock|urlencode }}&source={{ source|urlencode }}&q={{ query|urlencode }}&state={{ request.GET.state|urlencode }}">上一页</a>{% endif %}<span>第 {{ page.number }} / {{ page.paginator.num_pages }} 页</span>{% if page.has_next %}<a href="?page={{ page.next_page_number }}&stock={{ stock|urlencode }}&source={{ source|urlencode }}&q={{ query|urlencode }}&state={{ request.GET.state|urlencode }}">下一页</a>{% endif %}</nav>
+{% if can_admin %}<details class="intel-section">
+<summary>添加视野环球财经节目链接</summary>
+<form method="post" action="{% url 'intelligence:program_add_video' %}" class="program-filters">{% csrf_token %}<label>公开视频链接<input type="url" name="url" required placeholder="https://www.youtube.com/watch?v=…">
+</label>
+<button class="button" type="submit">添加到阅读列表</button>
+</form>
+</details>{% endif %}
 {% endblock %}

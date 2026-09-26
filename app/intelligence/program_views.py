@@ -24,12 +24,12 @@ from .program_archive import archive_program
 from .views import _is_family_admin
 
 STOCK_FILTERS = {
-    'MSFT': ('微软', r'微软|\bMicrosoft\b|\bMSFT\b'),
-    'TSLA': ('特斯拉', r'特斯拉|\bTesla\b|\bTSLA\b'),
-    'SPCX': ('SpaceX', r'\bSpaceX\b|\bSPCX\b'),
-    'INTC': ('Intel', r'英特尔|\bIntel\b|\bINTC\b'),
-    'NVDA': ('英伟达', r'英伟达|輝達|\bNvidia\b|\bNVDA\b'),
-    'GOOG': ('谷歌', r'谷歌|\bGoogle\b|\bAlphabet\b|\bGOOGL?\b'),
+    'MSFT': ('微软', r'微软|(^|[^A-Za-z])(Microsoft|MSFT)([^A-Za-z]|$)'),
+    'TSLA': ('特斯拉', r'特斯拉|(^|[^A-Za-z])(Tesla|TSLA)([^A-Za-z]|$)'),
+    'SPCX': ('SpaceX', r'(^|[^A-Za-z])(SpaceX|SPCX)([^A-Za-z]|$)'),
+    'INTC': ('Intel', r'英特尔|(^|[^A-Za-z])(Intel|INTC)([^A-Za-z]|$)'),
+    'NVDA': ('英伟达', r'英伟达|輝達|(^|[^A-Za-z])(Nvidia|NVDA)([^A-Za-z]|$)'),
+    'GOOG': ('谷歌', r'谷歌|(^|[^A-Za-z])(Google|Alphabet|GOOGL?)([^A-Za-z]|$)'),
 }
 
 
@@ -111,6 +111,8 @@ def program_settings(request):
         return HttpResponseForbidden('只有家庭管理员可以修改订阅和服务配置。')
     member = request.family_member
     config = ProgramSettings.objects.filter(family=member.family).first() or ProgramSettings(family=member.family)
+    if not config.pk and request.is_secure():
+        config.public_base_url = request.build_absolute_uri('/').rstrip('/')
     form = SettingsForm(request.POST if request.method == 'POST' and request.POST.get('action') == 'settings' else None, instance=config)
     if request.method == 'POST':
         if request.POST.get('action') == 'subscriptions':

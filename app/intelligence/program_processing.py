@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from knowledge.crypto import _fernet_key, decrypt_json
 from .program_models import ProgramSettings, ProgramEntry, ProgramRevision, ProgramSummaryChunk
-from .program_sources import ProgramError, fetch_publisher_text
+from .program_sources import ProgramError, ProgramConfigurationRequired, fetch_publisher_text
 from .program_media import ASR_MODEL, asr_request, download_asr_result, youtube_metadata, youtube_captions, youtube_audio, private_json_request
 
 ASR_CNY_PER_SECOND = Decimal('0.00022')
@@ -63,7 +63,7 @@ def store_audio(entry, body, mime):
 
 def audio_access_url(entry, config):
     if not config.public_base_url:
-        raise ProgramError('YouTube 转写需要管理员设置本工作台的公网 HTTPS 地址，以提供限时音频给百炼。')
+        raise ProgramConfigurationRequired('YouTube 转写需要管理员设置本工作台的公网 HTTPS 地址，以提供限时音频给百炼。')
     token = signing.dumps({'entry': entry.pk, 'file': entry.audio_file.name}, salt='program-audio-v1')
     return config.public_base_url.rstrip('/') + reverse('intelligence:program_audio', args=[entry.pk, token])
 
@@ -75,7 +75,7 @@ def month_start():
 def submit_asr(entry, config):
     # Validate credentials and transport before reserving money or marking an uncertain submission.
     if not config.allow_asr or not decrypt_json(config.encrypted_credentials).get('api_key'):
-        raise ProgramError('请先在订阅设置中配置并开启百炼转写。')
+        raise ProgramConfigurationRequired('请先在订阅设置中配置并开启百炼转写。')
     if not 0 < entry.duration_seconds <= config.max_audio_minutes * 60:
         raise ProgramError('音频时长未知或超过单集上限，暂不提交转写。')
     audio_url = audio_access_url(entry, config) if entry.audio_file else entry.audio_url
@@ -169,7 +169,16 @@ def summarize_next_chunk(entry, config):
     policy = _provider_policy(provider)
     revision = entry.current_revision
     max_chars = min(10000, policy['max_input_characters'] - len(PROMPT) - 500)
-    chunks = make_chunks(revision.segments, max_chars)
+    batches = revision.summary.get('batches')
+    if batches:
+        chunks = [[{'id': i, 'text': revision.segments[i - 1]['text']} for i in batch] for batch in batches]
+    else:
+        chunks = make_chunks(revision.segments, max_chars)
+        batches = [[row['id'] for row in rows] for rows in chunks]
+        # Fix paragraph boundaries before the first paid request. Provider or input-limit
+        # changes during resume must never reuse a chunk number for different source text.
+        revision.summary = {'schema': 'program-summary-v1', 'batches': batches}
+        revision.save(update_fields=['summary', 'updated_at'])
     for number, rows in enumerate(chunks, 1):
         chunk, _ = ProgramSummaryChunk.objects.get_or_create(revision=revision, number=number)
         if chunk.status == 'success':
@@ -190,7 +199,7 @@ def summarize_next_chunk(entry, config):
             chunk.provider, chunk.model_name = provider, provider.model_name
             chunk.reserved_usd += cost
             chunk.save()
-        ProgramEntry.objects.filter(pk=entry.pk).update(state='summarizing')
+        ProgramEntry.objects.filter(pk=entry.pk).update(state='summarizing', last_error='')
         payload = {'model': provider.model_name, 'messages': [{'role': 'system', 'content': PROMPT}, {'role': 'user', 'content': user_prompt}],
                    'max_tokens': policy['max_output_tokens'], 'response_format': {'type': 'json_object'}}
         if policy['disable_thinking']:
@@ -213,7 +222,7 @@ def summarize_next_chunk(entry, config):
     if len(successful) == len(chunks):
         points = [p for chunk in successful for p in chunk.result['points']]
         revision.summary = {'schema': 'program-summary-v1', 'points': points, 'source_hash': revision.content_hash,
-                            'parts': len(chunks), 'model': provider.model_name}
+                            'parts': len(chunks), 'batches': batches, 'models': sorted({c.model_name for c in successful})}
         revision.summary_complete = True
         revision.save(update_fields=['summary', 'summary_complete', 'updated_at'])
         ProgramEntry.objects.filter(pk=entry.pk).update(state='ready', last_error='')
@@ -230,9 +239,9 @@ def process_entry(entry_id):
         config = ProgramSettings.objects.filter(family=entry.subscription.family).first()
         if entry.state == 'asr_submit':
             raise ProgramError('上次转写提交中断，请核对百炼任务 ID 后继续，系统不会重复扣费。')
-        if entry.state == 'asr_wait':
+        if entry.task_id and not entry.current_revision_id:
             if not config:
-                raise ProgramError('请先配置转写服务。')
+                raise ProgramConfigurationRequired('请先配置转写服务。')
             poll_asr(entry, config)
             return True
         if entry.current_revision_id:
@@ -257,16 +266,18 @@ def process_entry(entry_id):
                 save_revision(entry, captions, origin='youtube_caption', source_url=entry.url)
                 return True
             if not config or not config.allow_asr or not config.public_base_url:
-                raise ProgramError('本期未取得字幕；配置百炼 Key 和工作台公网地址后可转写音频。')
+                raise ProgramConfigurationRequired('本期未取得字幕；配置百炼 Key 和工作台公网地址后可转写音频。')
             body, mime = youtube_audio(entry)
             store_audio(entry, body, mime)
         if not config:
-            raise ProgramError('未取得完整文字稿，请先配置转写服务。')
+            raise ProgramConfigurationRequired('未取得完整文字稿，请先配置转写服务。')
         submit_asr(entry, config)
         return True
     except Exception as exc:
         entry.refresh_from_db()
         state = 'uncertain' if entry.state == 'asr_submit' else 'failed'
+        if isinstance(exc, ProgramConfigurationRequired):
+            state = 'waiting_config'
         message = str(exc)[:300] if isinstance(exc, ProgramError) else '处理失败，已保留原文和任务记录，请检查服务配置或网络后重试。'
         ProgramEntry.objects.filter(pk=entry_id).update(state=state, last_error=message)
         return False

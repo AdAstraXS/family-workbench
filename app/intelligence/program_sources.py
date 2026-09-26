@@ -35,6 +35,10 @@ class ProgramError(ValueError):
     """A safe, user-visible message; never include remote bodies, credentials or signed URLs."""
 
 
+class ProgramConfigurationRequired(ProgramError):
+    pass
+
+
 def plain_segments(html):
     soup = BeautifulSoup(html, 'html.parser')
     for node in soup.select('script,style,nav,footer,form,button,iframe'):

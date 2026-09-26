@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from .http_client import fetch_public_url, validate_public_http_url
-from .program_sources import CATALOGUE, ProgramError
+from .program_sources import CATALOGUE, ProgramError, ProgramConfigurationRequired
 from knowledge.crypto import decrypt_json
 
 MAX_AUDIO_BYTES = 60 * 1024 * 1024
@@ -40,7 +40,7 @@ def private_json_request(url, *, key, payload=None, headers=None):
 def asr_request(config, *, task_id='', audio_url=''):
     key = decrypt_json(config.encrypted_credentials).get('api_key', '')
     if not config.allow_asr or not key:
-        raise ProgramError('转写尚未开启，管理员需配置百炼 Key 并授权发送公开节目音频。')
+        raise ProgramConfigurationRequired('转写尚未开启，管理员需配置百炼 Key 并授权发送公开节目音频。')
     workspace = config.workspace_id.strip()
     if workspace and not re.fullmatch(r'[a-zA-Z0-9-]{1,80}', workspace):
         raise ProgramError('百炼 Workspace ID 格式不正确。')

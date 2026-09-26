@@ -37,7 +37,7 @@ class ProgramSubscription(TimestampedModel):
 class ProgramEntry(TimestampedModel):
     STATES = [('new', '待获取正文'), ('fetching', '正在获取'), ('asr_submit', '转写提交中'),
               ('asr_wait', '转写中'), ('text_ready', '文字稿可读'), ('summarizing', '正在整理'),
-              ('ready', '整理完成'), ('failed', '需要处理'), ('uncertain', '提交结果待核对')]
+              ('ready', '整理完成'), ('waiting_config', '等待服务配置'), ('failed', '需要处理'), ('uncertain', '提交结果待核对')]
     subscription = models.ForeignKey(ProgramSubscription, related_name='entries', on_delete=models.PROTECT)
     external_id = models.CharField(max_length=200)
     title = models.CharField(max_length=500)
@@ -74,6 +74,10 @@ class ProgramRevision(TimestampedModel):
     archived_document = models.ForeignKey('knowledge.KnowledgeDocument', null=True, blank=True, on_delete=models.PROTECT)
     class Meta:
         constraints = [models.UniqueConstraint(fields=['entry', 'content_hash'], name='unique_program_revision')]
+
+    @property
+    def origin_label(self):
+        return {'publisher': '出版方原文', 'youtube_caption': '公开视频字幕', 'fun-asr': '百炼音频转写', 'manual': '手动导入文字稿'}.get(self.origin, self.origin)
 
 
 class ProgramSummaryChunk(TimestampedModel):
