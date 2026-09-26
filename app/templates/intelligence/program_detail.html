@@ -1,0 +1,35 @@
+{% extends 'base.html' %}{% load static %}
+{% block title %}{{ entry.title }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}"><link rel="stylesheet" href="{% static 'css/intelligence-programs.css' %}">{% endblock %}
+{% block content %}
+<a href="{% url 'intelligence:program_list' %}">← 精选订阅</a><header class="intel-page-head"><div><span class="intel-eyebrow">{{ source_name }}</span><h1>{{ entry.title }}</h1><p>{{ entry.published_at|date:'Y-m-d' }} · {{ entry.get_state_display }}</p><a href="{{ entry.url }}" target="_blank" rel="noopener noreferrer">打开原始来源 ↗</a></div></header>
+{% if entry.last_error %}<div class="intel-section program-error">{{ entry.last_error }}</div>{% endif %}
+{% if revision %}
+<div class="program-reading"><main><section class="intel-section"><div class="intel-section-head"><h2>AI 阅读要点</h2>{% if revision.summary_complete %}<span>未经人工复核</span>{% endif %}</div>
+{% if groups %}{% for topic,points in groups.items %}<h3>{{ topic }}</h3>{% for point in points %}<p><span class="program-kind">{{ point.kind }}</span> {{ point.text }} <small>{% for ref in point.refs %}<a href="#segment-{{ ref }}">原文 {{ ref }}</a> {% endfor %}</small></p>{% endfor %}{% endfor %}{% else %}<p>原文已可阅读。AI 整理将在服务配置完成并处理后显示。</p>{% endif %}</section>
+<section class="intel-section">
+  <h2>完整原文 / 文字稿</h2>
+  <p class="intel-muted">{{ revision.origin_label }} · 保存于 {{ revision.created_at|date:'Y-m-d H:i' }}。{% if revision.origin == 'fun-asr' or revision.origin == 'youtube_caption' %}语音识别可能有误，请按时间戳核对关键数字。{% endif %}</p>
+  {% for segment in segments %}
+    <p class="program-segment" id="segment-{{ segment.number }}">
+      <span class="program-segment-label">{% if segment.url %}<a href="{{ segment.url }}" target="_blank" rel="noopener noreferrer">{{ segment.timestamp }}</a>{% elif segment.timestamp %}{{ segment.timestamp }}{% else %}§ {{ segment.number }}{% endif %}</span>
+      <span>{{ segment.text }}</span>
+    </p>
+  {% endfor %}
+</section></main>
+<aside class="intel-section program-aside">
+  {% if can_write %}
+    <form method="post" action="{% url 'intelligence:program_action' entry.pk %}">
+      {% csrf_token %}<input type="hidden" name="action" value="archive"><input type="hidden" name="revision_id" value="{{ revision.pk }}">
+      <button class="button" type="submit">{% if revision.archived_document_id %}保存并打开知识资料{% else %}保存为知识{% endif %}</button>
+    </form>
+    <p class="intel-muted">保存原文及本次整理结果到知识待整理。</p>
+  {% endif %}
+  <details><summary>原文版本信息</summary>
+    {% for version in versions %}<p><a href="?version={{ version.pk }}">{{ version.created_at|date:'m-d H:i' }} · {{ version.origin_label }}</a>{% if version.pk == revision.pk %} · 当前阅读{% endif %}</p>{% endfor %}
+    <small class="program-hash">校验值 {{ revision.content_hash }}</small>
+  </details>
+</aside></div>
+{% else %}<section class="intel-empty"><h2>正在等待完整内容</h2><p>先获取出版方文字稿或字幕；没有文字稿时，按已配置预算进行音频转写。</p></section>{% endif %}
+{% if can_admin %}<details class="intel-section"><summary>处理与补充原文</summary><p>保留成功的转写和摘要片段。只有失败的 AI 片段会在确认继续后重试，可能产生新的摘要费用。</p><form method="post" action="{% url 'intelligence:program_action' entry.pk %}" class="program-filters">{% csrf_token %}<input type="hidden" name="action" value="retry">{% if entry.state == 'uncertain' %}<label>百炼控制台中的原任务 ID<input name="task_id" autocomplete="off"></label>{% endif %}<button class="button" type="submit">获取 / 继续处理</button></form><hr><form method="post" action="{% url 'intelligence:program_action' entry.pk %}">{% csrf_token %}<input type="hidden" name="action" value="import"><label for="transcript">导入已有完整文字稿（每行一段，保存新版本）</label><textarea id="transcript" name="transcript" rows="8" maxlength="600000" required></textarea><button class="button" type="submit">保存文字稿</button></form></details>{% endif %}
+{% endblock %}

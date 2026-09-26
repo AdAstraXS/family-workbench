@@ -8,7 +8,7 @@
 | 项目 | 许可 / 定位 | 本次实际采用 |
 | --- | --- | --- |
 | [Fintech-Scraper](https://github.com/vishwasbabu/Fintech-Scraper) | Apache-2.0，按公司配置发现附件 | 参考公司配置、链接发现、历史去重思路；没有复制代码，没有引入 Playwright 服务 |
-| [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/bs4/doc/) | MIT，HTML 解析库 | 新增 `beautifulsoup4==4.14.3`，直接用于链接、正文和表格单元格提取 |
+| [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/bs4/doc/) | MIT，HTML 解析库 | 使用 `beautifulsoup4==4.15.0`，与同时上线的节目订阅模块共用依赖，直接用于链接、正文和表格单元格提取 |
 | [pypdf](https://pypdf.readthedocs.io/en/stable/user/extract-text.html) | BSD-3-Clause，PDF 文本与页处理 | 复用项目已有 `pypdf==6.19.0`；正文保留物理页码、字符位置及原始 PDF |
 | [EarningsCall Python](https://github.com/EarningsCall/earningscall-python) | MIT SDK，连接第三方 API 服务 | 未接入；SDK 开源不等于所需数据服务免费或覆盖完整 |
 
