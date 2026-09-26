@@ -10,7 +10,7 @@ from django.utils import timezone
 from datetime import timedelta
 
 from .adapters import _safe_xml_root, _first_text, _children, _entry_link, _parse_datetime, parse_youtube_atom
-from .http_client import fetch_public_url
+from .program_network import fetch_source_url as fetch_public_url
 from .program_models import ProgramEntry, ProgramSubscription
 
 CATALOGUE = {

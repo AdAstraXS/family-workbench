@@ -16,7 +16,7 @@ from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST, require_safe
 
 from knowledge.crypto import encrypt_json, _fernet_key
-from .ai_enrichment import text_ai_providers
+from .ai_enrichment import text_ai_providers, provider_is_configured
 from .program_models import ProgramEntry, ProgramRevision, ProgramSettings, ProgramSubscription
 from .program_sources import CATALOGUE, ProgramError
 from .program_processing import save_revision, month_start
@@ -50,7 +50,8 @@ class SettingsForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['summary_provider'].queryset = self.fields['summary_provider'].queryset.filter(pk__in=[p.pk for p in text_ai_providers()])
+        self.fields['summary_provider'].queryset = self.fields['summary_provider'].queryset.filter(
+            pk__in=[p.pk for p in text_ai_providers() if provider_is_configured(p)])
 
     def clean_workspace_id(self):
         value = self.cleaned_data['workspace_id'].strip()
@@ -131,7 +132,7 @@ def program_settings(request):
                     obj.encrypted_credentials = encrypt_json({'api_key': form.cleaned_data['api_key'].strip()})
                 obj.configured_by = member
                 obj.save()
-                messages.success(request, '配置已保存。Key 已加密，不会回显。')
+                messages.success(request, '服务配置已保存。' + ('Key 已加密，不会回显。' if obj.encrypted_credentials else '百炼 Key 尚未配置。'))
                 return redirect('intelligence:program_settings')
             except Exception:
                 form.add_error(None, '配置未保存，请检查服务器加密密钥配置。')
