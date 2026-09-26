@@ -14,14 +14,29 @@
       {% if can_write %}
         <form class="research-inline-form" method="post" action="{% url 'investment_research:sync_documents' dossier.pk %}">
           {% csrf_token %}
-          <button class="button" type="submit">立即同步</button>
+          <button class="button" type="submit">检查 SEC 目录</button>
         </form>
+        {% if ir_company %}<form class="research-inline-form" method="post" action="{% url 'investment_research:sync_ir' dossier.pk %}">
+          {% csrf_token %}<button class="button" type="submit">检查官方 IR 材料</button>
+        </form>{% endif %}
       {% endif %}
     </div>
   </div>
 
+  {% if ir_company %}
+    <section class="research-document-body" aria-label="官方 IR 覆盖">
+      <h2>官方 IR · 最近发布的季度</h2>
+      <p>财报新闻稿、演示材料、财务报表和文字稿分别保存。公司未公开的材料不要求补齐；目录覆盖不代表正文已经保存。</p>
+      {% if ir_coverage %}<ul>{% for row in ir_coverage %}
+        <li><a href="?source=official_ir&amp;period={{ row.year }}-{{ row.quarter }}"><strong>FY{{ row.year }} Q{{ row.quarter }}</strong></a> · {{ row.types|join:"、" }} · {{ row.saved }}/{{ row.count }} 份已保存正文</li>
+      {% endfor %}</ul>{% else %}<p>尚未成功检查官方 IR。可点击上方按钮获取公开材料目录。</p>{% endif %}
+      {% for warning in ir_warnings %}<p>{{ warning }}</p>{% endfor %}
+      <p><a href="{{ ir_company.homepage }}" target="_blank" rel="noopener noreferrer">公司官方入口</a></p>
+    </section>
+  {% endif %}
+  <p><a href="?">全部材料</a> · <a href="?source=official_ir">公司 IR</a> · <a href="?source=sec">SEC 文件</a></p>
   {% if source_states %}
-    <div class="research-source-states" aria-label="来源同步状态">
+    <details class="research-source-states"><summary>来源检查状态</summary>
       {% for state in source_states %}
         <article class="research-source-state">
           <strong>{{ state.get_source_display }}</strong>
@@ -37,7 +52,7 @@
           {% endif %}
         </article>
       {% endfor %}
-    </div>
+    </details>
   {% endif %}
 
   {% if page.object_list %}
@@ -49,6 +64,7 @@
             <span>{{ document.get_source_display }}</span>
             <time>{% if document.published_at %}{{ document.published_at|date:"Y-m-d" }}{% else %}日期待来源补充{% endif %}</time>
             {% if document.period_end %}<span>报告期至 {{ document.period_end|date:"Y-m-d" }}</span>{% endif %}
+            {% if document.metadata.quarter %}<span>FY{{ document.metadata.fiscal_year }} Q{{ document.metadata.quarter }}</span>{% endif %}
           </div>
           <h2><a href="{% url 'investment_research:document_detail' dossier.pk document.pk %}">{{ document.title }}</a></h2>
           <div class="research-document-actions">
@@ -60,15 +76,15 @@
     </div>
     {% if page.has_other_pages %}
       <nav class="research-pager" aria-label="官方资料分页">
-        {% if page.has_previous %}<a href="?page={{ page.previous_page_number }}">上一页</a>{% endif %}
+        {% if page.has_previous %}<a href="?source={{ selected_source|urlencode }}&amp;period={{ selected_period|urlencode }}&amp;page={{ page.previous_page_number }}">上一页</a>{% endif %}
         <span>第 {{ page.number }} / {{ page.paginator.num_pages }} 页</span>
-        {% if page.has_next %}<a href="?page={{ page.next_page_number }}">下一页</a>{% endif %}
+        {% if page.has_next %}<a href="?source={{ selected_source|urlencode }}&amp;period={{ selected_period|urlencode }}&amp;page={{ page.next_page_number }}">下一页</a>{% endif %}
       </nav>
     {% endif %}
   {% else %}
     <div class="research-document-empty">
       <strong>还没有官方资料</strong>
-      <p>系统会在定时同步后显示 SEC 财报和微软投资者关系资料，不需要逐项手工填写。</p>
+      <p>支持的公司可通过“检查官方 IR 材料”获取目录，再选择需要阅读的原件保存正文。</p>
     </div>
   {% endif %}
 </section>

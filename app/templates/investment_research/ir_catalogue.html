@@ -1,0 +1,36 @@
+{% extends "investment_research/base.html" %}
+{% block title %}公司官方 IR{% endblock %}
+{% block research_content %}
+<section class="research-page">
+  <div class="research-header"><div><h1>公司官方 IR</h1>
+    <p>13 家公司的公开材料入口。先检查目录，再进入研究档案阅读、保存正文和引用；无需已有持仓。</p>
+    <p class="research-private-note">这里仅共享公司公开材料。你的判断、关注指标和 AI 草稿仍只有自己可见。</p>
+  </div><a class="button" href="{% url 'investment_research:index' %}">我的公司研究</a></div>
+  <div class="research-ir-grid">
+    {% for card in cards %}<article class="research-document-card">
+      <h2>{{ card.company.name }}</h2>
+      <p class="research-private-note">{{ card.company.symbol }} · {{ card.company.market }}</p>
+      {% if card.state.last_success_at %}
+        <p>覆盖 {{ card.period_count }} 个季度 · {{ card.count }} 份材料 · {{ card.saved }} 份已有正文</p>
+      {% else %}<p>尚未检查官方目录</p>{% endif %}
+      {% for warning in card.warnings %}<p class="research-source-error">{{ warning }}</p>{% endfor %}
+      <div class="research-actions">
+        {% if can_write %}
+        <form method="post" action="{% url 'investment_research:explore' %}">{% csrf_token %}
+          <input type="hidden" name="company" value="{{ card.company.key }}"><button type="submit" class="button">开始了解</button>
+        </form>
+        {% endif %}
+        <a href="{{ card.company.homepage }}" target="_blank" rel="noopener noreferrer">官网入口</a>
+      </div>
+      <details><summary>材料获取与状态</summary>
+        {% if card.state.last_checked_at %}<p>最近检查：{{ card.state.last_checked_at|date:"Y-m-d H:i" }}</p>{% endif %}
+        {% if card.state.last_error %}<p class="research-source-error">{{ card.state.last_error }}</p>{% endif %}
+        {% if can_write %}<form method="post" action="{% url 'investment_research:sync_ir_company' card.company.key %}">{% csrf_token %}
+          <button type="submit" class="button">检查 {{ card.company.name }} 材料</button>
+        </form>{% endif %}
+      </details>
+    </article>{% endfor %}
+  </div>
+</section>
+<style>.research-ir-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}.research-ir-grid h2{margin:0 0 8px}.research-ir-grid details{margin-top:16px}.research-ir-grid .research-actions{justify-content:flex-start;align-items:center}</style>
+{% endblock %}

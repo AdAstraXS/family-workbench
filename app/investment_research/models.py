@@ -7,9 +7,11 @@ from portfolio.models import Security
 # 官方资料来源（M2A-1 固定契约，供后续 connector 复用）。
 SOURCE_SEC = "sec"
 SOURCE_MICROSOFT_IR = "microsoft_ir"
+SOURCE_OFFICIAL_IR = "official_ir"
 SOURCE_CHOICES = [
     (SOURCE_SEC, "SEC EDGAR"),
     (SOURCE_MICROSOFT_IR, "Microsoft IR"),
+    (SOURCE_OFFICIAL_IR, "公司官方 IR"),
 ]
 
 # 官方资料类型。
@@ -29,6 +31,11 @@ DOCUMENT_TYPE_CHOICES = [
     (DOC_TYPE_EARNINGS_RELEASE, "财报新闻稿"),
     (DOC_TYPE_EARNINGS_CALL, "财报电话会/网络直播"),
     (DOC_TYPE_INVESTOR_UPDATE, "投资者公告"),
+    ("financial_statements", "财务报表"),
+    ("presentation", "业绩演示材料"),
+    ("prepared_remarks", "管理层演讲稿"),
+    ("transcript", "电话会文字稿"),
+    ("shareholder_letter", "股东信"),
     (DOC_TYPE_OTHER, "其他"),
 ]
 
@@ -179,7 +186,9 @@ class OfficialResearchContentVersion(models.Model):
     version_number = models.PositiveIntegerField("版本号")
     source_url = models.URLField("获取时来源链接", max_length=1000)
     raw_sha256 = models.CharField("原始响应 SHA-256", max_length=64)
-    raw_gzip = models.BinaryField("原始 HTML（gzip）")
+    raw_gzip = models.BinaryField("原始文件（gzip）")
+    media_type = models.CharField("原件格式", max_length=120, default="text/html")
+    sections = models.JSONField("页码与正文位置", default=list, blank=True)
     content_text = models.TextField("规范正文")
     content_sha256 = models.CharField("规范正文 SHA-256", max_length=64)
     extractor_version = models.CharField("提取器版本", max_length=32)

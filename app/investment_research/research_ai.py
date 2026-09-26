@@ -233,8 +233,9 @@ def generate_research_draft(*, actor, dossier_id, version_id, provider_id, conse
     dossier = ResearchDossier.objects.filter(pk=dossier_id, owner=actor, family=actor.family).select_related("current_revision", "security").first()
     if dossier is None:
         raise DossierNotFound("研究档案不存在或不属于你。")
+    from .official_ir import documents_for_security
     version = OfficialResearchContentVersion.objects.filter(
-        pk=version_id, document__security=dossier.security, document__source="sec",
+        pk=version_id, document__in=documents_for_security(dossier.security),
     ).select_related("document").first()
     if version is None:
         raise DossierNotFound("正文版本不存在或不属于当前标的。")
@@ -266,6 +267,7 @@ def generate_research_draft(*, actor, dossier_id, version_id, provider_id, conse
     )
     thesis = current.thesis if current else "尚无本人正式判断，当前处于探索阶段。"
     lines = [f"标的：{dossier.security.symbol}；资料：{version.document.title}；正文版本：{version.pk}。",
+             f"材料类型：{version.document.get_document_type_display()}。演讲稿不等于完整问答；不要推断本材料未包含的内容。",
              f"本次仅提供正文第 {segment_index + 1}/{segment_count} 区段，字符位置 [{segment['start']},{segment['end']})，"
              f"共 {segment['end'] - segment['start']} / {len(version.content_text)} 字；其他区段本次未提供。",
              f"本人当前判断：{thesis}"]

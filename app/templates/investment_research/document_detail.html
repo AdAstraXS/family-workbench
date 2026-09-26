@@ -26,7 +26,10 @@
     </form>
   {% endif %}
   {% if current_content_version %}
+    <p><a class="button" href="{% url 'investment_research:original_document' dossier.pk document.pk chapter_version.pk %}">下载本版原始文件</a></p>
+    {% if not chapter_version.content_text %}<p>本版原件已保存，尚无可引用正文。请下载原件阅读。</p>{% endif %}
     <p class="research-private-note">正文版本 {{ current_content_version.version_number }} · 获取于 {{ current_content_version.fetched_at|date:"Y-m-d H:i" }}</p>
+    {% if chapter_version.content_text %}
     <form method="post" action="{% url 'investment_research:create_citation' dossier.pk document.pk %}" class="research-form">
       {% csrf_token %}
       <input type="hidden" name="version" value="{{ selected_version.pk|default:current_content_version.pk }}">
@@ -34,8 +37,18 @@
       <textarea id="research-quote" name="quote" rows="3" maxlength="500" required></textarea>
       <button class="button" type="submit">定位原文</button>
     </form>
+    {% endif %}
   {% endif %}
 
+  {% if can_write and can_fetch_ir %}
+    <form method="post" action="{% url 'investment_research:fetch_ir' dossier.pk document.pk %}">{% csrf_token %}
+      <button class="button" type="submit">{% if current_content_version %}重新检查 IR 正文{% else %}保存 IR 正文与原件{% endif %}</button>
+    </form>
+    {% if document.metadata.content_error %}<p>{{ document.metadata.content_error }}</p>{% endif %}
+  {% endif %}
+  {% if chapter_version.sections %}
+    <p class="research-private-note">正文中的页码对应本版原件。表格与图表的视觉排版请以下载原件为准；系统不据此自动计算财务指标。</p>
+  {% endif %}
   {% if document.document_type == "10-k" and chapter_version %}
     <p><a class="button" href="{% url 'investment_research:document_metrics' dossier.pk document.pk %}?version={{ chapter_version.pk }}">查看跨期指标核对</a></p>
     <section class="research-document-body" aria-labelledby="research-chapters-heading">

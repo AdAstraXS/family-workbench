@@ -1,0 +1,12 @@
+{
+  "tsla": {
+    "verified_at": "2026-09-26",
+    "source": "https://ir.tesla.com/",
+    "materials": [
+      {"year": 2026, "quarter": 2, "url": "https://assets-ir.tesla.com/tesla-contents/IR/TSLA-Q2-2026-Update.pdf", "type": "presentation", "title": "Shareholder Deck"},
+      {"year": 2026, "quarter": 1, "url": "https://assets-ir.tesla.com/tesla-contents/IR/TSLA-Q1-2026-Update.pdf", "type": "presentation", "title": "Shareholder Deck"},
+      {"year": 2025, "quarter": 4, "url": "https://assets-ir.tesla.com/tesla-contents/IR/TSLA-Q4-2025-Update.pdf", "type": "presentation", "title": "Shareholder Deck"},
+      {"year": 2025, "quarter": 3, "url": "https://assets-ir.tesla.com/tesla-contents/IR/TSLA-Q3-2025-Update.pdf", "type": "presentation", "title": "Shareholder Deck"}
+    ]
+  }
+}

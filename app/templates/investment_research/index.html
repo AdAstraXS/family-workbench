@@ -11,6 +11,7 @@
     </div>
     {% if can_write %}
       <div class="research-actions">
+        <a class="button" href="{% url 'investment_research:ir_catalogue' %}">公司官方 IR</a>
         <a class="button" href="{% url 'investment_research:explore' %}">先了解一家公司</a>
         <a class="button" href="{% url 'investment_research:create' %}">已有判断，直接建档</a>
       </div>

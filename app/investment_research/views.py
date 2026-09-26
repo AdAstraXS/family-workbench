@@ -15,7 +15,7 @@ from ai_analysis.models import AiAnalysisRequest
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import F
+from django.db.models import F, Q, OuterRef, Subquery
 from django.http import Http404, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -24,6 +24,8 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
 
 from .citations import locate_quote, resolve_quote
+from .official_ir import company_security, documents_for_security, ir_coverage
+from .providers.ir_registry import BY_KEY, company_for_security
 from .forms import (
     CreateDossierForm, EditThesisForm, ExploreDossierForm, FilingReviewForm, FirstThesisForm,
 )
@@ -186,7 +188,9 @@ def explore(request):
     form = ExploreDossierForm(request.POST if request.method == "POST" else None)
     if request.method == "POST" and form.is_valid():
         try:
-            dossier = create_exploration(actor=member, security=form.cleaned_data["security"])
+            security = (company_security(BY_KEY[form.cleaned_data['company']])
+                        if form.cleaned_data.get('company') else form.cleaned_data['security'])
+            dossier = create_exploration(actor=member, security=security)
         except DuplicateDossier as exc:
             dossier = exc.dossier
             messages.info(request, "已有这家公司的研究档案，已为你打开。")
@@ -233,7 +237,7 @@ def detail(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
-    documents = OfficialResearchDocument.objects.filter(security=dossier.security)
+    documents = documents_for_security(dossier.security)
     source_states = list(
         ResearchSourceState.objects.filter(security=dossier.security).order_by("source")
     )
@@ -242,7 +246,9 @@ def detail(request, pk):
         (state.last_success_at for state in successful_states), default=None
     )
     available_versions = list(
-        OfficialResearchContentVersion.objects.filter(document__security=dossier.security, document__source="sec")
+        OfficialResearchContentVersion.objects.filter(document__in=documents)
+        .filter(pk=Subquery(OfficialResearchContentVersion.objects.filter(document_id=OuterRef('document_id')).order_by('-version_number').values('pk')[:1]))
+        .exclude(content_text='')
         .select_related("document").order_by("-fetched_at", "-pk")[:20]
     )
     completed_segments = set()
@@ -294,6 +300,7 @@ def detail(request, pk):
             "revision": dossier.current_revision,
             "can_write": is_writer(member),
             "document_count": documents.count(),
+            "ir_company": company_for_security(dossier.security),
             "latest_source_success_at": latest_success_at,
             "source_error_count": sum(bool(state.last_error) for state in source_states),
             "available_versions": available_versions,
@@ -325,6 +332,7 @@ def sync_documents(request, pk):
     try:
         _, totals = sync_research_sources(
             symbols=[dossier.security.symbol],
+            sources=['sec'],
         )
     except ValueError as exc:
         messages.error(request, f"官方资料同步未执行：{exc}")
@@ -609,13 +617,24 @@ def documents(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
-    queryset = OfficialResearchDocument.objects.filter(
-        security=dossier.security
-    ).order_by(F("published_at").desc(nulls_last=True), "-pk")
+    queryset = documents_for_security(dossier.security).order_by(F("published_at").desc(nulls_last=True), "-pk")
+    selected_source = request.GET.get('source', '')
+    if selected_source in ('sec', 'official_ir'):
+        queryset = queryset.filter(source__in=['official_ir', 'microsoft_ir'] if selected_source == 'official_ir' else ['sec'])
+    selected_period = request.GET.get('period', '')
+    if len(selected_period) == 6 and selected_period[:4].isdigit() and selected_period[4] == '-' and selected_period[5] in '1234':
+        queryset = queryset.filter(metadata__fiscal_year=int(selected_period[:4]), metadata__quarter=int(selected_period[5]))
+    else:
+        selected_period = ''
+    if selected_source == 'official_ir' or selected_period:
+        queryset = queryset.order_by(F('metadata__fiscal_year').desc(nulls_last=True),
+                                     F('metadata__quarter').desc(nulls_last=True), '-pk')
+    company, coverage, warnings = ir_coverage(dossier.security)
     page = Paginator(queryset, PAGE_SIZE).get_page(request.GET.get("page"))
-    source_states = ResearchSourceState.objects.filter(
-        security=dossier.security
-    ).order_by("source")
+    source_query = Q(security=dossier.security)
+    if company:
+        source_query |= Q(source='official_ir', external_company_id=company.key)
+    source_states = ResearchSourceState.objects.filter(source_query).order_by('source')
     return render(
         request,
         "investment_research/documents.html",
@@ -623,6 +642,9 @@ def documents(request, pk):
             "dossier": dossier,
             "page": page,
             "source_states": source_states,
+            "ir_company": company, "ir_coverage": coverage, "ir_warnings": warnings,
+            "selected_source": selected_source,
+            "selected_period": selected_period,
             "can_write": is_writer(member),
         },
     )
@@ -635,11 +657,7 @@ def document_detail(request, pk, document_pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
-    document = get_object_or_404(
-        OfficialResearchDocument,
-        pk=document_pk,
-        security=dossier.security,
-    )
+    document = get_object_or_404(documents_for_security(dossier.security), pk=document_pk)
     selected_version = None
     highlighted = None
     if "version" in request.GET:
@@ -656,7 +674,7 @@ def document_detail(request, pk, document_pk):
             )
     elif any(key in request.GET for key in ("start", "end", "hash")):
         raise Http404("引用缺少正文版本。")
-    current_version = document.content_versions.first() if document.source == "sec" else None
+    current_version = document.content_versions.first()
     chapter_version = selected_version or current_version
     chapter_coverage = []
     item8_statements = []
@@ -681,6 +699,7 @@ def document_detail(request, pk, document_pk):
             "dossier": dossier, "document": document,
             "can_write": is_writer(member),
             "can_fetch_sec": document.source == "sec" and document.document_type in {"10-k", "10-q", "8-k"},
+            "can_fetch_ir": document.source in ('official_ir', 'microsoft_ir') and bool(company_for_security(document.security)),
             "current_content_version": current_version,
             "selected_version": selected_version,
             "highlighted": highlighted,
@@ -848,7 +867,7 @@ def create_citation(request, pk, document_pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
-    document = get_object_or_404(OfficialResearchDocument, pk=document_pk, security=dossier.security)
+    document = get_object_or_404(documents_for_security(dossier.security), pk=document_pk)
     version = get_object_or_404(
         OfficialResearchContentVersion,
         pk=_positive_id_or_404(request.POST.get("version")), document=document,
@@ -859,7 +878,7 @@ def create_citation(request, pk, document_pk):
         messages.error(request, str(exc))
         return redirect("investment_research:document_detail", pk=pk, document_pk=document_pk)
     url = reverse("investment_research:document_detail", args=[pk, document_pk])
-    return redirect(f"{url}?{urlencode({'version': version.pk, 'start': start, 'end': end, 'hash': digest})}")
+    return redirect(f"{url}?{urlencode({'version': version.pk, 'start': start, 'end': end, 'hash': digest})}#research-citation")
 
 
 @_method(["POST"])

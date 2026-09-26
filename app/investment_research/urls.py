@@ -1,10 +1,15 @@
 from django.urls import path
 
-from . import views
+from . import views, ir_views
 
 app_name = "investment_research"
 
 urlpatterns = [
+    path('ir/', ir_views.catalogue, name='ir_catalogue'),
+    path('ir/<slug:company_key>/sync/', ir_views.sync_company, name='sync_ir_company'),
+    path('<int:pk>/documents/ir/sync/', ir_views.sync, name='sync_ir'),
+    path('<int:pk>/documents/<int:document_pk>/ir/fetch/', ir_views.fetch, name='fetch_ir'),
+    path('<int:pk>/documents/<int:document_pk>/original/<int:version_pk>/', ir_views.original, name='original_document'),
     path("", views.index, name="index"),
     path("new/", views.create, name="create"),
     path("explore/new/", views.explore, name="explore"),

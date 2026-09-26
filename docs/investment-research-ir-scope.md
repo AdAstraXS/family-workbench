@@ -21,8 +21,9 @@ TSMC、SpaceX、SK 海力士、博通、AMD、Intel 全部加入首批范围。
 | AMD | AMD | https://ir.amd.com/financial-information/financial-results |
 | Intel | INTC | https://www.intc.com/financial-info/financial-results |
 
-这是接入与验收范围，不代表 13 家自动采集均已实现。现有程序仍仅有 Microsoft IR
-财报新闻稿专用路径；本次更新范围及入口调查，没有部署或写入生产数据。
+十三家公司共用发现、归档和固定引用流程已实现；开源复用、真实验收和已知限制见
+[实现与验收说明](investment-research-ir-implementation.md)。特斯拉官方附件可读，
+实时目录仍返回访问拒绝，必须明确区分已核实链接快照与自动更新成功。
 
 ## 本次新增六家的入口核对
 
@@ -66,5 +67,4 @@ TSMC、SpaceX、SK 海力士、博通、AMD、Intel 全部加入首批范围。
 7. 该范围不自动增加追踪指标、不改写个人判断、不触发云端 AI；材料接入后沿用现有私密草稿与人工确认流程。
    用户已要求 SEC 验收暂缓，本批不恢复 SEC 验收，也不修改已有 SEC 定时任务。
 
-下一步：先实现共用官方 IR 获取与引用流程，用现有 Microsoft 路径和 AMD、Intel 的真实资料
-验证；随后在同一首批范围内完成其余公司，逐家记录缺口与验收结果。
+上方六家入口核对保留为实现前调查记录；当前进展以实现与验收说明为准。

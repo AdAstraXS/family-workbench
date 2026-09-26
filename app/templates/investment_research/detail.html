@@ -20,7 +20,7 @@
   </div>
 
   <section class="research-journey" aria-label="研究进度">
-    <div><strong>1 · 了解公司</strong><p>查看 SEC 资料与原文，决定值得核查的指标。</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看资料</a></div>
+    <div><strong>1 · 了解公司</strong><p>查看公司 IR、SEC 资料与原文，决定值得核查的指标。</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看资料</a></div>
     <div><strong>2 · 形成判断</strong><p>{% if revision %}已保存第 {{ revision.revision_number }} 版判断和待验证问题。{% else %}先研究，再由你写下第一版判断。{% endif %}</p>{% if not revision and can_write %}<a href="{% url 'investment_research:first_thesis' dossier.pk %}">记录第一版判断</a>{% endif %}</div>
     <div><strong>3 · 新财报复核</strong><p>{% if not revision %}保存判断后，才能比较随后发布的财报。{% elif pending_review_count %}{{ pending_review_count }} 份新财报待复核。{% elif needs_revision_count %}已复核，{{ needs_revision_count }} 份提示修订判断。{% else %}暂无待复核的新财报。{% endif %}</p>{% if revision %}<a href="{% url 'investment_research:review_plan' dossier.pk %}">{% if current_plan %}查看已确认的下期计划{% else %}制定下期复核计划{% endif %}</a> · <a href="{% url 'investment_research:filing_reviews' dossier.pk %}">查看复核清单</a>{% endif %}</div>
   </section>
@@ -37,9 +37,9 @@
     <div class="research-actions">
       <a class="button" href="{% url 'investment_research:documents' dossier.pk %}">查看官方资料</a>
       {% if can_write %}
-        <form class="research-inline-form" method="post" action="{% url 'investment_research:sync_documents' dossier.pk %}">
+        <form class="research-inline-form" method="post" action="{% if ir_company %}{% url 'investment_research:sync_ir' dossier.pk %}{% else %}{% url 'investment_research:sync_documents' dossier.pk %}{% endif %}">
           {% csrf_token %}
-          <button class="button" type="submit">立即同步</button>
+          <button class="button" type="submit">{% if ir_company %}检查官方 IR 材料{% else %}检查 SEC 目录{% endif %}</button>
         </form>
       {% endif %}
     </div>
@@ -88,7 +88,7 @@
   <section class="research-source-summary" aria-labelledby="research-ai-heading">
     <div>
       <h2 id="research-ai-heading">研究草稿</h2>
-      <p>主动选择已保存的 SEC 正文版本，让 AI 帮你整理支持、反证和待验证问题。草稿仅自己可见，不会改写正式判断。</p>
+      <p>主动选择已保存的官方资料正文，让 AI 帮你整理支持、反证和待验证问题。草稿仅自己可见，不会改写正式判断。</p>
       {% if recent_drafts %}
         <p>最近请求：{% for item in recent_drafts %}<a href="{% url 'investment_research:draft_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }}（{{ item.get_status_display }}）</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>
       {% endif %}
@@ -99,7 +99,7 @@
       <summary>生成一份带原文引用的草稿</summary>
       <form method="post" action="{% url 'investment_research:generate_draft' dossier.pk %}" class="research-form">
         {% csrf_token %}
-        <label for="research-selection">选择 SEC 正文版本与阅读区段</label>
+        <label for="research-selection">选择官方资料正文版本与阅读区段</label>
         <select id="research-selection" name="selection" required>
           {% for group in research_groups %}
             <optgroup label="{{ group.version.document.title }} · 正文第 {{ group.version.version_number }} 版 · {{ group.version.content_text|length }} 字">
@@ -121,7 +121,7 @@
       </form>
     </details>
   {% elif can_write %}
-    <p class="research-none">{% if not available_versions %}请先在官方资料中提取一份 SEC 正文。{% else %}尚未配置获准处理投研资料的云端文本模型。{% endif %}</p>
+    <p class="research-none">{% if not available_versions %}请先在官方资料中保存一份可读正文。{% else %}尚未配置获准处理投研资料的云端文本模型。{% endif %}</p>
   {% endif %}
 </section>
 {% endblock %}
