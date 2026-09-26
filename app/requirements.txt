@@ -9,3 +9,4 @@ futu-api>=9.0
 cryptography>=49.0,<50.0
 msal>=1.37,<2.0
 nh3>=0.3.6,<0.4
+pypdf==6.19.0

@@ -1,0 +1,2 @@
+{% extends "reading/base.html" %}
+{% block hub_content %}<header class="reading-heading"><h1>图书信息</h1><a href="{% url 'reading:detail' book.pk %}">返回图书</a></header><section class="reading-panel"><form method="post">{% csrf_token %}{{ form.as_p }}<p class="muted">改为仅自己后，其他成员将无法继续打开本书。原件和本人阅读位置保留。</p><button class="primary">保存</button></form></section>{% endblock %}

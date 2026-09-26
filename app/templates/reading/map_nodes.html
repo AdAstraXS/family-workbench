@@ -1,0 +1,1 @@
+<ul class="reading-map">{% for node in nodes %}<li><details open><summary>{% if node.section_id %}<a href="#{{ node.section_id }}">{{ node.title }}</a>{% else %}{{ node.title }}{% endif %}</summary>{% if node.children %}{% include "reading/map_nodes.html" with nodes=node.children %}{% endif %}</details></li>{% empty %}<li>此成果尚无导图节点。</li>{% endfor %}</ul>

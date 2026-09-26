@@ -1,0 +1,7 @@
+{% extends "reading/base.html" %}{% load static %}
+{% block title %}上传图书 · 在线书库{% endblock %}
+{% block hub_content %}
+<header class="reading-heading"><div><span class="eyebrow">收藏一本书</span><h1>上传图书</h1><p>选择文件与可见范围，原件会保存在受保护的书库中。</p></div><a href="{% url 'reading:index' %}">返回书架</a></header>
+<section class="reading-panel"><form method="post" enctype="multipart/form-data" id="reading-upload">{% csrf_token %}{{ form.as_p }}<p class="muted">单个文件最大 {{ max_mb }} MB。上传后由后台解析；原件、阅读能力和文字能力分别显示。EPUB 使用统一阅读排版，原文件保留。</p><button class="primary" type="submit">保存图书</button><div id="upload-status" role="status" aria-live="polite"></div><progress id="upload-progress" max="100" value="0" hidden></progress></form></section>
+<script src="{% static 'reading/upload.js' %}" defer></script>
+{% endblock %}
