@@ -7,7 +7,8 @@
 {% if revision %}
 <div class="program-reading"><main><section class="intel-section"><div class="intel-section-head"><h2>AI 阅读要点</h2>{% if revision.summary_complete %}<span>未经人工复核</span>{% endif %}</div>
 {% if summary_warning %}<p class="program-error">部分要点未展示：{{ summary_warning }} 管理员可在下方点击“获取 / 继续处理”。</p>{% endif %}
-{% if groups %}{% for topic,points in groups.items %}<h3>{{ topic }}</h3>{% for point in points %}<p><span class="program-kind">{{ point.kind }}</span> {{ point.text }} <small>{% for ref in point.refs %}<a href="#segment-{{ ref }}">原文 {{ ref }}</a> {% endfor %}</small></p>{% endfor %}{% endfor %}{% else %}<p>{% if entry.private_owner_id and not entry.allow_cloud_summary %}本次未授权云端 AI 整理，原文可直接阅读和保存。{% else %}原文已可阅读。AI 整理将在服务配置完成并处理后显示。{% endif %}</p>{% endif %}</section>
+{% if revision.summary.omitted_year_points %}<p class="intel-muted">有 {{ revision.summary.omitted_year_points }} 条要点的年份无法从引用段落核实，已跳过；请结合原文阅读。</p>{% endif %}
+{% if groups %}{% for topic,points in groups.items %}<h3>{{ topic }}</h3>{% for point in points %}<p><span class="program-kind">{{ point.kind }}</span> {{ point.text }} <small>{% for ref in point.refs %}<a href="#segment-{{ ref }}">原文 {{ ref }}</a> {% endfor %}</small></p>{% endfor %}{% endfor %}{% else %}<p>{% if entry.private_owner_id and not entry.allow_cloud_summary %}本次未授权云端 AI 整理，原文可直接阅读和保存。{% elif entry.state == 'failed' %}AI 整理未完成，请查看上方失败原因。原文可正常阅读。{% elif entry.state == 'waiting_config' %}AI 整理正在等待服务配置；原文可正常阅读。{% else %}原文已可阅读。若已启用 AI 摘要服务，系统会逐段整理；完成后刷新页面查看。{% endif %}</p>{% endif %}</section>
 <section class="intel-section">
   <h2>完整原文 / 文字稿</h2>
   <p class="intel-muted">{{ revision.origin_label }} · 保存于 {{ revision.created_at|date:'Y-m-d H:i' }}。{% if revision.origin == 'fun-asr' or revision.origin == 'youtube_caption' %}语音识别可能有误，请按时间戳核对关键数字。{% endif %}</p>

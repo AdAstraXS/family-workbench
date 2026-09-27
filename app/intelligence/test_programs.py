@@ -18,7 +18,7 @@ from knowledge.crypto import encrypt_json
 from knowledge.models import KnowledgeDocument
 from ai_analysis.models import AiProvider
 from .program_models import ProgramSubscription, ProgramSettings, ProgramEntry, ProgramRevision, ProgramSummaryChunk
-from .program_processing import save_revision, process_entry, submit_asr, validate_points, make_chunks, store_audio, audio_access_url
+from .program_processing import save_revision, process_entry, submit_asr, validate_points, validate_generated_points, make_chunks, store_audio, audio_access_url
 from .program_sources import ProgramError, parse_catalogue_feed, collect_subscription
 from .program_media import parse_asr_result, asr_request
 from .program_archive import archive_program
@@ -380,7 +380,8 @@ class ProgramTests(TestCase):
             self.assertEqual(payload['max_tokens'], 512)
             data = json.loads(payload['messages'][1]['content'])
             point = {'topic': 'MSFT', 'kind': '作者观点', 'text': '仅用于验证的摘要', 'refs': [data['paragraphs'][0]['id']]}
-            return {'choices': [{'message': {'content': json.dumps({'points': [point]})}, 'finish_reason': 'stop'}], 'usage': {'total_tokens': 100}}
+            invented = {'topic': '利率', 'kind': '事实', 'text': '2026年利率上升。', 'refs': point['refs']}
+            return {'choices': [{'message': {'content': json.dumps({'points': [point, invented]})}, 'finish_reason': 'stop'}], 'usage': {'total_tokens': 100}}
         with patch('intelligence.ai_enrichment._chat_url', return_value='https://example.com/v1/chat/completions'), patch('intelligence.program_processing.private_json_request', side_effect=response) as remote:
             for _ in range(12):
                 process_entry(self.entry.pk)
@@ -392,6 +393,9 @@ class ProgramTests(TestCase):
             self.assertEqual(remote.call_count, calls)
         revision.refresh_from_db()
         self.assertTrue(revision.summary_complete)
+        self.assertEqual(revision.summary['omitted_year_points'], calls)
+        self.assertEqual(len(revision.summary['points']), calls)
+        self.assertContains(self.client.get(reverse('intelligence:program_detail', args=[self.entry.pk])), '年份无法从引用段落核实')
         self.assertTrue(all(c.reserved_usd > 0 and c.model_name == 'test-model' for c in revision.chunks.all()))
         self.assertTrue(all(c.prompt_version == 'program-summary-v3' for c in revision.chunks.all()))
 
@@ -418,6 +422,14 @@ class ProgramTests(TestCase):
         self.assertEqual(chunk.status, 'pending')
         self.assertEqual(chunk.reserved_usd, Decimal('.001'))
         self.assertEqual(revision.summary['batches'], [[1]])
+
+    def test_generated_points_reject_all_unsupported_years_and_malformed_refs(self):
+        unsupported = {'topic': '利率', 'kind': '事实', 'text': '2026年利率上升。', 'refs': [1]}
+        with self.assertRaises(ProgramError):
+            validate_generated_points({'points': [unsupported]}, {1}, {1: '利率上升。'})
+        valid = {'topic': '利率', 'kind': '作者观点', 'text': '作者认为利率将上升。', 'refs': [1]}
+        with self.assertRaises(ProgramError):
+            validate_generated_points({'points': [valid, {**valid, 'refs': [99]}]}, {1}, {1: '利率上升。'})
 
     def test_paused_subscription_does_not_run(self):
         self.sub.enabled = False
