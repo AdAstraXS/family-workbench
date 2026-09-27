@@ -7,10 +7,12 @@ expected_revision_id 是必填 HiddenInput：缺失或非数字直接拒绝，
 不能默认为最新版本。
 """
 from django import forms
+from django.db.models import Q
 
 from portfolio.models import Security
 
 from .models import ResearchFilingReview
+from .providers.ir_registry import COMPANIES
 
 
 def parse_list_field(raw):
@@ -63,9 +65,20 @@ class CreateDossierForm(ResearchFormMixin, forms.Form):
 
 
 class ExploreDossierForm(forms.Form):
+    company = forms.ChoiceField(label="官方 IR 公司", required=False,
+                                choices=[('', '请选择（或选择下方已有标的）')] + [(c.key, c.name) for c in COMPANIES])
     security = forms.ModelChoiceField(
-        label="想了解的美股", queryset=Security.objects.filter(market="US", asset_type=Security.TYPE_STOCK).order_by("symbol", "pk"),
+        label="已有标的", required=False,
+        queryset=Security.objects.filter(Q(market="US") | Q(market="KR", symbol__in=['000660', '000660.KS'])
+                                         | Q(market="TW", symbol__in=['2330', '2330.TW']),
+                                         asset_type=Security.TYPE_STOCK).order_by("symbol", "pk"),
     )
+
+    def clean(self):
+        data = super().clean()
+        if bool(data.get('company')) == bool(data.get('security')):
+            raise forms.ValidationError('请选择一家公司，或一个已有标的。')
+        return data
 
 
 class FirstThesisForm(ResearchFormMixin, forms.Form):
