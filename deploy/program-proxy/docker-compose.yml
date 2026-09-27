@@ -2,6 +2,7 @@ services:
   proxy:
     image: ghcr.io/metacubex/metacubexd-server:v1.273.1
     container_name: family-workbench-proxy
+    user: '1026:100'
     restart: unless-stopped
     environment:
       CONTROL_TOKEN: '${CONTROL_TOKEN:?Set CONTROL_TOKEN in the private .env}'
@@ -22,7 +23,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: 512m
-    cpus: 0.5
+    cpu_shares: 256
     logging:
       driver: json-file
       options:

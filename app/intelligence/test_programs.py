@@ -22,6 +22,7 @@ from .program_processing import save_revision, process_entry, submit_asr, valida
 from .program_sources import ProgramError, parse_catalogue_feed, collect_subscription
 from .program_media import parse_asr_result, asr_request
 from .program_archive import archive_program
+from .http_client import SafeHttpError
 
 
 @override_settings(KNOWLEDGE_TOKEN_ENCRYPTION_KEY=Fernet.generate_key().decode())
@@ -130,6 +131,24 @@ class ProgramTests(TestCase):
         with patch('intelligence.program_processing.asr_request', return_value={'output': {'task_status': 'RUNNING'}}) as remote:
             process_entry(self.entry.pk)
             self.assertEqual(remote.call_args.kwargs, {'task_id': 'task-1'})
+
+    def test_failed_source_retries_after_five_minutes_but_success_stays_hourly(self):
+        for error, minutes, should_collect in [('network', 6, True), ('network', 2, False), ('', 6, False)]:
+            with self.subTest(error=error, minutes=minutes):
+                self.sub.last_error = error
+                self.sub.last_checked_at = timezone.now() - timedelta(minutes=minutes)
+                self.sub.save(update_fields=['last_error', 'last_checked_at'])
+                with patch('intelligence.management.commands.run_program_subscriptions.collect_subscription', return_value=0) as collect:
+                    call_command('run_program_subscriptions', family_id=self.family.pk, collect_only=True)
+                self.assertEqual(collect.called, should_collect)
+
+    def test_collection_preserves_safe_network_diagnostic_without_remote_detail(self):
+        with patch('intelligence.program_sources.fetch_public_url', side_effect=SafeHttpError('proxy_network', '信源代理连接失败。')):
+            with self.assertRaisesMessage(ProgramError, '信源代理连接失败。'):
+                collect_subscription(self.sub)
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.last_error, '信源代理连接失败。')
+        self.assertIsNone(self.sub.lease_until)
 
     def test_uncertain_submission_is_not_automatically_resubmitted(self):
         with patch('intelligence.program_processing.asr_request', side_effect=ProgramError('服务请求失败')) as remote:

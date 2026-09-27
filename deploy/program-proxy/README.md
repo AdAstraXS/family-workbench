@@ -6,14 +6,20 @@
 
 独立目录 `/volume1/docker/family-workbench-proxy`，目录权限 700。
 私有 `.env` 保存两个独立随机值 `CONTROL_TOKEN`、`CLASH_SECRET`，权限 600；不提交，不输出。
-订阅配置由用户在面板中填写。不要复用工作台的 `.env`，不要把订阅链接写进仓库、任务脚本或日志。
+2026-09-27 按用户明确授权，通过加密 SSH 标准输入复用电脑当前 Clash 订阅。
+仅复制节点及订阅地址，使用独立的最小代理规则；不复制电脑的 TUN、系统代理或监听配置。
+订阅缓存与配置保存在私有 `data/`，订阅每天更新。不要复用工作台的 `.env`，
+不要把订阅链接写进仓库、任务脚本或日志。
 
 ## 访问范围
 
-- 管理页面和控制 API 仅映射 NAS 127.0.0.1:18780 / 18790，通过批准的 SSH 密钥建立本机隧道访问。
+- 管理页面和控制 API 仅映射 NAS 127.0.0.1:18780 / 18790。现有 SSH 禁止端口转发，
+  保持此限制；通过批准的 SSH 密钥在 NAS 本机调用官方管理 API，凭据仅在远端进程内读取。
 - 7890 代理端口不映射宿主机，只供工作台 Docker 网络使用。
 - 无 privileged、host network、NET_ADMIN、TUN、Docker socket 或工作台数据卷。
 - `cap_drop: ALL`、`no-new-privileges`、512 MB 内存上限与日志轮转。
+- 容器使用 NAS DX 的 `1026:100` 身份访问私有目录；该 NAS 不支持 CFS CPU 配额，使用 `cpu_shares: 256`。
+- 官方服务会在配置文件前插入管理字段，因此配置正文须使用普通 YAML 映射，不能用单行 JSON。
 - Docker 网络名称已在 DSM 验证为 `family-workbench_default`。
 
 ## 工作台接入
