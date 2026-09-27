@@ -27,6 +27,37 @@ from .http_client import SafeHttpError
 
 @override_settings(KNOWLEDGE_TOKEN_ENCRYPTION_KEY=Fernet.generate_key().decode())
 class ProgramTests(TestCase):
+    @patch('intelligence.program_media.youtube_metadata')
+    @patch('intelligence.program_media._yt_command')
+    def test_channel_fallback_validates_channel_and_publication_date(self, command, metadata):
+        from .program_media import youtube_recent_entries
+        from .program_sources import CATALOGUE
+        command.return_value = json.dumps({'channel_id': CATALOGUE['rhino']['channel_id'],
+            'entries': [{'id': 'OyiGHowGOSI'}]}).encode()
+        metadata.return_value = {'title': '公开节目', 'duration': 1487, 'upload_date': '20260926'}
+        result = youtube_recent_entries()
+        self.assertEqual(result[0]['published_at'].date().isoformat(), '2026-09-26')
+        self.assertEqual(result[0]['external_id'], 'OyiGHowGOSI')
+        command.return_value = b'{"channel_id":"unapproved","entries":[]}'
+        with self.assertRaises(ProgramError):
+            youtube_recent_entries()
+
+    @patch('intelligence.program_media.youtube_recent_entries')
+    @patch('intelligence.program_sources.fetch_public_url')
+    def test_channel_fallback_on_transient_error_does_not_bypass_forbidden(self, fetch, fallback):
+        self.sub.code = 'rhino'
+        self.sub.save()
+        fetch.side_effect = SafeHttpError('proxy_http_500', 'HTTP 500')
+        fallback.return_value = [{'external_id': 'OyiGHowGOSI', 'title': '公开节目',
+            'url': 'https://www.youtube.com/watch?v=OyiGHowGOSI', 'published_at': timezone.now()}]
+        self.assertEqual(collect_subscription(self.sub), 1)
+        fallback.assert_called_once()
+        fallback.reset_mock()
+        fetch.side_effect = SafeHttpError('proxy_http_403', 'HTTP 403')
+        with self.assertRaises(ProgramError):
+            collect_subscription(self.sub)
+        fallback.assert_not_called()
+
     def setUp(self):
         self.media = tempfile.TemporaryDirectory()
         self.override = override_settings(MEDIA_ROOT=self.media.name)

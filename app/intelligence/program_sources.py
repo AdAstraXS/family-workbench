@@ -145,7 +145,14 @@ def collect_subscription(subscription):
         return 0
     try:
         spec = CATALOGUE[subscription.code]
-        items = parse_catalogue_feed(subscription.code, fetch_public_url(spec['feed'], max_bytes=8000000).body)
+        try:
+            items = parse_catalogue_feed(subscription.code, fetch_public_url(spec['feed'], max_bytes=8000000).body)
+        except SafeHttpError as exc:
+            if subscription.code != 'rhino' or exc.code not in {
+                    'proxy_http_404', 'proxy_http_500', 'proxy_http_502', 'proxy_http_503', 'proxy_http_504'}:
+                raise
+            from .program_media import youtube_recent_entries
+            items = youtube_recent_entries()
         initial = subscription.last_success_at is None
         items = items[:3] if initial else items[:30]
         count = 0

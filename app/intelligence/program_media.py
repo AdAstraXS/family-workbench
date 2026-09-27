@@ -5,6 +5,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
@@ -104,11 +106,11 @@ def _yt_command(args, timeout=180):
         raise ProgramError('YouTube 获取失败，可能是网络或平台访问限制；可导入已有字幕或音频后继续。') from exc
 
 
-def youtube_metadata(entry, max_minutes):
+def youtube_metadata(entry, max_minutes, *, timeout=180):
     if entry.subscription.code != 'rhino' or not re.fullmatch(r'[A-Za-z0-9_-]{11}', entry.external_id):
         raise ProgramError('当前只支持已订阅的视野环球财经公开视频。')
     url = 'https://www.youtube.com/watch?v=' + entry.external_id
-    info = json.loads(_yt_command(['--dump-single-json', '--skip-download', url]))
+    info = json.loads(_yt_command(['--dump-single-json', '--skip-download', url], timeout=timeout))
     if info.get('channel_id') != CATALOGUE['rhino']['channel_id']:
         raise ProgramError('视频不属于已批准的频道。')
     if info.get('availability') not in (None, 'public') or info.get('is_live') or info.get('live_status') == 'is_upcoming':
@@ -117,6 +119,32 @@ def youtube_metadata(entry, max_minutes):
     if not 0 < duration <= max_minutes * 60:
         raise ProgramError('节目时长未知或超过单集上限。')
     return info
+
+
+def youtube_recent_entries():
+    """Metadata-only fallback for transient failure of the public Atom feed."""
+    spec = CATALOGUE['rhino']
+    listing = json.loads(_yt_command(['--yes-playlist', '--flat-playlist', '--playlist-end', '3',
+        '--dump-single-json', '--skip-download', spec['url'] + '/videos'], timeout=45))
+    if listing.get('channel_id') != spec['channel_id']:
+        raise ProgramError('节目列表不属于已批准的频道。')
+    result = []
+    for item in listing.get('entries', [])[:3]:
+        video_id = item.get('id', '')
+        if not re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id):
+            raise ProgramError('节目列表包含无效视频标识。')
+        entry = SimpleNamespace(subscription=SimpleNamespace(code='rhino'), external_id=video_id)
+        info = youtube_metadata(entry, 1440, timeout=45)
+        date = str(info.get('upload_date') or '')
+        if not re.fullmatch(r'\d{8}', date):
+            raise ProgramError('节目列表缺少发布日期，暂不自动入队。')
+        result.append({'external_id': video_id, 'title': str(info.get('title') or '')[:500],
+            'url': 'https://www.youtube.com/watch?v=' + video_id,
+            'duration_seconds': int(info['duration']),
+            'published_at': datetime.strptime(date, '%Y%m%d').replace(tzinfo=timezone.utc)})
+    if not result:
+        raise ProgramError('官方频道暂未返回节目列表。')
+    return result
 
 
 def youtube_captions(info):
