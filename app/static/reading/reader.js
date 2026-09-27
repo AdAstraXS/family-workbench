@@ -5,9 +5,27 @@ const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
 const toc = document.querySelector('#toc');
 let view, pdf, pdfEngine, pdfPage=1, rendering=false, ready=false, restoring=false;
 let revision=0, pending=null, savedKey='', saving=false, conflicted=null, saveTimer;
-let selected=null, annotations=[], highlightDraw, selectionDocument, selectionEndRect, annotationSaving=false;
+let selected=null, annotations=[], highlightDraw, selectionDocument, selectionEndRect, annotationSaving=false, editingAnnotation=null, cardAnnotation=null;
 let pdfScale=1, requestedPDF=null;
 const actions=document.querySelector('#selection-actions');
+const card=document.querySelector('#highlight-card');
+const preferenceKey=`reading:display:${config.member_id}:${config.book_id}`;
+try{
+  const saved=JSON.parse(localStorage.getItem(preferenceKey) || '{}');
+  for(const [id,key,allowed] of [
+    ['font-size','fontSize',['14','16','18','21','24']],
+    ['letter-spacing','letterSpacing',['compact','standard','loose']],
+    ['line-spacing','lineSpacing',['compact','standard','loose']],
+  ])if(allowed.includes(saved[key]))document.getElementById(id).value=saved[key];
+}catch{}
+function saveDisplayPreferences(){
+  try{localStorage.setItem(preferenceKey,JSON.stringify({
+    fontSize:document.querySelector('#font-size').value,
+    letterSpacing:document.querySelector('#letter-spacing').value,
+    lineSpacing:document.querySelector('#line-spacing').value,
+  }));}catch{}
+  view?.renderer.setStyles?.(fontStyle());
+}
 function placeSelectionPanel(panel){
   if(!selectionEndRect)return;
   const margin=8, gap=8, footerTop=document.querySelector('.reader-toolbar').getBoundingClientRect().top;
@@ -65,10 +83,22 @@ function turnPage(direction) {
   actions.hidden=true;
   (pdf?renderPDF(pdfPage+direction):(direction<0?view.prev():view.next())).catch(fail);
 }
+function highlightedAtPointer(doc,event){
+  if(pdf){
+    const page=surface.querySelector('.pdf-page');if(!page)return false;
+    const bounds=page.getBoundingClientRect(),x=(event.clientX-bounds.left)/bounds.width,y=(event.clientY-bounds.top)/bounds.height;
+    return annotations.some(n=>n.highlight_visible && n.anchor.page===pdfPage &&
+      n.anchor.rects.some(r=>x>=r[0]&&x<=r[0]+r[2]&&y>=r[1]&&y<=r[1]+r[3]));
+  }
+  const contents=view?.renderer?.getContents?.() || [];
+  const overlay=contents.find(content=>content.doc===doc)?.overlayer;
+  const [value]=overlay?.hitTest(event) || [];
+  return !!value && annotations.some(n=>n.highlight_visible && n.anchor.cfi===value);
+}
 function selection(doc,index) {
   let timer, pointer=null, touching=false;
   const capture=()=>{
-    if(touching || !document.querySelector('#selection-note').hidden)return;
+    if(touching || !document.querySelector('#selection-note').hidden || !card.hidden)return;
     const sel=doc.getSelection(),text=sel?.toString().trim();
     if(!config.writable || !text || !sel.rangeCount || text.length>4000){actions.hidden=true;return;}
     const range=sel.getRangeAt(0).cloneRange();let anchor;
@@ -88,6 +118,7 @@ function selection(doc,index) {
       anchor={page:pdfPage,rects};
     }else anchor={cfi:view.getCFI(index,range),section:index};
     selected={quote:text,anchor};
+    editingAnnotation=null;
     selectionDocument=doc;
     document.querySelector('#selected-text').textContent=text;
     actions.hidden=false;
@@ -100,6 +131,7 @@ function selection(doc,index) {
   doc.addEventListener('pointerdown',e=>{
     if(!inContent(e))return;
     touching=true;clearTimeout(timer);actions.hidden=true;
+    card.hidden=true;
     pointer={x:e.clientX,y:e.clientY,time:performance.now(),selected:!!doc.getSelection()?.toString(),moved:false};
   });
   doc.addEventListener('pointermove',e=>{if(pointer && Math.hypot(e.clientX-pointer.x,e.clientY-pointer.y)>8)pointer.moved=true;});
@@ -113,8 +145,10 @@ function selection(doc,index) {
       const bounds=surface.getBoundingClientRect();
       const frame=doc.defaultView.frameElement;
       const x=e.clientX+(frame?frame.getBoundingClientRect().left:0)-bounds.left;
-      if(x>=0 && x<bounds.width*.25)turnPage(-1);
-      else if(x>bounds.width*.75 && x<=bounds.width)turnPage(1);
+      const direction=x>=0 && x<bounds.width*.25?-1:x>bounds.width*.75 && x<=bounds.width?1:0;
+      // Page turns happen on pointerup, before the annotation's click handler.
+      // Use the same highlight geometry here so edge highlights take priority.
+      if(direction && !highlightedAtPointer(doc,e))turnPage(direction);
     }
     schedule();
   });
@@ -136,12 +170,12 @@ async function refreshNotes(){
   for(const n of annotations){
     const card=document.createElement('article'),quote=document.createElement('button'),body=document.createElement('p'),link=document.createElement('a');
     quote.textContent=n.quote;quote.onclick=()=>navigate(n.anchor).catch(fail);
-    body.textContent=`${n.author} · ${n.visibility==='private'?'仅自己':'已分享'} · ${n.highlight_visible?'已划线':'未划线'}：${n.note || '仅摘录'}`;
+    body.textContent=`${n.author} · ${n.visibility==='private'?'仅自己':'已分享'}：${n.note || '仅划线'}`;
     link.href=`/reading/notes/${n.id}/`;link.textContent='查看、编辑与回复';card.append(quote,body,link);
     if(n.owned && !n.note && !n.has_comments){
       const toggle=document.createElement('button');toggle.className='highlight-toggle';
-      toggle.textContent=n.highlight_visible?'取消划线':'恢复划线';
-      toggle.onclick=()=>toggleHighlight(n,toggle);
+      toggle.textContent='取消划线';
+      toggle.onclick=()=>deleteHighlight(n,toggle);
       card.append(toggle);
     }
     list.append(card);
@@ -150,17 +184,64 @@ async function refreshNotes(){
   if(!annotations.length)list.textContent='选中文字后可以保存划线，分享由你决定。';
   if(pdf)drawPDFNotes();
 }
-async function toggleHighlight(note,button){
+async function deleteHighlight(note,button){
   button.disabled=true;
   try{
-    const response=await fetch(`/reading/notes/${note.id}/highlight/`,{method:'POST',credentials:'same-origin',
+    const response=await fetch(`/reading/notes/${note.id}/highlight/`,{method:'DELETE',credentials:'same-origin',
       headers:{'Content-Type':'application/json','X-CSRFToken':csrf},
-      body:JSON.stringify({visible:!note.highlight_visible,revision:note.revision})});
+      body:JSON.stringify({revision:note.revision})});
     if(!response.headers.get('content-type')?.includes('application/json'))throw Error('划线未更新，请检查登录状态。');
     const result=await response.json();if(!response.ok)throw Error(result.error || '划线未更新，请重试。');
-    await refreshNotes();setStatus(result.highlight_visible?'划线已恢复':'划线已取消');
+    card.hidden=true;cardAnnotation=null;await refreshNotes();setStatus('划线已删除，可以重新划线');
   }catch(error){fail(error);}finally{button.disabled=false;}
 }
+function showHighlightCard(note,rect,doc=document){
+  if(!note)return;
+  const frameRect=doc.defaultView?.frameElement?.getBoundingClientRect();
+  selectionEndRect={left:rect.left+(frameRect?.left || 0),right:rect.right+(frameRect?.left || 0),
+    top:rect.top+(frameRect?.top || 0),bottom:rect.bottom+(frameRect?.top || 0)};
+  cardAnnotation=note;
+  const noteBody=document.querySelector('#card-note');
+  noteBody.textContent=note.note;noteBody.hidden=!note.note;
+  document.querySelector('#card-author').textContent=`批注人：${note.author}`;
+  document.querySelector('#remove-highlight').hidden=!note.owned || !!note.note || note.has_comments;
+  document.querySelector('#edit-highlight').hidden=!note.owned;
+  document.querySelector('#edit-highlight').textContent=note.note?'编辑批注':'批注';
+  document.querySelector('#delete-note').hidden=!note.owned || !note.note;
+  document.querySelector('#open-highlight').href=`/reading/notes/${note.id}/`;
+  actions.hidden=true;card.hidden=false;placeSelectionPanel(card);
+}
+document.addEventListener('pointerdown',e=>{if(!card.contains(e.target) && !surface.contains(e.target))card.hidden=true;});
+document.querySelector('#remove-highlight').onclick=()=>{
+  if(cardAnnotation)deleteHighlight(cardAnnotation,document.querySelector('#remove-highlight'));
+};
+const deleteNoteDialog=document.querySelector('#delete-note-dialog');
+document.querySelector('#delete-note').onclick=()=>{if(cardAnnotation?.owned && cardAnnotation.note)deleteNoteDialog.showModal();};
+document.querySelector('#cancel-delete-note').onclick=()=>deleteNoteDialog.close();
+document.querySelector('#confirm-delete-note').onclick=async()=>{
+  const note=cardAnnotation,button=document.querySelector('#confirm-delete-note');
+  if(!note?.owned || !note.note)return;
+  button.disabled=true;
+  try{
+    const response=await fetch(`/reading/notes/${note.id}/annotation/`,{method:'DELETE',credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({revision:note.revision})});
+    if(!response.headers.get('content-type')?.includes('application/json'))throw Error('批注未删除，请检查登录状态。');
+    const result=await response.json();if(!response.ok)throw Error(result.error || '批注未删除，请重试。');
+    deleteNoteDialog.close();card.hidden=true;cardAnnotation=null;
+    await refreshNotes();setStatus('批注已删除，原划线仍保留');
+  }catch(error){fail(error);}finally{button.disabled=false;}
+};
+document.querySelector('#edit-highlight').onclick=()=>{
+  if(!cardAnnotation?.owned)return;
+  editingAnnotation=cardAnnotation;
+  selected={quote:cardAnnotation.quote,anchor:cardAnnotation.anchor};
+  document.querySelector('#selected-text').textContent=cardAnnotation.quote;
+  document.querySelector('#annotation-note').value=cardAnnotation.note;
+  document.querySelector('#annotation-visibility').value=cardAnnotation.visibility;
+  card.hidden=true;document.querySelector('#selection-note').hidden=false;
+  placeSelectionPanel(document.querySelector('#selection-note'));
+  document.querySelector('#annotation-note').focus();
+};
 function addToc(items,parent,go) {
   const list=document.createElement('ul');parent.append(list);
   for(const item of items) {
@@ -198,21 +279,27 @@ async function openEPUB(saved) {
     if(range.toString().replace(/\s/g,'')!==annotation.quote.replace(/\s/g,'')){setStatus('部分划线位置未匹配，请从批注列表核对原文。');return;}
     draw(highlightDraw,{color:'#efbb32'});
   });
-  view.addEventListener('create-overlay',e=>setTimeout(()=>{for(const n of annotations.filter(n=>n.anchor.section===e.detail.index))view.addAnnotation({value:n.anchor.cfi,quote:n.quote}).catch(fail);},0));
+  view.addEventListener('show-annotation',e=>{
+    if(e.detail.range?.startContainer?.ownerDocument?.getSelection()?.toString())return;
+    const note=annotations.find(n=>n.anchor.cfi===e.detail.value);
+    const rect=[...e.detail.range?.getClientRects() || []].at(-1);
+    if(rect)showHighlightCard(note,rect,e.detail.range.startContainer.ownerDocument);
+  });
+  view.addEventListener('create-overlay',e=>setTimeout(()=>{for(const n of annotations.filter(n=>n.highlight_visible && n.anchor.section===e.detail.index))view.addAnnotation({value:n.anchor.cfi,quote:n.quote}).catch(fail);},0));
   view.addEventListener('external-link',e=>e.preventDefault());
   view.addEventListener('relocate',e=>{
     const d=e.detail;
     if(d.cfi){const current=view.resolveCFI(d.cfi);const link=document.querySelector('#summarize-current');link.href=link.href.split('?')[0]+`?section=${current.index+1}`;
       document.querySelector('#chapter-label').textContent=d.tocItem?.label || `第 ${current.index+1} 节`;
       link.title=`总结：${document.querySelector('#chapter-label').textContent}`;}
-    document.querySelector('#page-label').textContent=`约 ${Math.round((d.fraction || 0)*100)}%`;
+    const percent=Math.round((d.fraction || 0)*100);
+    document.querySelector('#page-label').textContent=`约 ${percent}%`;
+    if(document.activeElement!==document.querySelector('#page-number'))document.querySelector('#page-number').value=percent;
     if(d.cfi) record({cfi:d.cfi},(d.fraction || 0)*10000);
   });
   await view.open(book);
   view.renderer.setStyles?.(fontStyle());
-  document.querySelector('#font-size').onchange=()=>view.renderer.setStyles?.(fontStyle());
-  document.querySelector('#letter-spacing').onchange=()=>view.renderer.setStyles?.(fontStyle());
-  document.querySelector('#line-spacing').onchange=()=>view.renderer.setStyles?.(fontStyle());
+  for(const id of ['font-size','letter-spacing','line-spacing'])document.getElementById(id).onchange=saveDisplayPreferences;
   addToc(book.toc?.length ? book.toc : manifest.sections.map((s,i)=>({label:`第 ${i+1} 节`,href:i})),toc,async item=>view.goTo(item.href));
   await view.init({lastLocation:saved.location.cfi,showTextStart:true});
   ready=true;
@@ -262,7 +349,9 @@ async function openPDF(saved) {
     pdfScale=Math.max(.1,Math.min(4,Math.round((pdfScale+step)*100)/100));
     document.querySelector('#pdf-zoom').value='custom';renderPDF(pdfPage).catch(fail);
   };
-  document.querySelector('#page-jump').hidden=false;
+  document.querySelector('#page-number').min=1;
+  document.querySelector('#page-number').setAttribute('aria-label','页码');
+  document.querySelector('#jump-unit').textContent='页';
   pdfEngine=await import('./vendor/pdfjs/pdf.min.mjs');
   const base=new URL('./vendor/pdfjs/',import.meta.url);
   pdfEngine.GlobalWorkerOptions.workerSrc=new URL('pdf.worker.min.mjs',base).href;
@@ -274,6 +363,14 @@ async function openPDF(saved) {
   document.querySelector('#page-number').max=pdf.numPages;
   await renderPDF(Math.min(saved.location.page || 1,pdf.numPages));
   selection(document);
+  surface.addEventListener('click',e=>{
+    if(getSelection()?.toString() || !surface.contains(e.target))return;
+    const page=surface.querySelector('.pdf-page');if(!page)return;
+    const bounds=page.getBoundingClientRect(),x=(e.clientX-bounds.left)/bounds.width,y=(e.clientY-bounds.top)/bounds.height;
+    const note=[...annotations].reverse().find(n=>n.highlight_visible && n.anchor.page===pdfPage &&
+      n.anchor.rects.some(r=>x>=r[0]&&x<=r[0]+r[2]&&y>=r[1]&&y<=r[1]+r[3]));
+    if(note)showHighlightCard(note,{left:e.clientX,right:e.clientX,top:e.clientY,bottom:e.clientY});
+  });
   const outline=await pdf.getOutline();
   if(outline?.length) addToc(outline.map(x=>({label:x.title,dest:x.dest})),toc,async item=>{
     const dest=typeof item.dest==='string'?await pdf.getDestination(item.dest):item.dest;
@@ -283,7 +380,11 @@ async function openPDF(saved) {
 }
 document.querySelector('#prev').onclick=()=>turnPage(-1);
 document.querySelector('#next').onclick=()=>turnPage(1);
-document.querySelector('#page-jump').onsubmit=e=>{e.preventDefault();if(pdf)renderPDF(Number(document.querySelector('#page-number').value)).catch(fail);};
+document.querySelector('#page-jump').onsubmit=e=>{
+  e.preventDefault();const value=Number(document.querySelector('#page-number').value);
+  if(pdf)renderPDF(value).catch(fail);
+  else if(view && Number.isInteger(value) && value>=0 && value<=100)view.goToFraction(value/100).catch(fail);
+};
 document.querySelector('#toggle-toc').onclick=()=>{toc.hidden=!toc.hidden;document.querySelector('#toggle-toc').setAttribute('aria-expanded',String(!toc.hidden));};
 document.querySelector('#toggle-settings').onclick=()=>{const panel=document.querySelector('#reader-settings');panel.hidden=!panel.hidden;document.querySelector('#toggle-settings').setAttribute('aria-expanded',String(!panel.hidden));};
 document.querySelector('#save-now').onclick=()=>save().catch(fail);
@@ -292,7 +393,7 @@ document.querySelector('#toggle-notes').onclick=()=>{const panel=document.queryS
 document.querySelector('#refresh-notes').onclick=()=>refreshNotes().catch(fail);
 actions.addEventListener('pointerdown',e=>e.preventDefault());
 document.querySelector('#comment-selection').onclick=()=>{
-  if(!selected)return;actions.hidden=true;document.querySelector('#selection-note').hidden=false;
+  if(!selected)return;editingAnnotation=null;actions.hidden=true;document.querySelector('#selection-note').hidden=false;
   placeSelectionPanel(document.querySelector('#selection-note'));
   document.querySelector('#annotation-note').focus();
 };
@@ -303,14 +404,25 @@ async function saveAnnotation(highlightOnly){
   const button=document.querySelector('#save-annotation'),message=document.querySelector('#annotation-status');button.disabled=true;
   document.querySelector('#highlight-selection').disabled=true;
   try{
-    const response=await fetch(config.annotations,{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({
-      ...selected,note:highlightOnly?'':document.querySelector('#annotation-note').value,visibility:highlightOnly?'private':document.querySelector('#annotation-visibility').value,
-      file_hash:config.file_hash,normalizer_version:config.normalizer_version})});
+    const payload=editingAnnotation ? {
+      revision:editingAnnotation.revision,note:document.querySelector('#annotation-note').value,
+      visibility:document.querySelector('#annotation-visibility').value,
+    } : {
+      ...selected,note:highlightOnly?'':document.querySelector('#annotation-note').value,
+      visibility:highlightOnly?'private':document.querySelector('#annotation-visibility').value,
+      file_hash:config.file_hash,normalizer_version:config.normalizer_version,
+    };
+    const url=editingAnnotation?`/reading/notes/${editingAnnotation.id}/annotation/`:config.annotations;
+    const response=await fetch(url,{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify(payload)});
     if(!response.headers.get('content-type')?.includes('application/json'))throw Error('未保存，请检查登录或权限。');
     const result=await response.json();if(!response.ok)throw Error(result.error);
-    selected=null;document.querySelector('#annotation-note').value='';document.querySelector('#selection-note').hidden=true;
+    if(result.outcome==='existing_note')throw Error('这段文字已有批注，请点原划线打开卡片后修改。');
+    selected=null;editingAnnotation=null;document.querySelector('#annotation-note').value='';document.querySelector('#selection-note').hidden=true;
     actions.hidden=true;selectionDocument?.getSelection()?.removeAllRanges();
-    await refreshNotes();setStatus(highlightOnly?'划线已保存':'批注已保存');
+    await refreshNotes();setStatus(result.outcome==='unchanged'?'这段文字已有划线，未重复保存':
+      result.outcome==='expanded'?'已将原划线更新为较长的选区':
+      result.outcome==='annotated'?'已在原划线上添加批注':highlightOnly?'划线已保存':'批注已保存');
   }catch(error){message.textContent=error.message;document.querySelector('#selection-status').textContent=error.message;}
   finally{button.disabled=false;document.querySelector('#highlight-selection').disabled=false;annotationSaving=false;}
 }

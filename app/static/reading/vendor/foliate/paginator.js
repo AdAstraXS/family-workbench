@@ -594,7 +594,7 @@ export class Paginator extends HTMLElement {
         }, 700)
         this.addEventListener('load', ({ detail: { doc } }) => {
             let isPointerSelecting = false
-            doc.addEventListener('pointerdown', () => isPointerSelecting = true)
+            doc.addEventListener('pointerdown', e => isPointerSelecting = e.pointerType !== 'touch')
             doc.addEventListener('pointerup', () => isPointerSelecting = false)
             let isKeyboardSelecting = false
             doc.addEventListener('keydown', () => isKeyboardSelecting = true)
@@ -826,10 +826,17 @@ export class Paginator extends HTMLElement {
             x: touch?.screenX, y: touch?.screenY,
             t: e.timeStamp,
             vx: 0, xy: 0,
+            selecting: e.target?.ownerDocument?.getSelection()?.type === 'Range',
         }
     }
     #onTouchMove(e) {
         const state = this.#touchState
+        // Leave selection-handle dragging to the browser, including a range
+        // that appears after touchstart from a long press.
+        if (state.selecting || e.target?.ownerDocument?.getSelection()?.type === 'Range') {
+            state.selecting = true
+            return
+        }
         if (state.pinched) return
         state.pinched = globalThis.visualViewport.scale > 1
         if (this.scrolled || state.pinched) return
@@ -852,6 +859,7 @@ export class Paginator extends HTMLElement {
     }
     #onTouchEnd() {
         this.#touchScrolled = false
+        if (this.#touchState?.selecting) return
         if (this.scrolled) return
 
         // XXX: Firefox seems to report scale as 1... sometimes...?
