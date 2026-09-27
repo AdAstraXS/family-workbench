@@ -79,7 +79,8 @@ from .analysis_materials import source_preview
 from .thesis_analysis import generate_thesis_analysis, enforce_market_expectation_boundary
 from .valuation_trial import build_valuation_trial
 from .next_day_digest import (active_consent, latest_digest, latest_manual_analysis,
-                              pending_sources, set_auto_digest_consent)
+                              pending_sources, set_auto_digest_consent,
+                              generate_next_day_digest)
 from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
 from .review_plan import (
     confirm_review_plan, generate_review_plan, latest_plan_source, plan_context,
@@ -577,6 +578,24 @@ def next_day_consent(request, pk):
         else:
             messages.success(request, "已开启新资料的个人判断自动对照。" if action == "enable"
                              else "已关闭个人判断自动对照；公开资料事件简报仍可生成。")
+    return redirect("investment_research:next_day_tracking", pk=pk)
+
+
+@_method(["POST"])
+def next_day_generate(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能生成自动事件简报。")
+    try:
+        digest = generate_next_day_digest(dossier.pk)
+    except ResearchAiError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "新资料事件简报已生成，可展开核对原文。" if digest
+                         else "当前没有待处理的官方正文，或尚未生成公司研究简报。")
     return redirect("investment_research:next_day_tracking", pk=pk)
 
 

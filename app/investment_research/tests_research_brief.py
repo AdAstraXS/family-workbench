@@ -172,9 +172,16 @@ class ResearchBriefTests(TestCase):
         self.assertEqual(self.client.post(consent_url, {"action": "enable"}).status_code, 404)
         self.client.force_login(self.user)
         self.assertEqual(self.client.post(consent_url, {"action": "enable"}).status_code, 302)
-        self.assertContains(self.client.get(reverse("investment_research:next_day_tracking",
-                                                    args=[self.dossier.pk])),
-                            "已开启个人判断对照")
+        tracking_url = reverse("investment_research:next_day_tracking",
+                               args=[self.dossier.pk])
+        tracking_page = self.client.get(tracking_url)
+        self.assertContains(tracking_page, "已开启个人判断对照")
+        self.assertContains(tracking_page, "现在生成事件简报")
+        self.assertContains(tracking_page, "正在整理官方资料并分析")
+        with patch("investment_research.views.generate_next_day_digest", return_value=None) as run:
+            self.assertEqual(self.client.post(reverse("investment_research:next_day_generate",
+                                                     args=[self.dossier.pk])).status_code, 302)
+            run.assert_called_once_with(self.dossier.pk)
         sent = []
 
         def transport(request, **kwargs):

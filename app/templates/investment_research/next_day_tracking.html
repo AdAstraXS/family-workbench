@@ -27,7 +27,9 @@
       {% if can_write %}<form method="post" action="{% url 'investment_research:next_day_consent' dossier.pk %}">{% csrf_token %}<input type="hidden" name="action" value="enable"><button class="button" type="submit">开启个人判断自动对照</button></form>{% endif %}
     {% else %}<p>先生成一次公司研究简报并选定文本模型，之后可开启个人判断自动对照。</p>{% endif %}
   </details>
-  {% if pending %}<div class="research-document-empty">有 {{ pending|length }} 份新官方资料已保存。{% if latest_analysis or digest %}正在等待下一次自动生成简报。{% else %}请先生成一次公司研究简报并选定文本模型，之后才会自动跟踪新资料。{% endif %}</div>{% endif %}
+  {% if pending %}<div class="research-document-empty">有 {{ pending|length }} 份新官方资料已保存。{% if latest_analysis or digest %}正在等待下一次自动生成简报。{% else %}请先生成一次公司研究简报并选定文本模型，之后才会自动跟踪新资料。{% endif %}
+    {% if latest_analysis and can_write %}<form method="post" action="{% url 'investment_research:next_day_generate' dossier.pk %}" class="research-digest-generate">{% csrf_token %}<button class="button" type="submit">现在生成事件简报</button><span class="research-digest-wait" role="status" hidden>正在整理官方资料并分析，请稍候…</span></form>{% endif %}
+  </div>{% endif %}
   {% if digest and result %}
     {% if digest.scope.thesis_revision_id != dossier.current_revision_id %}<div class="research-document-empty">这份简报生成时，你的正式判断还是第 {{ digest.scope.thesis_revision_number }} 版。请结合当前判断重新阅读。</div>{% endif %}
     <section class="research-brief-card research-brief-summary"><p class="research-eyebrow">{% if digest.scope.initial_digest %}最近材料回顾{% else %}公开资料变化{% endif %} · {% if digest.scope.private_comparison %}围绕我的判断{% else %}公开资料{% endif %} AI 事件简报</p><h2>{{ result.headline }}</h2><p>{{ result.intro|default:"这次只保留值得回到原文核对的变化。" }}</p><p class="research-private-note">{% if digest.scope.private_comparison %}本次模型读取了授权的正式判断、关键假设、待验证问题和本批官方短摘录；不会自动改写正式判断。{% else %}本次模型只读取 SEC / 公司 IR 公开摘录；个人核查问题仅在本地并列展示。{% endif %}</p></section>
@@ -50,4 +52,12 @@
   <section class="research-brief-card"><h2>我可以怎样更新判断？</h2><p>先打开事件原文，核对披露是否真正改变你的假设，再决定是否保存新版本。自动简报不会修改正式判断。</p><a class="button" href="{% url 'investment_research:edit' dossier.pk %}">核对后修改我的判断</a></section>
   <footer class="research-private-note">波段价格与技术信号将放在投资组合模块完善；本页只跟踪已保存的官方基本面资料。</footer>
 </div>
+<script>
+  document.querySelectorAll('.research-digest-generate').forEach(form => form.addEventListener('submit', () => {
+    const button = form.querySelector('button');
+    button.disabled = true;
+    button.textContent = '正在生成…';
+    form.querySelector('.research-digest-wait').hidden = false;
+  }));
+</script>
 {% endblock %}
