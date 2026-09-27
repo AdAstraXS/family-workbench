@@ -44,19 +44,28 @@ class SelfServiceProgramTests(TestCase):
         preview = self.client.post(reverse('intelligence:program_source_new'), {**payload, 'action': 'preview'})
         self.assertEqual(preview.status_code, 200)
         self.assertContains(preview, '✓ 命中')
-        self.assertFalse(ProgramSubscription.objects.exists())
+        self.assertFalse(ProgramSubscription.objects.filter(family=self.family).exists())
         saved = self.client.post(reverse('intelligence:program_source_new'), {**payload, 'action': 'save'})
         self.assertEqual(saved.status_code, 302)
-        source = ProgramSubscription.objects.get()
+        source = ProgramSubscription.objects.get(family=self.family)
         self.assertTrue(source.auto_process)
         self.assertEqual(source.min_duration_seconds, 1200)
         self.assertEqual(source.exclude_terms, '预告')
         self.assertContains(self.client.get(reverse('intelligence:program_settings')), '宏观访谈')
         self.assertContains(self.client.get(reverse('intelligence:program_list')), '宏观访谈')
+        inspect.return_value = {**inspect.return_value,
+            'source_url': 'https://other.example.com/feed.xml',
+            'feed_url': 'https://other.example.com/feed.xml'}
         changed = self.client.post(reverse('intelligence:program_source_edit', args=[source.pk]),
             {**payload, 'url': 'https://other.example.com/feed.xml', 'action': 'save'})
-        self.assertContains(changed, '地址不能改动')
-        self.assertEqual(ProgramSubscription.objects.get(pk=source.pk).source_url, payload['url'])
+        self.assertEqual(changed.status_code, 302)
+        source.refresh_from_db()
+        self.assertIsNotNone(source.removed_at)
+        self.assertFalse(source.enabled)
+        replacement = ProgramSubscription.objects.filter(family=self.family).exclude(pk=source.pk).get()
+        self.assertEqual(replacement.source_url, 'https://other.example.com/feed.xml')
+        self.assertEqual(self.client.get(reverse('intelligence:program_source_edit', args=[source.pk])).status_code, 404)
+        source = replacement
         self.client.post(reverse('intelligence:program_source_edit', args=[source.pk]), {'action': 'toggle'})
         self.assertFalse(ProgramSubscription.objects.get(pk=source.pk).enabled)
 
@@ -108,17 +117,112 @@ class SelfServiceProgramTests(TestCase):
         response = self.client.post(reverse('intelligence:program_add_bilibili'),
                                     {'url': inspect.return_value['url']})
         self.assertEqual(response.status_code, 302)
-        source = ProgramSubscription.objects.get()
+        source = ProgramSubscription.objects.get(family=self.family)
         self.assertEqual(source.kind, 'bilibili')
         self.assertFalse(source.collect_enabled)
         self.assertEqual(collect_subscription(source), 0)
         self.assertTrue(ProgramEntry.objects.get().requested)
         manage_url = reverse('intelligence:program_source_edit', args=[source.pk])
-        self.assertContains(self.client.get(manage_url), '逐期添加这个 UP 主')
-        self.assertNotContains(self.client.get(manage_url), '保存筛选规则')
-        self.assertEqual(self.client.post(manage_url, {'action': 'save'}).status_code, 403)
+        self.assertContains(self.client.get(manage_url), '只能逐期添加公开视频')
+        self.assertContains(self.client.get(manage_url), '保存改动')
         self.client.post(manage_url, {'action': 'toggle'})
         self.assertFalse(ProgramSubscription.objects.get(pk=source.pk).enabled)
+        self.client.post(manage_url, {'action': 'delete'})
+        self.assertEqual(self.client.post(reverse('intelligence:program_add_bilibili'),
+                                          {'url': inspect.return_value['url']}).status_code, 302)
+        self.assertEqual(ProgramSubscription.objects.filter(family=self.family, kind='bilibili').count(), 2)
+        self.assertEqual(ProgramEntry.objects.filter(subscription__family=self.family).count(), 2)
+
+    def test_catalogue_source_uses_same_edit_delete_controls_and_preserves_entries(self):
+        source = ProgramSubscription.objects.create(family=self.family, code='oaktree',
+            custom_name='Howard Marks · Oaktree Memos',
+            source_url='https://www.oaktreecapital.com/insights')
+        entry = ProgramEntry.objects.create(subscription=source, external_id='memo-1',
+            title='一篇备忘录', url='https://www.oaktreecapital.com/insights/memo/one')
+        settings_url = reverse('intelligence:program_settings')
+        page = self.client.get(settings_url)
+        self.assertContains(page, 'Howard Marks · Oaktree Memos')
+        self.assertContains(page, reverse('intelligence:program_source_edit', args=[source.pk]))
+        self.assertContains(page, '<input type="hidden" name="action" value="delete">', html=True)
+        payload = {'kind': 'article', 'url': source.source_url, 'name': 'Howard Marks 备忘录',
+                   'include_terms': '风险', 'include_mode': 'any', 'exclude_terms': '',
+                   'min_duration_minutes': '0', 'auto_process': 'on', 'action': 'save'}
+        self.assertEqual(self.client.post(reverse('intelligence:program_source_edit', args=[source.pk]),
+                                          payload).status_code, 302)
+        source.refresh_from_db()
+        self.assertEqual(source.custom_name, 'Howard Marks 备忘录')
+        self.assertEqual(source.include_terms, '风险')
+        self.assertEqual(source.kind, '')  # Keep the official memo parser.
+        self.assertContains(self.client.get(settings_url), 'Howard Marks 备忘录')
+        self.assertEqual(self.client.post(reverse('intelligence:program_source_edit', args=[source.pk]),
+                                          {'action': 'delete'}).status_code, 302)
+        source.refresh_from_db()
+        self.assertFalse(source.enabled)
+        self.assertIsNotNone(source.removed_at)
+        self.assertEqual(source.removed_by, self.owner)
+        self.assertNotContains(self.client.get(settings_url), 'Howard Marks 备忘录')
+        self.assertEqual(ProgramEntry.objects.get(pk=entry.pk).subscription_id, source.pk)
+        self.assertContains(self.client.get(reverse('intelligence:program_detail', args=[entry.pk])),
+                            'Howard Marks 备忘录')
+
+    @patch('intelligence.program_views.catalogue_recent_items')
+    def test_catalogue_preview_does_not_save_or_request_processing(self, recent):
+        source = ProgramSubscription.objects.create(family=self.family, code='dwarkesh',
+            custom_name='Dwarkesh Podcast', source_url='https://www.dwarkesh.com/feed',
+            auto_process=False)
+        recent.return_value = [{'title': 'AI 深度访谈', 'url': 'https://www.dwarkesh.com/p/one',
+                                'published_at': timezone.now(), 'duration_seconds': 3600}]
+        response = self.client.post(reverse('intelligence:program_source_edit', args=[source.pk]),
+            {'kind': 'article', 'url': source.source_url, 'name': 'Dwarkesh Podcast',
+             'include_terms': 'AI', 'include_mode': 'any', 'action': 'preview'})
+        self.assertContains(response, '✓ 命中')
+        source.refresh_from_db()
+        self.assertEqual(source.include_terms, '')
+        self.assertFalse(source.auto_process)
+        self.assertFalse(ProgramEntry.objects.exists())
+
+    @patch('intelligence.program_sources.catalogue_recent_items')
+    def test_catalogue_edit_filter_is_used_by_background_collection(self, recent):
+        source = ProgramSubscription.objects.create(family=self.family, code='dwarkesh',
+            include_terms='微软', auto_process=False)
+        recent.return_value = [
+            {'external_id': 'one', 'title': '微软访谈', 'url': 'https://www.dwarkesh.com/p/one',
+             'published_at': timezone.now()},
+            {'external_id': 'two', 'title': '其他访谈', 'url': 'https://www.dwarkesh.com/p/two',
+             'published_at': timezone.now()},
+        ]
+        self.assertEqual(collect_subscription(source), 1)
+        self.assertEqual(list(source.entries.values_list('title', flat=True)), ['微软访谈'])
+        self.assertFalse(source.entries.get().requested)
+
+    def test_duration_filter_rejects_sources_without_duration_metadata(self):
+        source = ProgramSubscription.objects.create(family=self.family, code='rhino',
+            custom_name='视野环球财经', source_url='https://www.youtube.com/@RhinoFinance')
+        response = self.client.post(reverse('intelligence:program_source_edit', args=[source.pk]),
+            {'kind': 'youtube', 'url': source.source_url, 'name': source.custom_name,
+             'include_mode': 'any', 'min_duration_minutes': '20', 'action': 'save'})
+        self.assertContains(response, '暂不能按时长筛选')
+        self.assertEqual(ProgramSubscription.objects.get(pk=source.pk).min_duration_seconds, 0)
+
+    def test_delete_blocks_in_flight_work_and_is_family_scoped(self):
+        source = ProgramSubscription.objects.create(family=self.family, code='custom_busy',
+            kind='article', custom_name='待处理来源', source_url='https://example.com/feed',
+            feed_url='https://example.com/feed')
+        entry = ProgramEntry.objects.create(subscription=source, external_id='one', title='待处理文章',
+            url='https://example.com/one', lease_until=timezone.now() + timedelta(minutes=10))
+        url = reverse('intelligence:program_source_edit', args=[source.pk])
+        response = self.client.post(url, {'action': 'delete'}, follow=True)
+        self.assertContains(response, '任务正在运行')
+        source.refresh_from_db()
+        self.assertIsNone(source.removed_at)
+        entry.lease_until = None
+        entry.save(update_fields=['lease_until'])
+        self.client.force_login(self.other.user)
+        self.assertEqual(self.client.post(url, {'action': 'delete'}).status_code, 403)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.client.force_login(self.owner.user)
+        self.assertEqual(self.client.post(url, {'action': 'delete'}).status_code, 302)
+        self.assertEqual(ProgramEntry.objects.get(pk=entry.pk).title, '待处理文章')
 
     @patch('intelligence.program_custom_sources.check_public_url', side_effect=lambda url: url)
     @patch('intelligence.program_custom_sources._yt_command')

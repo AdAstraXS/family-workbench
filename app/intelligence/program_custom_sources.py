@@ -18,7 +18,9 @@ from .program_sources import CATALOGUE, ProgramError, plain_segments, duration_s
 
 def source_spec(subscription):
     if subscription.code in CATALOGUE:
-        return CATALOGUE[subscription.code]
+        return {**CATALOGUE[subscription.code],
+                'name': subscription.custom_name or CATALOGUE[subscription.code]['name'],
+                'url': subscription.source_url or CATALOGUE[subscription.code]['url']}
     if subscription.kind not in {'youtube', 'bilibili', 'podcast', 'article', 'upload'}:
         raise ProgramError('信源类型无效。')
     return {'name': subscription.custom_name, 'kind': subscription.kind,

@@ -37,6 +37,9 @@ class ProgramSubscription(TimestampedModel):
     enabled = models.BooleanField(default=True)
     collect_enabled = models.BooleanField(default=True)
     auto_process = models.BooleanField(default=True)
+    removed_at = models.DateTimeField(null=True, blank=True)
+    removed_by = models.ForeignKey('family_core.FamilyMember', null=True, blank=True,
+                                   on_delete=models.SET_NULL, related_name='removed_program_subscriptions')
     # On first subscription only the latest three entries are collected. Older history is never billed automatically.
     last_checked_at = models.DateTimeField(null=True, blank=True)
     last_success_at = models.DateTimeField(null=True, blank=True)

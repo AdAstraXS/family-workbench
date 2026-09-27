@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理精选订阅 · 页面演示</title>
+  <style>
+    :root{font-family:Inter,"Microsoft YaHei",system-ui,sans-serif;color:#243749;background:#f5f7fb;font-synthesis:none}
+    *{box-sizing:border-box}button,input,select{font:inherit}button{cursor:pointer}a{color:inherit;text-decoration:none}
+    .shell{min-height:100vh;display:grid;grid-template-columns:216px minmax(0,1fr)}
+    .side{background:#fbfcfe;border-right:1px solid #e7edf3;padding:22px 15px;display:flex;flex-direction:column;gap:34px}
+    .brand{display:flex;align-items:center;gap:11px;padding:3px 10px;font-weight:800;color:#1d4756}.brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:#e4eef1;color:#2a6e72;font-size:21px}
+    .side nav{display:grid;gap:5px}.side nav small{color:#8795a2;margin:18px 10px 5px;font-size:11px}.side nav a{padding:11px 12px;border-radius:10px;color:#53697b;font-size:14px}.side nav a.active{background:#e9f0f7;color:#285575;font-weight:700}
+    .side-foot{margin-top:auto;color:#91a0ad;font-size:12px;line-height:1.8;padding:0 10px}
+    .workspace{min-width:0}.topbar{height:67px;background:#fbfcfe;border-bottom:1px solid #e7edf3;display:flex;align-items:center;justify-content:space-between;padding:0 34px;color:#718396;font-size:13px}.topbar b{color:#354d61}.avatar{width:29px;height:29px;border-radius:50%;display:grid;place-items:center;background:#e7eef6;color:#446a84;font-weight:700}
+    main{max-width:1340px;margin:0 auto;padding:28px 42px 85px}.back{font-size:13px;color:#527391}.eyebrow{margin-top:36px;color:#62858b;font-size:12px;letter-spacing:.12em;font-weight:800}.page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:22px}.page-head h1{font-size:32px;letter-spacing:-.03em;margin:8px 0}.page-head p{margin:0;color:#718396;line-height:1.7;font-size:14px}
+    .button{border:1px solid #315d78;border-radius:9px;background:#315d78;color:white;padding:10px 15px;font-weight:700;font-size:13px;white-space:nowrap}.button:hover{background:#244e68}.button.ghost{background:white;color:#315d78;border-color:#cfdae5}.button.ghost:hover{background:#f1f6fa}.button.danger{background:#a74740;border-color:#a74740}.button.danger:hover{background:#8f3933}.button.small{padding:7px 11px;font-size:12px}
+    .notice{background:#eaf3f4;color:#37646a;border:1px solid #d5e5e6;border-radius:11px;padding:12px 16px;font-size:13px;line-height:1.6;margin-bottom:20px}.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}.stat{background:#fff;border:1px solid #e4eaf0;border-radius:13px;padding:16px 19px}.stat strong{display:block;font-size:22px;margin-bottom:3px}.stat span{font-size:12px;color:#7a8b99}
+    .card{background:#fff;border:1px solid #e5ebf1;border-radius:15px;box-shadow:0 8px 26px #273c5e0a}.section-head{padding:22px 24px 17px;display:flex;align-items:center;justify-content:space-between;gap:16px}.section-head h2{font-size:18px;margin:0 0 5px}.section-head p{font-size:13px;color:#7a8b99;margin:0;line-height:1.6}.toolbar{display:flex;gap:10px;align-items:center}.toolbar input,.toolbar select{height:37px;border:1px solid #d5dee8;border-radius:9px;color:#344c5d;background:white;padding:0 11px;font-size:13px}.toolbar input{width:185px}.toolbar select{max-width:130px}
+    .table-wrap{overflow:auto}.source-table{width:100%;border-collapse:collapse;table-layout:fixed}.source-table th{background:#f8fafc;text-align:left;color:#8191a0;font-size:11px;font-weight:700;letter-spacing:.05em;padding:12px 18px;border-top:1px solid #edf1f5;border-bottom:1px solid #edf1f5}.source-table td{padding:17px 18px;border-bottom:1px solid #edf1f5;font-size:13px;vertical-align:middle}.source-table tr:last-child td{border-bottom:0}.source-table th:nth-child(1){width:31%}.source-table th:nth-child(2){width:15%}.source-table th:nth-child(3){width:23%}.source-table th:nth-child(4){width:15%}.source-table th:nth-child(5){width:16%}.source-name{display:flex;align-items:flex-start;gap:11px}.source-icon{display:grid;place-items:center;flex:none;width:35px;height:35px;border-radius:10px;background:#e7eef5;color:#336b85;font-weight:800;font-size:12px}.source-icon.bilibili{background:#fdebef;color:#bd667c}.source-icon.rss{background:#fff1e4;color:#b87539}.source-icon.article{background:#edf1e9;color:#688367}.source-name b{display:block;line-height:1.5}.subline{display:block;color:#8a99a6;font-size:11px;margin-top:5px;word-break:break-all}.tag{display:inline-block;border:1px solid #d7e2e8;border-radius:5px;padding:2px 6px;color:#718696;font-size:10px;margin-left:5px;font-weight:500}.rule{line-height:1.7;color:#536b7c}.muted{color:#99a6b0}.pill{display:inline-flex;align-items:center;gap:6px;border-radius:30px;padding:5px 9px;background:#e8f5ee;color:#37775d;font-size:11px;font-weight:700}.pill::before{content:"";width:6px;height:6px;background:currentColor;border-radius:50%}.pill.paused{background:#f1f2f4;color:#8794a0}.pill.manual{background:#fff2df;color:#a16b25}.status-detail{font-size:11px;color:#91a1af;margin-top:7px}.actions{display:flex;gap:10px;flex-wrap:wrap}.link-button{padding:2px 0;background:none;border:0;color:#376887;font-size:12px;font-weight:700}.link-button:hover{text-decoration:underline}.link-button.delete{color:#aa5751}.empty{text-align:center;padding:42px;color:#8293a1}
+    .settings{margin-top:19px;padding:21px 24px}.settings h2{font-size:16px;margin:0 0 7px}.settings p{font-size:13px;color:#7c8e9b;margin:0;line-height:1.7}.settings a{color:#386982;font-weight:700}
+    dialog{border:0;padding:0;color:#243749;box-shadow:0 18px 70px #162b4750}dialog::backdrop{background:#142b3c72}.editor{position:fixed;inset:0 0 0 auto;margin:0;width:min(560px,100vw);max-height:100vh;border-radius:18px 0 0 18px;overflow:auto}.editor-head{padding:25px 27px;border-bottom:1px solid #e7ecf1;display:flex;justify-content:space-between;gap:12px;align-items:start}.editor-head h2{font-size:21px;margin:3px 0 7px}.editor-head p{font-size:12px;color:#7890a0;margin:0;line-height:1.6}.close{border:0;background:#f0f4f7;color:#526b7d;border-radius:8px;width:32px;height:32px;font-size:20px}.editor-body{padding:23px 27px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px}.field{display:grid;gap:7px;min-width:0}.field.wide{grid-column:1/-1}.field label{font-size:12px;font-weight:700;color:#425c70}.field input,.field select{width:100%;height:39px;border:1px solid #d5dfe8;border-radius:8px;padding:0 10px;background:#fff;color:#253e50;font-size:13px}.field small{color:#8999a7;font-size:11px;line-height:1.5}.switch-row{display:flex;align-items:flex-start;gap:10px;padding:15px;background:#f7fafb;border-radius:9px}.switch-row input{margin-top:2px}.switch-row strong{font-size:13px}.switch-row small{display:block;font-size:11px;line-height:1.5;color:#8899a6;margin-top:3px}.editor-footer{border-top:1px solid #e7ecf1;padding:18px 27px;display:flex;justify-content:space-between;gap:12px}.editor-footer>div{display:flex;gap:9px}
+    .field input::placeholder{color:#98a6b2;opacity:1}
+    .field .switch-row{align-items:flex-start;gap:11px;padding:13px 15px;border:1px solid #e7edf1;cursor:pointer}
+    .field .switch-row input[type=checkbox]{width:16px;height:16px;min-width:16px;flex:none;margin:1px 0 0;padding:0;accent-color:#315d78}
+    .switch-row span{min-width:0}.switch-row strong{display:block;line-height:1.4}.switch-row small{line-height:1.6;color:#718596;margin-top:4px}
+    .switch-row small b{color:#465f72}.preview-note{margin:0;padding:0 27px 15px;color:#718596;font-size:11px;line-height:1.6}
+    .editor[open]{height:100vh;overflow:hidden;display:flex;flex-direction:column}
+    .editor[open] #sourceForm{display:flex;flex-direction:column;flex:1;min-height:0}
+    .editor[open] .editor-head,.editor[open] .editor-footer,.editor[open] .preview-note{flex:none}
+    .editor[open] .editor-body{flex:1;min-height:0;overflow-y:auto}
+    .editor[open] .editor-footer{background:#fff}
+    .confirm{width:min(460px,calc(100vw - 30px));border-radius:14px;padding:25px}.confirm h2{font-size:19px;margin:0 0 10px}.confirm p{font-size:13px;color:#60788b;line-height:1.8;margin:0 0 18px}.confirm-actions{display:flex;justify-content:flex-end;gap:9px}
+    @media(max-width:1090px){.shell{grid-template-columns:1fr}.side{display:none}.topbar{height:58px;padding:0 18px}main{padding:20px 17px 70px}.page-head{align-items:start}.source-table{min-width:810px}}
+    @media(max-width:650px){.page-head{display:block}.page-head .button{margin-top:17px}.page-head h1{font-size:27px}.stats{grid-template-columns:repeat(3,1fr);gap:7px}.stat{padding:12px}.stat strong{font-size:19px}.stat span{font-size:10px}.section-head{display:block;padding:19px 16px}.toolbar{margin-top:15px}.toolbar input{flex:1;min-width:0;width:auto}.toolbar select{width:110px}.table-wrap{overflow:visible}.source-table,.source-table tbody,.source-table tr,.source-table td{display:block;width:100%}.source-table thead{display:none}.source-table tr{padding:14px 16px;border-top:1px solid #edf1f5}.source-table tr:first-child{border-top:0}.source-table td{border:0;padding:4px 0}.source-table td:nth-child(2)::before{content:"类型 · ";color:#8a99a6}.source-table td:nth-child(3){color:#647889}.source-table td:nth-child(4){margin-top:5px}.source-table td:nth-child(5){margin-top:8px}.source-name{gap:9px}.source-icon{width:31px;height:31px}.editor{border-radius:0}.editor-head,.editor-body,.editor-footer{padding-left:18px;padding-right:18px}.form-grid{grid-template-columns:1fr}.field.wide{grid-column:auto}.editor-footer{position:sticky;bottom:0;background:#fff}}
+    @media(max-width:650px){.preview-note{padding-left:18px;padding-right:18px}}
+    @media(max-width:650px){.editor-footer{flex-wrap:wrap}.editor-footer>div{width:100%;justify-content:flex-end;flex-wrap:wrap}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="side"><div class="brand"><span class="brand-mark">✿</span><span>我的家庭</span></div><nav><small>财富管理</small><a href="#">投资组合</a><a href="#">投研</a><small>阅读与积累</small><a href="#">知识中心</a><small>观察与分析</small><a class="active" href="#">✧　AI 情报</a></nav><div class="side-foot">让今天的积累，<br>成为明天的底气。</div></aside>
+    <div class="workspace"><header class="topbar"><span>我的家庭　/　<b>AI 情报</b></span><span class="avatar">a</span></header>
+      <main><a class="back" href="#">← 精选订阅</a><div class="eyebrow">投资阅读 / 信源管理</div>
+        <div class="page-head"><div><h1>管理精选订阅</h1><p>所有信源放在一起管理。随时修改筛选与自动整理设置，也可以暂停或移除订阅。</p></div><button id="add" class="button" type="button">＋ 添加信源</button></div>
+        <div class="notice">页面演示：操作仅在当前页面生效，不连接 NAS，也不会修改现有订阅、历史节目或模型费用。</div>
+        <div class="stats"><div class="stat"><strong id="totalCount">6</strong><span>全部信源</span></div><div class="stat"><strong id="activeCount">5</strong><span>正在检查</span></div><div class="stat"><strong id="pausedCount">1</strong><span>已暂停 / 逐期添加</span></div></div>
+        <section class="card"><div class="section-head"><div><h2>信源列表</h2><p>每条订阅都可以编辑、暂停或删除；按名称和类型查找。</p></div><div class="toolbar"><input id="search" type="search" aria-label="搜索信源" placeholder="搜索名称或链接"><select id="filter" aria-label="按类型筛选"><option value="all">全部类型</option><option value="youtube">YouTube</option><option value="bilibili">B 站</option><option value="podcast">播客 RSS</option><option value="article">文章 RSS</option></select></div></div>
+          <div class="table-wrap"><table class="source-table"><thead><tr><th>信源</th><th>类型</th><th>定向筛选</th><th>状态</th><th>操作</th></tr></thead><tbody id="rows"></tbody></table></div>
+        </section>
+        <section class="card settings"><h2>转写与 AI 整理</h2><p>百炼 Key、月度预算和摘要模型沿用现有设置，放在单独的服务配置页。<a href="#" onclick="return false">管理服务设置 →</a></p></section>
+      </main>
+    </div>
+  </div>
+  <dialog id="editor" class="editor" aria-labelledby="editorTitle"><form id="sourceForm" method="dialog"><div class="editor-head"><div><h2 id="editorTitle">编辑信源</h2><p>修改后先检查最近内容，再决定是否开启自动整理。</p></div><button class="close" id="closeEditor" type="button" aria-label="关闭">×</button></div>
+    <div class="editor-body"><div class="form-grid">
+      <div class="field wide"><label for="name">显示名称</label><input id="name" required maxlength="160"></div>
+      <div class="field"><label for="kind">来源类型</label><select id="kind"><option value="youtube">YouTube 公开频道 / 播放列表</option><option value="bilibili">B 站公开视频 / UP 主</option><option value="podcast">播客 RSS</option><option value="article">文章 RSS</option></select></div>
+      <div class="field"><label for="weekday">发布星期</label><select id="weekday"><option value="不限">不限</option><option>周一</option><option>周二</option><option>周三</option><option>周四</option><option>周五</option><option>周六</option><option>周日</option></select></div>
+      <div class="field wide"><label for="url">频道、播放列表或 RSS 链接</label><input id="url" type="url" required placeholder="https://…"><small>修改链接时，会先核对新地址的来源身份；已有节目和原文保留。</small></div>
+      <div class="field"><label for="include">标题包含</label><input id="include" placeholder="多个词用逗号分开"></div>
+      <div class="field"><label for="mode">关键词关系</label><select id="mode"><option value="any">命中任一</option><option value="all">同时命中全部</option></select></div>
+      <div class="field"><label for="exclude">标题排除</label><input id="exclude" placeholder="预告, 精华"></div>
+      <div class="field"><label for="duration">最短时长（分钟）</label><input id="duration" type="number" min="0" max="240" value="0"></div>
+      <div class="field wide"><label class="switch-row"><input id="auto" type="checkbox"><span><strong>发现新内容后自动生成摘要</strong><small><b>不勾选：</b>命中的节目仍会进入列表，但不会自动转写或生成 AI 摘要，之后可以手动整理。<br><b>勾选：</b>自动获取公开正文或字幕；没有文字稿的音视频按服务设置尝试转写，再生成 AI 摘要。首次只整理最新 1 条，费用受月度预算限制。</small></span></label></div>
+    </div></div>
+    <p class="preview-note">“预览筛选结果”只临时查看最近哪些节目命中，不保存订阅，也不转写或生成摘要。</p>
+    <div class="editor-footer"><button id="deleteInEditor" type="button" class="link-button delete">删除此订阅</button><div><button id="preview" type="button" class="button ghost">预览筛选结果</button><button class="button" type="submit">保存改动（演示）</button></div></div></form></dialog>
+  <dialog id="confirm" class="confirm" aria-labelledby="confirmTitle"><h2 id="confirmTitle">删除这条订阅？</h2><p id="confirmText"></p><div class="confirm-actions"><button id="cancelDelete" class="button ghost" type="button">取消</button><button id="confirmDelete" class="button danger" type="button">删除订阅</button></div></dialog>
+  <script>
+    const initialSources=[
+      {id:1,name:'视野环球财经',kind:'youtube',url:'https://www.youtube.com/@RhinoFinance',include:'',mode:'any',exclude:'',weekday:'不限',duration:0,auto:true,enabled:true,checked:'今天 15:15'},
+      {id:5,name:'大摩宏观策略谈',kind:'youtube',url:'https://www.youtube.com/@ExampleMacro/videos',include:'大摩宏观策略谈',mode:'any',exclude:'预告, 精华',weekday:'周一',duration:20,auto:true,enabled:true,checked:'今天 14:30'},
+      {id:2,name:'Dwarkesh Podcast',kind:'article',url:'https://www.dwarkesh.com/feed',include:'',mode:'any',exclude:'',weekday:'不限',duration:0,auto:true,enabled:true,checked:'今天 15:15'},
+      {id:3,name:'In Good Company',kind:'podcast',url:'https://feeds.acast.com/public/shows/in-good-company-with-nicolai-tangen',include:'',mode:'any',exclude:'Highlights, Friday Wrap-Up',weekday:'不限',duration:0,auto:true,enabled:true,checked:'今天 15:15'},
+      {id:6,name:'B 站投资节目',kind:'bilibili',url:'https://space.bilibili.com/12345/video',include:'宏观, 财报',mode:'any',exclude:'',weekday:'不限',duration:15,auto:false,enabled:false,checked:'逐期添加'},
+      {id:4,name:'Howard Marks · Oaktree Memos',kind:'article',url:'https://www.oaktreecapital.com/insights',include:'',mode:'any',exclude:'',weekday:'不限',duration:0,auto:true,enabled:true,checked:'今天 15:25'}
+    ];
+    let sources=initialSources.map(x=>({...x})),editingId=null,deletingId=null,nextId=7;
+    const $=id=>document.getElementById(id);
+    const kindLabel={youtube:'YouTube',bilibili:'B 站',podcast:'播客 RSS',article:'文章 RSS'};
+    function text(tag,value,className){const el=document.createElement(tag);el.textContent=value;if(className)el.className=className;return el}
+    function render(){const rows=$('rows');rows.replaceChildren();const query=$('search').value.trim().toLowerCase(),filter=$('filter').value;
+      const visible=sources.filter(s=>(filter==='all'||s.kind===filter)&&(!query||(s.name+' '+s.url).toLowerCase().includes(query)));
+      for(const s of visible){const tr=document.createElement('tr');
+        const nameTd=document.createElement('td'),nameWrap=text('div','','source-name'),icon=text('span',s.kind==='youtube'?'▶':s.kind==='bilibili'?'B':s.kind==='podcast'?'◉':'▤','source-icon '+(s.kind==='bilibili'?'bilibili':s.kind==='podcast'?'rss':s.kind==='article'?'article':'')),nameBlock=document.createElement('div');nameBlock.append(text('b',s.name));nameBlock.append(text('span',s.url,'subline'));nameWrap.append(icon,nameBlock);nameTd.append(nameWrap);tr.append(nameTd);
+        tr.append(text('td',kindLabel[s.kind]));const bits=[];if(s.include)bits.push('包含：'+s.include);if(s.exclude)bits.push('排除：'+s.exclude);if(s.weekday!=='不限')bits.push(s.weekday);if(s.duration)bits.push('≥'+s.duration+' 分钟');tr.append(text('td',bits.join(' · ')||'全部公开内容',bits.length?'rule':'muted'));
+        const status=document.createElement('td');status.append(text('span',!s.enabled?'已暂停':s.kind==='bilibili'?'逐期添加':'检查中','pill '+(!s.enabled?'paused':s.kind==='bilibili'?'manual':'')));status.append(text('div',s.checked,'status-detail'));tr.append(status);
+        const actions=document.createElement('td'),bar=text('div','','actions');for(const [label,action,cl] of [['编辑','edit',''],[s.enabled?'暂停':'恢复','toggle',''],['删除','delete','delete']]){const button=text('button',label,'link-button '+cl);button.type='button';button.dataset.action=action;button.dataset.id=String(s.id);bar.append(button)}actions.append(bar);tr.append(actions);rows.append(tr)}
+      if(!visible.length){const tr=document.createElement('tr'),td=text('td','没有找到符合条件的信源。','empty');td.colSpan=5;tr.append(td);rows.append(tr)}
+      $('totalCount').textContent=sources.length;$('activeCount').textContent=sources.filter(s=>s.enabled).length;$('pausedCount').textContent=sources.filter(s=>!s.enabled).length;
+    }
+    function openEditor(id){editingId=id;const s=sources.find(x=>x.id===id)||{name:'',kind:'youtube',url:'',include:'',mode:'any',exclude:'',weekday:'不限',duration:0,auto:false};$('editorTitle').textContent=id?'编辑信源':'添加信源';for(const key of ['name','kind','url','include','mode','exclude','weekday','duration'])$(key).value=s[key];$('auto').checked=s.auto;$('deleteInEditor').hidden=!id;$('editor').showModal()}
+    function askDelete(id){deletingId=id;const s=sources.find(x=>x.id===id);if(!s)return;$('confirmTitle').textContent='删除「'+s.name+'」？';$('confirmText').textContent='这会停止后续检查，并从信源列表移除这条订阅。已收集的节目、文字稿和归档仍可阅读。演示页只会暂时移除这一行。';$('confirm').showModal()}
+    $('rows').addEventListener('click',e=>{const button=e.target.closest('button[data-action]');if(!button)return;const id=Number(button.dataset.id),s=sources.find(x=>x.id===id);if(!s)return;if(button.dataset.action==='edit')openEditor(id);if(button.dataset.action==='toggle'){s.enabled=!s.enabled;render()}if(button.dataset.action==='delete')askDelete(id)});
+    $('add').addEventListener('click',()=>openEditor(null));$('search').addEventListener('input',render);$('filter').addEventListener('change',render);$('closeEditor').addEventListener('click',()=>$('editor').close());$('cancelDelete').addEventListener('click',()=>$('confirm').close());$('deleteInEditor').addEventListener('click',()=>{const id=editingId;$('editor').close();askDelete(id)});
+    $('confirmDelete').addEventListener('click',()=>{sources=sources.filter(s=>s.id!==deletingId);$('confirm').close();render()});
+    $('sourceForm').addEventListener('submit',e=>{e.preventDefault();const values={name:$('name').value.trim(),kind:$('kind').value,url:$('url').value.trim(),include:$('include').value.trim(),mode:$('mode').value,exclude:$('exclude').value.trim(),weekday:$('weekday').value,duration:Number($('duration').value)||0,auto:$('auto').checked};if(!values.name||!values.url){$('sourceForm').reportValidity();return}if(editingId){Object.assign(sources.find(x=>x.id===editingId),values)}else sources.unshift({id:nextId++,enabled:true,checked:'尚未检查',...values});$('editor').close();render()});
+    $('preview').addEventListener('click',()=>alert('演示页只展示交互。正式页面会临时读取最近内容，列出每条命中或跳过的原因；预览不会保存订阅、转写音频或生成摘要。'));
+    render();
+  </script>
+</body>
+</html>

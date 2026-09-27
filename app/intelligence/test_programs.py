@@ -175,7 +175,7 @@ class ProgramTests(TestCase):
             for name, args in [('program_list', []), ('program_settings', []), ('program_detail', [self.entry.pk])]:
                 self.assertEqual(self.client.get(reverse('intelligence:' + name, args=args)).status_code, 200)
         self.assertEqual(ProgramSettings.objects.count(), 0)
-        self.assertEqual(ProgramSubscription.objects.count(), 1)
+        self.assertEqual(ProgramSubscription.objects.filter(family=self.family).count(), 1)
         fetch.assert_not_called()
 
     def test_family_isolation_and_member_settings_permission(self):
@@ -203,10 +203,10 @@ class ProgramTests(TestCase):
         self.assertNotContains(self.client.get(reverse('intelligence:program_settings')), 'secret-value-for-test')
 
     def test_catalogue_selection_and_pause(self):
-        self.client.post(reverse('intelligence:program_settings'), {'action': 'subscriptions', 'sources': ['dwarkesh', 'oaktree'], 'auto': ['oaktree']})
+        self.client.post(reverse('intelligence:program_source_edit', args=[self.sub.pk]), {'action': 'toggle'})
         self.sub.refresh_from_db()
         self.assertFalse(self.sub.enabled)
-        self.assertEqual(ProgramSubscription.objects.filter(enabled=True).count(), 2)
+        self.assertEqual(ProgramSubscription.objects.filter(family=self.family, enabled=True).count(), 0)
 
     def test_rss_excludes_short_versions_and_does_not_treat_description_as_transcript(self):
         body = b'<rss><channel><item><title>HIGHLIGHTS: CEO</title><link>https://example.com/short</link></item><item><title>CEO complete</title><link>https://example.com/full</link><description>Transcript short description</description><enclosure url="https://example.com/audio.mp3"/><duration>25:20</duration></item></channel></rss>'

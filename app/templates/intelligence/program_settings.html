@@ -1,9 +1,69 @@
 {% extends 'base.html' %}{% load static %}
 {% block title %}管理精选订阅{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}"><link rel="stylesheet" href="{% static 'css/intelligence-programs.css' %}">{% endblock %}
-{% block content %}<a href="{% url 'intelligence:program_list' %}">← 精选订阅</a><h1>管理精选订阅</h1>
-<section class="intel-section"><h2>来源与更新</h2><p>订阅这里的公开内容不需要购买会员。首次收集最近三篇，只自动处理最新一篇。取消订阅保留已保存内容，并暂停后续抓取与处理。</p><form method="post">{% csrf_token %}<input type="hidden" name="action" value="subscriptions">{% for source in sources %}<div class="program-source"><label><input type="checkbox" name="sources" value="{{ source.code }}" {% if source.subscription.enabled %}checked{% endif %}> <strong>{{ source.name }}</strong> · {{ source.layer }}</label><p>{{ source.description }} <a href="{{ source.url }}" target="_blank" rel="noopener noreferrer">官方入口 ↗</a></p><label><input type="checkbox" name="auto" value="{{ source.code }}" {% if source.subscription.auto_process or not source.subscription %}checked{% endif %}> 自动获取新内容并整理</label>{% if source.subscription %}<p class="intel-muted">上次检查：{{ source.subscription.last_checked_at|date:'Y-m-d H:i'|default:'尚未运行' }} · 最近成功：{{ source.subscription.last_success_at|date:'Y-m-d H:i'|default:'尚未运行' }}</p>{% if source.subscription.last_error %}<p class="program-error">{{ source.subscription.last_error }}</p>{% endif %}{% endif %}</div>{% endfor %}<button class="button" type="submit">保存订阅</button></form></section>
-<section class="intel-section"><div class="intel-section-head"><h2>自行添加的公开信源</h2><a class="button" href="{% url 'intelligence:program_source_new' %}">添加公开信源</a></div><p>支持 YouTube 频道或播放列表、B 站 UP 主、播客 RSS 和文章 RSS。添加前可以测试最近内容及筛选结果。</p>
-{% for source in custom_sources %}<div class="program-source"><strong>{{ source.custom_name }}</strong> · {{ source.kind_label }} · {% if not source.enabled %}已暂停{% elif not source.collect_enabled %}逐期添加{% else %}运行中{% endif %}<p><a href="{% url 'intelligence:program_source_edit' source.pk %}">管理</a> · <a href="{{ source.source_url }}" target="_blank" rel="noopener noreferrer">打开来源 ↗</a></p>{% if source.collect_enabled %}<p class="intel-muted">上次检查：{{ source.last_checked_at|date:'Y-m-d H:i'|default:'尚未运行' }} · 最近成功：{{ source.last_success_at|date:'Y-m-d H:i'|default:'尚未运行' }}</p>{% endif %}{% if source.last_error %}<p class="program-error">{{ source.last_error }}</p>{% endif %}</div>{% empty %}<p>还没有自行添加的信源。</p>{% endfor %}</section>
-<section class="intel-section"><h2>语音转写与 AI 整理</h2><p>百炼 Key：{% if key_configured %}已加密保存{% else %}尚未配置{% endif %}。本月转写已预留约 ¥{{ used_asr }}（按整段音频保守预估，含待核对任务；实际账单以百炼为准）。</p><p><a href="https://bailian.console.aliyun.com/" target="_blank" rel="noopener noreferrer">打开阿里云百炼控制台</a>，选择北京地域，开通模型服务并创建 API Key，然后在此填写。请勿把 Key 发到聊天中。</p><form method="post" class="intel-form">{% csrf_token %}<input type="hidden" name="action" value="settings">{{ form.non_field_errors }}<div class="intel-form-grid">{% for field in form %}<div class="intel-form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</div>{% endfor %}</div><button class="button" type="submit">保存服务设置</button></form></section>
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}"><link rel="stylesheet" href="{% static 'css/intelligence-programs.css' %}"><link rel="stylesheet" href="{% static 'css/intelligence-programs-management.css' %}?v=20260927-1">{% endblock %}
+{% block content %}
+<div class="program-manage">
+  <a class="program-manage-back" href="{% url 'intelligence:program_list' %}">← 精选订阅</a>
+  <div class="program-manage-heading"><div><span class="intel-eyebrow">投资阅读 / 信源管理</span><h1>管理精选订阅</h1><p>所有信源放在一起管理。随时修改筛选与自动整理设置，也可以暂停或移除订阅。</p></div><a class="button" href="{% url 'intelligence:program_source_new' %}">＋ 添加信源</a></div>
+  <div class="program-manage-stats"><div><strong>{{ total_count }}</strong><span>全部信源</span></div><div><strong>{{ active_count }}</strong><span>正在检查</span></div><div><strong>{{ paused_count }}</strong><span>已暂停 / 逐期添加</span></div></div>
+  <section class="program-manage-card" aria-labelledby="source-list-title">
+    <div class="program-manage-card-head"><div><h2 id="source-list-title">信源列表</h2><p>每条订阅都可以编辑、暂停或删除；按名称和类型查找。</p></div><form method="get" action="{% url 'intelligence:program_settings' %}" class="program-manage-search"><input id="program-source-search" name="q" type="search" value="{{ query }}" placeholder="搜索名称或链接" aria-label="搜索信源"><select id="program-source-kind" name="kind" aria-label="按类型筛选"><option value="">全部类型</option><option value="youtube" {% if kind_filter == 'youtube' %}selected{% endif %}>YouTube</option><option value="bilibili" {% if kind_filter == 'bilibili' %}selected{% endif %}>B 站</option><option value="podcast" {% if kind_filter == 'podcast' %}selected{% endif %}>播客 RSS</option><option value="article" {% if kind_filter == 'article' %}selected{% endif %}>文章 RSS</option></select><button type="submit" class="program-search-submit">筛选</button></form></div>
+    <div class="program-source-table-wrap"><table class="program-source-table"><thead><tr><th scope="col">信源</th><th scope="col">类型</th><th scope="col">定向筛选</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>
+    {% for row in sources %}<tr class="program-source-row" data-source-name="{{ row.name }} {{ row.url }}" data-source-kind="{{ row.kind }}">
+      <td><strong>{{ row.name }}</strong><a class="program-source-url" href="{{ row.url }}" target="_blank" rel="noopener noreferrer">{{ row.url }}</a></td>
+      <td>{{ row.kind_label }}</td><td>{{ row.rule }}</td>
+      <td>{% if not row.subscription.enabled %}<span class="program-status paused">已暂停</span>{% elif not row.subscription.collect_enabled %}<span class="program-status manual">逐期添加</span>{% else %}<span class="program-status active">检查中</span>{% endif %}<small>{% if row.subscription.collect_enabled %}上次检查：{{ row.subscription.last_checked_at|date:'m-d H:i'|default:'尚未运行' }}{% else %}手动加入公开视频{% endif %}</small>{% if row.subscription.last_error %}<span class="program-source-error">{{ row.subscription.last_error }}</span>{% endif %}</td>
+      <td><div class="program-source-actions"><a href="{% url 'intelligence:program_source_edit' row.subscription.pk %}">编辑</a><form method="post" action="{% url 'intelligence:program_source_edit' row.subscription.pk %}">{% csrf_token %}<button type="submit" name="action" value="toggle">{% if row.subscription.enabled %}暂停{% else %}恢复{% endif %}</button></form><form method="post" action="{% url 'intelligence:program_source_edit' row.subscription.pk %}" class="program-delete-form" data-source-name="{{ row.name }}">{% csrf_token %}<input type="hidden" name="action" value="delete"><button type="submit">删除</button></form></div></td>
+    </tr>{% empty %}<tr><td colspan="5" class="program-source-empty">没有找到符合条件的信源。<a href="{% url 'intelligence:program_source_new' %}">添加信源</a></td></tr>{% endfor %}
+    {% if sources %}<tr id="program-no-filter" hidden><td colspan="5" class="program-source-empty">没有找到符合条件的信源。</td></tr>{% endif %}
+    </tbody></table></div>
+  </section>
+  <section class="program-manage-card program-service-settings"><h2>转写与 AI 整理</h2><p>百炼 Key：{% if key_configured %}已加密保存{% else %}尚未配置{% endif %}。本月转写已预留约 ¥{{ used_asr }}；实际账单以百炼为准。</p><details {% if form.errors %}open{% endif %}><summary>管理服务设置</summary><p><a href="https://bailian.console.aliyun.com/" target="_blank" rel="noopener noreferrer">打开阿里云百炼控制台</a>，选择北京地域创建 API Key。请在下方填写，不要发送到聊天中。</p><form method="post" class="intel-form">{% csrf_token %}<input type="hidden" name="action" value="settings">{{ form.non_field_errors }}<div class="intel-form-grid">{% for field in form %}<div class="intel-form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</div>{% endfor %}</div><button class="button" type="submit">保存服务设置</button></form></details></section>
+</div>
+{% if editor_form %}
+<dialog id="program-source-editor" class="program-source-editor" aria-labelledby="program-editor-title"><form method="post" action="{% if editing_source %}{% url 'intelligence:program_source_edit' editing_source.pk %}{% else %}{% url 'intelligence:program_source_new' %}{% endif %}" class="program-editor-form">{% csrf_token %}
+  <header><div><h2 id="program-editor-title">{% if editing_source %}编辑信源{% else %}添加信源{% endif %}</h2><p>先预览筛选结果，再决定是否自动整理新内容。</p></div><a href="{% url 'intelligence:program_settings' %}" aria-label="关闭编辑面板">×</a></header>
+  <div class="program-editor-body">{{ editor_form.non_field_errors }}{% if manual_only %}<p class="program-editor-alert">这个 B 站 UP 主目前只能逐期添加公开视频，频道列表暂时无法自动抓取。</p>{% endif %}<div class="program-editor-grid">
+    <div class="wide"><label for="{{ editor_form.name.id_for_label }}">显示名称</label>{{ editor_form.name }}{{ editor_form.name.errors }}</div>
+    <div><label for="{{ editor_form.kind.id_for_label }}">来源类型</label>{{ editor_form.kind }}{{ editor_form.kind.errors }}</div>
+    <div><label for="{{ editor_form.publish_weekday.id_for_label }}">发布星期</label>{{ editor_form.publish_weekday }}{{ editor_form.publish_weekday.errors }}</div>
+    <div class="wide"><label for="{{ editor_form.url.id_for_label }}">频道、播放列表或 RSS 链接</label>{{ editor_form.url }}<small>更换链接时会建立新订阅；原订阅停止检查，已有节目和文字稿保留。</small>{{ editor_form.url.errors }}</div>
+    <div><label for="{{ editor_form.include_terms.id_for_label }}">标题包含</label>{{ editor_form.include_terms }}{{ editor_form.include_terms.errors }}</div>
+    <div><label for="{{ editor_form.include_mode.id_for_label }}">关键词关系</label>{{ editor_form.include_mode }}{{ editor_form.include_mode.errors }}</div>
+    <div><label for="{{ editor_form.exclude_terms.id_for_label }}">标题排除</label>{{ editor_form.exclude_terms }}{{ editor_form.exclude_terms.errors }}</div>
+    <div><label for="{{ editor_form.min_duration_minutes.id_for_label }}">最短时长（分钟）</label>{{ editor_form.min_duration_minutes }}{{ editor_form.min_duration_minutes.errors }}</div>
+    <div class="wide"><label class="program-auto-option">{{ editor_form.auto_process }}<span><strong>发现新内容后自动生成摘要</strong><small><b>不勾选：</b>命中的节目仍会进入列表，但不会自动转写或生成 AI 摘要，之后可以手动整理。<br><b>勾选：</b>自动获取公开正文或字幕；没有文字稿的音视频按服务设置尝试转写，再生成 AI 摘要。首次只整理最新 1 条，费用受月度预算限制。</small></span></label>{{ editor_form.auto_process.errors }}</div>
+  </div>{% if preview %}<div class="program-preview"><h3>最近内容预览</h3><p>仅查看命中结果，不保存、不转写、不生成摘要。</p>{% for item, matched in preview.matches %}<div class="program-preview-row"><span>{% if matched %}✓ 命中{% else %}— 跳过{% endif %}</span><strong>{{ item.title }}</strong></div>{% endfor %}</div>{% endif %}</div>
+  <p class="program-preview-help">“预览筛选结果”只临时查看最近哪些节目命中，不保存订阅，也不转写或生成摘要。</p>
+  <footer><span></span><div><button class="button ghost" type="submit" name="action" value="preview">预览筛选结果</button><button class="button" type="submit" name="action" value="save">{% if editing_source %}保存改动{% else %}添加订阅{% endif %}</button></div></footer>
+</form></dialog>
+{% endif %}
+<dialog id="program-delete-dialog" class="program-delete-dialog" aria-labelledby="program-delete-title"><h2 id="program-delete-title">删除这条订阅？</h2><p>删除后停止后续检查和自动整理，并从信源列表移除。已有节目、文字稿和归档仍可阅读。</p><div><button type="button" class="button ghost" data-delete-cancel>取消</button><button type="button" class="button" data-delete-confirm>删除订阅</button></div></dialog>
 {% endblock %}
+{% block scripts %}<script>
+(() => {
+  const editor = document.getElementById('program-source-editor');
+  if (editor && !editor.open) editor.showModal();
+  const search = document.getElementById('program-source-search');
+  const kind = document.getElementById('program-source-kind');
+  const rows = [...document.querySelectorAll('.program-source-row')];
+  function filterRows() {
+    const query = search.value.trim().toLocaleLowerCase();
+    rows.forEach(row => { row.hidden = !!((query && !row.dataset.sourceName.toLocaleLowerCase().includes(query)) ||
+      (kind.value && row.dataset.sourceKind !== kind.value)); });
+    const empty = document.getElementById('program-no-filter');
+    if (empty) empty.hidden = rows.some(row => !row.hidden);
+  }
+  search?.addEventListener('input', filterRows);
+  kind?.addEventListener('change', filterRows);
+  const confirm = document.getElementById('program-delete-dialog');
+  let pending = null;
+  document.querySelectorAll('.program-delete-form').forEach(form => form.addEventListener('submit', event => {
+    event.preventDefault(); pending = form;
+    confirm.querySelector('h2').textContent = `删除「${form.dataset.sourceName}」？`;
+    confirm.showModal();
+  }));
+  confirm.querySelector('[data-delete-cancel]').addEventListener('click', () => confirm.close());
+  confirm.querySelector('[data-delete-confirm]').addEventListener('click', () => pending?.submit());
+})();
+</script>{% endblock %}
