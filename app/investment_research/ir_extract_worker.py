@@ -90,6 +90,7 @@ if __name__ == '__main__':
         if len(raw) > 20*1024*1024:
             raise ValueError('Input exceeds limit')
         print(json.dumps(extract(raw, sys.argv[1]), ensure_ascii=True))
-    except Exception:
-        print(json.dumps({'error': '文件无法在限额内提取正文，请核对原件或手动导入可读材料。'}))
+    except Exception as exc:
+        print(json.dumps({'error': '文件无法在限额内提取正文，请核对原件或手动导入可读材料。',
+                          'error_type': type(exc).__name__}))
         sys.exit(1)

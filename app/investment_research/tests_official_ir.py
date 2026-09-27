@@ -38,6 +38,13 @@ class FakeClient:
 
 
 class OfficialIRProviderTests(SimpleTestCase):
+    def test_report_period_in_body_is_not_a_publication_date(self):
+        body = '<article><p>Quarter ended July 26, 2026.</p><p>' + 'Financial results. '*30 + '</p></article>'
+        response = IRResponse('https://nvidianews.nvidia.com/news/test', body.encode(), 'text/html')
+        self.assertIsNone(extract_material(response)['published_at'])
+        response.raw = ('<div class="article-date">August 26, 2026</div>'+body).encode()
+        self.assertEqual(extract_material(response)['published_at'], date(2026,8,26))
+
     def test_catalogue_identity_is_market_qualified(self):
         self.assertEqual(len(COMPANIES), 13)
         self.assertEqual(company_for_security(Security(symbol='GOOG', market='US', asset_type='stock')).key, 'alphabet')

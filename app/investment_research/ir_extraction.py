@@ -1,5 +1,6 @@
 """Turn official originals into citeable text without interpreting financial values."""
 import json
+import logging
 import io
 import re
 import subprocess
@@ -13,7 +14,7 @@ from bs4 import BeautifulSoup
 from .providers.ir_http import IRError
 from .providers.official_ir import parse_date
 
-EXTRACTOR_VERSION = 'official-ir-1'
+EXTRACTOR_VERSION = 'official-ir-2'
 MEDIA_TYPES = {'pdf': 'application/pdf', 'html': 'text/html',
                'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -46,8 +47,11 @@ def extract_material(response):
             )
             result = json.loads(completed.stdout)
             if completed.returncode or result.get('error'):
+                logging.getLogger(__name__).warning('IR extraction failed: kind=%s returncode=%s error_type=%s',
+                                                    kind, completed.returncode, result.get('error_type', 'unknown'))
                 raise ValueError
         except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            logging.getLogger(__name__).warning('IR extraction unavailable: kind=%s reason=%s', kind, type(exc).__name__)
             raise AttachmentTextUnavailable(MEDIA_TYPES[kind]) from exc
         result.update(media_type=MEDIA_TYPES[kind], published_at=None)
         return result
@@ -59,6 +63,11 @@ def extract_material(response):
         published = parse_date(node.get('content') or node.get('datetime'))
         if published:
             break
+    if published is None:
+        for node in soup.select('.article-date'):
+            published = parse_date(node.get_text(' ', strip=True))
+            if published:
+                break
     # ASP.NET sites wrap the full article in a form; remove controls, not the article.
     for node in soup.select('script, style, nav, header, footer, input, button, select, textarea, noscript, iframe, svg, template, [hidden], [aria-hidden="true"]'):
         node.decompose()
@@ -81,8 +90,4 @@ def extract_material(response):
     text = '\n'.join(re.sub(r'\s+', ' ', line).strip() for line in body.get_text().splitlines() if line.strip())
     if len(text) < 300 or len(text) > 1_000_000 or re.search(r'^(access denied|just a moment|robot or human)', text, re.I):
         raise IRError('官方材料正文为空、访问受限或超过处理范围。')
-    if published is None:
-        # Datelines near the start, not arbitrary dates in a financial table.
-        match = re.search(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, 20\d{2}', text[:1500])
-        published = parse_date(match[0]) if match else None
     return {'text': text, 'media_type': 'text/html', 'sections': [], 'published_at': published}

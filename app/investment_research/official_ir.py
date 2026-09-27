@@ -184,7 +184,7 @@ def _archive_ir_response(document, response, *, acquisition_note=''):
         document.content_text = text
         document.content_sha256 = version.content_sha256
         document.fetched_at = version.fetched_at
-        document.published_at = document.published_at or extracted['published_at']
+        document.published_at = extracted['published_at'] or document.published_at
         document.metadata = {**document.metadata, 'content_error': extraction_error,
                              'content_checked_at': version.fetched_at.isoformat()}
         document.save()

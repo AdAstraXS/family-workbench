@@ -110,8 +110,10 @@
     </section>
   {% else %}
     <div class="research-document-empty">
-      <strong>当前仅归档元数据</strong>
-      <p>这份资料尚未提取正文，可以通过“官方原文”查看完整内容。</p>
+      {% if current_content_version %}<strong>已保存原件，尚无可引用正文</strong>
+      <p>可以下载本版原始文件阅读；这份材料暂不提供给 AI。</p>
+      {% else %}<strong>当前仅归档元数据</strong>
+      <p>这份资料尚未提取正文，可以通过“官方原文”查看完整内容。</p>{% endif %}
     </div>
   {% endif %}
 </article>
