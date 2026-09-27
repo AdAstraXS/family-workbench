@@ -100,6 +100,7 @@ class Annotation(TimestampedModel):
     quote = models.TextField(max_length=4000)
     note = models.TextField(max_length=10000, blank=True)
     visibility = models.CharField(max_length=10, choices=Book.VISIBILITY, default=Book.PRIVATE)
+    highlight_visible = models.BooleanField(default=True)
     revision = models.PositiveIntegerField(default=1)
     text_matched = models.BooleanField(default=False)
 

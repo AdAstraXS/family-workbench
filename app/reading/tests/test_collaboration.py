@@ -70,6 +70,36 @@ class CollaborationTests(TestCase):
         bad={**self.payload(book),"quote":"外部文字","anchor":{"cfi":"epubcfi(/6/2!/4/4:0)","section":99}}
         self.assertEqual(self.client.post(self.url("annotations",book),bad,content_type="application/json").status_code,400)
 
+    def test_only_own_plain_highlight_can_be_hidden_and_restored(self):
+        book=self.ready()
+        payload={**self.payload(book),"quote":"阅读测试文本。","note":"","visibility":"family",
+                 "anchor":{"cfi":"epubcfi(/6/2!/4/4:0)","section":0}}
+        created=self.client.post(self.url("annotations",book),payload,content_type="application/json")
+        self.assertEqual(created.status_code,201,created.content)
+        note_id=created.json()["id"]
+        toggle=reverse("reading:highlight_visibility",args=[note_id])
+        self.client.force_login(self.peer.user)
+        self.assertEqual(self.client.post(toggle,{"visible":False,"revision":1},content_type="application/json").status_code,404)
+        self.client.force_login(self.owner.user)
+        hidden=self.client.post(toggle,{"visible":False,"revision":1},content_type="application/json")
+        self.assertEqual(hidden.status_code,200,hidden.content)
+        self.assertFalse(hidden.json()["highlight_visible"])
+        self.assertEqual(self.client.post(toggle,{"visible":True,"revision":1},content_type="application/json").status_code,409)
+        self.assertContains(self.client.get(reverse("reading:note",args=[note_id])),"已取消划线")
+        restored=self.client.post(toggle,{"visible":True,"revision":2},content_type="application/json")
+        self.assertTrue(restored.json()["highlight_visible"])
+        self.assertFalse(self.client.post(toggle,{"visible":False,"revision":3},content_type="application/json").json()["highlight_visible"])
+        detail=reverse("reading:note",args=[note_id])
+        self.client.post(detail,{"revision":4,"note":"我的批注","visibility":"family"})
+        self.assertTrue(Annotation.objects.get(pk=note_id).highlight_visible)
+        self.assertEqual(self.client.post(toggle,{"visible":False,"revision":5},content_type="application/json").status_code,400)
+        self.client.post(detail,{"revision":5,"note":"","visibility":"family"})
+        self.client.force_login(self.peer.user)
+        self.client.post(reverse("reading:comment",args=[note_id]),{"body":"家庭回复"})
+        self.client.force_login(self.owner.user)
+        self.assertEqual(self.client.post(toggle,{"visible":False,"revision":6},content_type="application/json").status_code,400)
+        self.assertTrue(Annotation.objects.get(pk=note_id).highlight_visible)
+
     def test_plan_private_manual_completion_and_online_position_separate(self):
         book=self.ready()
         response=self.client.post(reverse("reading:plans"),{"title":"秋季阅读","target_date":"2026-12-31"})
