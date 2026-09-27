@@ -15,10 +15,12 @@ from ai_analysis.models import AiAnalysisRequest, AiProvider
 from family_core.models import Family, FamilyMember
 from portfolio.models import Security
 
+from .analysis_materials import source_preview
 from .models import OfficialResearchContentVersion, OfficialResearchDocument
 from .research_ai import ResearchAiError
 from .services import create_dossier, save_thesis_revision
-from .thesis_analysis import analysis_sections, generate_thesis_analysis
+from .tests_financial_overview import filing
+from .thesis_analysis import generate_thesis_analysis
 
 
 class ThesisAnalysisTests(TestCase):
@@ -74,16 +76,15 @@ class ThesisAnalysisTests(TestCase):
                            "usage": {"prompt_tokens": 500, "completion_tokens": 200}}).encode()
 
     def generate(self, **changes):
-        keys = [section["key"] for section in analysis_sections(self.dossier)]
         arguments = {"actor": self.actor, "dossier_id": self.dossier.pk,
-                     "section_keys": keys[:2], "provider_id": self.provider.pk,
+                     "provider_id": self.provider.pk,
                      "consent": True, "transport": lambda request, **kwargs: self.response(),
                      "url_validator": lambda provider: "https://example.ai/v1/chat/completions"}
         arguments.update(changes)
         with patch.dict(os.environ, {"SYNTHESIS_TEST_KEY": "test-token"}):
             return generate_thesis_analysis(**arguments)
 
-    def test_selected_sections_are_sent_once_and_result_links_saved_versions(self):
+    def test_prepared_sources_are_sent_once_and_result_links_saved_versions(self):
         sent = []
 
         def transport(request, **kwargs):
@@ -92,9 +93,10 @@ class ThesisAnalysisTests(TestCase):
 
         analysis = self.generate(transport=transport)
         self.assertEqual(analysis.status, AiAnalysisRequest.STATUS_SUCCESS)
-        self.assertEqual(len(analysis.scope["sections"]), 2)
+        self.assertEqual(len(analysis.scope["sources"]), 2)
         self.assertEqual(analysis.scope["thesis_revision_id"], self.dossier.current_revision_id)
         self.assertIn("Official report", sent[0])
+        self.assertNotIn(self.versions[0].content_text, sent[0])
         self.assertNotIn("test-token", analysis.prompt)
         cite = analysis.result.result_json["assessments"][0]["citations"][0]
         self.assertIn(cite["version_id"], [version.pk for version in self.versions])
@@ -111,13 +113,52 @@ class ThesisAnalysisTests(TestCase):
                                           args=[self.dossier.pk, analysis.pk]))
         self.assertEqual(private.status_code, 404)
 
-    def test_consent_and_bogus_citation_fail_closed(self):
+    def test_consent_and_bogus_citation_degrade_to_unknown(self):
         with self.assertRaisesMessage(ResearchAiError, "确认"):
             self.generate(consent=False)
         self.assertEqual(AiAnalysisRequest.objects.count(), 0)
-        with self.assertRaisesMessage(ResearchAiError, "未提供"):
-            self.generate(transport=lambda request, **kwargs: self.response("E999"))
-        self.assertEqual(AiAnalysisRequest.objects.get().status, AiAnalysisRequest.STATUS_FAILED)
+        analysis = self.generate(transport=lambda request, **kwargs: self.response("E999"))
+        self.assertEqual(analysis.status, AiAnalysisRequest.STATUS_SUCCESS)
+        self.assertEqual(analysis.result.result_json["invalid_reference_count"], 1)
+        self.assertEqual(analysis.result.result_json["assessments"][0]["verdict"], "unknown")
+        self.assertFalse(analysis.result.result_json["assessments"][0]["citations"])
+        self.assertFalse(analysis.result.result_json["suggested_revision"])
+
+    def test_analysis_page_requires_no_source_selection(self):
+        self.client.force_login(self.user)
+        with patch.dict(os.environ, {"SYNTHESIS_TEST_KEY": "test-token"}):
+            response = self.client.get(reverse("investment_research:thesis_analysis",
+                                               args=[self.dossier.pk]))
+        self.assertContains(response, "本次自动整理的资料")
+        self.assertNotContains(response, 'name="sections"')
+        self.assertEqual(len(source_preview(self.dossier)), 2)
+
+    def test_verified_three_year_financial_cells_enter_prepared_packet(self):
+        sample = filing()
+        document = OfficialResearchDocument.objects.create(
+            security=self.security, source="sec", external_id="annual-cited",
+            document_type="10-k", title="Annual report", source_url="https://www.sec.gov/annual",
+            period_end=sample.document.period_end, metadata={"cik": "1"},
+        )
+        OfficialResearchContentVersion.objects.create(
+            document=document, version_number=1, source_url=document.source_url,
+            raw_sha256=hashlib.sha256(gzip.decompress(sample.raw_gzip)).hexdigest(),
+            raw_gzip=sample.raw_gzip, content_text=sample.content_text,
+            content_sha256=hashlib.sha256(sample.content_text.encode()).hexdigest(),
+            extractor_version="test", fetched_at=timezone.now(),
+        )
+        sent = []
+        def transport(request, **kwargs):
+            sent.append(json.loads(request.data)["messages"][1]["content"])
+            return self.response()
+        analysis = self.generate(transport=transport)
+        self.assertIn("营业收入 150.00 亿美元", sent[0])
+        self.assertIn("毛利率 60.00 %", sent[0])
+        self.assertEqual(analysis.scope["financial_periods"],
+                         ["2025-06-30", "2026-06-30", "2027-06-30"])
+        self.assertGreater(analysis.scope["financial_count"], 10)
+        cite = analysis.result.result_json["assessments"][0]["citations"][0]
+        self.assertEqual(cite["document_id"], document.pk)
 
     def test_old_analysis_keeps_original_thesis_version(self):
         analysis = self.generate()

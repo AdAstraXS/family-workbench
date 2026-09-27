@@ -6,10 +6,17 @@
       <p class="research-private-note">{{ analysis.created_at|date:"Y-m-d H:i" }} · 第 {{ analysis.scope.thesis_revision_number }} 版判断 · {{ analysis.provider.name }} / {{ analysis.provider.model_name }} · 仅自己可见</p></div>
     <a class="button" href="{% url 'investment_research:thesis_analysis' dossier.pk %}">返回分析入口</a></header>
   {% if not is_current_revision %}<div class="research-document-empty">这份草稿对照的是旧版判断。你之后已修改正式判断，请按当时的语境阅读。</div>{% endif %}
-  <section class="research-analysis-context"><h2>本次读了哪些材料</h2><ul>
+  <section class="research-analysis-context"><h2>本次分析依据</h2>
+    {% if analysis.scope.sources %}<p>已整理 {{ analysis.scope.financial_count }} 项财务指标、{{ analysis.scope.narrative_count }} 条官方要点{% if analysis.scope.financial_periods %}；财年截至 {{ analysis.scope.financial_periods|join:"、" }}{% endif %}。</p>{% endif %}
+    <details><summary>查看官方资料与版本</summary><ul>
+    {% for source in analysis.scope.sources %}<li><a href="{% url 'investment_research:document_detail' dossier.pk source.document_id %}?version={{ source.version_id }}">{{ source.document_title }}</a> · {{ source.source }}{% if source.period_end %} · 截至 {{ source.period_end }}{% endif %}</li>{% endfor %}
     {% for section in analysis.scope.sections %}<li><a href="{% url 'investment_research:document_detail' dossier.pk section.document_id %}?version={{ section.version_id }}">{{ section.document_title }}</a> · {{ section.source }} · 正文版本 {{ section.version_id }} · 字符 {{ section.start }}–{{ section.end }} / {{ section.total }}</li>{% endfor %}
-  </ul><p class="research-private-note">这份结论只覆盖上述片段；未选中的年报章节、其他季度和其他资料未进入本次模型分析。引用固定到当时的正文版本。</p></section>
+    </ul></details>
+    {% if analysis.scope.preparation_problem %}<p class="research-private-note">财务整理提示：{{ analysis.scope.preparation_problem }}。请核查财务概览。</p>{% endif %}
+    <p class="research-private-note">分析只覆盖本次整理的指标和要点；每条引用固定到生成当时保存的原文版本。</p>
+  </section>
   {% if result %}
+    {% if result.invalid_reference_count %}<div class="research-document-empty">模型有 {{ result.invalid_reference_count }} 项引用无效，已标为“证据不足”；这些条目不能作为修订判断的依据。</div>{% endif %}
     <div class="research-analysis-results">
       <h2>逐项核查</h2>
       {% for item in result.assessments %}

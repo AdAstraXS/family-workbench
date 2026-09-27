@@ -75,7 +75,8 @@ from .futu_financials import (
     FutuFinancialError, breakdown_tables, provider_code, refresh_futu_financials,
     highlight_rows, statement_tables,
 )
-from .thesis_analysis import analysis_sections, generate_thesis_analysis
+from .analysis_materials import source_preview
+from .thesis_analysis import generate_thesis_analysis
 from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
 from .review_plan import (
     confirm_review_plan, generate_review_plan, latest_plan_source, plan_context,
@@ -472,7 +473,6 @@ def thesis_analysis(request, pk):
         try:
             analysis = generate_thesis_analysis(
                 actor=member, dossier_id=dossier.pk,
-                section_keys=request.POST.getlist("sections"),
                 provider_id=provider_id,
                 consent=request.POST.get("one_time_consent") == "yes",
             )
@@ -483,12 +483,7 @@ def thesis_analysis(request, pk):
             return redirect("investment_research:thesis_analysis_detail", pk=pk,
                             analysis_pk=analysis.pk)
         return redirect("investment_research:thesis_analysis", pk=pk)
-    sections = analysis_sections(dossier)
-    chosen = 0
-    for section in sections:
-        if chosen < 2 and section["label"] in {"管理层讨论与分析", "财务报表与附注", "正文开头"}:
-            section["suggested"] = True
-            chosen += 1
+    sources = source_preview(dossier)
     histories = [analysis for analysis in AiAnalysisRequest.objects.filter(
         member=member, family=member.family, module="investment_research",
         analysis_type="thesis_synthesis",
@@ -496,7 +491,7 @@ def thesis_analysis(request, pk):
         if (analysis.scope or {}).get("dossier_id") == dossier.pk][:10]
     return render(request, "investment_research/thesis_analysis.html", {
         "dossier": dossier, "revision": dossier.current_revision,
-        "sections": sections, "providers": available_research_providers() if can_write else [],
+        "sources": sources, "providers": available_research_providers() if can_write else [],
         "can_write": can_write, "histories": histories,
     })
 
