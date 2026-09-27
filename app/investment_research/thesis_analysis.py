@@ -21,7 +21,7 @@ from .research_ai import (
 from .services import DossierNotFound, _require_writer
 
 
-PROMPT_VERSION = "research-thesis-synthesis-v4"
+PROMPT_VERSION = "research-thesis-synthesis-v5"
 
 
 class ResponseFormatError(ResearchAiError):
@@ -131,7 +131,18 @@ def _validate_output(raw, targets, evidence):
             citations.extend({**cite, "id": ref} for cite in evidence_by_id[ref]["citations"])
         citations = list({(cite["version_id"], cite["start"], cite["end"]): cite
                           for cite in citations}.values())
+        detail = _model_text(item.get("detail"), 550)
+        boundary = _model_text(item.get("boundary"), 300)
+        implication = _model_text(item.get("implication"), 250)
+        detail, _ = _redact_quantified_sentences(detail)
+        boundary, _ = _redact_quantified_sentences(boundary)
+        implication, _ = _redact_quantified_sentences(implication)
+        cited_facts = ([{"id": ref, "text": evidence_by_id[ref]["text"]}
+                        for ref in valid_refs[:3] if evidence_by_id[ref].get("text")]
+                       if valid_refs else [])
         cleaned.append({**target, "verdict": verdict, "reason": reason,
+                        "detail": detail, "boundary": boundary,
+                        "implication": implication, "cited_facts": cited_facts,
                         "citations": citations})
     notes = []
     for field in ("gaps", "next_checks"):
@@ -151,7 +162,10 @@ def _validate_output(raw, targets, evidence):
     if invalid_refs:
         suggestion = ""
         notes[0].append("有些条目的模型引用无效，已改为证据不足；请核查后再修订判断。")
-    return {"assessments": cleaned, "gaps": notes[0],
+    headline, _ = _redact_quantified_sentences(_model_text(value.get("headline"), 120))
+    overview, _ = _redact_quantified_sentences(_model_text(value.get("overview"), 650))
+    return {"headline": headline, "overview": overview,
+            "assessments": cleaned, "gaps": notes[0],
             "next_checks": notes[1], "suggested_revision": suggestion,
             "invalid_reference_count": invalid_refs}
 
@@ -190,14 +204,20 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
         "你仅看到了本次整理后的指标和摘录，不能声称读过整份财报或所有 IR 材料。"
         "逐项评估给定的假设和问题，保留支持、反证、矛盾与未知；不要给买卖建议。"
         "必须返回一个非空的简体中文 JSON 对象，不能返回空内容、Markdown 或代码围栏。"
-        "assessments 数组按输入顺序，每项含 kind、index、verdict、reason、evidence_ids；"
+        "先写 headline（本次最重要的简短结论）和 overview（两三句，说明与用户判断的关系）。"
+        "assessments 数组按输入顺序，每项含 kind、index、verdict、reason、detail、boundary、implication、evidence_ids；"
+        "reason 是一句话结论；detail 解释支持和反证；boundary 说明证据不能证明什么；implication 说明对个人判断的影响。"
+        "每项 reason、detail、boundary、implication 分别尽量控制在 35、80、50、50 个汉字内，优先覆盖全部条目。"
         "verdict 仅 supports/weakens/mixed/unknown；有结论必须引用本次资料包中的 E 编号，未知可以无引用。"
         "另返回 gaps 字符串数组、next_checks 字符串数组、suggested_revision 字符串。"
         "所有解释只写定性判断，不另算金额、数量或百分比；指标数值已在财务概览展示。"
         "引用只能支持其对应的断言，不能将公司披露、AI 推断和成员观点混为一谈。"
         "如果资料包不足以回答某项，verdict 设 unknown 并说清缺口。"
-        '格式示例：{"assessments":[{"kind":"pillar","index":0,"verdict":"unknown",'
-        '"reason":"本次资料尚无证据","evidence_ids":[]}],"gaps":[],"next_checks":[],"suggested_revision":""}。'
+        '格式示例：{"headline":"现金回报仍待验证","overview":"收入有支持，投入回报仍需跟踪。",'
+        '"assessments":[{"kind":"pillar","index":0,"verdict":"unknown",'
+        '"reason":"本次资料尚无证据","detail":"","boundary":"尚无现金口径",'
+        '"implication":"暂不提高长期增长假设","evidence_ids":[]}],'
+        '"gaps":[],"next_checks":[],"suggested_revision":""}。'
     )
     lines = [f"公司：{dossier.security.symbol}；当前判断版本：{revision.revision_number}。",
              f"当前判断：{revision.thesis[:2000]}",
@@ -234,6 +254,7 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
         scope={"dossier_id": dossier.pk, "thesis_revision_id": revision.pk,
                "thesis_revision_number": revision.revision_number,
                "sources": packet["sources"], "financial_periods": packet["periods"],
+               "valuation_basis": packet["valuation_basis"],
                "financial_count": packet["financial_count"],
                "narrative_count": packet["narrative_count"],
                "preparation_problem": packet["problem"],

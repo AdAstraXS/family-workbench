@@ -6,7 +6,7 @@
     <div><p class="research-eyebrow">公司研究 · {{ dossier.security.symbol }} / {{ dossier.security.market }}</p><h1>{{ dossier.security.name }}</h1><p class="research-private-note">本档案仅自己可见。正式判断只在你保存时更新。</p></div>
     <div class="research-actions">{% if can_write and revision %}<a class="button" href="{% url 'investment_research:edit' dossier.pk %}">修改我的判断</a>{% elif can_write %}<a class="button" href="{% url 'investment_research:first_thesis' dossier.pk %}">保存我的第一版判断</a>{% endif %}<a class="button" href="{% url 'investment_research:history' dossier.pk %}">判断历史</a></div>
   </header>
-  <nav class="research-workflow" aria-label="公司研究步骤"><span aria-current="step">1 · 当前判断</span><a href="{% url 'investment_research:financials' dossier.pk %}">2 · 财务概览</a><a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">3 · AI 综合分析</a><a href="{% url 'investment_research:documents' dossier.pk %}">官方资料</a></nav>
+  <nav class="research-workflow" aria-label="公司研究步骤"><span aria-current="step">1 · 当前判断</span><a href="{% url 'investment_research:financials' dossier.pk %}">2 · 财务概览</a><a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">3 · AI 综合分析</a><a href="{% url 'investment_research:next_day_tracking' dossier.pk %}">次日跟踪</a><a href="{% url 'investment_research:documents' dossier.pk %}">官方资料</a></nav>
   {% if dossier.initial_thesis %}<details class="research-initial"><summary>最初记录（不会随当前判断修改）</summary><p>{{ dossier.initial_thesis|linebreaksbr }}</p></details>{% endif %}
   {% if revision %}
     <section class="research-current research-hero"><p class="research-eyebrow">我的正式判断 · 第 {{ revision.revision_number }} 版 · {{ revision.created_at|date:"Y-m-d H:i" }}</p><h2>{{ revision.thesis|linebreaksbr }}</h2>
@@ -18,7 +18,7 @@
   {% endif %}
   <div class="research-main-actions">
     <a class="research-action-card" href="{% url 'investment_research:financials' dossier.pk %}"><span class="research-action-number">01</span><h2>看财务概览</h2><p>近三个完整财年的增长、利润、现金和财务承受力。每个数字可回到年报原文；页内也有富途财务对照入口。</p><strong>打开财务概览 →</strong></a>
-    <a class="research-action-card" href="{% url 'investment_research:thesis_analysis' dossier.pk %}"><span class="research-action-number">02</span><h2>检查我的判断</h2><p>选定官方资料，让 AI 逐项整理支持、反证与缺口；由你决定是否修改判断。</p><strong>打开综合分析 →</strong></a>
+    <a class="research-action-card" href="{% url 'investment_research:thesis_analysis' dossier.pk %}"><span class="research-action-number">02</span><h2>公司研究简报</h2><p>自动整理官方资料，围绕你的判断展示结论、证据、下次核查与估值试算；逐项核查保留在简报中。</p><strong>打开综合分析 →</strong></a>
     <a class="research-action-card" href="{% url 'investment_research:documents' dossier.pk %}"><span class="research-action-number">03</span><h2>查看官方资料</h2><p>阅读 SEC 年报、季报和公司 IR 新闻稿，核对财务数字与引文。</p><strong>已归档 {{ document_count }} 份 · 查看资料 →</strong></a>
   </div>
   {% if revision %}<section class="research-source-summary"><div><h2>下期财报复核</h2><p>{% if pending_review_count %}{{ pending_review_count }} 份新财报待复核，可逐项核查。{% elif needs_revision_count %}{{ needs_revision_count }} 份复核提示修订判断 · 待修订判断。{% else %}暂无待复核的新财报。{% endif %}</p>{% for item in review_items %}<p><a href="{% url 'investment_research:filing_review' dossier.pk item.document.pk %}">{{ item.document.title }}</a> · {{ item.document.published_at|date:"Y-m-d" }}</p>{% endfor %}</div><div class="research-actions"><a class="button" href="{% url 'investment_research:review_plan' dossier.pk %}">{% if current_plan %}查看已确认的下期计划{% else %}制定下期复核计划{% endif %}</a><a class="button" href="{% url 'investment_research:filing_reviews' dossier.pk %}">复核记录</a></div></section>{% endif %}

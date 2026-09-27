@@ -77,6 +77,8 @@ from .futu_financials import (
 )
 from .analysis_materials import source_preview
 from .thesis_analysis import generate_thesis_analysis
+from .valuation_trial import build_valuation_trial
+from .next_day_digest import latest_digest, pending_sources
 from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
 from .review_plan import (
     confirm_review_plan, generate_review_plan, latest_plan_source, plan_context,
@@ -479,7 +481,7 @@ def thesis_analysis(request, pk):
         except (ResearchAiError, ResearchValidationError) as exc:
             messages.error(request, str(exc))
         else:
-            messages.success(request, "AI 综合分析草稿已生成，请逐项核对引用。")
+            messages.success(request, "公司研究简报已生成；关键结论可展开核对原文。")
             return redirect("investment_research:thesis_analysis_detail", pk=pk,
                             analysis_pk=analysis.pk)
         return redirect("investment_research:thesis_analysis", pk=pk)
@@ -516,9 +518,37 @@ def thesis_analysis_detail(request, pk, analysis_pk):
                 "supports": "有支持", "weakens": "有反证", "mixed": "证据混合",
                 "unknown": "证据不足",
             }.get(item.get("verdict"), "待核对")
-    return render(request, "investment_research/thesis_analysis_detail.html", {
+    mode = "audit" if request.GET.get("mode") == "audit" else "brief"
+    valuation = (build_valuation_trial(dossier.security, analysis.scope, request.GET)
+                 if mode == "brief" else None)
+    return render(request, "investment_research/thesis_analysis_detail.html"
+                  if mode == "audit" else "investment_research/thesis_analysis_brief.html", {
         "dossier": dossier, "analysis": analysis, "result": result,
+        "valuation": valuation,
         "is_current_revision": (analysis.scope or {}).get("thesis_revision_id") == dossier.current_revision_id,
+    })
+
+
+@_method(["GET"])
+def next_day_tracking(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    digest = latest_digest(dossier)
+    pending = pending_sources(dossier)
+    latest_analysis = next((item for item in AiAnalysisRequest.objects.filter(
+        member=member, family=member.family, module="investment_research",
+        analysis_type="thesis_synthesis", status=AiAnalysisRequest.STATUS_SUCCESS,
+    ).order_by("-created_at")[:40]
+        if (item.scope or {}).get("dossier_id") == dossier.pk), None)
+    checks = (latest_analysis.result.result_json or {}).get("next_checks", []) if latest_analysis else []
+    quote = build_valuation_trial(dossier.security, {}, {})
+    return render(request, "investment_research/next_day_tracking.html", {
+        "dossier": dossier, "digest": digest,
+        "result": digest.result.result_json if digest else None,
+        "pending": pending, "checks": checks,
+        "latest_analysis": latest_analysis, "quote": quote,
     })
 
 

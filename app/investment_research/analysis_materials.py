@@ -13,7 +13,8 @@ from .tenk_chapters import tenk_chapter_coverage
 
 
 NARRATIVE_TERMS = ("revenue", "growth", "demand", "cash", "margin", "cloud",
-                   "customer", "segment", "capital expenditure", "guidance")
+                   "customer", "segment", "capital expenditure", "guidance",
+                   "lease", "depreciation", "investment", "outlook")
 NARRATIVE_TYPES = {"10-q", "earnings_release", "prepared_remarks", "transcript",
                    "shareholder_letter", "investor_update"}
 
@@ -79,6 +80,7 @@ def prepare_analysis_materials(dossier):
     annual = next((v for v in preview if v.document.source == "sec"
                    and v.document.document_type == "10-k"), None)
     evidence, sources, periods = [], [], []
+    valuation_basis = {}
     problem = ""
 
     def add(version, text, citations):
@@ -99,6 +101,15 @@ def prepare_analysis_materials(dossier):
             ).select_related("document").order_by("-version_number", "-pk"))
         fiscal_periods, rows, problem = build_financial_overview(annual, historical)
         periods = [period.isoformat() for period in fiscal_periods]
+        eps_row = next((row for row in rows if row["code"] == "diluted_eps"), None)
+        if eps_row:
+            for period, cell in reversed(list(zip(fiscal_periods, eps_row["cells"]))):
+                citations = _citations(cell)
+                if cell.get("amount") is not None and cell["amount"] > 0 and citations:
+                    valuation_basis = {"eps": str(cell["amount"]),
+                                       "period_end": period.isoformat(),
+                                       "citation": citations[0]}
+                    break
         for row in rows:
             for period, cell in zip(fiscal_periods, row["cells"]):
                 amount = cell.get("amount")
@@ -142,6 +153,7 @@ def prepare_analysis_materials(dossier):
                 "start": start, "end": start + len(quote), "hash": quote_digest(quote),
             }])
     return {"evidence": evidence, "sources": sources, "periods": periods,
+            "valuation_basis": valuation_basis,
             "financial_count": sum("财年截至" in item["text"] for item in evidence),
             "narrative_count": sum("摘录" in item["text"] for item in evidence),
             "problem": problem}

@@ -22,6 +22,8 @@ urlpatterns = [
     path("<int:pk>/analysis/", views.thesis_analysis, name="thesis_analysis"),
     path("<int:pk>/analysis/<int:analysis_pk>/", views.thesis_analysis_detail,
          name="thesis_analysis_detail"),
+    path("<int:pk>/analysis/next-day/", views.next_day_tracking,
+         name="next_day_tracking"),
     path("<int:pk>/first/", views.first_thesis, name="first_thesis"),
     path("<int:pk>/reviews/", views.filing_reviews, name="filing_reviews"),
     path("<int:pk>/reviews/<int:document_pk>/", views.filing_review, name="filing_review"),
