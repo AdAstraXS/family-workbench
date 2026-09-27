@@ -8,6 +8,7 @@ ResearchValidationError；DossierNotFound 转 404。
 """
 import logging
 import traceback
+from hashlib import sha256
 from datetime import timedelta
 from decimal import Decimal
 from urllib.parse import urlencode
@@ -15,6 +16,8 @@ from urllib.parse import urlencode
 from ai_analysis.models import AiAnalysisRequest
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.conf import settings
+from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db.models import F, Q, OuterRef, Subquery
 from django.http import Http404, HttpResponseForbidden
@@ -69,7 +72,8 @@ from .tenk_history import fill_tenk_history
 from .tenk_metrics import BUSINESS_CALC_CODES, HISTORICAL_LEASE_CODES, tenk_metric_grid
 from .financial_overview import build_financial_overview
 from .futu_financials import (
-    FutuFinancialError, comparison_rows, provider_code, refresh_futu_financials,
+    FutuFinancialError, breakdown_tables, provider_code, refresh_futu_financials,
+    highlight_rows, statement_tables,
 )
 from .thesis_analysis import analysis_sections, generate_thesis_analysis
 from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
@@ -343,7 +347,7 @@ def financials(request, pk):
     versions = list(OfficialResearchContentVersion.objects.filter(
         document__security=dossier.security, document__source="sec",
         document__document_type="10-k",
-    ).select_related("document", "document__security")
+    ).select_related("document", "document__security").defer("raw_gzip", "content_text")
         .order_by("-document__period_end", "-fetched_at", "-pk")[:8])
     version = versions[0] if versions else None
     if request.GET.get("version"):
@@ -356,9 +360,25 @@ def financials(request, pk):
         document__document_type="10-k",
         document__period_end__lt=version.document.period_end,
         document__period_end__gte=version.document.period_end - timedelta(days=900),
-    ).select_related("document", "document__security").order_by("-version_number", "-pk"))
+    ).select_related("document", "document__security").defer(
+        "raw_gzip", "content_text").order_by("-version_number", "-pk"))
         if version and version.document.period_end else [])
-    periods, rows, problem = build_financial_overview(version, historical_versions)
+    cache_key = None
+    if version and not settings.DEBUG and version.raw_sha256 and version.content_sha256:
+        identity = [(item.pk, item.raw_sha256, item.content_sha256)
+                    for item in historical_versions]
+        cache_key = "research-financial-v3:" + sha256(repr((
+            version.pk, version.raw_sha256, version.content_sha256, identity,
+        )).encode()).hexdigest()
+    result = cache.get(cache_key) if cache_key else None
+    if result is None:
+        if version is not None:
+            version = OfficialResearchContentVersion.objects.select_related(
+                "document", "document__security").get(pk=version.pk)
+        result = build_financial_overview(version, historical_versions)
+        if cache_key:
+            cache.set(cache_key, result, timeout=3600)
+    periods, rows, problem = result
     by_code = {row["code"]: row for row in rows}
     groups = []
     for title, codes in (
@@ -422,20 +442,16 @@ def futu_financials(request, pk):
                 messages.success(request, "富途年度财务资料已更新。")
         return redirect("investment_research:futu_financials", pk=pk)
     snapshot = FutuFinancialSnapshot.objects.filter(security=dossier.security).first()
-    latest_sec = (OfficialResearchContentVersion.objects.filter(
-        document__security=dossier.security, document__source="sec",
-        document__document_type="10-k",
-    ).select_related("document").order_by("-document__period_end", "-fetched_at", "-pk").first())
-    periods, rows, sec_problem = (build_financial_overview(latest_sec)
-                                  if snapshot else ([], [], "尚未获取富途数据。"))
-    comparisons = comparison_rows(snapshot, periods, rows)
     statements = snapshot.data.get("statements", []) if snapshot else []
     breakdown = snapshot.data.get("breakdown") if snapshot else None
+    tables = statement_tables(statements)
     return render(request, "investment_research/futu_financials.html", {
         "dossier": dossier, "snapshot": snapshot, "code": code,
-        "code_problem": code_problem, "statements": statements,
-        "breakdown": breakdown, "comparisons": comparisons,
-        "sec_problem": sec_problem, "can_write": is_writer(member),
+        "code_problem": code_problem, "tables": tables,
+        "has_missing_names": any(table["missing_names"] for table in tables),
+        "highlights": highlight_rows(tables),
+        "breakdown": breakdown, "breakdown_groups": breakdown_tables(breakdown),
+        "can_write": is_writer(member),
     })
 
 
