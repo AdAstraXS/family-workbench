@@ -1,6 +1,8 @@
 """Issuer-scoped public materials; private dossiers never leave the application."""
 import gzip
 import hashlib
+import json
+from pathlib import Path
 from datetime import timedelta
 
 from django.db import transaction
@@ -11,7 +13,7 @@ from portfolio.models import Security
 from .ir_extraction import EXTRACTOR_VERSION, extract_material, AttachmentTextUnavailable
 from .models import (OfficialResearchContentVersion, OfficialResearchDocument,
                      ResearchSourceState, SOURCE_OFFICIAL_IR)
-from .providers.ir_http import IRClient, IRError
+from .providers.ir_http import IRClient, IRError, IRResponse, official_url
 from .providers.ir_registry import company_for_security
 from .providers.official_ir import OfficialIRProvider
 
@@ -115,6 +117,46 @@ def _fetch_ir_content(document, *, client=None):
     if document.source not in (SOURCE_OFFICIAL_IR, 'microsoft_ir') or not company:
         raise IRError('这份资料不属于已配置的官方 IR 来源。')
     response = (client or IRClient(company)).get(document.source_url)
+    return _archive_ir_response(document, response)
+
+
+def verified_imports(company):
+    path = Path(__file__).with_name('providers') / 'ir_verified_links.json'
+    snapshot = json.loads(path.read_text(encoding='utf-8')).get(company.key, {})
+    return snapshot, {m['raw_sha256']: m for m in snapshot.get('materials', []) if m.get('raw_sha256')}
+
+
+def import_verified_originals(company, uploads):
+    """Accept only exact bytes already downloaded and verified from official sources.
+
+    The server-owned catalogue, not the upload filename or submitted metadata,
+    determines issuer, URL and type. Never accept a local database or arbitrary text.
+    """
+    if not uploads or len(uploads) > 5 or sum(f.size for f in uploads) > 50 * 1024 * 1024:
+        raise IRError('每次请选择 1 至 5 份已核实原件，总大小不超过 50 MB。')
+    snapshot, known = verified_imports(company)
+    candidates = []
+    for upload in uploads:
+        if upload.size > 20 * 1024 * 1024:
+            raise IRError('单份原件不得超过 20 MB。')
+        raw = upload.read(20 * 1024 * 1024 + 1)
+        item = known.get(hashlib.sha256(raw).hexdigest())
+        if not item:
+            raise IRError('文件与本公司已核实官方原件不一致；本次未导入。请使用对应版本的原文件。')
+        url = official_url(company, item['url'])
+        document = OfficialResearchDocument.objects.filter(
+            source=SOURCE_OFFICIAL_IR, source_url=url, metadata__ir_company=company.key).first()
+        if document is None:
+            raise IRError('请先检查该公司的官方材料目录，再导入对应原件。')
+        candidates.append((document, IRResponse(url, raw, item['media_type'])))
+    # Validate the entire submitted batch before archiving any bytes.
+    note = f'从电脑导入；与 {snapshot["verified_at"]} 下载核实的官方原件 SHA-256 一致。'
+    with transaction.atomic():
+        return [_archive_ir_response(document, response, acquisition_note=note)
+                for document, response in candidates]
+
+
+def _archive_ir_response(document, response, *, acquisition_note=''):
     raw_hash = hashlib.sha256(response.raw).hexdigest()
     previous = document.content_versions.first()
     if previous and previous.raw_sha256 == raw_hash and previous.extractor_version == EXTRACTOR_VERSION:
@@ -137,6 +179,7 @@ def _fetch_ir_content(document, *, client=None):
             content_text=text, content_sha256=hashlib.sha256(text.encode()).hexdigest(),
             extractor_version=EXTRACTOR_VERSION, fetched_at=timezone.now(),
             media_type=extracted['media_type'], sections=extracted['sections'],
+            acquisition_note=acquisition_note,
         )
         document.content_text = text
         document.content_sha256 = version.content_sha256

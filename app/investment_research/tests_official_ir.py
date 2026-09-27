@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils import timezone
@@ -15,7 +16,8 @@ from portfolio.models import Security, InvestmentPosition
 from .citations import locate_quote, resolve_quote
 from .ir_extraction import extract_material
 from .models import OfficialResearchDocument, OfficialResearchContentVersion, ResearchDossier, ResearchSourceState
-from .official_ir import company_security, documents_for_security, fetch_ir_content, sync_official_ir
+from .official_ir import (company_security, documents_for_security, fetch_ir_content, sync_official_ir,
+                         import_verified_originals)
 from .providers.ir_http import IRClient, IRError, IRResponse, official_url, _Redirect
 from .providers.ir_registry import BY_KEY, COMPANIES, company_for_security
 from .providers.official_ir import OfficialIRProvider, IRMaterial, IRDiscovery, material_type
@@ -279,6 +281,49 @@ class OfficialIRIntegrationTests(TestCase):
         self.assertEqual(len(response.context['cards']),13)
         self.assertEqual(Security.objects.count(),before)
         self.assertEqual(ResearchDossier.objects.count(),1)
+
+    def test_import_checks_server_catalogue_preserves_quotes_and_records_origin(self):
+        self.discover()
+        doc = OfficialResearchDocument.objects.get()
+        doc.source_url = 'https://abc.xyz/verified-article'
+        doc.save(update_fields=['source_url'])
+        raw = b'<article><p>Verified original evidence.</p><p>'+b'Public facts. '*35+b'</p></article>'
+        item = {'url':doc.source_url, 'media_type':'text/html'}
+        catalogue = ({'verified_at':'2026-09-26'}, {hashlib.sha256(raw).hexdigest():item})
+        with patch('investment_research.official_ir.verified_imports', return_value=catalogue), \
+             patch('investment_research.providers.ir_http.IRClient.get', side_effect=AssertionError('No network')):
+            first = import_verified_originals(BY_KEY['alphabet'],[SimpleUploadedFile('ignored-name.bin',raw)])[0][0]
+            second, created = import_verified_originals(BY_KEY['alphabet'],[SimpleUploadedFile('renamed.pdf',raw)])[0]
+            self.assertFalse(created)
+            self.assertEqual(first.pk, second.pk)
+            self.assertIn('2026-09-26', first.acquisition_note)
+            self.assertEqual(gzip.decompress(first.raw_gzip), raw)
+            args = locate_quote(first,'Verified original evidence.')
+            self.assertEqual(resolve_quote(first,*args)[1],'Verified original evidence.')
+
+    def test_mismatched_file_rejects_whole_batch_and_wrong_company(self):
+        self.discover()
+        doc = OfficialResearchDocument.objects.get()
+        raw = b'known original'
+        catalogue = ({'verified_at':'2026-09-26'}, {hashlib.sha256(raw).hexdigest():{'url':doc.source_url,'media_type':'text/html'}})
+        with patch('investment_research.official_ir.verified_imports',return_value=catalogue):
+            with self.assertRaises(IRError):
+                import_verified_originals(BY_KEY['alphabet'], [SimpleUploadedFile('ok',raw),SimpleUploadedFile('bad',b'different')])
+            with self.assertRaises(IRError):
+                import_verified_originals(BY_KEY['meta'], [SimpleUploadedFile('wrong-issuer',raw)])
+        self.assertEqual(OfficialResearchContentVersion.objects.count(),0)
+
+    def test_import_endpoint_requires_writer_csrf_and_post(self):
+        from django.test import Client
+        url=reverse('investment_research:import_ir_originals',args=['alphabet'])
+        self.assertEqual(self.client.get(url).status_code,405)
+        client=Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        self.assertEqual(client.post(url).status_code,403)
+        self.assertEqual(self.client.post(reverse('investment_research:import_ir_originals',args=['unknown'])).status_code,404)
+        self.member.role = FamilyMember.ROLE_VIEWER
+        self.member.save(update_fields=['role'])
+        self.assertEqual(self.client.post(url).status_code,403)
 
     def test_directory_failure_cannot_replace_a_newer_saved_catalogue(self):
         self.discover()

@@ -28,6 +28,15 @@
         {% if can_write %}<form method="post" action="{% url 'investment_research:sync_ir_company' card.company.key %}">{% csrf_token %}
           <button type="submit" class="button">检查 {{ card.company.name }} 材料</button>
         </form>{% endif %}
+        {% if can_write and card.can_import %}
+        <details><summary>连接受限时导入已核实原件</summary>
+          <p>仅接收与已核实官方文件完全一致的原件；自动核对公司和文件校验值，不接收改写文本或数据库。每次最多 5 份、合计 50 MB。</p>
+          <form method="post" enctype="multipart/form-data" action="{% url 'investment_research:import_ir_originals' card.company.key %}">{% csrf_token %}
+            <label>选择 {{ card.company.name }} 原件<input type="file" name="originals" multiple required></label>
+            <button type="submit" class="button">核对并导入原件</button>
+          </form>
+        </details>
+        {% endif %}
       </details>
     </article>{% endfor %}
   </div>

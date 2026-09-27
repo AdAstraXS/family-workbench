@@ -267,6 +267,7 @@ def generate_research_draft(*, actor, dossier_id, version_id, provider_id, conse
     )
     thesis = current.thesis if current else "尚无本人正式判断，当前处于探索阶段。"
     lines = [f"标的：{dossier.security.symbol}；资料：{version.document.title}；正文版本：{version.pk}。",
+             f"原件入库方式：{version.acquisition_note or '从官方链接下载'}",
              f"材料类型：{version.document.get_document_type_display()}。演讲稿不等于完整问答；不要推断本材料未包含的内容。",
              f"本次仅提供正文第 {segment_index + 1}/{segment_count} 区段，字符位置 [{segment['start']},{segment['end']})，"
              f"共 {segment['end'] - segment['start']} / {len(version.content_text)} 字；其他区段本次未提供。",

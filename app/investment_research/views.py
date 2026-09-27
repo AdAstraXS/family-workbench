@@ -617,7 +617,9 @@ def documents(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
-    queryset = documents_for_security(dossier.security).order_by(F("published_at").desc(nulls_last=True), "-pk")
+    queryset = documents_for_security(dossier.security).order_by(
+        F("published_at").desc(nulls_last=True), F('metadata__fiscal_year').desc(nulls_last=True),
+        F('metadata__quarter').desc(nulls_last=True), "-pk")
     selected_source = request.GET.get('source', '')
     if selected_source in ('sec', 'official_ir'):
         queryset = queryset.filter(source__in=['official_ir', 'microsoft_ir'] if selected_source == 'official_ir' else ['sec'])

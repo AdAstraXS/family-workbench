@@ -7,7 +7,8 @@ from django.http import Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .models import OfficialResearchContentVersion, OfficialResearchDocument, ResearchSourceState
-from .official_ir import company_security, documents_for_security, fetch_ir_content, sync_official_ir
+from .official_ir import (company_security, documents_for_security, fetch_ir_content, sync_official_ir,
+                          verified_imports, import_verified_originals)
 from .providers.ir_registry import COMPANIES, BY_KEY
 from .permissions import get_accessible_dossier_or_404, is_writer
 from .providers.ir_http import IRError
@@ -26,6 +27,7 @@ def catalogue(request):
         cards.append({'company': company, 'state': state, 'count': documents.count(),
                       'period_count': len(state.cursor.get('periods', [])) if state else 0,
                       'saved': documents.exclude(content_text__isnull=True).exclude(content_text='').count(),
+                      'can_import': bool(verified_imports(company)[1]) and documents.exists(),
                       'warnings': state.cursor.get('warnings', []) if state else []})
     return render(request, 'investment_research/ir_catalogue.html', {'cards': cards, 'can_write': is_writer(member)})
 
@@ -48,6 +50,24 @@ def sync_company(request, company_key):
             messages.success(request, f'{company.name} 官方目录已检查，新增 {count} 份材料。')
     except IRError as exc:
         messages.error(request, f'{company.name}：{exc}')
+    return redirect('investment_research:ir_catalogue')
+
+
+@_method(['POST'])
+def import_originals(request, company_key):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    if not is_writer(member):
+        return HttpResponseForbidden('查看者角色不能导入原件。')
+    if company_key not in BY_KEY:
+        raise Http404
+    try:
+        versions = import_verified_originals(BY_KEY[company_key], request.FILES.getlist('originals'))
+        readable = sum(bool(version.content_text) for version, _ in versions)
+        messages.success(request, f'已核对并保存 {len(versions)} 份官方原件，其中 {readable} 份可阅读和引用；已有相同版本不会重复入库。')
+    except IRError as exc:
+        messages.error(request, str(exc))
     return redirect('investment_research:ir_catalogue')
 
 

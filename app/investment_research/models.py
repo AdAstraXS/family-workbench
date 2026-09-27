@@ -189,6 +189,7 @@ class OfficialResearchContentVersion(models.Model):
     raw_gzip = models.BinaryField("原始文件（gzip）")
     media_type = models.CharField("原件格式", max_length=120, default="text/html")
     sections = models.JSONField("页码与正文位置", default=list, blank=True)
+    acquisition_note = models.CharField("原件入库说明", max_length=250, blank=True, default="")
     content_text = models.TextField("规范正文")
     content_sha256 = models.CharField("规范正文 SHA-256", max_length=64)
     extractor_version = models.CharField("提取器版本", max_length=32)

@@ -28,7 +28,8 @@
   {% if current_content_version %}
     <p><a class="button" href="{% url 'investment_research:original_document' dossier.pk document.pk chapter_version.pk %}">下载本版原始文件</a></p>
     {% if not chapter_version.content_text %}<p>本版原件已保存，尚无可引用正文。请下载原件阅读。</p>{% endif %}
-    <p class="research-private-note">正文版本 {{ current_content_version.version_number }} · 获取于 {{ current_content_version.fetched_at|date:"Y-m-d H:i" }}</p>
+    <p class="research-private-note">正文版本 {{ chapter_version.version_number }} · 保存于 {{ chapter_version.fetched_at|date:"Y-m-d H:i" }}</p>
+    {% if chapter_version.acquisition_note %}<p class="research-private-note">{{ chapter_version.acquisition_note }}</p>{% endif %}
     {% if chapter_version.content_text %}
     <form method="post" action="{% url 'investment_research:create_citation' dossier.pk document.pk %}" class="research-form">
       {% csrf_token %}
