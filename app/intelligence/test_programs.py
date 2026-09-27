@@ -22,11 +22,49 @@ from .program_processing import save_revision, process_entry, submit_asr, valida
 from .program_sources import ProgramError, parse_catalogue_feed, collect_subscription
 from .program_media import parse_asr_result, asr_request
 from .program_archive import archive_program
+from .http_client import SafeHttpError
 
 
 @override_settings(KNOWLEDGE_TOKEN_ENCRYPTION_KEY=Fernet.generate_key().decode())
 class ProgramTests(TestCase):
+    @patch('intelligence.program_media.youtube_metadata')
+    @patch('intelligence.program_media._yt_command')
+    def test_channel_fallback_validates_channel_and_publication_date(self, command, metadata):
+        from .program_media import youtube_recent_entries
+        from .program_sources import CATALOGUE
+        command.return_value = json.dumps({'channel_id': CATALOGUE['rhino']['channel_id'],
+            'entries': [{'id': 'OyiGHowGOSI'}]}).encode()
+        metadata.return_value = {'title': '公开节目', 'duration': 1487, 'upload_date': '20260926'}
+        result = youtube_recent_entries()
+        self.assertEqual(result[0]['published_at'].date().isoformat(), '2026-09-26')
+        self.assertEqual(result[0]['external_id'], 'OyiGHowGOSI')
+        command.return_value = b'{"channel_id":"unapproved","entries":[]}'
+        with self.assertRaises(ProgramError):
+            youtube_recent_entries()
+
+    @patch('intelligence.program_media.youtube_recent_entries')
+    @patch('intelligence.program_sources.fetch_public_url')
+    def test_channel_fallback_on_transient_error_does_not_bypass_forbidden(self, fetch, fallback):
+        self.sub.code = 'rhino'
+        self.sub.save()
+        fetch.side_effect = SafeHttpError('proxy_http_500', 'HTTP 500')
+        fallback.return_value = [{'external_id': 'OyiGHowGOSI', 'title': '公开节目',
+            'url': 'https://www.youtube.com/watch?v=OyiGHowGOSI', 'published_at': timezone.now()}]
+        self.assertEqual(collect_subscription(self.sub), 1)
+        fallback.assert_called_once()
+        fallback.reset_mock()
+        fetch.side_effect = SafeHttpError('proxy_http_403', 'HTTP 403')
+        with self.assertRaises(ProgramError):
+            collect_subscription(self.sub)
+        fallback.assert_not_called()
+
     def setUp(self):
+        self.upload_mock = patch('intelligence.program_processing.upload_asr_audio', return_value='oss://dashscope-instant/test/audio.mp3')
+        self.podcast_mock = patch('intelligence.program_processing.podcast_audio', return_value=(b'ID3test-audio', 'audio/mpeg'))
+        self.upload_mock.start()
+        self.podcast_mock.start()
+        self.addCleanup(self.upload_mock.stop)
+        self.addCleanup(self.podcast_mock.stop)
         self.media = tempfile.TemporaryDirectory()
         self.override = override_settings(MEDIA_ROOT=self.media.name)
         self.override.enable()
@@ -45,6 +83,82 @@ class ProgramTests(TestCase):
 
     def revision(self, text='微软的投资需要关注现金流。'):
         return save_revision(self.entry, [{'text': text, 'start_ms': 1000, 'end_ms': 2000}], origin='fun-asr', source_url=self.entry.url)
+
+    def prepare_download_failure(self):
+        self.entry.task_id, self.entry.submitted_at = 'failed-download', timezone.now()
+        self.entry.asr_reserved_cny, self.entry.asr_error_code = Decimal('.3300'), 'FILE_DOWNLOAD_FAILED'
+        self.entry.state = 'failed'
+        self.entry.save()
+        self.client.post(reverse('intelligence:program_action', args=[self.entry.pk]), {'action': 'retry_transfer'})
+
+    def test_audio_recovery_preserves_old_task_and_reservations(self):
+        self.prepare_download_failure()
+        with patch('intelligence.program_processing.asr_request', side_effect=[
+                {'output': {'task_status': 'FAILED', 'code': 'FILE_DOWNLOAD_FAILED'}},
+                {'output': {'task_id': 'replacement-task'}}]) as remote:
+            self.assertTrue(process_entry(self.entry.pk))
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.task_id, 'replacement-task')
+        self.assertEqual(self.entry.asr_reserved_cny, Decimal('.6600'))
+        self.assertEqual(self.entry.asr_attempt_history[0]['task_id'], 'failed-download')
+        self.assertEqual(remote.call_count, 2)
+        self.assertFalse(self.entry.retry_audio_transfer)
+
+    def test_audio_recovery_does_not_replace_running_or_unknown_tasks(self):
+        self.prepare_download_failure()
+        with patch('intelligence.program_processing.asr_request', return_value={'output': {'task_status': 'RUNNING'}}) as remote:
+            self.assertFalse(process_entry(self.entry.pk))
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.task_id, 'failed-download')
+        self.assertEqual(self.entry.asr_attempt_history, [])
+        self.assertEqual(remote.call_count, 1)
+
+    def test_audio_recovery_budget_and_uncertain_submit(self):
+        self.prepare_download_failure()
+        self.config.monthly_asr_cny = Decimal('.50')
+        self.config.save()
+        with patch('intelligence.program_processing.asr_request', return_value={'output': {'task_status': 'FAILED', 'code': 'FILE_DOWNLOAD_FAILED'}}) as remote:
+            self.assertFalse(process_entry(self.entry.pk))
+        self.assertEqual(remote.call_count, 1)
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.asr_reserved_cny, Decimal('.3300'))
+        self.config.monthly_asr_cny = Decimal('20')
+        self.config.save()
+        self.client.post(reverse('intelligence:program_action', args=[self.entry.pk]), {'action': 'retry_transfer'})
+        with patch('intelligence.program_processing.asr_request', side_effect=[
+                {'output': {'task_status': 'FAILED', 'code': 'FILE_DOWNLOAD_FAILED'}}, ProgramError('timeout')]) as remote:
+            self.assertFalse(process_entry(self.entry.pk))
+            self.assertFalse(process_entry(self.entry.pk))
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.state, 'uncertain')
+        self.assertEqual(len(self.entry.asr_attempt_history), 1)
+        self.assertEqual(remote.call_count, 2)
+
+    @patch('intelligence.program_media.private_json_request')
+    def test_oss_input_uses_model_bound_resolver(self, request):
+        asr_request(self.config, audio_url='oss://dashscope-instant/test/audio.m4a')
+        self.assertEqual(request.call_args.kwargs['headers']['X-DashScope-OssResourceResolve'], 'enable')
+        with self.assertRaises(ProgramError):
+            asr_request(self.config, audio_url='oss://unapproved/audio.m4a')
+
+    @patch('intelligence.program_media.build_opener')
+    @patch('intelligence.program_media.validate_public_http_url')
+    @patch('intelligence.program_media.private_json_request')
+    def test_private_upload_does_not_forward_api_key_to_storage(self, policy, validate, opener):
+        from intelligence.program_media import upload_asr_audio
+        data = {'upload_host': 'https://dashscope-file-mgr.oss-cn-beijing.aliyuncs.com',
+            'upload_dir': 'dashscope-instant/test', 'max_file_size_mb': 10, 'oss_access_key_id': 'scoped-upload',
+            'signature': 'upload-signature', 'policy': 'upload-policy', 'x_oss_object_acl': 'private', 'x_oss_forbid_overwrite': 'true'}
+        policy.return_value = {'data': data}
+        opener.return_value.open.return_value.__enter__.return_value.status = 200
+        self.assertTrue(upload_asr_audio(self.config, b'ID3test', 'audio/mpeg').startswith('oss://dashscope-instant/test/'))
+        sent = opener.return_value.open.call_args.args[0]
+        self.assertFalse(sent.has_header('Authorization'))
+        self.assertNotIn(b'test-not-real', sent.data)
+        data['upload_host'] = 'https://attacker.example/upload'
+        with self.assertRaises(ProgramError):
+            upload_asr_audio(self.config, b'ID3test', 'audio/mpeg')
+        self.assertEqual(opener.return_value.open.call_count, 1)
 
     def test_revision_idempotent_and_new_version_preserves_original(self):
         first = self.revision()
@@ -107,6 +221,14 @@ class ProgramTests(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]['published_at'].month, 9)
 
+    def test_youtube_feed_accepts_channel_id_without_uc_prefix_only_for_same_channel(self):
+        from .adapters import FeedParseError
+        template = '<feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015"><yt:channelId>{}</yt:channelId><entry><yt:videoId>OyiGHowGOSI</yt:videoId><title>完整节目</title><link href="https://www.youtube.com/watch?v=OyiGHowGOSI"/></entry></feed>'
+        for channel_id in ['UCFQsi7WaF5X41tcuOryDk8w', 'FQsi7WaF5X41tcuOryDk8w']:
+            self.assertEqual(parse_catalogue_feed('rhino', template.format(channel_id).encode())[0]['external_id'], 'OyiGHowGOSI')
+        with self.assertRaises(FeedParseError):
+            parse_catalogue_feed('rhino', template.format('OtherChannel01234567890').encode())
+
     def test_first_collection_only_latest_automatically_processed(self):
         items = [dict(external_id=str(i), title=str(i), url=f'https://example.com/{i}') for i in range(5)]
         with patch('intelligence.program_sources.fetch_public_url', return_value=SimpleNamespace(body=b'')), patch('intelligence.program_sources.parse_catalogue_feed', side_effect=lambda *args: [dict(i) for i in items]):
@@ -130,6 +252,24 @@ class ProgramTests(TestCase):
         with patch('intelligence.program_processing.asr_request', return_value={'output': {'task_status': 'RUNNING'}}) as remote:
             process_entry(self.entry.pk)
             self.assertEqual(remote.call_args.kwargs, {'task_id': 'task-1'})
+
+    def test_failed_source_retries_after_five_minutes_but_success_stays_hourly(self):
+        for error, minutes, should_collect in [('network', 6, True), ('network', 2, False), ('', 6, False)]:
+            with self.subTest(error=error, minutes=minutes):
+                self.sub.last_error = error
+                self.sub.last_checked_at = timezone.now() - timedelta(minutes=minutes)
+                self.sub.save(update_fields=['last_error', 'last_checked_at'])
+                with patch('intelligence.management.commands.run_program_subscriptions.collect_subscription', return_value=0) as collect:
+                    call_command('run_program_subscriptions', family_id=self.family.pk, collect_only=True)
+                self.assertEqual(collect.called, should_collect)
+
+    def test_collection_preserves_safe_network_diagnostic_without_remote_detail(self):
+        with patch('intelligence.program_sources.fetch_public_url', side_effect=SafeHttpError('proxy_network', '信源代理连接失败。')):
+            with self.assertRaisesMessage(ProgramError, '信源代理连接失败。'):
+                collect_subscription(self.sub)
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.last_error, '信源代理连接失败。')
+        self.assertIsNone(self.sub.lease_until)
 
     def test_uncertain_submission_is_not_automatically_resubmitted(self):
         with patch('intelligence.program_processing.asr_request', side_effect=ProgramError('服务请求失败')) as remote:
@@ -228,12 +368,16 @@ class ProgramTests(TestCase):
             'allow_intelligence_analysis': True, 'intelligence_data_scope': 'public_metadata_only',
             'intelligence_policy_version': 'public-metadata-v1', 'intelligence_policy_reviewed_on': '2026-09-26',
             'intelligence_max_input_characters': 2000, 'intelligence_max_output_tokens': 512,
+            'intelligence_disable_thinking': True,
             'intelligence_input_usd_per_million': '.1', 'intelligence_output_usd_per_million': '.2',
             'intelligence_max_estimated_usd': '.1', 'api_key_env_var': 'PROGRAM_TEST_API_KEY'})
         self.config.summary_provider, self.config.allow_summary = provider, True
         self.config.save()
         revision = save_revision(self.entry, [{'text': str(i) + '公开文字。' * 100} for i in range(8)], origin='publisher', source_url=self.entry.url)
         def response(url, *, key, payload):
+            self.assertEqual(payload['thinking'], {'type': 'disabled'})
+            self.assertNotIn('enable_thinking', payload)
+            self.assertEqual(payload['max_tokens'], 512)
             data = json.loads(payload['messages'][1]['content'])
             point = {'topic': 'MSFT', 'kind': '作者观点', 'text': '仅用于验证的摘要', 'refs': [data['paragraphs'][0]['id']]}
             return {'choices': [{'message': {'content': json.dumps({'points': [point]})}, 'finish_reason': 'stop'}], 'usage': {'total_tokens': 100}}
@@ -249,6 +393,31 @@ class ProgramTests(TestCase):
         revision.refresh_from_db()
         self.assertTrue(revision.summary_complete)
         self.assertTrue(all(c.reserved_usd > 0 and c.model_name == 'test-model' for c in revision.chunks.all()))
+        self.assertTrue(all(c.prompt_version == 'program-summary-v3' for c in revision.chunks.all()))
+
+    def test_invented_year_is_hidden_cannot_archive_and_retries_only_bad_chunk(self):
+        revision = self.revision('On August 17, yields increased.')
+        bad = {'points': [{'topic': '利率', 'kind': '事实', 'text': '2024年8月17日利率上升。', 'refs': [1]}]}
+        with self.assertRaises(ProgramError):
+            validate_points(bad, {1}, {1: revision.text})
+        self.assertEqual(validate_points(bad, {1}, {1: 'In 2024, yields increased.'}), bad)
+        revision.summary, revision.summary_complete = {**bad, 'batches': [[1]]}, True
+        revision.save()
+        chunk = ProgramSummaryChunk.objects.create(revision=revision, number=1, status='success',
+            result=bad, reserved_usd=Decimal('.001'))
+        response = self.client.get(reverse('intelligence:program_detail', args=[self.entry.pk]))
+        self.assertContains(response, '部分要点未展示')
+        self.assertNotContains(response, '2024年8月17日')
+        with self.assertRaises(ProgramError):
+            archive_program(revision, self.member)
+        self.assertFalse(KnowledgeDocument.objects.exists())
+        self.client.post(reverse('intelligence:program_action', args=[self.entry.pk]), {'action': 'retry'})
+        revision.refresh_from_db()
+        chunk.refresh_from_db()
+        self.assertFalse(revision.summary_complete)
+        self.assertEqual(chunk.status, 'pending')
+        self.assertEqual(chunk.reserved_usd, Decimal('.001'))
+        self.assertEqual(revision.summary['batches'], [[1]])
 
     def test_paused_subscription_does_not_run(self):
         self.sub.enabled = False
@@ -318,7 +487,10 @@ class ProgramBudgetConcurrencyTests(TransactionTestCase):
                 return False
             finally:
                 connections.close_all()
-        with patch('intelligence.program_processing.asr_request', return_value={'output': {'task_id': 'test-task'}}) as remote:
+        with patch('intelligence.program_processing.podcast_audio', return_value=(b'ID3test', 'audio/mpeg')), \
+                patch('intelligence.program_processing.store_audio'), \
+                patch('intelligence.program_processing.upload_asr_audio', return_value='oss://dashscope-instant/test/audio.mp3'), \
+                patch('intelligence.program_processing.asr_request', return_value={'output': {'task_id': 'test-task'}}) as remote:
             with ThreadPoolExecutor(max_workers=2) as executor:
                 results = list(executor.map(run, ids))
             self.assertEqual(sum(results), 1)

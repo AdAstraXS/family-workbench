@@ -138,8 +138,9 @@ def create_dossier(*, actor, security, initial_thesis, pillars, questions):
 def create_exploration(*, actor, security):
     """先建立私密探索档案；还没有用户正式判断或版本。"""
     _require_writer(actor)
-    if security.market != "US" or security.asset_type != Security.TYPE_STOCK:
-        raise ResearchValidationError("探索入口目前只支持已有美股普通股。")
+    from .providers.ir_registry import company_for_security
+    if security.asset_type != Security.TYPE_STOCK or (security.market != "US" and not company_for_security(security)):
+        raise ResearchValidationError("探索入口支持美股普通股及已配置官方 IR 的公司。")
     try:
         with transaction.atomic():
             return ResearchDossier.objects.create(

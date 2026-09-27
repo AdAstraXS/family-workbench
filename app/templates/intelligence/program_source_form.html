@@ -1,0 +1,9 @@
+{% extends 'base.html' %}{% load static %}
+{% block title %}{% if source %}管理公开信源{% else %}添加公开信源{% endif %}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}"><link rel="stylesheet" href="{% static 'css/intelligence-programs.css' %}">{% endblock %}
+{% block content %}<a href="{% url 'intelligence:program_settings' %}">← 管理精选订阅</a><h1>{% if source %}管理 {{ source.custom_name }}{% else %}添加公开信源{% endif %}</h1>
+<p>先检查最近节目，再决定是否启用自动整理。启用后首次只处理最近一条命中的内容；历史内容不会批量计费。</p>
+<section class="intel-section">{% if manual_only %}<p>目前只能逐期添加这个 UP 主的公开视频；频道列表受到 B 站访问限制，暂时无法设置自动抓取规则。</p><p><a href="{% url 'intelligence:program_list' %}">前往阅读列表添加视频</a></p>{% else %}<form method="post" class="intel-form">{% csrf_token %}{{ form.non_field_errors }}<div class="intel-form-grid">{% for field in form %}<div class="intel-form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</div>{% endfor %}</div><button class="button ghost" name="action" value="preview" type="submit">测试最近内容</button> <button class="button" name="action" value="save" type="submit">{% if source %}保存筛选规则{% else %}添加订阅{% endif %}</button></form>{% endif %}
+{% if source %}<form method="post">{% csrf_token %}<button class="button ghost" name="action" value="toggle" type="submit">{% if source.enabled %}暂停后续检查{% else %}恢复后续检查{% endif %}</button></form>{% endif %}</section>
+{% if preview %}<section class="intel-section"><h2>最近内容预览</h2><p>{{ preview.name }} · 命中内容会按设置进入阅读列表。</p>{% for item,matched in preview.matches %}<p>{% if matched %}✓ 命中{% else %}— 跳过{% endif %} · {{ item.title }}{% if item.published_at %} · {{ item.published_at|date:'Y-m-d' }}{% endif %}{% if item.duration_seconds %} · {{ item.duration_seconds }} 秒{% endif %}</p>{% endfor %}</section>{% endif %}
+{% endblock %}

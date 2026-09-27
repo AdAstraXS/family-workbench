@@ -1,11 +1,52 @@
 from unittest.mock import patch, MagicMock
 from urllib.request import Request
+from urllib.error import HTTPError
 from django.test import SimpleTestCase
 from .http_client import SafeHttpError
 from .program_network import approved_source_url, fetch_source_url, source_proxy, SourceRedirect, NAS_PROXY
+from .program_network import public_user_source_url, UserSourceRedirect
 
 
 class ProgramNetworkTests(SimpleTestCase):
+    def test_custom_source_proxy_rejects_private_targets_and_redirects(self):
+        with patch.dict('os.environ', {'PROGRAM_SOURCE_PROXY': NAS_PROXY}):
+            self.assertEqual(public_user_source_url('https://www.example.com:443/feed'),
+                             'https://www.example.com:443/feed')
+            for url in ('http://example.com/feed', 'https://127.0.0.1/feed',
+                        'https://localhost/feed', 'https://router.local/feed',
+                        'https://user@example.com/feed', 'https://example.com:8443/feed'):
+                with self.subTest(url=url), self.assertRaises(SafeHttpError):
+                    public_user_source_url(url)
+            with self.assertRaises(SafeHttpError):
+                UserSourceRedirect().redirect_request(Request('https://example.com/feed'), None,
+                    302, '', {}, 'https://127.0.0.1/internal')
+    @patch('intelligence.program_network._fetch_proxy_source')
+    def test_only_transient_youtube_feed_404_is_retried(self, fetch):
+        error = SafeHttpError('proxy_http_404', 'HTTP 404')
+        fetch.side_effect = [error, 'feed']
+        with patch.dict('os.environ', {'PROGRAM_SOURCE_PROXY': NAS_PROXY}):
+            self.assertEqual(fetch_source_url('https://www.youtube.com/feeds/videos.xml?channel_id=test'), 'feed')
+            self.assertEqual(fetch.call_count, 2)
+            fetch.reset_mock(side_effect=True)
+            fetch.side_effect = error
+            with self.assertRaises(SafeHttpError):
+                fetch_source_url('https://www.youtube.com/feeds/videos.xml?channel_id=test')
+            self.assertEqual(fetch.call_count, 3)
+            fetch.reset_mock(side_effect=True)
+            fetch.side_effect = SafeHttpError('proxy_http_403', 'HTTP 403')
+            with self.assertRaises(SafeHttpError):
+                fetch_source_url('https://www.youtube.com/feeds/videos.xml?channel_id=test')
+            self.assertEqual(fetch.call_count, 1)
+
+    @patch('intelligence.program_network.build_opener')
+    def test_http_status_is_safe_and_distinct_from_connection_failure(self, opener):
+        opener.return_value.open.side_effect = HTTPError('https://www.youtube.com/', 429, 'secret detail', {}, None)
+        with patch.dict('os.environ', {'PROGRAM_SOURCE_PROXY': NAS_PROXY}):
+            with self.assertRaises(SafeHttpError) as caught:
+                fetch_source_url('https://www.youtube.com/')
+        self.assertIn('HTTP 429', caught.exception.safe_message)
+        self.assertNotIn('secret', caught.exception.safe_message)
+
     def test_proxy_destination_is_fixed_by_deployment(self):
         with patch.dict('os.environ', {'PROGRAM_SOURCE_PROXY': 'http://unreviewed.example:7890'}):
             with self.assertRaises(SafeHttpError):

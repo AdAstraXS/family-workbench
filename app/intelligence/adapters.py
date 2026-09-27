@@ -175,7 +175,10 @@ def parse_youtube_atom(body, *, expected_channel_id, max_items=50):
     if _local_name(root.tag) != "feed":
         raise FeedParseError("YouTube 频道响应不是有效的 Atom 订阅。")
     feed_channel_id = _first_text(root, "channelId")
-    if feed_channel_id and feed_channel_id != expected_channel_id:
+    allowed_channel_ids = {expected_channel_id}
+    if re.fullmatch(r'UC[A-Za-z0-9_-]{22}', expected_channel_id):
+        allowed_channel_ids.add(expected_channel_id[2:])
+    if feed_channel_id and feed_channel_id not in allowed_channel_ids:
         raise FeedParseError("YouTube 订阅返回的频道 ID 与配置不一致。")
 
     collected = []
@@ -202,7 +205,7 @@ def parse_youtube_atom(body, *, expected_channel_id, max_items=50):
                 content_depth=SourceItem.DEPTH_DESCRIPTION if excerpt else SourceItem.DEPTH_TITLE,
                 raw_metadata={
                     "platform": "youtube",
-                    "channel_id": feed_channel_id or expected_channel_id,
+                    "channel_id": expected_channel_id,
                     "video_id": video_id,
                     "transcript_status": "not_requested",
                 },

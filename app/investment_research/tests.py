@@ -1047,7 +1047,7 @@ class OfficialResearchDocumentModelTests(TestCase):
 
     def test_source_choices_match_spec(self):
         values = [v for v, _ in SOURCE_CHOICES]
-        self.assertEqual(values, ["sec", "microsoft_ir"])
+        self.assertEqual(values, ["sec", "microsoft_ir", "official_ir"])
 
     def test_document_type_choices_match_spec(self):
         values = [v for v, _ in DOCUMENT_TYPE_CHOICES]
@@ -1061,6 +1061,11 @@ class OfficialResearchDocumentModelTests(TestCase):
                 "earnings_release",
                 "earnings_call",
                 "investor_update",
+                "financial_statements",
+                "presentation",
+                "prepared_remarks",
+                "transcript",
+                "shareholder_letter",
                 "other",
             ],
         )
@@ -3291,7 +3296,7 @@ class OfficialDocumentsViewTests(ResearchViewTestBase):
         self.login(self.alice)
         response = self.client.get(documents_url(self.dossier))
         self.assertContains(response, "还没有官方资料")
-        self.assertContains(response, "不需要逐项手工填写")
+        self.assertContains(response, "检查官方 IR 材料")
 
         success_at = timezone.now()
         ResearchSourceState.objects.create(
@@ -3348,7 +3353,7 @@ class OfficialDocumentsViewTests(ResearchViewTestBase):
             documents_url(self.dossier),
             fetch_redirect_response=False,
         )
-        sync_mock.assert_called_once_with(symbols=[self.security.symbol])
+        sync_mock.assert_called_once_with(symbols=[self.security.symbol], sources=['sec'])
         self.assertContains(
             self.client.get(documents_url(self.dossier)),
             "官方资料已更新：新增 2 份，更新 1 份，无变化 3 份。",

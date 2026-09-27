@@ -26,7 +26,10 @@ class Command(BaseCommand):
             entry.audio_expires_at = None
             entry.save(update_fields=['audio_file', 'audio_expires_at'])
         for sub in ProgramSubscription.objects.filter(family_id=family_id, enabled=True):
-            if sub.last_checked_at and sub.last_checked_at > timezone.now() - timedelta(hours=1):
+            if sub.kind == 'upload' or not sub.collect_enabled:
+                continue
+            check_interval = timedelta(minutes=5) if sub.last_error else timedelta(hours=1)
+            if sub.last_checked_at and sub.last_checked_at > timezone.now() - check_interval:
                 continue
             try:
                 collected += collect_subscription(sub)
@@ -39,8 +42,6 @@ class Command(BaseCommand):
                 requested=True).exclude(state__in=['ready', 'failed', 'uncertain']).order_by('updated_at', 'pk')
             if not config or not config.allow_asr or not config.encrypted_credentials:
                 entries = entries.exclude(state='waiting_config')
-            elif not config.public_base_url:
-                entries = entries.exclude(state='waiting_config', subscription__code='rhino')
             if not config or not config.allow_summary or not config.summary_provider_id:
                 entries = entries.exclude(state__in=['text_ready', 'summarizing'])
             for entry in list(entries[:max_steps]):

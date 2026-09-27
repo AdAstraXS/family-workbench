@@ -23,7 +23,19 @@ class ProgramSettings(TimestampedModel):
 class ProgramSubscription(TimestampedModel):
     family = models.ForeignKey(Family, on_delete=models.CASCADE)
     code = models.CharField(max_length=40)
+    custom_name = models.CharField(max_length=160, blank=True)
+    kind = models.CharField(max_length=20, blank=True)
+    source_url = models.URLField(max_length=2000, blank=True)
+    feed_url = models.URLField(max_length=2000, blank=True)
+    channel_id = models.CharField(max_length=80, blank=True)
+    playlist_id = models.CharField(max_length=100, blank=True)
+    include_terms = models.CharField(max_length=500, blank=True)
+    include_mode = models.CharField(max_length=3, default='any')
+    exclude_terms = models.CharField(max_length=500, blank=True)
+    publish_weekday = models.PositiveSmallIntegerField(null=True, blank=True)
+    min_duration_seconds = models.PositiveIntegerField(default=0)
     enabled = models.BooleanField(default=True)
+    collect_enabled = models.BooleanField(default=True)
     auto_process = models.BooleanField(default=True)
     # On first subscription only the latest three entries are collected. Older history is never billed automatically.
     last_checked_at = models.DateTimeField(null=True, blank=True)
@@ -39,6 +51,13 @@ class ProgramEntry(TimestampedModel):
               ('asr_wait', '转写中'), ('text_ready', '文字稿可读'), ('summarizing', '正在整理'),
               ('ready', '整理完成'), ('waiting_config', '等待服务配置'), ('failed', '需要处理'), ('uncertain', '提交结果待核对')]
     subscription = models.ForeignKey(ProgramSubscription, related_name='entries', on_delete=models.PROTECT)
+    private_owner = models.ForeignKey('family_core.FamilyMember', null=True, blank=True,
+                                      on_delete=models.PROTECT, related_name='private_program_entries')
+    allow_cloud_summary = models.BooleanField(default=True)
+    allow_cloud_asr = models.BooleanField(default=True)
+    uploaded_original = models.FileField(upload_to='intelligence/encrypted-originals/%Y/%m/', blank=True)
+    uploaded_sha256 = models.CharField(max_length=64, blank=True)
+    uploaded_name = models.CharField(max_length=255, blank=True)
     external_id = models.CharField(max_length=200)
     title = models.CharField(max_length=500)
     url = models.URLField(max_length=2000)
@@ -52,6 +71,9 @@ class ProgramEntry(TimestampedModel):
     task_id = models.CharField(max_length=150, blank=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
     asr_reserved_cny = models.DecimalField(max_digits=10, decimal_places=4, default=0)
+    asr_attempt_history = models.JSONField(default=list, blank=True)
+    asr_error_code = models.CharField(max_length=80, blank=True)
+    retry_audio_transfer = models.BooleanField(default=False)
     audio_file = models.FileField(upload_to='intelligence/encrypted-audio/%Y/%m/', blank=True)
     audio_expires_at = models.DateTimeField(null=True, blank=True)
     audio_mime = models.CharField(max_length=60, blank=True)
@@ -77,7 +99,8 @@ class ProgramRevision(TimestampedModel):
 
     @property
     def origin_label(self):
-        return {'publisher': '出版方原文', 'youtube_caption': '公开视频字幕', 'fun-asr': '百炼音频转写', 'manual': '手动导入文字稿'}.get(self.origin, self.origin)
+        return {'publisher': '出版方原文', 'youtube_caption': '公开视频字幕', 'fun-asr': '百炼音频转写',
+                'manual': '手动导入文字稿', 'upload': '成员上传原文'}.get(self.origin, self.origin)
 
 
 class ProgramSummaryChunk(TimestampedModel):
