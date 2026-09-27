@@ -26,6 +26,8 @@ class Command(BaseCommand):
             entry.audio_expires_at = None
             entry.save(update_fields=['audio_file', 'audio_expires_at'])
         for sub in ProgramSubscription.objects.filter(family_id=family_id, enabled=True):
+            if sub.kind == 'upload' or not sub.collect_enabled:
+                continue
             check_interval = timedelta(minutes=5) if sub.last_error else timedelta(hours=1)
             if sub.last_checked_at and sub.last_checked_at > timezone.now() - check_interval:
                 continue

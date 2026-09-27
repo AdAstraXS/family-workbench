@@ -4,9 +4,22 @@ from urllib.error import HTTPError
 from django.test import SimpleTestCase
 from .http_client import SafeHttpError
 from .program_network import approved_source_url, fetch_source_url, source_proxy, SourceRedirect, NAS_PROXY
+from .program_network import public_user_source_url, UserSourceRedirect
 
 
 class ProgramNetworkTests(SimpleTestCase):
+    def test_custom_source_proxy_rejects_private_targets_and_redirects(self):
+        with patch.dict('os.environ', {'PROGRAM_SOURCE_PROXY': NAS_PROXY}):
+            self.assertEqual(public_user_source_url('https://www.example.com:443/feed'),
+                             'https://www.example.com:443/feed')
+            for url in ('http://example.com/feed', 'https://127.0.0.1/feed',
+                        'https://localhost/feed', 'https://router.local/feed',
+                        'https://user@example.com/feed', 'https://example.com:8443/feed'):
+                with self.subTest(url=url), self.assertRaises(SafeHttpError):
+                    public_user_source_url(url)
+            with self.assertRaises(SafeHttpError):
+                UserSourceRedirect().redirect_request(Request('https://example.com/feed'), None,
+                    302, '', {}, 'https://127.0.0.1/internal')
     @patch('intelligence.program_network._fetch_proxy_source')
     def test_only_transient_youtube_feed_404_is_retried(self, fetch):
         error = SafeHttpError('proxy_http_404', 'HTTP 404')

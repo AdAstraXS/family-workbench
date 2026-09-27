@@ -1,0 +1,47 @@
+from django.db import migrations, models
+import django.db.models.deletion
+
+
+class Migration(migrations.Migration):
+    dependencies = [('intelligence', '0011_program_audio_transfer_recovery'),
+                    ('family_core', '0001_initial')]
+    operations = [
+        migrations.AddField(model_name='programsubscription', name='custom_name',
+                            field=models.CharField(max_length=160, blank=True)),
+        migrations.AddField(model_name='programsubscription', name='collect_enabled',
+                            field=models.BooleanField(default=True)),
+        migrations.AddField(model_name='programsubscription', name='kind',
+                            field=models.CharField(max_length=20, blank=True)),
+        migrations.AddField(model_name='programsubscription', name='source_url',
+                            field=models.URLField(max_length=2000, blank=True)),
+        migrations.AddField(model_name='programsubscription', name='feed_url',
+                            field=models.URLField(max_length=2000, blank=True)),
+        migrations.AddField(model_name='programsubscription', name='channel_id',
+                            field=models.CharField(max_length=80, blank=True)),
+        migrations.AddField(model_name='programsubscription', name='playlist_id',
+                            field=models.CharField(max_length=100, blank=True)),
+        migrations.AddField(model_name='programsubscription', name='include_terms',
+                            field=models.CharField(max_length=500, blank=True)),
+        migrations.AddField(model_name='programsubscription', name='include_mode',
+                            field=models.CharField(max_length=3, default='any')),
+        migrations.AddField(model_name='programsubscription', name='exclude_terms',
+                            field=models.CharField(max_length=500, blank=True)),
+        migrations.AddField(model_name='programsubscription', name='publish_weekday',
+                            field=models.PositiveSmallIntegerField(null=True, blank=True)),
+        migrations.AddField(model_name='programsubscription', name='min_duration_seconds',
+                            field=models.PositiveIntegerField(default=0)),
+        migrations.AddField(model_name='programentry', name='private_owner',
+                            field=models.ForeignKey(to='family_core.familymember', null=True, blank=True,
+                                                    related_name='private_program_entries',
+                                                    on_delete=django.db.models.deletion.PROTECT)),
+        migrations.AddField(model_name='programentry', name='allow_cloud_summary',
+                            field=models.BooleanField(default=True)),
+        migrations.AddField(model_name='programentry', name='allow_cloud_asr',
+                            field=models.BooleanField(default=True)),
+        migrations.AddField(model_name='programentry', name='uploaded_original',
+                            field=models.FileField(upload_to='intelligence/encrypted-originals/%Y/%m/', blank=True)),
+        migrations.AddField(model_name='programentry', name='uploaded_sha256',
+                            field=models.CharField(max_length=64, blank=True)),
+        migrations.AddField(model_name='programentry', name='uploaded_name',
+                            field=models.CharField(max_length=255, blank=True)),
+    ]

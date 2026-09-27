@@ -8,7 +8,7 @@
 <span class="intel-eyebrow">投资阅读</span>
 <h1>精选订阅</h1>
 <p>每日市场观察、完整访谈和投资方法。先读重点，再回到原文核对。</p>
-</div>{% if can_admin %}<a class="button ghost" href="{% url 'intelligence:program_settings' %}">管理订阅</a>{% endif %}</section>
+</div><div>{% if can_write %}<a class="button ghost" href="{% url 'intelligence:program_upload' %}">上传资料</a>{% endif %} {% if can_admin %}<a class="button ghost" href="{% url 'intelligence:program_settings' %}">管理订阅</a>{% endif %}</div></section>
 {% include 'intelligence/_tabs.html' %}
 <nav class="program-stock-tabs" aria-label="关注股票">
   <a href="?source={{ source|urlencode }}" {% if not stock %}aria-current="page"{% endif %}>全部主题</a>
@@ -50,4 +50,5 @@
 <button class="button" type="submit">添加到阅读列表</button>
 </form>
 </details>{% endif %}
+{% if can_admin %}<details class="intel-section"><summary>添加 B 站公开视频链接</summary><p>核对公开视频身份后加入阅读列表。B 站频道自动列表如被平台拦截，可用此入口逐期添加。</p><form method="post" action="{% url 'intelligence:program_add_bilibili' %}" class="program-filters">{% csrf_token %}<label>视频链接<input type="url" name="url" required placeholder="https://www.bilibili.com/video/BV…"></label><button class="button" type="submit">添加到阅读列表</button></form></details>{% endif %}
 {% endblock %}

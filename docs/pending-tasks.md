@@ -3,9 +3,19 @@
 投资板块 2026-07-03 至 2026-08-09 的设计决策、主要交付、版本节点和部署经验，已归档到
 [`investment-module-development-history.md`](investment-module-development-history.md)。
 
-更新时间：2026-09-24
+更新时间：2026-09-27
 
 ## AI 情报精选订阅 · 2026-09-27
+
+- [x] 自助信源第一版已部署 NAS `03aedaab1661a4561052b7fe76879552a9d9a526`：公开 YouTube 频道/播放列表、播客 RSS、文章 RSS、文件上传，
+  以及标题包含/排除、任一/全部、发布星期、最短时长和保存前预览。B 站公开视频增加 UP 主
+  订阅尝试与单条视频逐期添加；频道列表在测试网络返回 352/HTTP 412，尚未完成真实频道自动验收。
+  本地 PostgreSQL 53 项回归通过；生产 `intelligence.0012` 迁移、Django 检查、外网页面和
+  16:00 DSM 五分钟任务成功。发布前验证备份 `family-workbench-intelligence-selfservice-03aedaa.dump`
+  （SHA-256 `5c2aeea76b6d5ff60e05b7536708d3cce9bc410fa45d5b88b095cfbb13eb1d1c`），
+  旧源码回滚包已保存。发布前后投资账户 35、持仓 480、流水 1069、快照 2139、明细 13284、
+  最新快照 2026-09-27、估值运行 74 均未变；`.env` 哈希未变。详细范围与限制见
+  [自助信源第一版](key-person-intelligence/self-service-sources-v1.md)。
 
 - 与“投研模块2”协调后统一发布，当前实际运行并标记 `ea889db1fc8eb5b82cc718512471870c8bf4ed9a`，已推送。
   包含完整投研/阅读代码。NAS 独立代理与正式 DSM 五分钟任务已启用；仅程序任务使用代理。

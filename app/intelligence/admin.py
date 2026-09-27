@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.db.models import Q
 from .program_models import ProgramSettings, ProgramSubscription, ProgramEntry, ProgramRevision, ProgramSummaryChunk
 
 
@@ -14,8 +15,20 @@ class ProgramReadOnlyAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
+    def get_queryset(self, request):
+        rows = super().get_queryset(request)
+        if self.model is ProgramEntry:
+            return rows.filter(Q(private_owner__isnull=True) | Q(private_owner__user=request.user))
+        if self.model is ProgramRevision:
+            return rows.filter(Q(entry__private_owner__isnull=True) | Q(entry__private_owner__user=request.user))
+        if self.model is ProgramSummaryChunk:
+            return rows.filter(Q(revision__entry__private_owner__isnull=True)
+                               | Q(revision__entry__private_owner__user=request.user))
+        return rows
+
     def get_fields(self, request, obj=None):
-        return [f.name for f in self.model._meta.fields if f.name not in {'encrypted_credentials', 'audio_file', 'audio_url'}]
+        return [f.name for f in self.model._meta.fields if f.name not in {
+            'encrypted_credentials', 'audio_file', 'audio_url', 'uploaded_original'}]
 
 from .models import (
     CollectionRun,
