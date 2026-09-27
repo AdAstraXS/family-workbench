@@ -372,4 +372,5 @@ class OfficialIRIntegrationTests(TestCase):
         self.assertEqual(version.content_text,'')
         self.assertEqual(gzip.decompress(version.raw_gzip),b'%PDF-example')
         response=self.client.get(reverse('investment_research:detail',args=[self.dossier.pk]))
-        self.assertEqual(response.context['available_versions'],[])
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, '生成一份带原文引用的草稿')

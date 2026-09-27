@@ -19,7 +19,7 @@ from django.contrib.auth.decorators import login_required
 from django.conf import settings
 from django.core.cache import cache
 from django.core.paginator import Paginator
-from django.db.models import F, Q, OuterRef, Subquery
+from django.db.models import F, Q
 from django.http import Http404, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -61,8 +61,8 @@ from .services import (
 )
 from .providers.sec import SecClientError
 from .research_ai import (
-    MAX_DOCUMENT_CHARS, PROMPT_TEMPLATE_VERSION, ResearchAiError, available_research_providers,
-    document_segments, generate_research_draft,
+    PROMPT_TEMPLATE_VERSION, ResearchAiError, available_research_providers,
+    generate_research_draft,
 )
 from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
@@ -261,56 +261,7 @@ def detail(request, pk):
     latest_success_at = max(
         (state.last_success_at for state in successful_states), default=None
     )
-    available_versions = list(
-        OfficialResearchContentVersion.objects.filter(document__in=documents)
-        .filter(pk=Subquery(OfficialResearchContentVersion.objects.filter(document_id=OuterRef('document_id')).order_by('-version_number').values('pk')[:1]))
-        .exclude(content_text='')
-        .select_related("document").order_by("-fetched_at", "-pk")[:20]
-    )
-    completed_segments = set()
-    if is_writer(member) and available_versions:
-        for analysis in AiAnalysisRequest.objects.filter(
-            member=member, family=member.family, module="investment_research",
-            analysis_type="document_draft", status=AiAnalysisRequest.STATUS_SUCCESS,
-        ).only("scope"):
-            scope = analysis.scope or {}
-            if scope.get("dossier_id") == dossier.pk and scope.get("version_id"):
-                # 旧草稿只读取开头 16,000 字，没有 segment_index。
-                completed_segments.add((scope["version_id"], scope.get("segment_index", 0)))
-    research_groups = []
-    for version in available_versions:
-        segments = document_segments(version)
-        chapters = tenk_chapter_coverage(
-            version, (index for version_id, index in completed_segments if version_id == version.pk),
-        )
-        for segment in segments:
-            segment["completed"] = (version.pk, segment["index"]) in completed_segments
-            segment["chapter_codes"] = "、".join(
-                chapter["code"] for chapter in chapters
-                if chapter["located"] and chapter["start"] < segment["end"]
-                and chapter["end"] > segment["start"]
-            )
-        research_groups.append({"version": version, "segments": segments})
-    first_pending = next(
-        (segment for group in research_groups for segment in group["segments"] if not segment["completed"]),
-        None,
-    )
-    if first_pending is not None:
-        first_pending["selected"] = True
-    providers = available_research_providers() if is_writer(member) else []
-    recent_drafts = [
-        analysis for analysis in AiAnalysisRequest.objects.filter(
-            member=member, module="investment_research", analysis_type="document_draft",
-        ).select_related("provider").order_by("-created_at")[:30]
-        if (analysis.scope or {}).get("dossier_id") == dossier.pk
-    ][:5]
-    recent_syntheses = [
-        analysis for analysis in AiAnalysisRequest.objects.filter(
-            member=member, family=member.family, module="investment_research",
-            analysis_type="thesis_synthesis",
-        ).order_by("-created_at")[:30]
-        if (analysis.scope or {}).get("dossier_id") == dossier.pk
-    ][:3]
+    latest_analysis = latest_manual_analysis(dossier)
     review_start_date, review_items = reviewable_filings(dossier)
     current_plan = (ResearchReviewPlan.objects.filter(
         dossier=dossier, thesis_revision_id=dossier.current_revision_id,
@@ -326,12 +277,7 @@ def detail(request, pk):
             "ir_company": company_for_security(dossier.security),
             "latest_source_success_at": latest_success_at,
             "source_error_count": sum(bool(state.last_error) for state in source_states),
-            "available_versions": available_versions,
-            "research_groups": research_groups,
-            "research_providers": providers,
-            "research_document_limit": MAX_DOCUMENT_CHARS,
-            "recent_drafts": recent_drafts,
-            "recent_syntheses": recent_syntheses,
+            "latest_analysis": latest_analysis,
             "selected_metric_count": len(dossier.selected_metric_codes or []),
             "review_start_date": review_start_date,
             "review_items": [item for item in review_items
