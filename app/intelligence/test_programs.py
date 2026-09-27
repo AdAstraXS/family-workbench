@@ -280,7 +280,31 @@ class ProgramTests(TestCase):
         revision.refresh_from_db()
         self.assertTrue(revision.summary_complete)
         self.assertTrue(all(c.reserved_usd > 0 and c.model_name == 'test-model' for c in revision.chunks.all()))
-        self.assertTrue(all(c.prompt_version == 'program-summary-v2' for c in revision.chunks.all()))
+        self.assertTrue(all(c.prompt_version == 'program-summary-v3' for c in revision.chunks.all()))
+
+    def test_invented_year_is_hidden_cannot_archive_and_retries_only_bad_chunk(self):
+        revision = self.revision('On August 17, yields increased.')
+        bad = {'points': [{'topic': '利率', 'kind': '事实', 'text': '2024年8月17日利率上升。', 'refs': [1]}]}
+        with self.assertRaises(ProgramError):
+            validate_points(bad, {1}, {1: revision.text})
+        self.assertEqual(validate_points(bad, {1}, {1: 'In 2024, yields increased.'}), bad)
+        revision.summary, revision.summary_complete = {**bad, 'batches': [[1]]}, True
+        revision.save()
+        chunk = ProgramSummaryChunk.objects.create(revision=revision, number=1, status='success',
+            result=bad, reserved_usd=Decimal('.001'))
+        response = self.client.get(reverse('intelligence:program_detail', args=[self.entry.pk]))
+        self.assertContains(response, '部分要点未展示')
+        self.assertNotContains(response, '2024年8月17日')
+        with self.assertRaises(ProgramError):
+            archive_program(revision, self.member)
+        self.assertFalse(KnowledgeDocument.objects.exists())
+        self.client.post(reverse('intelligence:program_action', args=[self.entry.pk]), {'action': 'retry'})
+        revision.refresh_from_db()
+        chunk.refresh_from_db()
+        self.assertFalse(revision.summary_complete)
+        self.assertEqual(chunk.status, 'pending')
+        self.assertEqual(chunk.reserved_usd, Decimal('.001'))
+        self.assertEqual(revision.summary['batches'], [[1]])
 
     def test_paused_subscription_does_not_run(self):
         self.sub.enabled = False

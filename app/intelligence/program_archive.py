@@ -8,6 +8,7 @@ from knowledge.models import KnowledgeDocument, KnowledgeSource, KnowledgeRevisi
 from knowledge.search import index_document
 from .program_models import ProgramRevision
 from .program_sources import CATALOGUE, ProgramError
+from .program_processing import validate_points
 
 
 def archive_program(revision, member):
@@ -18,6 +19,10 @@ def archive_program(revision, member):
         with transaction.atomic():
             revision = ProgramRevision.objects.select_for_update().select_related('entry__subscription').get(pk=revision.pk)
             entry = revision.entry
+            if revision.summary.get('points'):
+                rows = {i: s['text'] for i, s in enumerate(revision.segments, 1)}
+                for point in revision.summary['points']:
+                    validate_points({'points': [point]}, set(rows), rows)
             payload = {'schema': 'program-archive-v1', 'source_url': entry.url, 'origin': revision.origin,
                        'content_hash': revision.content_hash, 'segments': revision.segments, 'summary': revision.summary,
                        'summary_complete': revision.summary_complete}

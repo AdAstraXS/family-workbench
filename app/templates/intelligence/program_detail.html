@@ -6,6 +6,7 @@
 {% if entry.last_error %}<div class="intel-section program-error">{{ entry.last_error }}</div>{% endif %}
 {% if revision %}
 <div class="program-reading"><main><section class="intel-section"><div class="intel-section-head"><h2>AI 阅读要点</h2>{% if revision.summary_complete %}<span>未经人工复核</span>{% endif %}</div>
+{% if summary_warning %}<p class="program-error">部分要点未展示：{{ summary_warning }} 管理员可在下方点击“获取 / 继续处理”。</p>{% endif %}
 {% if groups %}{% for topic,points in groups.items %}<h3>{{ topic }}</h3>{% for point in points %}<p><span class="program-kind">{{ point.kind }}</span> {{ point.text }} <small>{% for ref in point.refs %}<a href="#segment-{{ ref }}">原文 {{ ref }}</a> {% endfor %}</small></p>{% endfor %}{% endfor %}{% else %}<p>原文已可阅读。AI 整理将在服务配置完成并处理后显示。</p>{% endif %}</section>
 <section class="intel-section">
   <h2>完整原文 / 文字稿</h2>

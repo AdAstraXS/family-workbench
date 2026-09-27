@@ -19,7 +19,7 @@ from knowledge.crypto import encrypt_json, _fernet_key
 from .ai_enrichment import text_ai_providers, provider_is_configured
 from .program_models import ProgramEntry, ProgramRevision, ProgramSettings, ProgramSubscription
 from .program_sources import CATALOGUE, ProgramError
-from .program_processing import save_revision, month_start
+from .program_processing import save_revision, month_start, validate_points
 from .program_archive import archive_program
 from .views import _is_family_admin
 
@@ -101,6 +101,17 @@ def program_list(request):
     page = Paginator(entries, 20).get_page(request.GET.get('page'))
     for entry in page:
         entry.source_name = CATALOGUE[entry.subscription.code]['name']
+        entry.summary_preview = ''
+        revision = entry.current_revision
+        if revision and revision.summary_complete:
+            rows = {i: s['text'] for i, s in enumerate(revision.segments, 1)}
+            for point in revision.summary.get('points', []):
+                try:
+                    validate_points({'points': [point]}, set(rows), rows)
+                except ProgramError:
+                    continue
+                entry.summary_preview = point['text']
+                break
     return render(request, 'intelligence/program_list.html', {'page': page, 'catalogue': CATALOGUE,
         'source': source, 'query': query, 'stock': stock, 'stocks': STOCK_FILTERS, 'can_admin': _is_family_admin(request)})
 
@@ -151,6 +162,7 @@ def program_detail(request, pk):
         revision = get_object_or_404(entry.revisions, pk=request.GET['version'])
     segments = []
     groups = {}
+    summary_warning = ''
     if revision:
         for i, segment in enumerate(revision.segments, 1):
             row = {**segment, 'number': i}
@@ -159,9 +171,15 @@ def program_detail(request, pk):
             row['url'] = entry.url + '&t=' + str(ms // 1000) if ms is not None and entry.subscription.code == 'rhino' else ''
             segments.append(row)
         for point in revision.summary.get('points', []):
+            try:
+                rows = {i: s['text'] for i, s in enumerate(revision.segments, 1)}
+                validate_points({'points': [point]}, set(rows), rows)
+            except ProgramError as exc:
+                summary_warning = str(exc)
+                continue
             groups.setdefault(point['topic'], []).append(point)
     return render(request, 'intelligence/program_detail.html', {'entry': entry, 'revision': revision,
-        'segments': segments, 'groups': groups, 'source_name': CATALOGUE[entry.subscription.code]['name'],
+        'segments': segments, 'groups': groups, 'summary_warning': summary_warning, 'source_name': CATALOGUE[entry.subscription.code]['name'],
         'versions': entry.revisions.order_by('-pk'), 'can_admin': _is_family_admin(request),
         'can_write': request.family_member.role != 'viewer'})
 
@@ -196,6 +214,19 @@ def program_action(request, pk):
                         raise ProgramError('任务 ID 格式错误。')
                     entry.task_id = task_id
                 if entry.current_revision_id:
+                    revision = entry.current_revision
+                    rows = {i: s['text'] for i, s in enumerate(revision.segments, 1)}
+                    invalid = []
+                    for chunk in revision.chunks.filter(status='success'):
+                        try:
+                            validate_points(chunk.result, set(rows), rows)
+                        except ProgramError:
+                            invalid.append(chunk.pk)
+                    if invalid:
+                        revision.chunks.filter(pk__in=invalid).update(status='pending')
+                        revision.summary_complete = False
+                        revision.summary = {k: v for k, v in revision.summary.items() if k != 'points'}
+                        revision.save(update_fields=['summary', 'summary_complete', 'updated_at'])
                     # Explicit retry retains the cost reservations from previous attempts.
                     entry.current_revision.chunks.filter(status__in=['failed', 'running']).update(status='pending')
                     entry.state = 'ready' if entry.current_revision.summary_complete else 'text_ready'

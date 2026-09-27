@@ -1,5 +1,6 @@
 """Optional, worker-only proxy for the four reviewed public source hosts."""
 import os
+from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
@@ -57,5 +58,12 @@ def fetch_source_url(url, *, max_bytes=2 * 1024 * 1024, timeout=12):
             return FetchResponse(status=response.status, url=final_url, body=body)
     except SafeHttpError:
         raise
+    except HTTPError as exc:
+        raise SafeHttpError('proxy_http', f'信源返回 HTTP {exc.code}，请稍后重试。', retryable=exc.code in {429, 500, 502, 503, 504}) from exc
+    except (TimeoutError, URLError) as exc:
+        reason = exc.reason if isinstance(exc, URLError) else exc
+        message = ('信源代理请求超时，请稍后重试。' if isinstance(reason, TimeoutError) else
+                   '信源代理连接未建立，请检查 NAS 代理服务。')
+        raise SafeHttpError('proxy_network', message, retryable=True) from exc
     except Exception as exc:
         raise SafeHttpError('proxy_network', '信源代理连接失败，请检查 NAS 代理和订阅状态。', retryable=True) from exc

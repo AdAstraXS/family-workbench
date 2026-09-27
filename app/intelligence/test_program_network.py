@@ -1,11 +1,21 @@
 from unittest.mock import patch, MagicMock
 from urllib.request import Request
+from urllib.error import HTTPError
 from django.test import SimpleTestCase
 from .http_client import SafeHttpError
 from .program_network import approved_source_url, fetch_source_url, source_proxy, SourceRedirect, NAS_PROXY
 
 
 class ProgramNetworkTests(SimpleTestCase):
+    @patch('intelligence.program_network.build_opener')
+    def test_http_status_is_safe_and_distinct_from_connection_failure(self, opener):
+        opener.return_value.open.side_effect = HTTPError('https://www.youtube.com/', 429, 'secret detail', {}, None)
+        with patch.dict('os.environ', {'PROGRAM_SOURCE_PROXY': NAS_PROXY}):
+            with self.assertRaises(SafeHttpError) as caught:
+                fetch_source_url('https://www.youtube.com/')
+        self.assertIn('HTTP 429', caught.exception.safe_message)
+        self.assertNotIn('secret', caught.exception.safe_message)
+
     def test_proxy_destination_is_fixed_by_deployment(self):
         with patch.dict('os.environ', {'PROGRAM_SOURCE_PROXY': 'http://unreviewed.example:7890'}):
             with self.assertRaises(SafeHttpError):
