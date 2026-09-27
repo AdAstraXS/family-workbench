@@ -5,6 +5,7 @@ Private thesis comparison requires a separate, provider-bound dossier consent.
 
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,7 +19,7 @@ from django.utils.dateparse import parse_datetime
 from ai_analysis.models import AiAnalysisRequest, AiAnalysisResult
 from knowledge.ai import KnowledgeAiError, _chat_url
 
-from .analysis_materials import NARRATIVE_TYPES, _narrative
+from .analysis_materials import NARRATIVE_TYPES, _narrative, source_preview
 from .citations import quote_digest
 from .models import (OfficialResearchContentVersion, ResearchAutoDigestConsent,
                      ResearchDossier)
@@ -30,7 +31,7 @@ from .thesis_analysis import ResponseFormatError, _evidence_ids, _model_text
 from .services import DossierNotFound, ResearchValidationError, _require_writer
 
 
-PROMPT_VERSION = "research-event-digest-v2"
+PROMPT_VERSION = "research-event-digest-v3"
 SOURCE_TYPES = NARRATIVE_TYPES | {"10-k"}
 SOURCE_NAMES = {"sec", "microsoft_ir", "official_ir"}
 
@@ -90,6 +91,13 @@ def pending_sources(dossier, history=None):
     history = history if history is not None else _history(dossier)
     latest_digest_item = next((item for item in history
                                if item.analysis_type == "next_day_digest"), None)
+    if (latest_digest_item and (latest_digest_item.scope or {}).get("initial_digest") and
+            (latest_digest_item.scope or {}).get("prompt_version") != PROMPT_VERSION):
+        current = source_preview(dossier)
+        old_ids = {item.get("version_id") for item in
+                   (latest_digest_item.scope or {}).get("sources", [])}
+        if {item.pk for item in current} != old_ids:
+            return current
     _, consent = _private_mode(dossier, history)
     if latest_digest_item and consent and not (latest_digest_item.scope or {}).get("private_comparison"):
         ids = [item.get("version_id") for item in
@@ -100,9 +108,13 @@ def pending_sources(dossier, history=None):
             ).select_related("document").defer("raw_gzip").order_by("fetched_at", "pk"))
     cursor = None
     if latest_digest_item:
-        cursor = max(((parse_datetime(source.get("fetched_at", "")), source.get("version_id", 0))
-                      for source in (latest_digest_item.scope or {}).get("sources", [])
-                      if parse_datetime(source.get("fetched_at", ""))), default=None)
+        stored = (latest_digest_item.scope or {}).get("source_cursor") or {}
+        if parse_datetime(stored.get("fetched_at", "")):
+            cursor = (parse_datetime(stored["fetched_at"]), stored.get("version_id", 0))
+        else:
+            cursor = max(((parse_datetime(source.get("fetched_at", "")), source.get("version_id", 0))
+                          for source in (latest_digest_item.scope or {}).get("sources", [])
+                          if parse_datetime(source.get("fetched_at", ""))), default=None)
     query = OfficialResearchContentVersion.objects.filter(
         document__security=dossier.security, document__source__in=SOURCE_NAMES,
         document__document_type__in=SOURCE_TYPES,
@@ -111,18 +123,9 @@ def pending_sources(dossier, history=None):
         query = query.filter(Q(fetched_at__gt=cursor[0]) |
                              Q(fetched_at=cursor[0], pk__gt=cursor[1]))
     elif not latest_digest_item:
-        # First run is a clearly labelled catch-up over the latest saved
-        # material, even when it predates the first thesis synthesis.
-        seen = set()
-        recent = []
-        for version in query.order_by("-fetched_at", "-pk")[:20]:
-            if version.document_id in seen:
-                continue
-            seen.add(version.document_id)
-            recent.append(version)
-            if len(recent) == 3:
-                break
-        return list(reversed(recent))
+        # The first review uses the latest reporting periods, regardless of
+        # when an older archived filing happened to be fetched locally.
+        return source_preview(dossier)
     else:
         return []
     seen = set()
@@ -137,13 +140,17 @@ def pending_sources(dossier, history=None):
     return versions
 
 
+def _complete_quote(quote):
+    quote = quote.strip()
+    if quote.endswith((".", "?", "!", "。", "？", "！", ";", "；")):
+        return quote
+    endings = [match.end() for match in re.finditer(r"[.!?。！？;；](?:\s|$)", quote)]
+    return quote[:endings[-1]].strip() if endings and endings[-1] >= 20 else ""
+
+
 def _packet(versions):
     evidence, sources = [], []
     for version in versions:
-        sources.append({"document_id": version.document_id, "version_id": version.pk,
-                        "title": version.document.title,
-                        "period_end": str(version.document.period_end or ""),
-                        "fetched_at": version.fetched_at.isoformat()})
         selected = _narrative(version, start=0,
                               end=min(len(version.content_text), 500000), count=10)
         if not selected:
@@ -152,7 +159,15 @@ def _packet(versions):
                 if len(stripped) >= 40:
                     selected = [(0, version.content_text.find(stripped), stripped[:350])]
                     break
-        for _, start, quote in selected:
+        valid = [(start, _complete_quote(quote)) for _, start, quote in selected]
+        valid = [(start, quote) for start, quote in valid if quote]
+        if not valid:
+            continue
+        sources.append({"document_id": version.document_id, "version_id": version.pk,
+                        "title": version.document.title,
+                        "period_end": str(version.document.period_end or ""),
+                        "fetched_at": version.fetched_at.isoformat()})
+        for start, quote in valid:
             evidence.append({"id": f"E{len(evidence) + 1}",
                              "text": f"{version.document.title}（截至 {version.document.period_end or '日期未标明'}）：{quote}",
                              "citation": {"document_id": version.document_id,
@@ -164,7 +179,24 @@ def _packet(versions):
 
 def _qualitative(value, limit):
     cleaned, _ = _redact_quantified_sentences(_model_text(value, limit))
-    return cleaned
+    return cleaned.replace("本句涉及金额或数量，具体数值及变化口径请查看引用原文。", "").strip()
+
+
+def _verified_summary(value, refs, evidence):
+    """Keep numeric claims only when their numbers appear in bound excerpts."""
+    original = _model_text(value, 450)
+    number_pattern = r"(?<!\d)\d[\d,]*(?:\.\d+)?%?"
+    cited_text = " ".join(evidence[ref]["text"] for ref in refs)
+    allowed = set(re.findall(number_pattern, cited_text))
+    parts = re.split(r"(?<=[。！？；])", original)
+    kept = []
+    for part in parts:
+        numbers = re.findall(number_pattern, part)
+        units = ("亿美元", "亿元", "万元", "美元", "人民币", "billion", "million", "trillion")
+        unsupported_unit = any(unit in part and unit not in cited_text for unit in units)
+        if all(number in allowed for number in numbers) and not unsupported_unit:
+            kept.append(part)
+    return "".join(kept).strip() or "具体变化请看下方官方摘录。"
 
 
 def _clean(raw, evidence):
@@ -189,7 +221,7 @@ def _clean(raw, evidence):
         if malformed or not valid_refs or len(valid_refs) != len(refs):
             continue
         title = _qualitative(item.get("title"), 130)
-        summary = _qualitative(item.get("summary"), 450)
+        summary = _verified_summary(item.get("summary"), valid_refs, by_id)
         impact = _qualitative(item.get("impact"), 350)
         if not (title and summary and impact):
             continue
@@ -230,6 +262,19 @@ def generate_next_day_digest(dossier_id, *, transport=None, url_validator=None):
            for item in history if item.analysis_type == "next_day_digest"):
         return None
     initial_digest = not any(item.analysis_type == "next_day_digest" for item in history)
+    if not initial_digest:
+        old = next(item for item in history if item.analysis_type == "next_day_digest")
+        initial_digest = bool((old.scope or {}).get("initial_digest") and
+                              (old.scope or {}).get("prompt_version") != PROMPT_VERSION)
+    if initial_digest:
+        newest = OfficialResearchContentVersion.objects.filter(
+            document__security=dossier.security, document__source__in=SOURCE_NAMES,
+            document__document_type__in=SOURCE_TYPES,
+        ).exclude(content_text="").order_by("-fetched_at", "-pk").first()
+        cursor = {"fetched_at": newest.fetched_at.isoformat(), "version_id": newest.pk} if newest else {}
+    else:
+        newest = max(versions, key=lambda item: (item.fetched_at, item.pk))
+        cursor = {"fetched_at": newest.fetched_at.isoformat(), "version_id": newest.pk}
     policy = research_provider_policy(provider)
     api_key = os.getenv(policy["api_key_env_var"], "")
     if not api_key:
@@ -292,11 +337,12 @@ def generate_next_day_digest(dossier_id, *, transport=None, url_validator=None):
                    "thesis_revision_number": dossier.current_revision.revision_number,
                    "source_fingerprint": fingerprint, "sources": packet["sources"],
                    "initial_digest": initial_digest,
+                   "source_cursor": cursor,
                    "private_comparison": private_comparison,
                    "consent_id": consent.pk if consent else None,
                    "prompt_version": PROMPT_VERSION,
                    "estimated_max_cost_usd": str(worst_cost)},
-            sanitized_input={"source_count": len(versions),
+            sanitized_input={"source_count": len(packet["sources"]),
                              "evidence_count": len(packet["evidence"]),
                              "provided_characters": len(user_prompt),
                              "private_thesis_included": private_comparison},

@@ -4,7 +4,7 @@ import gzip
 import hashlib
 import json
 import os
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -18,7 +18,8 @@ from family_core.models import Family, FamilyMember
 from portfolio.models import PriceSourceChoices, PricingStatusChoices, Security, SecurityMarketSnapshot
 
 from .models import OfficialResearchContentVersion, OfficialResearchDocument
-from .next_day_digest import generate_next_day_digest, pending_sources
+from .next_day_digest import (_complete_quote, _verified_summary,
+                              generate_next_day_digest, pending_sources)
 from .services import create_dossier
 from .valuation_trial import build_valuation_trial
 
@@ -152,6 +153,42 @@ class ResearchBriefTests(TestCase):
         self.client.force_login(self.other)
         self.assertEqual(self.client.get(reverse("investment_research:next_day_tracking",
                                                 args=[self.dossier.pk])).status_code, 404)
+
+    def test_first_digest_uses_latest_reporting_period_even_if_old_filing_was_fetched_later(self):
+        self.analysis()
+        versions = []
+        for year, days_ago in ((2025, 1), (2026, 10)):
+            body = f"Fiscal {year} revenue and operating cash flow improved during the year. " * 8
+            document = OfficialResearchDocument.objects.create(
+                security=self.security, source="sec", external_id=f"annual-{year}",
+                document_type="10-k", title=f"FY{year} 10-K",
+                source_url=f"https://example.com/{year}", period_end=date(year, 6, 30))
+            versions.append(OfficialResearchContentVersion.objects.create(
+                document=document, version_number=1, source_url=document.source_url,
+                raw_sha256=hashlib.sha256(body.encode()).hexdigest(),
+                raw_gzip=gzip.compress(body.encode()), content_text=body,
+                content_sha256=hashlib.sha256(body.encode()).hexdigest(),
+                extractor_version="test", fetched_at=timezone.now() - timedelta(days=days_ago)))
+        self.assertEqual([item.pk for item in pending_sources(self.dossier)], [versions[1].pk])
+        prior = AiAnalysisRequest.objects.create(
+            family=self.family, member=self.member, provider=self.provider,
+            module="investment_research", analysis_type="next_day_digest", prompt="old",
+            status=AiAnalysisRequest.STATUS_SUCCESS,
+            scope={"dossier_id": self.dossier.pk, "initial_digest": True,
+                   "prompt_version": "research-event-digest-v2",
+                   "sources": [{"version_id": versions[0].pk}]})
+        self.assertEqual([item.pk for item in pending_sources(self.dossier)], [versions[1].pk])
+
+    def test_event_excerpt_and_numeric_summary_drop_incomplete_or_unsupported_claims(self):
+        self.assertEqual(_complete_quote("Revenue grew 15% during the fiscal year. More detail was trunca"),
+                         "Revenue grew 15% during the fiscal year.")
+        self.assertEqual(_complete_quote("Azure revenue was trunca"), "")
+        evidence = {"E1": {"text": "Official release: revenue grew 15% in FY2026."}}
+        self.assertEqual(_verified_summary("收入增长15%。利润增长99%。", ["E1"], evidence),
+                         "收入增长15%。")
+        evidence["E1"]["text"] += " Cloud revenue was 15 billion dollars."
+        self.assertEqual(_verified_summary("收入增长15亿元。收入增长15%。", ["E1"], evidence),
+                         "收入增长15%。")
 
     def test_provider_bound_consent_sends_private_thesis_once_and_can_be_revoked(self):
         self.analysis()
