@@ -7,6 +7,24 @@ from .program_network import approved_source_url, fetch_source_url, source_proxy
 
 
 class ProgramNetworkTests(SimpleTestCase):
+    @patch('intelligence.program_network._fetch_proxy_source')
+    def test_only_transient_youtube_feed_404_is_retried(self, fetch):
+        error = SafeHttpError('proxy_http_404', 'HTTP 404')
+        fetch.side_effect = [error, 'feed']
+        with patch.dict('os.environ', {'PROGRAM_SOURCE_PROXY': NAS_PROXY}):
+            self.assertEqual(fetch_source_url('https://www.youtube.com/feeds/videos.xml?channel_id=test'), 'feed')
+            self.assertEqual(fetch.call_count, 2)
+            fetch.reset_mock(side_effect=True)
+            fetch.side_effect = error
+            with self.assertRaises(SafeHttpError):
+                fetch_source_url('https://www.youtube.com/feeds/videos.xml?channel_id=test')
+            self.assertEqual(fetch.call_count, 3)
+            fetch.reset_mock(side_effect=True)
+            fetch.side_effect = SafeHttpError('proxy_http_403', 'HTTP 403')
+            with self.assertRaises(SafeHttpError):
+                fetch_source_url('https://www.youtube.com/feeds/videos.xml?channel_id=test')
+            self.assertEqual(fetch.call_count, 1)
+
     @patch('intelligence.program_network.build_opener')
     def test_http_status_is_safe_and_distinct_from_connection_failure(self, opener):
         opener.return_value.open.side_effect = HTTPError('https://www.youtube.com/', 429, 'secret detail', {}, None)

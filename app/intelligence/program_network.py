@@ -44,6 +44,19 @@ def fetch_source_url(url, *, max_bytes=2 * 1024 * 1024, timeout=12):
     proxy = source_proxy()
     if not proxy:
         return direct_fetch(url, max_bytes=max_bytes, timeout=timeout)
+    parsed = urlsplit(approved_source_url(url))
+    # The public YouTube Atom endpoint intermittently returns 404 for an existing
+    # channel. Retry only that idempotent feed request; never retry 403/429 or ASR.
+    attempts = 3 if parsed.hostname == 'www.youtube.com' and parsed.path == '/feeds/videos.xml' else 1
+    for attempt in range(attempts):
+        try:
+            return _fetch_proxy_source(url, proxy, max_bytes=max_bytes, timeout=timeout)
+        except SafeHttpError as exc:
+            if exc.code != 'proxy_http_404' or attempt + 1 == attempts:
+                raise
+
+
+def _fetch_proxy_source(url, proxy, *, max_bytes, timeout):
     # DNS for these fixed HTTPS hosts is resolved by the proxy. Local DNS on the
     # NAS may return poisoned addresses; arbitrary caller-supplied hosts never
     # use this path. Every redirect is checked against the same fixed catalogue.
@@ -59,7 +72,7 @@ def fetch_source_url(url, *, max_bytes=2 * 1024 * 1024, timeout=12):
     except SafeHttpError:
         raise
     except HTTPError as exc:
-        raise SafeHttpError('proxy_http', f'信源返回 HTTP {exc.code}，请稍后重试。', retryable=exc.code in {429, 500, 502, 503, 504}) from exc
+        raise SafeHttpError(f'proxy_http_{exc.code}', f'信源返回 HTTP {exc.code}，请稍后重试。', retryable=exc.code in {429, 500, 502, 503, 504}) from exc
     except (TimeoutError, URLError) as exc:
         reason = exc.reason if isinstance(exc, URLError) else exc
         message = ('信源代理请求超时，请稍后重试。' if isinstance(reason, TimeoutError) else
