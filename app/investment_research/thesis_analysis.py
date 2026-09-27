@@ -21,7 +21,7 @@ from .research_ai import (
 from .services import DossierNotFound, _require_writer
 
 
-PROMPT_VERSION = "research-thesis-synthesis-v3"
+PROMPT_VERSION = "research-thesis-synthesis-v4"
 
 
 class ResponseFormatError(ResearchAiError):
@@ -35,6 +35,35 @@ def _targets(revision):
              for index, text in enumerate(revision.questions)])
 
 
+def _evidence_ids(value):
+    """Accept common model representations without inventing a source citation."""
+    if value is None:
+        return [], False
+    entries = value if isinstance(value, list) else [value]
+    refs = []
+    malformed = False
+    for entry in entries:
+        if isinstance(entry, dict):
+            entry = entry.get("id", entry.get("evidence_id"))
+        if isinstance(entry, int) and not isinstance(entry, bool):
+            entry = f"E{entry}"
+        if not isinstance(entry, str):
+            malformed |= entry is not None
+            continue
+        found = re.findall(r"(?<![A-Za-z0-9])E\s*0*(\d+)(?!\d)", entry, re.IGNORECASE)
+        if not found and re.fullmatch(r"\s*0*(\d+)\s*", entry):
+            found = [entry.strip()]
+        if found:
+            refs.extend(f"E{int(number)}" for number in found)
+        elif entry.strip():
+            malformed = True
+    return list(dict.fromkeys(refs)), malformed
+
+
+def _model_text(value, limit, default=""):
+    return value.strip()[:limit] if isinstance(value, str) and value.strip() else default
+
+
 def _validate_output(raw, targets, evidence):
     if not isinstance(raw, str) or not raw.strip():
         raise ResponseFormatError("文本模型返回了空内容，无法生成草稿。")
@@ -46,24 +75,42 @@ def _validate_output(raw, targets, evidence):
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ResponseFormatError("文本模型返回的 JSON 不完整或格式有误，无法生成草稿。") from exc
-    if not isinstance(value, dict) or not isinstance(value.get("assessments"), list):
-        raise ResearchAiError("AI 综合分析缺少逐项判断。")
-    if len(value["assessments"]) != len(targets):
-        raise ResearchAiError("AI 没有逐项覆盖当前判断。")
+    if not isinstance(value, dict) or not isinstance(value.get("assessments"), list) or not value["assessments"]:
+        raise ResponseFormatError("AI 综合分析缺少逐项判断。")
     evidence_by_id = {item["id"]: item for item in evidence}
+    items = value["assessments"]
+    by_target = {}
+    for item in items:
+        if isinstance(item, dict) and isinstance(item.get("kind"), str):
+            key = (item.get("kind"), str(item.get("index")))
+            if key not in by_target:
+                by_target[key] = item
+    positional = len(items) == len(targets) and all(
+        isinstance(item, dict) and item.get("kind") is None and item.get("index") is None
+        for item in items
+    )
     cleaned = []
     invalid_refs = 0
-    for item, target in zip(value["assessments"], targets):
-        if not isinstance(item, dict) or item.get("kind") != target["kind"] or item.get("index") != target["index"]:
-            raise ResearchAiError("AI 分析条目与当前判断不对应。")
-        verdict = item.get("verdict")
+    for position, target in enumerate(targets):
+        item = (items[position] if positional else
+                by_target.get((target["kind"], str(target["index"]))))
+        if not isinstance(item, dict):
+            cleaned.append({**target, "verdict": "unknown",
+                            "reason": "模型未返回与这项判断对应的分析。", "citations": []})
+            invalid_refs += 1
+            continue
+        raw_verdict = item.get("verdict")
+        verdict = {
+            "support": "supports", "支持": "supports",
+            "weaken": "weakens", "反对": "weakens", "削弱": "weakens",
+            "部分支持": "mixed", "矛盾": "mixed", "混合": "mixed",
+            "证据不足": "unknown", "未知": "unknown",
+        }.get(raw_verdict, raw_verdict) if isinstance(raw_verdict, str) else "unknown"
         if verdict not in {"supports", "weakens", "mixed", "unknown"}:
-            raise ResearchAiError("AI 分析状态无效。")
-        refs = item.get("evidence_ids")
-        if not isinstance(refs, list) or len(refs) > 3 or any(not isinstance(ref, str) for ref in refs):
-            raise ResearchAiError("AI 返回的证据编号格式不正确。")
-        valid_refs = list(dict.fromkeys(ref for ref in refs if ref in evidence_by_id))
-        if len(valid_refs) != len(set(refs)):
+            verdict = "unknown"
+        refs, malformed = _evidence_ids(item.get("evidence_ids"))
+        valid_refs = [ref for ref in refs if ref in evidence_by_id]
+        if malformed or len(valid_refs) != len(refs):
             invalid_refs += 1
             verdict = "unknown"
             reason = "模型引用的证据编号不在本次资料包中，请打开财务概览或官方资料核查。"
@@ -73,9 +120,14 @@ def _validate_output(raw, targets, evidence):
             verdict = "unknown"
             reason = "模型未给出可核查证据，这一项暂不能形成结论。"
         else:
-            reason, _ = _redact_quantified_sentences(_safe_text(item.get("reason"), 500))
+            reason = _model_text(item.get("reason"), 500)
+            if not reason:
+                verdict = "unknown"
+                reason = "模型未说明判断依据，这一项暂不能形成结论。"
+            else:
+                reason, _ = _redact_quantified_sentences(reason)
         citations = []
-        for ref in valid_refs:
+        for ref in valid_refs[:3]:
             citations.extend({**cite, "id": ref} for cite in evidence_by_id[ref]["citations"])
         citations = list({(cite["version_id"], cite["start"], cite["end"]): cite
                           for cite in citations}.values())
@@ -83,18 +135,19 @@ def _validate_output(raw, targets, evidence):
                         "citations": citations})
     notes = []
     for field in ("gaps", "next_checks"):
-        entries = value.get(field)
-        if not isinstance(entries, list) or len(entries) > 5:
-            raise ResearchAiError("AI 分析的缺口或下一步清单格式不正确。")
+        entries = value.get(field) or []
+        if isinstance(entries, str):
+            entries = [entries]
+        if not isinstance(entries, list):
+            entries = []
         notes_for_field = []
-        for entry in entries:
-            text, _ = _redact_quantified_sentences(_safe_text(entry, 250))
-            notes_for_field.append(text)
+        for entry in entries[:5]:
+            text = _model_text(entry, 250)
+            if text:
+                text, _ = _redact_quantified_sentences(text)
+                notes_for_field.append(text)
         notes.append(notes_for_field)
-    suggestion = value.get("suggested_revision", "")
-    if not isinstance(suggestion, str) or len(suggestion) > 1200:
-        raise ResearchAiError("AI 判断修订建议格式不正确。")
-    suggestion, _ = _redact_quantified_sentences(suggestion.strip())
+    suggestion, _ = _redact_quantified_sentences(_model_text(value.get("suggested_revision"), 1200))
     if invalid_refs:
         suggestion = ""
         notes[0].append("有些条目的模型引用无效，已改为证据不足；请核查后再修订判断。")

@@ -36,8 +36,31 @@
       <p class="research-private-note">若模型偶尔返回空内容或无效 JSON，系统会在上方单次费用上限内自动重试一次。</p>
       <p class="research-private-note">本次会向所选模型发送：上面的官方资料经整理的指标与短摘录，以及你当前的判断、假设和问题。不会发送整份年报或其他知识库内容。AI 只能生成草稿，不能修改正式判断。</p>
       <label class="research-consent"><input type="checkbox" name="one_time_consent" value="yes" required> 我确认仅本次将上述内容发送给所选云端模型。</label>
-      <button type="submit">生成逐项分析草稿</button>
+      <button type="submit" id="research-synthesis-submit">生成逐项分析草稿</button>
+      <p class="research-analysis-progress" id="research-synthesis-progress" role="status" aria-live="polite" hidden>请求已发出，正在整理资料并生成逐项分析。通常需要几十秒，请保持页面打开。</p>
     </form>
+    <script>
+      (() => {
+        const form = document.getElementById('research-synthesis-form');
+        const button = document.getElementById('research-synthesis-submit');
+        const progress = document.getElementById('research-synthesis-progress');
+        form.addEventListener('submit', () => {
+          if (form.dataset.submitting === 'true') return;
+          form.dataset.submitting = 'true';
+          form.setAttribute('aria-busy', 'true');
+          button.disabled = true;
+          button.textContent = '正在生成分析…';
+          progress.hidden = false;
+        });
+        window.addEventListener('pageshow', () => {
+          form.dataset.submitting = 'false';
+          form.removeAttribute('aria-busy');
+          button.disabled = false;
+          button.textContent = '生成逐项分析草稿';
+          progress.hidden = true;
+        });
+      })();
+    </script>
   {% elif revision and can_write %}
     <div class="research-document-empty"><strong>还不能生成综合分析</strong><p>{% if not sources %}请先在官方资料中保存 SEC 年报或近期 IR 正文。{% else %}尚未配置获准处理投研资料的文本模型。{% endif %}</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看官方资料</a></div>
   {% endif %}

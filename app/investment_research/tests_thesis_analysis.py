@@ -188,12 +188,53 @@ class ThesisAnalysisTests(TestCase):
             self.generate(transport=transport)
         self.assertEqual(len(sent), 1)
 
+    def test_common_evidence_id_shapes_are_normalized_and_citations_stay_bounded(self):
+        targets = [{"kind": "pillar", "index": 0, "text": "需求"}]
+        evidence = [{"id": f"E{number}", "citations": [{
+            "version_id": number, "document_id": number, "start": 0,
+            "end": 10, "hash": "test",
+        }]} for number in range(1, 5)]
+        for refs in ("E1", 1, {"id": "E1"}, [{"evidence_id": "E1"}], ["E1"]):
+            with self.subTest(refs=refs):
+                raw = json.dumps({"assessments": [{
+                    "kind": "pillar", "index": 0, "verdict": "supports",
+                    "reason": "材料支持需求判断。", "evidence_ids": refs,
+                }], "gaps": [], "next_checks": []})
+                result = _validate_output(raw, targets, evidence)
+                self.assertEqual(result["assessments"][0]["verdict"], "supports")
+                self.assertEqual(result["assessments"][0]["citations"][0]["id"], "E1")
+        raw = json.dumps({"assessments": [{
+            "kind": "pillar", "index": 0, "verdict": "supports",
+            "reason": "材料支持需求判断。", "evidence_ids": "E1、E2、E3、E4",
+        }]})
+        result = _validate_output(raw, targets, evidence)
+        self.assertEqual(len(result["assessments"][0]["citations"]), 3)
+
+    def test_missing_or_unverifiable_model_fields_degrade_without_false_citations(self):
+        targets = [{"kind": "pillar", "index": 0, "text": "需求"},
+                   {"kind": "question", "index": 0, "text": "现金？"}]
+        evidence = [{"id": "E1", "citations": [{"version_id": 1, "document_id": 1,
+                                                  "start": 0, "end": 10, "hash": "test"}]}]
+        raw = json.dumps({"assessments": [{
+            "kind": "pillar", "index": 0, "verdict": "supports",
+            "reason": "材料支持需求判断。", "evidence_ids": ["E1", "E999"],
+        }], "gaps": "还要核查现金流", "next_checks": None,
+            "suggested_revision": {"text": "不能直接采用"}})
+        result = _validate_output(raw, targets, evidence)
+        self.assertEqual([item["verdict"] for item in result["assessments"]],
+                         ["unknown", "unknown"])
+        self.assertTrue(all(not item["citations"] for item in result["assessments"]))
+        self.assertEqual(result["gaps"][0], "还要核查现金流")
+        self.assertEqual(result["suggested_revision"], "")
+
     def test_analysis_page_requires_no_source_selection(self):
         self.client.force_login(self.user)
         with patch.dict(os.environ, {"SYNTHESIS_TEST_KEY": "test-token"}):
             response = self.client.get(reverse("investment_research:thesis_analysis",
                                                args=[self.dossier.pk]))
         self.assertContains(response, "本次自动整理的资料")
+        self.assertContains(response, 'id="research-synthesis-progress"')
+        self.assertContains(response, "正在生成分析")
         self.assertNotContains(response, 'name="sections"')
         self.assertEqual(len(source_preview(self.dossier)), 2)
 

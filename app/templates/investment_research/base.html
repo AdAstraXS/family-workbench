@@ -115,6 +115,10 @@
   .research-section-option input { margin-top:4px; }
   .research-section-option small { display:block; color:#687386; line-height:1.55; }
   .research-consent { padding:12px; background:#f3f6fb; border-radius:8px; }
+  .research-analysis-progress { margin-top:14px; padding:14px 16px; border:1px solid #c7daf4; border-radius:9px; background:#f1f6ff; color:#244b81; line-height:1.6; }
+  .research-analysis-progress::before { content:""; display:inline-block; width:14px; height:14px; margin-right:9px; vertical-align:-2px; border:2px solid #a9c4e9; border-top-color:#245ea7; border-radius:50%; animation:research-spin .8s linear infinite; }
+  .research-analysis-progress[hidden] { display:none; }
+  @keyframes research-spin { to { transform:rotate(360deg); } }
   .research-assessment header { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
   .research-assessment h3 { font-size:17px; margin:0; }
   .research-assessment p { line-height:1.7; }
