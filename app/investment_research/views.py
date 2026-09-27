@@ -523,11 +523,8 @@ def thesis_analysis_detail(request, pk, analysis_pk):
                 "supports": "有支持", "weakens": "有反证", "mixed": "证据混合",
                 "unknown": "证据不足",
             }.get(item.get("verdict"), "待核对")
-    mode = "audit" if request.GET.get("mode") == "audit" else "brief"
-    valuation = (build_valuation_trial(dossier.security, analysis.scope, request.GET)
-                 if mode == "brief" else None)
-    return render(request, "investment_research/thesis_analysis_detail.html"
-                  if mode == "audit" else "investment_research/thesis_analysis_brief.html", {
+    valuation = build_valuation_trial(dossier.security, analysis.scope, request.GET)
+    return render(request, "investment_research/thesis_analysis_brief.html", {
         "dossier": dossier, "analysis": analysis, "result": result,
         "valuation": valuation,
         "is_current_revision": (analysis.scope or {}).get("thesis_revision_id") == dossier.current_revision_id,
@@ -646,6 +643,18 @@ def edit(request, pk):
         return redirect("investment_research:first_thesis", pk=pk)
 
     current = dossier.current_revision
+    analysis = latest_manual_analysis(dossier)
+    digest = latest_digest(dossier)
+    reference = {
+        "analysis": analysis,
+        "suggestion": (analysis.result.result_json or {}).get("suggested_revision") if analysis else "",
+        "suggestion_is_current": bool(analysis and
+            (analysis.scope or {}).get("thesis_revision_id") == current.pk),
+        "digest": digest,
+        "digest_result": display_digest_result(digest.result.result_json) if digest else None,
+        "digest_is_current": bool(digest and
+            (digest.scope or {}).get("thesis_revision_id") == current.pk),
+    }
     if request.method == "POST":
         form = EditThesisForm(request.POST)
         if form.is_valid():
@@ -669,6 +678,7 @@ def edit(request, pk):
                         "dossier": dossier,
                         "form": form,
                         "conflict": True,
+                        **reference,
                     },
                     status=409,
                 )
@@ -698,7 +708,7 @@ def edit(request, pk):
     return render(
         request,
         "investment_research/edit.html",
-        {"dossier": dossier, "form": form, "conflict": False},
+        {"dossier": dossier, "form": form, "conflict": False, **reference},
     )
 
 

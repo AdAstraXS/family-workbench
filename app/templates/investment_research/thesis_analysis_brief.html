@@ -16,12 +16,11 @@
   <nav class="research-brief-tabs" aria-label="研究视图">
     <span aria-current="page">公司研究</span>
     <a href="{% url 'investment_research:next_day_tracking' dossier.pk %}">次日跟踪</a>
-    <a href="?mode=audit">逐项核查</a>
     <a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">生成新分析</a>
   </nav>
   {% if not is_current_revision %}<div class="research-document-empty">这是按旧版判断生成的研究简报。当前判断已修改；请按生成时的语境阅读。</div>{% endif %}
   {% if result %}
-    {% if result.invalid_reference_count %}<div class="research-document-empty">有 {{ result.invalid_reference_count }} 项模型引文无效，已降为“证据不足”。请打开逐项核查核对。</div>{% endif %}
+    {% if result.invalid_reference_count %}<div class="research-document-empty">有 {{ result.invalid_reference_count }} 项模型引文无效，已降为“证据不足”。请在下方核对原文。</div>{% endif %}
     <section class="research-brief-card research-brief-summary">
       <p class="research-eyebrow">围绕我的判断 · AI 研究草稿</p>
       <h2>{{ result.headline|default:"这份资料对我的判断意味着什么" }}</h2>
@@ -67,8 +66,8 @@
       {% else %}<p>{{ valuation.problem }}</p><a href="{% url 'portfolio:market_data_status' %}">查看行情与估值状态</a>{% endif %}
     </details>
     <details class="research-brief-card research-brief-expand"><summary>波段辅助 · 收盘后检查</summary><p>这里预留价格阈值、均线与事件提醒。完整复权日线和你的触发条件尚未接入，暂不计算技术信号。</p><span class="research-brief-pending">技术数据待接入</span><p><a href="{% url 'portfolio:security_list' %}">前往投资组合 · 自选股与行情</a></p></details>
-    {% if result.suggested_revision %}<section class="research-brief-card"><h2>我可以怎样更新判断？</h2><p>AI 建议以下措辞，由你核对后决定是否保存：</p><blockquote>{{ result.suggested_revision|linebreaksbr }}</blockquote>{% if is_current_revision %}<a class="button" href="{% url 'investment_research:edit' dossier.pk %}">核对后修改我的判断</a>{% endif %}</section>{% endif %}
+    {% if result.suggested_revision %}<section class="research-brief-card"><h2>我可以怎样更新判断？</h2><p>AI 建议以下措辞。编辑页会保留这条建议供你对照，只有你保存的新版本才会成为正式判断。</p><blockquote>{{ result.suggested_revision|linebreaksbr }}</blockquote>{% if is_current_revision %}<a class="button" href="{% url 'investment_research:edit' dossier.pk %}">查看建议并修改我的判断</a>{% endif %}</section>{% endif %}
   {% else %}<div class="research-document-empty"><strong>这次分析没有可展示的简报</strong><p>{{ analysis.error_message|default:"请求尚未完成。" }}</p></div>{% endif %}
-  <footer class="research-private-note">本页根据保存的官方资料生成；分析范围为 {{ analysis.scope.financial_count|default:0 }} 项财务指标、{{ analysis.scope.narrative_count|default:0 }} 条官方要点。<a href="?mode=audit">查看逐项核查与资料版本</a>。</footer>
+  <footer class="research-private-note">本页根据保存的官方资料生成；分析范围为 {{ analysis.scope.financial_count|default:0 }} 项财务指标、{{ analysis.scope.narrative_count|default:0 }} 条官方要点。每条结论可展开核查证据与出处。</footer>
 </div>
 {% endblock %}

@@ -90,7 +90,7 @@ class ResearchBriefTests(TestCase):
         self.assertIn("反推", implied["basis_label"])
         self.assertEqual(implied["eps"], Decimal("4.00"))
 
-    def test_brief_and_audit_are_private_and_show_current_quote(self):
+    def test_brief_is_private_and_legacy_audit_url_shows_same_research(self):
         analysis = self.analysis()
         self.client.force_login(self.user)
         url = reverse("investment_research:thesis_analysis_detail",
@@ -101,9 +101,34 @@ class ResearchBriefTests(TestCase):
         self.assertContains(response, "估值试算")
         self.assertContains(response, "161.05")
         self.assertContains(response, "波段辅助")
-        self.assertContains(self.client.get(url + "?mode=audit"), "逐项核查")
+        self.assertContains(self.client.get(reverse("investment_research:detail",
+                                                    args=[self.dossier.pk])), url)
+        legacy = self.client.get(url + "?mode=audit")
+        self.assertContains(legacy, "公司研究简报")
+        self.assertNotContains(legacy, "逐项核查")
         self.client.force_login(self.other)
         self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_edit_keeps_ai_wording_and_event_impact_visible(self):
+        analysis = self.analysis()
+        digest = AiAnalysisRequest.objects.create(
+            family=self.family, member=self.member, provider=self.provider,
+            module="investment_research", analysis_type="next_day_digest",
+            prompt="test", status=AiAnalysisRequest.STATUS_SUCCESS,
+            scope={"dossier_id": self.dossier.pk,
+                   "thesis_revision_id": self.dossier.current_revision_id,
+                   "thesis_revision_number": 1},
+        )
+        AiAnalysisResult.objects.create(request=digest, result_json={
+            "headline": "新公告", "events": [{"title": "云业务增长",
+                "impact": "核查增长能否转成现金。", "evidence": []}]})
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("investment_research:edit",
+                                           args=[self.dossier.pk]))
+        self.assertContains(response, "继续核查现金。")
+        self.assertContains(response, "核查增长能否转成现金。")
+        self.assertContains(response, "以后分析以你保存的最新正式判断为准")
+        self.assertContains(response, f"/research/{self.dossier.pk}/analysis/{analysis.pk}/")
 
     def test_next_day_digest_sends_only_public_material_and_is_idempotent(self):
         prior = self.analysis()
