@@ -22,9 +22,15 @@ body{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 #selection-actions button{white-space:nowrap}#selection-status{font-size:12px;color:#9c352c}
 #selection-note{bottom:calc(62px + env(safe-area-inset-bottom));max-height:70dvh;overflow:auto}
 #selection-actions,#selection-note{bottom:auto;right:auto;transform:none}
-#highlight-card{position:fixed;z-index:11;width:260px;max-width:calc(100vw - 16px);background:#fff;border:1px solid #d5ddcf;border-radius:10px;box-shadow:0 3px 18px #0003;padding:12px;display:grid;gap:8px}
-#highlight-card p{margin:0;max-height:80px;overflow:auto;font-size:13px}#highlight-card .card-actions{display:flex;gap:6px;flex-wrap:wrap}
-#highlight-card button,#highlight-card a{font-size:13px;padding:6px 9px}
+#highlight-card{position:fixed;z-index:11;width:320px;max-width:calc(100vw - 16px);background:#fff;border:1px solid #d5ddcf;border-radius:10px;box-shadow:0 3px 18px #0003;padding:12px;display:grid;gap:8px}
+#highlight-card p{margin:0;overflow-wrap:anywhere}#card-note{max-height:120px;overflow:auto;font-size:14px;line-height:1.55}#card-author{font-size:12px;color:#687b6d}
+#highlight-card .card-actions{display:flex;gap:5px;flex-wrap:nowrap;margin-top:3px}
+#highlight-card button,#highlight-card a{flex:1 1 0;min-width:0;white-space:nowrap;text-align:center;font-size:12px;padding:6px 2px;text-decoration:none}
+#highlight-card a{display:inline-flex;align-items:center;justify-content:center;border:1px solid #c8d1c6;border-radius:6px;background:#fff;color:inherit}
+#remove-highlight,#delete-note{color:#9c3a32;border-color:#e5c7c3}
+#delete-note-dialog{width:360px;max-width:calc(100vw - 30px);border:1px solid #d5ddcf;border-radius:12px;padding:18px;box-shadow:0 12px 38px #0003;color:#28362e}
+#delete-note-dialog::backdrop{background:#17281c85}#delete-note-dialog h2{font-size:17px;margin:0 0 8px}#delete-note-dialog p{font-size:14px;line-height:1.5;margin:0 0 16px}
+#delete-note-dialog .dialog-actions{display:flex;justify-content:flex-end;gap:8px}#confirm-delete-note{background:#a8463e;border-color:#a8463e;color:#fff}
 #selection-note{padding:14px;max-height:min(70dvh,500px)}
 #notes-list .highlight-toggle{width:auto;background:#fff;border:1px solid #c8d1c6;padding:5px 9px;font-size:13px}
 #notes-panel{top:60px;bottom:calc(65px + env(safe-area-inset-bottom))}

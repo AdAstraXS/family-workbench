@@ -78,7 +78,7 @@ def highlight_visibility(request, note_id):
 
 
 @member_required
-@require_POST
+@require_http_methods(["POST","DELETE"])
 def annotation_edit(request, note_id):
     try:
         if len(request.body)>30000:
@@ -88,17 +88,26 @@ def annotation_edit(request, note_id):
         return JsonResponse({"error":"请求格式不正确。"},status=400)
     if not isinstance(data,dict) or type(data.get("revision")) is not int:
         return JsonResponse({"error":"批注版本无效。"},status=400)
-    note, visibility=data.get("note"),data.get("visibility")
-    if not isinstance(note,str) or len(note)>10000 or visibility not in {Book.PRIVATE,Book.FAMILY}:
-        return JsonResponse({"error":"批注长度或分享范围无效。"},status=400)
+    deleting=request.method=="DELETE"
+    if not deleting:
+        note, visibility=data.get("note"),data.get("visibility")
+        if not isinstance(note,str) or len(note)>10000 or visibility not in {Book.PRIVATE,Book.FAMILY}:
+            return JsonResponse({"error":"批注长度或分享范围无效。"},status=400)
     with transaction.atomic():
         item=get_object_or_404(accessible_annotations(request.reader_member),pk=note_id)
         book_for(request,item.book_id,lock=True)
         if item.author_id!=request.reader_member.pk:
             raise Http404
+        if deleting and item.revision!=data["revision"]:
+            return JsonResponse({"error":"批注已在另一个页面更新，请刷新后重试。"},status=409)
+        if deleting and not item.note:
+            return JsonResponse({"error":"这条划线没有批注。"},status=400)
+        changes={"note":"" if deleting else note.strip(),"highlight_visible":True,
+                 "revision":data["revision"]+1,"updated_at":timezone.now()}
+        if not deleting:
+            changes["visibility"]=visibility
         changed=Annotation.objects.filter(pk=item.pk,revision=data["revision"]).update(
-            note=note.strip(),visibility=visibility,highlight_visible=True,
-            revision=data["revision"]+1,updated_at=timezone.now())
+            **changes)
         if not changed:
             return JsonResponse({"error":"批注已在另一个页面更新，请刷新后重试。"},status=409)
         item.refresh_from_db()

@@ -133,8 +133,10 @@ function selection(doc,index) {
       const bounds=surface.getBoundingClientRect();
       const frame=doc.defaultView.frameElement;
       const x=e.clientX+(frame?frame.getBoundingClientRect().left:0)-bounds.left;
-      if(x>=0 && x<bounds.width*.25)turnPage(-1);
-      else if(x>bounds.width*.75 && x<=bounds.width)turnPage(1);
+      const direction=x>=0 && x<bounds.width*.25?-1:x>bounds.width*.75 && x<=bounds.width?1:0;
+      // The highlight hit test runs on click, after pointerup. Give it priority
+      // over the page-edge shortcut even when highlighted text reaches the edge.
+      if(direction)setTimeout(()=>{if(card.hidden && !doc.getSelection()?.toString())turnPage(direction);},0);
     }
     schedule();
   });
@@ -171,7 +173,6 @@ async function refreshNotes(){
   if(pdf)drawPDFNotes();
 }
 async function deleteHighlight(note,button){
-  if(!confirm('取消这条划线？原划线记录会删除，之后可重新选中文字划线。'))return;
   button.disabled=true;
   try{
     const response=await fetch(`/reading/notes/${note.id}/highlight/`,{method:'DELETE',credentials:'same-origin',
@@ -179,7 +180,7 @@ async function deleteHighlight(note,button){
       body:JSON.stringify({revision:note.revision})});
     if(!response.headers.get('content-type')?.includes('application/json'))throw Error('划线未更新，请检查登录状态。');
     const result=await response.json();if(!response.ok)throw Error(result.error || '划线未更新，请重试。');
-    card.hidden=true;await refreshNotes();setStatus('划线已删除，可以重新划线');
+    card.hidden=true;cardAnnotation=null;await refreshNotes();setStatus('划线已删除，可以重新划线');
   }catch(error){fail(error);}finally{button.disabled=false;}
 }
 function showHighlightCard(note,rect,doc=document){
@@ -188,16 +189,35 @@ function showHighlightCard(note,rect,doc=document){
   selectionEndRect={left:rect.left+(frameRect?.left || 0),right:rect.right+(frameRect?.left || 0),
     top:rect.top+(frameRect?.top || 0),bottom:rect.bottom+(frameRect?.top || 0)};
   cardAnnotation=note;
-  document.querySelector('#card-quote').textContent=note.quote;
-  document.querySelector('#card-status').textContent=note.note ? `${note.author}：${note.note}` : `划线者：${note.author}`;
+  const noteBody=document.querySelector('#card-note');
+  noteBody.textContent=note.note;noteBody.hidden=!note.note;
+  document.querySelector('#card-author').textContent=`批注人：${note.author}`;
   document.querySelector('#remove-highlight').hidden=!note.owned || !!note.note || note.has_comments;
   document.querySelector('#edit-highlight').hidden=!note.owned;
+  document.querySelector('#edit-highlight').textContent=note.note?'编辑批注':'批注';
+  document.querySelector('#delete-note').hidden=!note.owned || !note.note;
   document.querySelector('#open-highlight').href=`/reading/notes/${note.id}/`;
   actions.hidden=true;card.hidden=false;placeSelectionPanel(card);
 }
-document.querySelector('#close-highlight').onclick=()=>{card.hidden=true;};
+document.addEventListener('pointerdown',e=>{if(!card.contains(e.target) && !surface.contains(e.target))card.hidden=true;});
 document.querySelector('#remove-highlight').onclick=()=>{
   if(cardAnnotation)deleteHighlight(cardAnnotation,document.querySelector('#remove-highlight'));
+};
+const deleteNoteDialog=document.querySelector('#delete-note-dialog');
+document.querySelector('#delete-note').onclick=()=>{if(cardAnnotation?.owned && cardAnnotation.note)deleteNoteDialog.showModal();};
+document.querySelector('#cancel-delete-note').onclick=()=>deleteNoteDialog.close();
+document.querySelector('#confirm-delete-note').onclick=async()=>{
+  const note=cardAnnotation,button=document.querySelector('#confirm-delete-note');
+  if(!note?.owned || !note.note)return;
+  button.disabled=true;
+  try{
+    const response=await fetch(`/reading/notes/${note.id}/annotation/`,{method:'DELETE',credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({revision:note.revision})});
+    if(!response.headers.get('content-type')?.includes('application/json'))throw Error('批注未删除，请检查登录状态。');
+    const result=await response.json();if(!response.ok)throw Error(result.error || '批注未删除，请重试。');
+    deleteNoteDialog.close();card.hidden=true;cardAnnotation=null;
+    await refreshNotes();setStatus('批注已删除，原划线仍保留');
+  }catch(error){fail(error);}finally{button.disabled=false;}
 };
 document.querySelector('#edit-highlight').onclick=()=>{
   if(!cardAnnotation?.owned)return;

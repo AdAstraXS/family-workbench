@@ -121,6 +121,26 @@ class CollaborationTests(TestCase):
         self.assertEqual(item.quote,"阅读测试文本。");self.assertEqual(item.anchor["cfi"],long["anchor"]["cfi"])
         self.assertEqual(Annotation.objects.filter(book=book,author=self.owner).count(),1)
 
+    def test_delete_annotation_text_keeps_highlight_and_replies(self):
+        book=self.ready();item=self.annotation(book,visibility="family")
+        edit=reverse("reading:annotation_edit",args=[item.pk])
+        self.client.force_login(self.peer.user)
+        self.assertEqual(self.client.delete(edit,{"revision":1},content_type="application/json").status_code,404)
+        self.client.post(reverse("reading:comment",args=[item.pk]),{"body":"保留的讨论"})
+        self.client.force_login(self.owner.user)
+        self.assertEqual(self.client.delete(edit,{"revision":0},content_type="application/json").status_code,409)
+        deleted=self.client.delete(edit,{"revision":1},content_type="application/json")
+        self.assertEqual(deleted.status_code,200,deleted.content)
+        self.assertEqual(deleted.json()["note"],"")
+        item.refresh_from_db()
+        self.assertEqual(item.note,"");self.assertTrue(item.highlight_visible)
+        self.assertEqual(item.comments.count(),1)
+        self.assertEqual(self.client.delete(edit,{"revision":2},content_type="application/json").status_code,400)
+        self.assertEqual(self.client.delete(reverse("reading:highlight_visibility",args=[item.pk]),
+            {"revision":2},content_type="application/json").status_code,400)
+        self.client.force_login(self.peer.user)
+        self.assertEqual(self.client.get(reverse("reading:note",args=[item.pk])).status_code,200)
+
     def test_hidden_legacy_plain_highlight_cleanup_keeps_discussion(self):
         book=self.ready();plain=self.annotation(book)
         protected=Annotation.objects.create(book=book,author=self.owner,file_hash=book.file.sha256,
