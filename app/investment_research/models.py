@@ -309,3 +309,20 @@ class ResearchSourceState(TimestampedModel):
 
     def __str__(self):
         return f"{self.security} {self.get_source_display()} 同步状态"
+
+
+class FutuFinancialSnapshot(models.Model):
+    """An explicitly refreshed OpenD response, separate from official filings."""
+
+    security = models.OneToOneField(
+        Security, on_delete=models.PROTECT, related_name="futu_financial_snapshot",
+        verbose_name="证券标的",
+    )
+    provider_code = models.CharField("富途代码", max_length=40)
+    data = models.JSONField("年度报表和收入构成", default=dict)
+    fetched_at = models.DateTimeField("获取时间")
+    last_error = models.CharField("最近刷新错误", max_length=500, blank=True)
+
+    class Meta:
+        verbose_name = "富途财务资料快照"
+        verbose_name_plural = "富途财务资料快照"

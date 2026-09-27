@@ -1,0 +1,69 @@
+{% extends "investment_research/base.html" %}
+{% block title %}AI 综合分析 · {{ dossier.security.name }}{% endblock %}
+{% block research_content %}
+<div class="research-page">
+  <header class="research-header">
+    <div><p class="research-eyebrow">公司研究 / {{ dossier.security.symbol }}</p><h1>围绕我的判断分析</h1>
+      <p class="research-private-note">选定官方资料正文，让 AI 逐条检查当前假设和问题。结果是私密草稿，你核对后再决定是否修改正式判断。</p></div>
+    <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回公司研究</a>
+  </header>
+  <nav class="research-workflow" aria-label="公司研究步骤">
+    <a href="{% url 'investment_research:detail' dossier.pk %}">1 · 当前判断</a>
+    <a href="{% url 'investment_research:financials' dossier.pk %}">2 · 财务概览</a>
+    <span aria-current="step">3 · AI 综合分析</span>
+    <a href="{% url 'investment_research:documents' dossier.pk %}">官方资料</a>
+  </nav>
+  {% if revision %}
+    <section class="research-analysis-context"><h2>本次要检查的判断 · 第 {{ revision.revision_number }} 版</h2>
+      <p>{{ revision.thesis|linebreaksbr }}</p>
+      <div class="research-context-columns"><div><h3>关键假设</h3><ol>{% for item in revision.pillars %}<li>{{ item }}</li>{% empty %}<li>尚未记录</li>{% endfor %}</ol></div>
+        <div><h3>待验证问题</h3><ol>{% for item in revision.questions %}<li>{{ item }}</li>{% empty %}<li>尚未记录</li>{% endfor %}</ol></div></div>
+    </section>
+  {% else %}
+    <div class="research-document-empty"><strong>先写下自己的第一版判断</strong><p>至少记录一条关键假设或待验证问题，AI 才能围绕它逐项检查。</p><a href="{% url 'investment_research:first_thesis' dossier.pk %}">保存第一版判断</a></div>
+  {% endif %}
+  {% if revision and can_write and sections and providers %}
+    <form method="post" class="research-form research-analysis-form" id="research-synthesis-form">
+      {% csrf_token %}
+      <h2>1 · 选择本次要读的资料</h2>
+      <p class="research-private-note">最多选 3 段，每段至多 8,000 字。每段都显示正文版本与字符范围；年报章节很长时只发送所示开头部分。建议同时选管理层讨论和财务报表，按需加入 IR 新闻稿或电话会文字稿。</p>
+      <div class="research-section-list">
+        {% for section in sections %}
+          <label class="research-section-option"><input type="checkbox" name="sections" value="{{ section.key }}"{% if section.suggested %} checked{% endif %}>
+            <span><strong>{{ section.document.title }}</strong><small>{{ section.document.get_source_display }} · {{ section.label }} · 正文第 {{ section.version.version_number }} 版 · 字符 {{ section.start }}–{{ section.end }} / {{ section.total }}</small></span>
+          </label>
+        {% endfor %}
+      </div>
+      <h2>2 · 确认发送范围</h2>
+      <label for="synthesis-provider">本次使用的文本模型</label>
+      <select id="synthesis-provider" name="provider" required>{% for provider in providers %}<option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }} · 单次费用上限 ${{ provider.extra_data.research_max_estimated_usd }}</option>{% endfor %}</select>
+      <p class="research-private-note">本次会发送：上方勾选的官方正文片段，以及你当前的判断、假设和问题。不会自动发送其他文件或整个知识库。材料只作证据，AI 不能修改正式判断。</p>
+      <label class="research-consent"><input type="checkbox" name="one_time_consent" value="yes" required> 我确认仅本次将上述内容发送给所选云端模型。</label>
+      <button type="submit">生成逐项分析草稿</button>
+    </form>
+  {% elif revision and can_write %}
+    <div class="research-document-empty"><strong>还不能生成综合分析</strong><p>{% if not sections %}请先在官方资料中保存至少一份可读正文。{% else %}尚未配置获准处理投研资料的文本模型。{% endif %}</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看官方资料</a></div>
+  {% endif %}
+  <section class="research-analysis-history"><h2>过去的综合分析</h2>
+    {% if histories %}<ul>{% for item in histories %}<li><a href="{% url 'investment_research:thesis_analysis_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }} · 第 {{ item.scope.thesis_revision_number }} 版判断 · {{ item.get_status_display }}</a></li>{% endfor %}</ul>
+    {% else %}<p class="research-private-note">还没有综合分析记录。</p>{% endif %}
+  </section>
+</div>
+<script>
+  (function () {
+    const form = document.getElementById('research-synthesis-form');
+    if (!form) return;
+    form.addEventListener('change', function (event) {
+      if (event.target.name !== 'sections') return;
+      const chosen = form.querySelectorAll('input[name="sections"]:checked');
+      if (chosen.length > 3) {
+        event.target.checked = false;
+        event.target.setCustomValidity('本次最多选择 3 段正文。');
+        event.target.reportValidity();
+      } else {
+        event.target.setCustomValidity('');
+      }
+    });
+  }());
+</script>
+{% endblock %}
