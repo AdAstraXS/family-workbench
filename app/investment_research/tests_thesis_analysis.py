@@ -20,7 +20,7 @@ from .models import OfficialResearchContentVersion, OfficialResearchDocument
 from .research_ai import ResearchAiError
 from .services import create_dossier, save_thesis_revision
 from .tests_financial_overview import filing
-from .thesis_analysis import generate_thesis_analysis
+from .thesis_analysis import _validate_output, generate_thesis_analysis
 
 
 class ThesisAnalysisTests(TestCase):
@@ -75,6 +75,12 @@ class ThesisAnalysisTests(TestCase):
         return json.dumps({"choices": [{"message": {"content": json.dumps(result)}}],
                            "usage": {"prompt_tokens": 500, "completion_tokens": 200}}).encode()
 
+    @staticmethod
+    def empty_response(content="", finish_reason="stop"):
+        return json.dumps({"choices": [{"message": {"content": content},
+                                        "finish_reason": finish_reason}],
+                           "usage": {"prompt_tokens": 500, "completion_tokens": 200}}).encode()
+
     def generate(self, **changes):
         arguments = {"actor": self.actor, "dossier_id": self.dossier.pk,
                      "provider_id": self.provider.pk,
@@ -123,6 +129,64 @@ class ThesisAnalysisTests(TestCase):
         self.assertEqual(analysis.result.result_json["assessments"][0]["verdict"], "unknown")
         self.assertFalse(analysis.result.result_json["assessments"][0]["citations"])
         self.assertFalse(analysis.result.result_json["suggested_revision"])
+
+    def test_empty_model_content_retries_once_and_counts_both_calls(self):
+        sent = []
+
+        def transport(request, **kwargs):
+            sent.append(json.loads(request.data))
+            return self.empty_response() if len(sent) == 1 else self.response()
+
+        analysis = self.generate(transport=transport)
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(analysis.sanitized_input["model_attempts"], 2)
+        self.assertEqual(analysis.result.tokens_used, 1400)
+        self.assertIn("非空、完整", sent[1]["messages"][0]["content"])
+
+    def test_twice_empty_reports_specific_failure_without_raw_output(self):
+        sent = []
+
+        def transport(request, **kwargs):
+            sent.append(request.data)
+            return self.empty_response()
+
+        with self.assertRaisesMessage(ResearchAiError, "空内容"):
+            self.generate(transport=transport)
+        self.assertEqual(len(sent), 2)
+        failed = AiAnalysisRequest.objects.get()
+        self.assertEqual(failed.status, AiAnalysisRequest.STATUS_FAILED)
+        self.assertEqual(failed.sanitized_input["model_attempts"], 2)
+        self.assertEqual(failed.sanitized_input["reported_tokens"], 1400)
+        self.assertNotIn(self.dossier.current_revision.thesis, str(failed.sanitized_input))
+
+    def test_malformed_json_retries_once(self):
+        sent = []
+
+        def transport(request, **kwargs):
+            sent.append(request.data)
+            return self.empty_response(content="{invalid json") if len(sent) == 1 else self.response()
+
+        analysis = self.generate(transport=transport)
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(analysis.sanitized_input["model_attempts"], 2)
+
+    def test_fenced_json_is_accepted_and_length_does_not_retry(self):
+        raw = json.loads(self.response())["choices"][0]["message"]["content"]
+        result = _validate_output(f"```JSON\n{raw}\n```", [
+            {"kind": "pillar", "index": 0, "text": "需求会持续增长"},
+            {"kind": "question", "index": 0, "text": "现金能否跟上？"},
+        ], [{"id": "E1", "citations": [{"version_id": 1, "document_id": 1,
+                                       "start": 0, "end": 10, "hash": "test"}]}])
+        self.assertEqual(result["assessments"][0]["verdict"], "supports")
+        sent = []
+
+        def transport(request, **kwargs):
+            sent.append(request.data)
+            return self.empty_response(content="{", finish_reason="length")
+
+        with self.assertRaisesMessage(ResearchAiError, "长度上限"):
+            self.generate(transport=transport)
+        self.assertEqual(len(sent), 1)
 
     def test_analysis_page_requires_no_source_selection(self):
         self.client.force_login(self.user)

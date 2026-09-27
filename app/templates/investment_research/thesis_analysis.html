@@ -33,6 +33,7 @@
       <h2>生成分析草稿</h2>
       <label for="synthesis-provider">本次使用的文本模型</label>
       <select id="synthesis-provider" name="provider" required>{% for provider in providers %}<option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }} · 单次费用上限 ${{ provider.extra_data.research_max_estimated_usd }}</option>{% endfor %}</select>
+      <p class="research-private-note">若模型偶尔返回空内容或无效 JSON，系统会在上方单次费用上限内自动重试一次。</p>
       <p class="research-private-note">本次会向所选模型发送：上面的官方资料经整理的指标与短摘录，以及你当前的判断、假设和问题。不会发送整份年报或其他知识库内容。AI 只能生成草稿，不能修改正式判断。</p>
       <label class="research-consent"><input type="checkbox" name="one_time_consent" value="yes" required> 我确认仅本次将上述内容发送给所选云端模型。</label>
       <button type="submit">生成逐项分析草稿</button>
