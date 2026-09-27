@@ -228,7 +228,10 @@ def program_detail(request, pk):
     return render(request, 'intelligence/program_detail.html', {'entry': entry, 'revision': revision,
         'segments': segments, 'groups': groups, 'summary_warning': summary_warning, 'source_name': source_spec(entry.subscription)['name'],
         'versions': entry.revisions.order_by('-pk'), 'can_admin': _is_family_admin(request),
-        'can_write': request.family_member.role != 'viewer'})
+        'can_write': request.family_member.role != 'viewer',
+        'archive_summary_available': bool(revision and revision.summary_complete and groups),
+        'archive_included': (revision.archived_document.hierarchy.get('program_archive_included', ['summary', 'transcript'])
+                             if revision and revision.archived_document_id else ['summary', 'transcript'])})
 
 
 @login_required
@@ -239,8 +242,10 @@ def program_action(request, pk):
     try:
         if action == 'archive':
             revision = get_object_or_404(entry.revisions, pk=request.POST.get('revision_id'))
-            document = archive_program(revision, request.family_member)
-            messages.success(request, '当前版本的原文和整理结果已保存到知识待整理。')
+            document = archive_program(revision, request.family_member,
+                                       include_summary=request.POST.get('include_summary') == 'on',
+                                       include_transcript=request.POST.get('include_transcript') == 'on')
+            messages.success(request, '所选内容已保存到知识待整理。')
             return redirect('knowledge:document_detail', pk=document.pk)
         if not _is_family_admin(request):
             return HttpResponseForbidden('只有管理员可以处理订阅任务。')
