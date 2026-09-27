@@ -83,6 +83,20 @@ class OfficialIRProviderTests(SimpleTestCase):
         with self.assertRaises(IRError):
             IRClient(BY_KEY['meta'], opener=opener, max_bytes=100, interval=0).get(response.geturl())
 
+    def test_truncated_or_partial_http_response_is_not_archived(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.geturl.return_value = 'https://investor.atmeta.com/file.pdf'
+        response.read.return_value = b'%PDF-truncated'
+        opener = Mock()
+        opener.open.return_value = response
+        for status, headers in [(200, {'Content-Length':'1000'}), (206, {}),
+                                (200, {'Content-Range':'bytes 0-13/1000'})]:
+            with self.subTest(status=status, headers=headers), self.assertRaisesMessage(IRError, '传输不完整'):
+                response.status, response.headers = status, headers
+                IRClient(BY_KEY['meta'], opener=opener, interval=0).get(response.geturl())
+
     def test_q4_four_quarters_and_no_invented_publication_date(self):
         company = BY_KEY['meta']
         base = 'https://investor.atmeta.com/feed/FinancialReport.svc/'

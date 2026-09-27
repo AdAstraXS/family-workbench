@@ -108,6 +108,10 @@ class IRClient:
                 raw = response.read(self.max_bytes + 1)
                 if len(raw) > self.max_bytes:
                     raise IRError('官方资料超过单份大小限制。')
+                expected_size = response.headers.get('Content-Length', '')
+                if (response.status == 206 or response.headers.get('Content-Range') or
+                        (str(expected_size).isdigit() and int(expected_size) != len(raw))):
+                    raise IRError('官方文件传输不完整；未将片段保存为完整原件，请稍后重新获取。')
                 encoding = response.headers.get('Content-Encoding', '').lower()
                 if encoding == 'gzip':
                     with gzip.GzipFile(fileobj=io.BytesIO(raw)) as compressed:
