@@ -7,21 +7,24 @@
   <div class="research-header">
     <div>
       <h1>官方资料：{{ dossier.security.name }}（{{ dossier.security.symbol }}）</h1>
-      <p class="research-private-note">资料默认保存在本地；浏览本页不会访问外部网站或修改研究判断。</p>
+      <p class="research-private-note">这里存放官方文件目录和已保存的正文。目录中有文件，不代表正文已经可读；浏览本页不会访问外部网站或修改研究判断。</p>
     </div>
     <div class="research-actions">
       <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a>
       {% if can_write %}
         <form class="research-inline-form" method="post" action="{% url 'investment_research:sync_documents' dossier.pk %}">
           {% csrf_token %}
-          <button class="button" type="submit">检查 SEC 目录</button>
+          <button class="button" type="submit">更新 SEC 文件目录</button>
         </form>
+        <span class="research-help" tabindex="0" aria-label="更新 SEC 文件目录说明">?<span class="research-help-popover" role="tooltip">连接 SEC 查找这家公司新增的 10-K、10-Q 和 8-K，并更新目录。正文仍需按需保存；你的判断不会被修改。</span></span>
         {% if ir_company %}<form class="research-inline-form" method="post" action="{% url 'investment_research:sync_ir' dossier.pk %}">
-          {% csrf_token %}<button class="button" type="submit">检查官方 IR 材料</button>
-        </form>{% endif %}
+          {% csrf_token %}<button class="button" type="submit">更新公司 IR 材料目录</button>
+        </form><span class="research-help" tabindex="0" aria-label="检查官方 IR 材料说明">?<span class="research-help-popover" role="tooltip">“检查官方 IR 材料”会查询公司官网的财报新闻稿、演示和电话会资料，保存新文件目录。部分官网可能限制实时访问；页面会显示检查状态。</span></span>{% endif %}
       {% endif %}
     </div>
   </div>
+
+  <nav class="research-workflow" aria-label="公司研究步骤"><a href="{% url 'investment_research:detail' dossier.pk %}">1 · 当前判断</a><a href="{% url 'investment_research:financials' dossier.pk %}">2 · 财务概览</a><a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">3 · AI 综合分析</a><span aria-current="step">官方资料</span></nav>
 
   {% if ir_company %}
     <section class="research-document-body" aria-label="官方 IR 覆盖">
@@ -84,7 +87,8 @@
   {% else %}
     <div class="research-document-empty">
       <strong>还没有官方资料</strong>
-      <p>支持的公司可通过“检查官方 IR 材料”获取目录，再选择需要阅读的原件保存正文。</p>
+      <p>可以先更新 SEC 或公司 IR 材料目录，再选择需要阅读的文件保存正文。</p>
+      {% if not ir_company %}<p>“检查官方 IR 材料”目前只对已接入的公司开放；这家公司可以先查看 SEC 文件。</p>{% endif %}
     </div>
   {% endif %}
 </section>
