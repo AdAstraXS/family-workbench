@@ -1,5 +1,7 @@
 import json
+from importlib import import_module
 from unittest.mock import patch
+from django.apps import apps
 from django.test import TestCase
 from django.core.exceptions import ValidationError
 from django.urls import reverse
@@ -70,35 +72,66 @@ class CollaborationTests(TestCase):
         bad={**self.payload(book),"quote":"外部文字","anchor":{"cfi":"epubcfi(/6/2!/4/4:0)","section":99}}
         self.assertEqual(self.client.post(self.url("annotations",book),bad,content_type="application/json").status_code,400)
 
-    def test_only_own_plain_highlight_can_be_hidden_and_restored(self):
+    def test_plain_highlight_delete_removes_record_but_protects_notes_and_replies(self):
         book=self.ready()
         payload={**self.payload(book),"quote":"阅读测试文本。","note":"","visibility":"family",
                  "anchor":{"cfi":"epubcfi(/6/2!/4/4:0)","section":0}}
         created=self.client.post(self.url("annotations",book),payload,content_type="application/json")
         self.assertEqual(created.status_code,201,created.content)
         note_id=created.json()["id"]
-        toggle=reverse("reading:highlight_visibility",args=[note_id])
+        remove=reverse("reading:highlight_visibility",args=[note_id])
         self.client.force_login(self.peer.user)
-        self.assertEqual(self.client.post(toggle,{"visible":False,"revision":1},content_type="application/json").status_code,404)
+        self.assertEqual(self.client.delete(remove,{"revision":1},content_type="application/json").status_code,404)
         self.client.force_login(self.owner.user)
-        hidden=self.client.post(toggle,{"visible":False,"revision":1},content_type="application/json")
-        self.assertEqual(hidden.status_code,200,hidden.content)
-        self.assertFalse(hidden.json()["highlight_visible"])
-        self.assertEqual(self.client.post(toggle,{"visible":True,"revision":1},content_type="application/json").status_code,409)
-        self.assertContains(self.client.get(reverse("reading:note",args=[note_id])),"已取消划线")
-        restored=self.client.post(toggle,{"visible":True,"revision":2},content_type="application/json")
-        self.assertTrue(restored.json()["highlight_visible"])
-        self.assertFalse(self.client.post(toggle,{"visible":False,"revision":3},content_type="application/json").json()["highlight_visible"])
+        self.assertEqual(self.client.delete(remove,{"revision":0},content_type="application/json").status_code,409)
         detail=reverse("reading:note",args=[note_id])
-        self.client.post(detail,{"revision":4,"note":"我的批注","visibility":"family"})
-        self.assertTrue(Annotation.objects.get(pk=note_id).highlight_visible)
-        self.assertEqual(self.client.post(toggle,{"visible":False,"revision":5},content_type="application/json").status_code,400)
-        self.client.post(detail,{"revision":5,"note":"","visibility":"family"})
+        edit=reverse("reading:annotation_edit",args=[note_id])
+        self.assertEqual(self.client.post(edit,{"revision":1,"note":"我的批注","visibility":"family"},content_type="application/json").status_code,200)
+        self.assertEqual(self.client.post(edit,{"revision":1,"note":"旧页面修改","visibility":"family"},content_type="application/json").status_code,409)
+        self.client.force_login(self.peer.user)
+        self.assertEqual(self.client.post(edit,{"revision":2,"note":"越权修改","visibility":"family"},content_type="application/json").status_code,404)
+        self.client.force_login(self.owner.user)
+        self.assertEqual(Annotation.objects.get(pk=note_id).note,"我的批注")
+        self.assertEqual(self.client.delete(remove,{"revision":2},content_type="application/json").status_code,400)
+        self.client.post(detail,{"revision":2,"note":"","visibility":"family"})
         self.client.force_login(self.peer.user)
         self.client.post(reverse("reading:comment",args=[note_id]),{"body":"家庭回复"})
         self.client.force_login(self.owner.user)
-        self.assertEqual(self.client.post(toggle,{"visible":False,"revision":6},content_type="application/json").status_code,400)
-        self.assertTrue(Annotation.objects.get(pk=note_id).highlight_visible)
+        self.assertEqual(self.client.delete(remove,{"revision":3},content_type="application/json").status_code,400)
+        self.assertEqual(Annotation.objects.filter(pk=note_id).count(),1)
+        other=self.client.post(self.url("annotations",book),{**payload,"anchor":{"cfi":"epubcfi(/6/2!/4/6:0)","section":0}},content_type="application/json")
+        other_id=other.json()["id"]
+        self.assertEqual(self.client.delete(reverse("reading:highlight_visibility",args=[other_id]),{"revision":1},content_type="application/json").status_code,200)
+        self.assertFalse(Annotation.objects.filter(pk=other_id).exists())
+        self.assertEqual(self.client.get(reverse("reading:note",args=[other_id])).status_code,404)
+
+    def test_overlapping_highlight_extends_only_when_new_selection_is_longer(self):
+        book=self.ready();url=self.url("annotations",book)
+        base={**self.payload(book),"note":"","visibility":"private"}
+        short={**base,"quote":"阅读测试","anchor":{"cfi":"epubcfi(/6/2!/4/4,/1:0,/1:4)","section":0}}
+        first=self.client.post(url,short,content_type="application/json")
+        self.assertEqual(first.status_code,201,first.content)
+        self.assertEqual(self.client.post(url,short,content_type="application/json").json()["outcome"],"unchanged")
+        long={**short,"quote":"阅读测试文本。","anchor":{"cfi":"epubcfi(/6/2!/4/4,/1:0,/1:7)","section":0}}
+        expanded=self.client.post(url,long,content_type="application/json")
+        self.assertEqual(expanded.json()["outcome"],"expanded")
+        self.assertEqual(expanded.json()["id"],first.json()["id"])
+        self.assertEqual(self.client.post(url,short,content_type="application/json").json()["outcome"],"unchanged")
+        item=Annotation.objects.get(pk=first.json()["id"])
+        self.assertEqual(item.quote,"阅读测试文本。");self.assertEqual(item.anchor["cfi"],long["anchor"]["cfi"])
+        self.assertEqual(Annotation.objects.filter(book=book,author=self.owner).count(),1)
+
+    def test_hidden_legacy_plain_highlight_cleanup_keeps_discussion(self):
+        book=self.ready();plain=self.annotation(book)
+        protected=Annotation.objects.create(book=book,author=self.owner,file_hash=book.file.sha256,
+            normalizer_version=book.file.normalizer_version,anchor={"cfi":"epubcfi(/6/2!/4/6:0)","section":0},
+            quote="阅读测试文本。",note="",visibility="family")
+        Annotation.objects.filter(pk__in=[plain.pk,protected.pk]).update(note="",highlight_visible=False)
+        AnnotationComment.objects.create(annotation=protected,author=self.owner,body="已有讨论")
+        import_module("reading.migrations.0004_remove_hidden_plain_highlights").remove_hidden_plain_highlights(apps,None)
+        self.assertFalse(Annotation.objects.filter(pk=plain.pk).exists())
+        protected.refresh_from_db();self.assertTrue(protected.highlight_visible)
+        self.assertEqual(protected.comments.count(),1)
 
     def test_plan_private_manual_completion_and_online_position_separate(self):
         book=self.ready()
@@ -258,6 +291,9 @@ class CollaborationTests(TestCase):
                  "anchor":{"page":1,"rects":[[.1,.1,.3,.03]]}}
         response=self.client.post(self.url("annotations",book),payload,content_type="application/json")
         self.assertEqual(response.status_code,201,response.content);self.assertTrue(response.json()["text_matched"])
+        repeated={**payload,"note":"","quote":"Reading text","anchor":{"page":1,"rects":[[.1,.1,.2,.03]]}}
+        self.assertEqual(self.client.post(self.url("annotations",book),repeated,content_type="application/json").json()["outcome"],"unchanged")
+        self.assertEqual(Annotation.objects.filter(book=book,author=self.owner).count(),1)
         payload["anchor"]["rects"]=[[.9,.1,.3,.03]]
         self.assertEqual(self.client.post(self.url("annotations",book),payload,content_type="application/json").status_code,400)
         with self.assertRaises(ValidationError):pdf_text(book.file,1,3)

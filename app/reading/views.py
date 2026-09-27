@@ -153,7 +153,8 @@ def reader(request, pk):
     book = book_for(request, pk)
     if book.file.status != "ready":
         return redirect("reading:detail", pk=pk)
-    data = {"format": book.file.format, "manifest": reverse("reading:manifest", args=[pk]),
+    data = {"format": book.file.format, "book_id":str(book.pk),"member_id":str(request.reader_member.pk),
+            "manifest": reverse("reading:manifest", args=[pk]),
             "annotations": reverse("reading:annotations", args=[pk]),
             "position": reverse("reading:position", args=[pk]), "file": reverse("reading:file", args=[pk]),
             "file_hash": book.file.sha256, "normalizer_version": book.file.normalizer_version,

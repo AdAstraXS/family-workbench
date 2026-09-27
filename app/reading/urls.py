@@ -20,6 +20,7 @@ urlpatterns = [
     path("plan-items/<int:item_id>/progress/", views_plans.plan_progress, name="plan_progress"),
     path("notes/<uuid:note_id>/", views_notes.note_detail, name="note"),
     path("notes/<uuid:note_id>/highlight/", views_notes.highlight_visibility, name="highlight_visibility"),
+    path("notes/<uuid:note_id>/annotation/", views_notes.annotation_edit, name="annotation_edit"),
     path("notes/<uuid:note_id>/comments/", views_notes.comment, name="comment"),
     path("comments/<int:comment_id>/", views_notes.comment_edit, name="comment_edit"),
     path("<uuid:pk>/", views.detail, name="detail"),
