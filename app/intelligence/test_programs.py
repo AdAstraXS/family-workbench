@@ -255,12 +255,16 @@ class ProgramTests(TestCase):
             'allow_intelligence_analysis': True, 'intelligence_data_scope': 'public_metadata_only',
             'intelligence_policy_version': 'public-metadata-v1', 'intelligence_policy_reviewed_on': '2026-09-26',
             'intelligence_max_input_characters': 2000, 'intelligence_max_output_tokens': 512,
+            'intelligence_disable_thinking': True,
             'intelligence_input_usd_per_million': '.1', 'intelligence_output_usd_per_million': '.2',
             'intelligence_max_estimated_usd': '.1', 'api_key_env_var': 'PROGRAM_TEST_API_KEY'})
         self.config.summary_provider, self.config.allow_summary = provider, True
         self.config.save()
         revision = save_revision(self.entry, [{'text': str(i) + '公开文字。' * 100} for i in range(8)], origin='publisher', source_url=self.entry.url)
         def response(url, *, key, payload):
+            self.assertEqual(payload['thinking'], {'type': 'disabled'})
+            self.assertNotIn('enable_thinking', payload)
+            self.assertEqual(payload['max_tokens'], 512)
             data = json.loads(payload['messages'][1]['content'])
             point = {'topic': 'MSFT', 'kind': '作者观点', 'text': '仅用于验证的摘要', 'refs': [data['paragraphs'][0]['id']]}
             return {'choices': [{'message': {'content': json.dumps({'points': [point]})}, 'finish_reason': 'stop'}], 'usage': {'total_tokens': 100}}
@@ -276,6 +280,7 @@ class ProgramTests(TestCase):
         revision.refresh_from_db()
         self.assertTrue(revision.summary_complete)
         self.assertTrue(all(c.reserved_usd > 0 and c.model_name == 'test-model' for c in revision.chunks.all()))
+        self.assertTrue(all(c.prompt_version == 'program-summary-v2' for c in revision.chunks.all()))
 
     def test_paused_subscription_does_not_run(self):
         self.sub.enabled = False
