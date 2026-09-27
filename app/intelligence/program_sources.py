@@ -11,6 +11,7 @@ from datetime import timedelta
 
 from .adapters import _safe_xml_root, _first_text, _children, _entry_link, _parse_datetime, parse_youtube_atom
 from .program_network import fetch_source_url as fetch_public_url
+from .http_client import SafeHttpError
 from .program_models import ProgramEntry, ProgramSubscription
 
 CATALOGUE = {
@@ -163,7 +164,9 @@ def collect_subscription(subscription):
         ProgramSubscription.objects.filter(pk=subscription.pk).update(last_checked_at=now, last_success_at=now, last_error='')
         return count
     except Exception as exc:
-        message = str(exc) if isinstance(exc, ProgramError) else '订阅抓取失败，请检查网络或来源页面后重试。'
+        message = (exc.safe_message if isinstance(exc, SafeHttpError) else
+                   str(exc) if isinstance(exc, ProgramError) else
+                   '订阅抓取失败，请检查网络或来源页面后重试。')
         ProgramSubscription.objects.filter(pk=subscription.pk).update(last_checked_at=now, last_error=message)
         raise ProgramError(message) from exc
     finally:
