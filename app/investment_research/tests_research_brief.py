@@ -152,3 +152,71 @@ class ResearchBriefTests(TestCase):
         self.client.force_login(self.other)
         self.assertEqual(self.client.get(reverse("investment_research:next_day_tracking",
                                                 args=[self.dossier.pk])).status_code, 404)
+
+    def test_provider_bound_consent_sends_private_thesis_once_and_can_be_revoked(self):
+        self.analysis()
+        body = "Official Azure revenue grew while infrastructure costs remained high. " * 8
+        document = OfficialResearchDocument.objects.create(
+            security=self.security, source="official_ir", external_id="private-event",
+            document_type="earnings_release", title="Official release",
+            source_url="https://example.com/release", published_at=timezone.now().date())
+        OfficialResearchContentVersion.objects.create(
+            document=document, version_number=1, source_url=document.source_url,
+            raw_sha256=hashlib.sha256(body.encode()).hexdigest(),
+            raw_gzip=gzip.compress(body.encode()), content_text=body,
+            content_sha256=hashlib.sha256(body.encode()).hexdigest(),
+            extractor_version="test", fetched_at=timezone.now())
+        self.client.force_login(self.other)
+        consent_url = reverse("investment_research:next_day_consent",
+                              args=[self.dossier.pk])
+        self.assertEqual(self.client.post(consent_url, {"action": "enable"}).status_code, 404)
+        self.client.force_login(self.user)
+        self.assertEqual(self.client.post(consent_url, {"action": "enable"}).status_code, 302)
+        self.assertContains(self.client.get(reverse("investment_research:next_day_tracking",
+                                                    args=[self.dossier.pk])),
+                            "已开启个人判断对照")
+        sent = []
+
+        def transport(request, **kwargs):
+            sent.append(json.loads(request.data)["messages"][1]["content"])
+            content = json.dumps({"headline": "新披露需核查", "intro": "对照了已有判断。",
+                "events": [{"title": "Azure增长", "summary": "云收入增长。",
+                            "impact": "支持收入判断，但现金回报仍待验证。",
+                            "boundary": "投入成本仍高。", "evidence_ids": ["E1"]}],
+                "gap": ""})
+            return json.dumps({"choices": [{"message": {"content": content}}],
+                "usage": {"prompt_tokens": 200, "completion_tokens": 100}}).encode()
+
+        with patch.dict(os.environ, {"BRIEF_TEST_KEY": "test-token"}):
+            digest = generate_next_day_digest(self.dossier.pk, transport=transport,
+                url_validator=lambda provider: "https://example.ai/v1/chat/completions")
+            self.assertIsNone(generate_next_day_digest(self.dossier.pk, transport=transport,
+                url_validator=lambda provider: "https://example.ai/v1/chat/completions"))
+        self.assertEqual(len(sent), 1)
+        self.assertIn("我看好增长但需要确认现金回报", sent[0])
+        self.assertIn("现金能否跟上", sent[0])
+        self.assertTrue(digest.scope["private_comparison"])
+        self.assertTrue(digest.sanitized_input["private_thesis_included"])
+        second_provider = AiProvider.objects.create(
+            name="Second model", provider_type="openai_compatible",
+            model_name="second-model", base_url="https://example.ai/v1",
+            extra_data=self.provider.extra_data)
+        newer_analysis = self.analysis()
+        newer_analysis.provider = second_provider
+        newer_analysis.save(update_fields=["provider"])
+        changed = body + " Additional official update. " * 8
+        OfficialResearchContentVersion.objects.create(
+            document=document, version_number=2, source_url=document.source_url,
+            raw_sha256=hashlib.sha256(changed.encode()).hexdigest(),
+            raw_gzip=gzip.compress(changed.encode()), content_text=changed,
+            content_sha256=hashlib.sha256(changed.encode()).hexdigest(),
+            extractor_version="test", fetched_at=timezone.now() + timedelta(seconds=1))
+        with patch.dict(os.environ, {"BRIEF_TEST_KEY": "test-token"}):
+            public_digest = generate_next_day_digest(self.dossier.pk, transport=transport,
+                url_validator=lambda provider: "https://example.ai/v1/chat/completions")
+        self.assertFalse(public_digest.scope["private_comparison"])
+        self.assertNotIn("我看好增长", sent[-1])
+        self.assertEqual(self.client.post(consent_url, {"action": "disable"}).status_code, 302)
+        self.assertNotContains(self.client.get(reverse("investment_research:next_day_tracking",
+                                                       args=[self.dossier.pk])),
+                               "已开启个人判断对照")

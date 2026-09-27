@@ -10,6 +10,7 @@ from .financial_overview import build_financial_overview
 from .models import OfficialResearchContentVersion
 from .official_ir import documents_for_security
 from .tenk_chapters import tenk_chapter_coverage
+from portfolio.models import SecurityMarketSnapshot
 
 
 NARRATIVE_TERMS = ("revenue", "growth", "demand", "cash", "margin", "cloud",
@@ -81,6 +82,15 @@ def prepare_analysis_materials(dossier):
                    and v.document.document_type == "10-k"), None)
     evidence, sources, periods = [], [], []
     valuation_basis = {}
+    market_context = {}
+    quote = SecurityMarketSnapshot.objects.filter(security=dossier.security).first()
+    if quote and quote.last_price and quote.last_price > 0 and quote.price_as_of:
+        market_context = {"price": str(quote.last_price),
+                          "currency": dossier.security.currency,
+                          "price_as_of": quote.price_as_of.isoformat(),
+                          "price_source": quote.get_price_source_display()}
+        if quote.pe_ttm_ratio and quote.pe_ttm_ratio > 0:
+            market_context["pe_ttm"] = str(quote.pe_ttm_ratio)
     problem = ""
 
     def add(version, text, citations):
@@ -154,6 +164,7 @@ def prepare_analysis_materials(dossier):
             }])
     return {"evidence": evidence, "sources": sources, "periods": periods,
             "valuation_basis": valuation_basis,
+            "market_context": market_context,
             "financial_count": sum("财年截至" in item["text"] for item in evidence),
             "narrative_count": sum("摘录" in item["text"] for item in evidence),
             "problem": problem}

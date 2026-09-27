@@ -24,6 +24,8 @@ urlpatterns = [
          name="thesis_analysis_detail"),
     path("<int:pk>/analysis/next-day/", views.next_day_tracking,
          name="next_day_tracking"),
+    path("<int:pk>/analysis/next-day/consent/", views.next_day_consent,
+         name="next_day_consent"),
     path("<int:pk>/first/", views.first_thesis, name="first_thesis"),
     path("<int:pk>/reviews/", views.filing_reviews, name="filing_reviews"),
     path("<int:pk>/reviews/<int:document_pk>/", views.filing_review, name="filing_review"),

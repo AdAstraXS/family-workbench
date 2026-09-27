@@ -35,7 +35,7 @@
         <article>
           <header><h3>{{ forloop.counter|stringformat:"02d" }} · {{ item.text }}</h3><span class="research-verdict research-verdict-{{ item.verdict }}">{{ item.verdict_label }}</span></header>
           <p class="research-brief-finding">{{ item.reason }}</p>
-          {% if item.cited_facts %}<p class="research-brief-evidence-lead">官方资料：{{ item.cited_facts.0.text|truncatechars:190 }}</p>{% endif %}
+          {% if item.cited_facts %}{% with lead=item.cited_facts|last %}<p class="research-brief-evidence-lead">官方资料：{{ lead.text|truncatechars:190 }}</p>{% endwith %}{% endif %}
           <details><summary>查看证据、边界与对判断的影响</summary>
             {% if item.detail %}<p>{{ item.detail }}</p>{% endif %}
             {% if item.cited_facts %}<div class="research-brief-facts"><strong>可核查的资料数字与要点</strong><ul>{% for fact in item.cited_facts %}<li>{{ fact.text }}</li>{% endfor %}</ul></div>{% endif %}

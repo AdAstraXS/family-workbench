@@ -76,9 +76,10 @@ from .futu_financials import (
     highlight_rows, statement_tables,
 )
 from .analysis_materials import source_preview
-from .thesis_analysis import generate_thesis_analysis
+from .thesis_analysis import generate_thesis_analysis, enforce_market_expectation_boundary
 from .valuation_trial import build_valuation_trial
-from .next_day_digest import latest_digest, pending_sources
+from .next_day_digest import (active_consent, latest_digest, latest_manual_analysis,
+                              pending_sources, set_auto_digest_consent)
 from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
 from .review_plan import (
     confirm_review_plan, generate_review_plan, latest_plan_source, plan_context,
@@ -513,6 +514,9 @@ def thesis_analysis_detail(request, pk, analysis_pk):
         raise Http404("分析记录不属于此档案。")
     result = analysis.result.result_json if analysis.status == AiAnalysisRequest.STATUS_SUCCESS else None
     if result:
+        result = {**result, "assessments": [
+            enforce_market_expectation_boundary(item)
+            for item in result.get("assessments", [])]}
         for item in result.get("assessments", []):
             item["verdict_label"] = {
                 "supports": "有支持", "weakens": "有反证", "mixed": "证据混合",
@@ -537,11 +541,10 @@ def next_day_tracking(request, pk):
     dossier = get_accessible_dossier_or_404(member, pk)
     digest = latest_digest(dossier)
     pending = pending_sources(dossier)
-    latest_analysis = next((item for item in AiAnalysisRequest.objects.filter(
-        member=member, family=member.family, module="investment_research",
-        analysis_type="thesis_synthesis", status=AiAnalysisRequest.STATUS_SUCCESS,
-    ).order_by("-created_at")[:40]
-        if (item.scope or {}).get("dossier_id") == dossier.pk), None)
+    latest_analysis = latest_manual_analysis(dossier)
+    consent = active_consent(dossier)
+    consent_active = bool(consent and latest_analysis and
+                          consent.provider_id == latest_analysis.provider_id)
     checks = (latest_analysis.result.result_json or {}).get("next_checks", []) if latest_analysis else []
     quote = build_valuation_trial(dossier.security, {}, {})
     return render(request, "investment_research/next_day_tracking.html", {
@@ -549,7 +552,32 @@ def next_day_tracking(request, pk):
         "result": digest.result.result_json if digest else None,
         "pending": pending, "checks": checks,
         "latest_analysis": latest_analysis, "quote": quote,
+        "consent": consent, "consent_active": consent_active,
+        "can_write": is_writer(member),
     })
+
+
+@_method(["POST"])
+def next_day_consent(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能修改自动分析授权。")
+    action = request.POST.get("action")
+    if action not in {"enable", "disable"}:
+        messages.error(request, "请选择开启或关闭自动对照。")
+    else:
+        try:
+            set_auto_digest_consent(actor=member, dossier_id=dossier.pk,
+                                    enabled=action == "enable")
+        except ResearchValidationError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, "已开启新资料的个人判断自动对照。" if action == "enable"
+                             else "已关闭个人判断自动对照；公开资料事件简报仍可生成。")
+    return redirect("investment_research:next_day_tracking", pk=pk)
 
 
 @_method(["POST"])

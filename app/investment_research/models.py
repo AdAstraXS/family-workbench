@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 from family_core.models import Family, FamilyMember, TimestampedModel
 from portfolio.models import Security
@@ -89,6 +90,26 @@ class ResearchDossier(TimestampedModel):
 
     def __str__(self):
         return f"{self.owner} - {self.security}"
+
+
+class ResearchAutoDigestConsent(TimestampedModel):
+    """Explicit, provider-bound permission for automatic thesis comparison."""
+
+    dossier = models.OneToOneField(
+        ResearchDossier, on_delete=models.CASCADE, related_name="auto_digest_consent",
+        verbose_name="研究档案")
+    provider = models.ForeignKey(
+        "ai_analysis.AiProvider", on_delete=models.PROTECT,
+        related_name="research_auto_digest_consents", verbose_name="授权的文本模型")
+    authorized_by = models.ForeignKey(
+        FamilyMember, on_delete=models.PROTECT,
+        related_name="research_auto_digest_consents", verbose_name="授权成员")
+    authorized_at = models.DateTimeField("授权时间", default=timezone.now)
+    revoked_at = models.DateTimeField("关闭时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "次日跟踪自动对照授权"
+        verbose_name_plural = "次日跟踪自动对照授权"
 
 
 class ResearchThesisRevision(models.Model):

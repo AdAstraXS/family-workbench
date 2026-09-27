@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from datetime import date
+from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -13,7 +14,7 @@ from django.utils import timezone
 
 from ai_analysis.models import AiAnalysisRequest, AiProvider
 from family_core.models import Family, FamilyMember
-from portfolio.models import Security
+from portfolio.models import Security, SecurityMarketSnapshot
 
 from .analysis_materials import source_preview
 from .models import OfficialResearchContentVersion, OfficialResearchDocument
@@ -129,6 +130,32 @@ class ThesisAnalysisTests(TestCase):
         self.assertEqual(analysis.result.result_json["assessments"][0]["verdict"], "unknown")
         self.assertFalse(analysis.result.result_json["assessments"][0]["citations"])
         self.assertFalse(analysis.result.result_json["suggested_revision"])
+
+    def test_saved_price_and_pe_are_context_but_market_beat_needs_consensus(self):
+        SecurityMarketSnapshot.objects.create(
+            security=self.security, last_price=Decimal("100"),
+            pe_ttm_ratio=Decimal("25"), price_as_of=timezone.now())
+        sent = []
+
+        def transport(request, **kwargs):
+            sent.append(json.loads(request.data)["messages"][1]["content"])
+            return self.response()
+
+        analysis = self.generate(transport=transport)
+        self.assertIn('"pe_ttm"', sent[0])
+        self.assertEqual(Decimal(analysis.scope["market_context"]["price"]), Decimal("100"))
+        self.assertEqual(Decimal(analysis.scope["market_context"]["pe_ttm"]), Decimal("25"))
+
+        raw = json.dumps({"assessments": [{"kind": "question", "index": 0,
+            "verdict": "supports", "reason": "Azure 增长很快。",
+            "evidence_ids": ["E1"]}]}, ensure_ascii=False)
+        checked = _validate_output(raw, [
+            {"kind": "question", "index": 0,
+             "text": "Azure AI 收入增长是否超越市场预期？"}],
+            [{"id": "E1", "text": "Azure grew 40%", "citations": []}])
+        self.assertEqual(checked["assessments"][0]["verdict"], "unknown")
+        self.assertEqual(checked["assessments"][0]["citations"], [])
+        self.assertIn("市场预期", checked["assessments"][0]["reason"])
 
     def test_empty_model_content_retries_once_and_counts_both_calls(self):
         sent = []
