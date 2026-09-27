@@ -1,0 +1,82 @@
+{% extends "investment_research/base.html" %}
+{% block title %}财务概览 · {{ dossier.security.name }}{% endblock %}
+{% block research_content %}
+<div class="research-page">
+  <header class="research-header">
+    <div>
+      <p class="research-eyebrow">公司研究 / {{ dossier.security.symbol }}</p>
+      <h1>财务概览</h1>
+      <p class="research-private-note">先看增长、利润、现金和财务承受力，再回到自己的投资判断。最近三个完整财年按同一份年报的比较数核对。</p>
+    </div>
+    <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回公司研究</a>
+  </header>
+  <nav class="research-workflow" aria-label="公司研究步骤">
+    <a href="{% url 'investment_research:detail' dossier.pk %}">1 · 当前判断</a>
+    <span aria-current="step">2 · 财务概览</span>
+    <a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">3 · AI 综合分析</a>
+    <a href="{% url 'investment_research:documents' dossier.pk %}">官方资料</a>
+  </nav>
+  {% if versions %}
+    <form method="get" class="research-version-picker">
+      <label for="financial-version">年报版本</label>
+      <select id="financial-version" name="version">
+        {% for item in versions %}<option value="{{ item.pk }}"{% if item.pk == version.pk %} selected{% endif %}>FY{{ item.document.period_end|date:"Y" }} · {{ item.document.title }} · 正文第 {{ item.version_number }} 版</option>{% endfor %}
+      </select>
+      <button type="submit">查看</button>
+    </form>
+  {% endif %}
+  {% if problem %}
+    <div class="research-document-empty"><strong>财务概览尚未形成</strong><p>{{ problem }}</p><p><a href="{% url 'investment_research:documents' dossier.pk %}">查看已归档资料和正文状态</a></p></div>
+  {% else %}
+    <p class="research-private-note">数据来自 {{ version.document.title }}（报告期截至 {{ version.document.period_end|date:"Y-m-d" }}）的已保存原件及正文第 {{ version.version_number }} 版。金额单位为亿美元；股数为亿股；EPS 为美元/股。图中的空白表示未核对到相同口径的原文，不能视为零。</p>
+    <div class="research-chart-grid" aria-label="三年财务趋势">
+      {% for chart in charts %}
+        <section class="research-chart-card" aria-label="{{ chart.title }}">
+          <h2>{{ chart.title }}</h2>
+          {% for series in chart.series %}
+            <h3>{{ series.label }}</h3>
+            {% for point in series.points %}
+              <div class="research-chart-row">
+                <span>FY{{ point.period|date:"Y" }}</span>
+                <span class="research-chart-track">{% if point.amount is not None %}<span class="research-chart-bar{% if point.negative %} is-negative{% endif %}" style="width:{{ point.width }}%"></span>{% endif %}</span>
+                <strong>{% if point.amount is not None %}{{ point.amount|floatformat:2 }}{% if series.unit == "percent" %}%{% endif %}{% else %}—{% endif %}</strong>
+              </div>
+            {% endfor %}
+          {% endfor %}
+        </section>
+      {% endfor %}
+    </div>
+    <div class="research-financial-groups">
+      {% for group in groups %}
+        <section class="research-financial-group">
+          <h2>{{ group.title }}</h2>
+          <div class="research-metric-scroll">
+            <table class="research-metric-table">
+              <thead><tr><th scope="col">指标</th>{% for period in periods %}<th scope="col">FY{{ period|date:"Y" }}<small>截至 {{ period|date:"Y-m-d" }}</small></th>{% endfor %}</tr></thead>
+              <tbody>
+                {% for row in group.rows %}
+                  <tr><th scope="row">{{ row.label }}{% if row.company_specific %}<small class="research-metric-source">公司专属披露，不能与其他公司直接比较</small>{% endif %}</th>
+                    {% for cell in row.cells %}<td>
+                      {% if cell.amount is not None %}
+                        <strong>{{ cell.amount|floatformat:2 }}{% if row.unit == "percent" %}%{% endif %}</strong>
+                        <small class="research-metric-source">{% if cell.derived %}计算值 · {{ cell.status }}{% else %}{{ cell.status }} · 正文第 {{ cell.version_number|default:version.version_number }} 版{% endif %}</small>
+                        {% if cell.citation %}<a class="research-evidence-link" href="{% url 'investment_research:document_detail' dossier.pk cell.document_id %}?version={{ cell.version_id }}&amp;start={{ cell.citation.start }}&amp;end={{ cell.citation.end }}&amp;hash={{ cell.citation.hash }}#research-citation">查看原文</a>{% endif %}
+                        {% if cell.components %}<span class="research-metric-links">{% for component in cell.components %}{% if component.cell.citation %}<a href="{% url 'investment_research:document_detail' dossier.pk component.cell.document_id %}?version={{ component.cell.version_id }}&amp;start={{ component.cell.citation.start }}&amp;end={{ component.cell.citation.end }}&amp;hash={{ component.cell.citation.hash }}#research-citation">{{ component.label }}依据</a>{% endif %}{% endfor %}</span>{% endif %}
+                      {% else %}<span class="research-missing">— · {{ cell.status }}</span>{% endif %}
+                    </td>{% endfor %}
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {% endfor %}
+    </div>
+    <details class="research-method-note"><summary>这些数字如何得出？</summary>
+      <p>只使用本页所选 SEC 10-K 原件中的完整财年事实，并要求金额、期间、单位、整公司维度和保存正文中的唯一原文位置一致。比较数可能已被公司重列；切换年报版本时结果会随所选原件变化。毛利率、营业利润率、净利率和简化自由现金流由表内基础值计算；后者等于经营活动现金流减固定资产现金支出，不代表所有资本投入或公司报告的非 GAAP 自由现金流。业务收入是单独披露项，可能重叠，不能将它们直接相加。</p>
+    </details>
+    <div class="research-next-action"><strong>下一步：这些变化对你的判断意味着什么？</strong><p>选择几段已保存的官方资料，让 AI 逐项检查你的假设；结果会标出支持、反证和证据缺口。</p><a class="button" href="{% url 'investment_research:thesis_analysis' dossier.pk %}">围绕我的判断分析</a></div>
+  {% endif %}
+  <div class="research-next-action"><strong>想用另一套数据交叉核对？</strong><p>富途 OpenAPI 的年度财务报表和主营构成会单独展示，保留其财年、币种和更新时间。</p><a class="button" href="{% url 'investment_research:futu_financials' dossier.pk %}">查看富途财务数据</a></div>
+</div>
+{% endblock %}

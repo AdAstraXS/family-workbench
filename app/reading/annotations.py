@@ -1,4 +1,5 @@
 import math
+import re
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from .models import Annotation, Book
@@ -12,6 +13,44 @@ def accessible_annotations(member, book=None):
     if book is not None:
         qs = qs.filter(book=book)
     return qs.select_related("author", "book", "book__file")
+
+
+def _cfi_bounds(cfi):
+    """Compare locations produced by Foliate's range CFI serializer."""
+    if not isinstance(cfi, str) or not cfi.startswith("epubcfi("):
+        return None
+    parts = cfi[8:-1].split(",")
+    if len(parts) not in {1, 3}:
+        return None
+    base = parts[0].split("!")[-1]
+    def position(path):
+        path = re.sub(r"\[[^]]*]", "", path)
+        steps = re.findall(r"/(\d+)(?::(\d+))?", path)
+        return tuple((int(index), int(offset) if offset else -1) for index, offset in steps)
+    if len(parts) == 1:
+        point = position(base)
+        return (point, point) if point else None
+    start, end = position(base + parts[1]), position(base + parts[2])
+    return (start, end) if start and end and start <= end else None
+
+
+def same_passage(left, right):
+    if "page" in left or "page" in right:
+        if left.get("page") != right.get("page"):
+            return False
+        for a in left.get("rects", []):
+            for b in right.get("rects", []):
+                width = min(a[0]+a[2], b[0]+b[2])-max(a[0], b[0])
+                height = min(a[1]+a[3], b[1]+b[3])-max(a[1], b[1])
+                if width > min(a[2], b[2])*.1 and height > min(a[3], b[3])*.1:
+                    return True
+        return False
+    if left.get("section") != right.get("section"):
+        return False
+    if left.get("cfi") == right.get("cfi"):
+        return True
+    a, b = _cfi_bounds(left.get("cfi")), _cfi_bounds(right.get("cfi"))
+    return bool(a and b and a[0] < b[1] and b[0] < a[1])
 
 
 def validate_annotation(book, data):
@@ -55,4 +94,5 @@ def validate_annotation(book, data):
 def annotation_payload(item, member):
     return {"id":str(item.pk),"quote":item.quote,"note":item.note,"anchor":item.anchor,
             "author":item.author.display_name,"owned":item.author_id==member.pk,"revision":item.revision,
-            "visibility":item.visibility,"text_matched":item.text_matched}
+            "visibility":item.visibility,"highlight_visible":item.highlight_visible,
+            "has_comments":item.comments.exists(),"text_matched":item.text_matched}

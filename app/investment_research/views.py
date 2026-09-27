@@ -9,6 +9,7 @@ ResearchValidationError；DossierNotFound 转 404。
 import logging
 import traceback
 from datetime import timedelta
+from decimal import Decimal
 from urllib.parse import urlencode
 
 from ai_analysis.models import AiAnalysisRequest
@@ -31,6 +32,7 @@ from .forms import (
 )
 from .filing_review import FilingReviewConflict, reviewable_filings, save_filing_review
 from .models import (
+    FutuFinancialSnapshot,
     OfficialResearchContentVersion,
     OfficialResearchDocument,
     ResearchDossier,
@@ -65,6 +67,11 @@ from .tenk_chapters import tenk_chapter_coverage
 from .tenk_financial_index import tenk_item8_index
 from .tenk_history import fill_tenk_history
 from .tenk_metrics import BUSINESS_CALC_CODES, HISTORICAL_LEASE_CODES, tenk_metric_grid
+from .financial_overview import build_financial_overview
+from .futu_financials import (
+    FutuFinancialError, comparison_rows, provider_code, refresh_futu_financials,
+)
+from .thesis_analysis import analysis_sections, generate_thesis_analysis
 from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
 from .review_plan import (
     confirm_review_plan, generate_review_plan, latest_plan_source, plan_context,
@@ -288,6 +295,13 @@ def detail(request, pk):
         ).select_related("provider").order_by("-created_at")[:30]
         if (analysis.scope or {}).get("dossier_id") == dossier.pk
     ][:5]
+    recent_syntheses = [
+        analysis for analysis in AiAnalysisRequest.objects.filter(
+            member=member, family=member.family, module="investment_research",
+            analysis_type="thesis_synthesis",
+        ).order_by("-created_at")[:30]
+        if (analysis.scope or {}).get("dossier_id") == dossier.pk
+    ][:3]
     review_start_date, review_items = reviewable_filings(dossier)
     current_plan = (ResearchReviewPlan.objects.filter(
         dossier=dossier, thesis_revision_id=dossier.current_revision_id,
@@ -308,6 +322,7 @@ def detail(request, pk):
             "research_providers": providers,
             "research_document_limit": MAX_DOCUMENT_CHARS,
             "recent_drafts": recent_drafts,
+            "recent_syntheses": recent_syntheses,
             "selected_metric_count": len(dossier.selected_metric_codes or []),
             "review_start_date": review_start_date,
             "review_items": [item for item in review_items
@@ -317,6 +332,183 @@ def detail(request, pk):
             "current_plan": current_plan,
         },
     )
+
+
+@_method(["GET"])
+def financials(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    versions = list(OfficialResearchContentVersion.objects.filter(
+        document__security=dossier.security, document__source="sec",
+        document__document_type="10-k",
+    ).select_related("document", "document__security")
+        .order_by("-document__period_end", "-fetched_at", "-pk")[:8])
+    version = versions[0] if versions else None
+    if request.GET.get("version"):
+        version = next((item for item in versions
+                        if str(item.pk) == request.GET["version"]), None)
+        if version is None:
+            raise Http404("所选年报正文版本不存在。")
+    historical_versions = (list(OfficialResearchContentVersion.objects.filter(
+        document__security=dossier.security, document__source="sec",
+        document__document_type="10-k",
+        document__period_end__lt=version.document.period_end,
+        document__period_end__gte=version.document.period_end - timedelta(days=900),
+    ).select_related("document", "document__security").order_by("-version_number", "-pk"))
+        if version and version.document.period_end else [])
+    periods, rows, problem = build_financial_overview(version, historical_versions)
+    by_code = {row["code"]: row for row in rows}
+    groups = []
+    for title, codes in (
+        ("增长从哪里来", ("revenue", "revenue_growth", "company_revenue", "iphone_revenue", "automotive_revenue")),
+        ("增长有没有带来利润", ("gross_profit", "gross_margin", "operating_income",
+                         "operating_margin", "net_income", "net_income_growth", "net_margin",
+                         "diluted_eps", "eps_growth")),
+        ("利润是否变成现金", ("operating_cash", "capex", "simple_fcf")),
+        ("扩张与财务承受力", ("cash", "total_debt", "net_cash", "diluted_shares")),
+    ):
+        groups.append({"title": title, "rows": [by_code[code] for code in codes if code in by_code]})
+    charts = []
+    for title, codes, fixed_max in (
+        ("收入规模", ("revenue",), None),
+        ("利润率", ("gross_margin", "operating_margin", "net_margin"), Decimal(100)),
+        ("现金流与投入", ("operating_cash", "capex", "simple_fcf"), None),
+    ):
+        series = [by_code[code] for code in codes if code in by_code]
+        amounts = [abs(cell["amount"]) for row in series for cell in row["cells"]
+                   if "amount" in cell]
+        scale = fixed_max or (max(amounts) if amounts else Decimal(1))
+        entries = []
+        for row in series:
+            points = []
+            for period, cell in zip(periods, row["cells"]):
+                amount = cell.get("amount")
+                points.append({"period": period, "amount": amount,
+                               "width": max(2, min(100, int(abs(amount) / scale * 100)))
+                               if amount is not None and scale else 0,
+                               "negative": amount is not None and amount < 0})
+            entries.append({"label": row["label"], "unit": row["unit"], "points": points})
+        charts.append({"title": title, "series": entries})
+    return render(request, "investment_research/financials.html", {
+        "dossier": dossier, "versions": versions, "version": version,
+        "periods": periods, "groups": groups, "charts": charts, "problem": problem,
+    })
+
+
+@_method(["GET", "POST"])
+def futu_financials(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    try:
+        code = provider_code(dossier.security)
+        code_problem = ""
+    except FutuFinancialError as exc:
+        code, code_problem = "", str(exc)
+    if request.method == "POST":
+        if not is_writer(member):
+            return HttpResponseForbidden("查看者角色不能更新富途财务资料。")
+        if code_problem:
+            messages.error(request, code_problem)
+        else:
+            try:
+                refresh_futu_financials(dossier.security)
+            except FutuFinancialError as exc:
+                messages.error(request, str(exc))
+            else:
+                messages.success(request, "富途年度财务资料已更新。")
+        return redirect("investment_research:futu_financials", pk=pk)
+    snapshot = FutuFinancialSnapshot.objects.filter(security=dossier.security).first()
+    latest_sec = (OfficialResearchContentVersion.objects.filter(
+        document__security=dossier.security, document__source="sec",
+        document__document_type="10-k",
+    ).select_related("document").order_by("-document__period_end", "-fetched_at", "-pk").first())
+    periods, rows, sec_problem = (build_financial_overview(latest_sec)
+                                  if snapshot else ([], [], "尚未获取富途数据。"))
+    comparisons = comparison_rows(snapshot, periods, rows)
+    statements = snapshot.data.get("statements", []) if snapshot else []
+    breakdown = snapshot.data.get("breakdown") if snapshot else None
+    return render(request, "investment_research/futu_financials.html", {
+        "dossier": dossier, "snapshot": snapshot, "code": code,
+        "code_problem": code_problem, "statements": statements,
+        "breakdown": breakdown, "comparisons": comparisons,
+        "sec_problem": sec_problem, "can_write": is_writer(member),
+    })
+
+
+@_method(["GET", "POST"])
+def thesis_analysis(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    can_write = is_writer(member)
+    if request.method == "POST":
+        if not can_write:
+            return HttpResponseForbidden("查看者角色不能发起 AI 分析。")
+        try:
+            provider_id = int(request.POST.get("provider", ""))
+        except ValueError:
+            provider_id = 0
+        try:
+            analysis = generate_thesis_analysis(
+                actor=member, dossier_id=dossier.pk,
+                section_keys=request.POST.getlist("sections"),
+                provider_id=provider_id,
+                consent=request.POST.get("one_time_consent") == "yes",
+            )
+        except (ResearchAiError, ResearchValidationError) as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, "AI 综合分析草稿已生成，请逐项核对引用。")
+            return redirect("investment_research:thesis_analysis_detail", pk=pk,
+                            analysis_pk=analysis.pk)
+        return redirect("investment_research:thesis_analysis", pk=pk)
+    sections = analysis_sections(dossier)
+    chosen = 0
+    for section in sections:
+        if chosen < 2 and section["label"] in {"管理层讨论与分析", "财务报表与附注", "正文开头"}:
+            section["suggested"] = True
+            chosen += 1
+    histories = [analysis for analysis in AiAnalysisRequest.objects.filter(
+        member=member, family=member.family, module="investment_research",
+        analysis_type="thesis_synthesis",
+    ).select_related("provider").order_by("-created_at")[:40]
+        if (analysis.scope or {}).get("dossier_id") == dossier.pk][:10]
+    return render(request, "investment_research/thesis_analysis.html", {
+        "dossier": dossier, "revision": dossier.current_revision,
+        "sections": sections, "providers": available_research_providers() if can_write else [],
+        "can_write": can_write, "histories": histories,
+    })
+
+
+@_method(["GET"])
+def thesis_analysis_detail(request, pk, analysis_pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    analysis = get_object_or_404(
+        AiAnalysisRequest.objects.select_related("provider"),
+        pk=analysis_pk, member=member, family=member.family,
+        module="investment_research", analysis_type="thesis_synthesis",
+    )
+    if (analysis.scope or {}).get("dossier_id") != dossier.pk:
+        raise Http404("分析记录不属于此档案。")
+    result = analysis.result.result_json if analysis.status == AiAnalysisRequest.STATUS_SUCCESS else None
+    if result:
+        for item in result.get("assessments", []):
+            item["verdict_label"] = {
+                "supports": "有支持", "weakens": "有反证", "mixed": "证据混合",
+                "unknown": "证据不足",
+            }.get(item.get("verdict"), "待核对")
+    return render(request, "investment_research/thesis_analysis_detail.html", {
+        "dossier": dossier, "analysis": analysis, "result": result,
+        "is_current_revision": (analysis.scope or {}).get("thesis_revision_id") == dossier.current_revision_id,
+    })
 
 
 @_method(["POST"])
