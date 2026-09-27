@@ -29,16 +29,16 @@
   </section>
 
   {% if snapshot %}
-    {% if has_missing_names %}<div class="research-document-empty"><strong>部分富途字段没有名称</strong><p>OpenD 本次仍返回了空名称。{% if code == "US.MSFT" %}微软三张报表中已与富途官网核对的字段显示在主表；{% endif %}尚不能可靠命名的字段收在各报表末尾的“原始字段”中。</p></div>{% endif %}
-
     {% if highlights %}<section class="research-financial-group">
       <h2>先看关键数字</h2>
-      <p class="research-private-note">以下指标直接采用富途提供的名称和年度数据；完整报表在下方展开。</p>
+      <p class="research-private-note">以下指标采用富途年度数值和已核对的字段名称；完整报表在下方展开。</p>
       <div class="research-metric-scroll"><table class="research-metric-table">
         <thead><tr><th scope="col">指标</th>{% for report in highlights.0.reports %}<th scope="col">{{ report.period }}</th>{% endfor %}</tr></thead>
-        <tbody>{% for row in highlights %}<tr><th scope="row">{{ row.label }}<small class="research-metric-source">{{ row.provider_name }}</small></th>{% for cell in row.cells %}<td><strong>{{ cell.amount }}</strong>{% if cell.yoy %}<small class="research-metric-source">同比 {{ cell.yoy }}</small>{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody>
+        <tbody>{% for row in highlights %}<tr><th scope="row">{{ row.label }}{% if row.provider_name != row.label %}<small class="research-metric-source">{{ row.provider_name }}</small>{% endif %}</th>{% for cell in row.cells %}<td><strong>{{ cell.amount }}</strong>{% if cell.yoy %}<small class="research-metric-source">同比 {{ cell.yoy }}</small>{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody>
       </table></div>
     </section>{% endif %}
+
+    {% if has_missing_names %}<p class="research-private-note">字段说明：OpenD 本次有部分空名称。{% if code == "US.MSFT" %}微软三张报表中已与富途官网核对的字段显示在主表；{% endif %}其余数字收在各报表末尾的“原始字段”中。</p>{% endif %}
 
     {% if breakdown_groups %}
       <section class="research-financial-group">

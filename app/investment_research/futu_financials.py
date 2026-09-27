@@ -187,7 +187,7 @@ def _display_item(item, statement_type, currency):
         return f"{_display_number(amount)}%"
     if statement_type in {1, 2, 3} and name:
         if re.search(r"每股|per share|\beps\b", name):
-            return f"{_display_number(amount)} {currency}/股"
+            return f"{_display_number(amount)} {_CURRENCY_NAMES.get(currency, currency)}/股"
         if re.search(r"股份数|股数|shares? outstanding", name):
             shares = Decimal(str(amount)) / Decimal("100000000")
             return f"{_display_number(shares)} 亿股"
@@ -237,7 +237,7 @@ def statement_tables(statements, provider_code=""):
 
 
 _HIGHLIGHTS = (
-    (1, "营业收入", r"^(?:营业总收入|营业收入|总收入|total revenue|revenue)$"),
+    (1, "营业收入", r"^(?:营业总收入|营业收入|total revenue|revenue)$"),
     (1, "毛利", r"^(?:毛利|gross profit|gross margin)$"),
     (1, "营业利润", r"^(?:营业利润|经营利润|operating income|operating profit)$"),
     (1, "净利润", r"^(?:净利润|net income)$"),

@@ -73,6 +73,15 @@ class FutuFinancialTests(SimpleTestCase):
         self.assertEqual(tables[0]["rows"][0]["cells"][0]["amount"], "67.94%")
         self.assertEqual(tables[0]["rows"][1]["cells"][0]["amount"], "1.23")
 
+    def test_total_and_operating_revenue_do_not_hide_revenue_highlight(self):
+        tables = statement_tables([{"type": 1, "title": "利润表", "reports": [
+            {"period": "2026/FY", "currency": "USD", "items": [
+                {"field_id": 8001, "name": "", "amount": "331839000000", "yoy": None},
+                {"field_id": 8002, "name": "", "amount": "331839000000", "yoy": None},
+            ]},
+        ]}], "US.MSFT")
+        self.assertEqual(highlight_rows(tables)[0]["label"], "营业收入")
+
     def test_breakdown_type_from_sdk_string_is_readable(self):
         breakdown = _breakdown_data({"period": "2026/FY", "currency_code": "USD",
                                      "breakdown_list": [{"type": "RevenueBreakdownType_Region",
