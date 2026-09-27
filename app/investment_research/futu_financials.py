@@ -13,6 +13,7 @@ from decimal import Decimal, InvalidOperation
 from django.conf import settings
 from django.utils import timezone
 
+from .futu_field_labels import reviewed_label
 from .models import FutuFinancialSnapshot
 
 
@@ -182,6 +183,8 @@ def _display_item(item, statement_type, currency):
     if amount is None:
         return "—"
     name = (item.get("name") or "").lower()
+    if statement_type == 4 and name in {"毛利率", "营业利润率", "净利率"}:
+        return f"{_display_number(amount)}%"
     if statement_type in {1, 2, 3} and name:
         if re.search(r"每股|per share|\beps\b", name):
             return f"{_display_number(amount)} {currency}/股"
@@ -195,11 +198,14 @@ def _display_item(item, statement_type, currency):
     return _display_number(amount)
 
 
-def statement_tables(statements):
+def statement_tables(statements, provider_code=""):
     """Align a provider's named fields across annual reports for scanning."""
     tables = []
     for statement in statements:
-        reports = statement.get("reports") or []
+        reports = [{**report, "standards_display":
+                    "US GAAP" if report.get("standards") == "US_GAAP"
+                    else report.get("standards") or ""}
+                   for report in statement.get("reports") or []]
         field_ids = list(dict.fromkeys(
             str(item.get("field_id"))
             for report in reports for item in report.get("items") or []
@@ -211,18 +217,21 @@ def statement_tables(statements):
                              if str(item.get("field_id")) == field_id), None)
                        for report in reports]
             name = next((item.get("name") for item in matches
-                         if item and item.get("name")), "")
+                         if item and item.get("name")), "") or reviewed_label(
+                             provider_code, statement["type"], field_id)
             cells = []
             for report, item in zip(reports, matches):
                 cells.append({
-                    "amount": _display_item(item, statement["type"], report.get("currency") or "")
+                    "amount": _display_item({**item, "name": name}, statement["type"],
+                                            report.get("currency") or "")
                     if item else "—",
                     "yoy": f"{_display_number(item['yoy'])}%"
                     if item and item.get("yoy") is not None else "",
                 })
             rows.append({"field_id": field_id, "name": name, "cells": cells})
         tables.append({"title": statement["title"], "type": statement["type"],
-                       "reports": reports, "rows": rows,
+                       "reports": reports, "rows": [row for row in rows if row["name"]],
+                       "raw_rows": [row for row in rows if not row["name"]],
                        "missing_names": sum(not row["name"] for row in rows)})
     return tables
 

@@ -444,7 +444,7 @@ def futu_financials(request, pk):
     snapshot = FutuFinancialSnapshot.objects.filter(security=dossier.security).first()
     statements = snapshot.data.get("statements", []) if snapshot else []
     breakdown = snapshot.data.get("breakdown") if snapshot else None
-    tables = statement_tables(statements)
+    tables = statement_tables(statements, snapshot.provider_code if snapshot else "")
     return render(request, "investment_research/futu_financials.html", {
         "dossier": dossier, "snapshot": snapshot, "code": code,
         "code_problem": code_problem, "tables": tables,

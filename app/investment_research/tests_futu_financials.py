@@ -48,6 +48,31 @@ class FutuFinancialTests(SimpleTestCase):
         self.assertEqual(tables[0]["rows"][0]["cells"][0]["yoy"], "17.79%")
         self.assertEqual(highlight_rows(tables)[0]["label"], "营业收入")
 
+    def test_reviewed_msft_labels_apply_only_to_msft_and_keep_unknown_fields_secondary(self):
+        statements = [{"type": 1, "title": "利润表", "reports": [
+            {"period": "2026/FY", "currency": "USD", "items": [
+                {"field_id": 8002, "name": "", "amount": "331839000000", "yoy": None},
+                {"field_id": 999999, "name": "", "amount": "123", "yoy": None},
+            ]},
+        ]}]
+        msft = statement_tables(statements, "US.MSFT")[0]
+        self.assertEqual(msft["rows"][0]["name"], "营业总收入")
+        self.assertEqual(msft["rows"][0]["cells"][0]["amount"], "3,318.39 亿美元")
+        self.assertEqual(msft["raw_rows"][0]["field_id"], "999999")
+        other = statement_tables(statements, "US.OTHER")[0]
+        self.assertEqual(other["rows"], [])
+        self.assertEqual(len(other["raw_rows"]), 2)
+
+    def test_reviewed_msft_ratio_has_explicit_unit(self):
+        tables = statement_tables([{"type": 4, "title": "主要指标", "reports": [
+            {"period": "2026/FY", "currency": "USD", "items": [
+                {"field_id": 14002, "name": "", "amount": "67.94", "yoy": None},
+                {"field_id": 14020, "name": "", "amount": "1.23", "yoy": None},
+            ]},
+        ]}], "US.MSFT")
+        self.assertEqual(tables[0]["rows"][0]["cells"][0]["amount"], "67.94%")
+        self.assertEqual(tables[0]["rows"][1]["cells"][0]["amount"], "1.23")
+
     def test_breakdown_type_from_sdk_string_is_readable(self):
         breakdown = _breakdown_data({"period": "2026/FY", "currency_code": "USD",
                                      "breakdown_list": [{"type": "RevenueBreakdownType_Region",
