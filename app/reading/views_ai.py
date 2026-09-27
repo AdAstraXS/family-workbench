@@ -62,8 +62,16 @@ def create(request,pk):
                 return redirect("reading:ai_job",job_id=job.pk)
         except ValidationError as exc:form.add_error(None,exc)
         except StopIteration:form.add_error("provider","服务商已停用，请刷新后重选。")
+    chapter_reference = None
+    if book.file.format != "pdf":
+        try:
+            section_index = int(form["section"].value() or 1) - 1
+            chapter = chapter_text(book.file, section_index)
+            chapter_reference = {"index": section_index, "number": section_index + 1, "title": chapter["title"]}
+        except (ValueError, TypeError, ValidationError, OSError):
+            pass
     return render(request,"reading/ai_create.html",{"book":book,"form":form,"preview":preview,"preview_title":preview_title,
-                  "section_count":len(book.file.sections)})
+                  "chapter_reference":chapter_reference,"section_count":len(book.file.sections)})
 
 
 def job_for(request,job_id):
