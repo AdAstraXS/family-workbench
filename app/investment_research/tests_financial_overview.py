@@ -10,7 +10,8 @@ from .financial_overview import build_financial_overview
 from .sec_content import extract_sec_html
 
 
-def filing(*, conflict=False, omit_capex=False, omit_first_cash=False):
+def filing(*, conflict=False, omit_capex=False, omit_first_cash=False,
+           duplicate_net_income_elsewhere=False):
     years = (2024, 2025, 2026)
     contexts = "".join(
         f"<xbrli:context id='fy{year}'><xbrli:period><xbrli:startDate>{year}-07-01</xbrli:startDate>"
@@ -28,25 +29,32 @@ def filing(*, conflict=False, omit_capex=False, omit_first_cash=False):
         ("capex", "PaymentsToAcquirePropertyPlantAndEquipment", "Purchases of property and equipment", (5, 8, 12), "fy"),
         ("onhand", "CashAndCashEquivalentsAtCarryingValue", "Cash and cash equivalents", (40, 45, 50), "at"),
     )
-    rows = []
+    rows = {"income": [], "balance": [], "cash_flow": []}
     for code, tag, label, values, context_type in tags:
         if omit_capex and code == "capex":
             continue
         for year, value in zip(years, values):
             if omit_first_cash and code == "onhand" and year == 2024:
                 continue
-            rows.append(f"<tr><td>{label}</td><td><ix:nonFraction name='us-gaap:{tag}' "
-                        f"contextRef='{context_type}{year}' unitRef='usd' scale='8' "
-                        f"id='{code}{year}'>{value}</ix:nonFraction></td></tr>")
+            statement = ("balance" if code == "onhand" else
+                         "cash_flow" if code in {"cash", "capex"} else "income")
+            rows[statement].append(f"<tr><td>{label}</td><td><ix:nonFraction name='us-gaap:{tag}' "
+                                   f"contextRef='{context_type}{year}' unitRef='usd' scale='8' "
+                                   f"id='{code}{year}'>{value}</ix:nonFraction></td></tr>")
     if conflict:
-        rows.append("<tr><td>Total revenue</td><td><ix:nonFraction "
-                    "name='us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax' "
-                    "contextRef='fy2026' unitRef='usd' scale='8' id='conflict'>999"
-                    "</ix:nonFraction></td></tr>")
+        rows["income"].append("<tr><td>Total revenue</td><td><ix:nonFraction "
+                              "name='us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax' "
+                              "contextRef='fy2026' unitRef='usd' scale='8' id='conflict'>999"
+                              "</ix:nonFraction></td></tr>")
     raw = ("<html><body><ix:header><xbrli:unit id='usd'><xbrli:measure>"
            "iso4217:USD</xbrli:measure></xbrli:unit>" + contexts + "</ix:header>"
-           "<h1>ITEM 8. FINANCIAL STATEMENTS AND SUPPLEMENTARY DATA</h1><table>" +
-           "".join(rows) + "</table><p>Notes to financial statements.</p>"
+           "<h1>ITEM 8. FINANCIAL STATEMENTS AND SUPPLEMENTARY DATA</h1>"
+           "<h2>INCOME STATEMENTS</h2><table>" + "".join(rows["income"]) + "</table>"
+           "<h2>BALANCE SHEETS</h2><table>" + "".join(rows["balance"]) + "</table>"
+           "<h2>CASH FLOWS STATEMENTS</h2><table>" +
+           ("<tr><td>Net income</td><td>30</td></tr>" if duplicate_net_income_elsewhere else "") +
+           "".join(rows["cash_flow"]) +
+           "</table><p>Notes to financial statements.</p>"
            "<h1>ITEM 9. CHANGES IN AND DISAGREEMENTS WITH ACCOUNTANTS</h1>"
            "</body></html>").encode()
     text = extract_sec_html(raw)
@@ -79,6 +87,11 @@ class FinancialOverviewTests(SimpleTestCase):
         self.assertIn("冲突", by_code["revenue"]["cells"][2]["status"])
         self.assertNotIn("amount", by_code["simple_fcf"]["cells"][2])
         self.assertNotIn("amount", by_code["revenue_growth"]["cells"][2])
+
+    def test_repeated_net_income_in_cash_flow_does_not_hide_income_statement(self):
+        _, rows, _ = build_financial_overview(filing(duplicate_net_income_elsewhere=True))
+        net_income = next(row for row in rows if row["code"] == "net_income")
+        self.assertEqual(net_income["cells"][2]["amount"], Decimal(30))
 
     def test_older_filing_backfills_only_same_security_and_cik(self):
         current = filing(omit_first_cash=True)

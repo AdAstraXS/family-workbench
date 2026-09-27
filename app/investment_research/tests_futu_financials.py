@@ -7,8 +7,8 @@ from unittest import mock
 from django.test import SimpleTestCase, override_settings
 
 from .futu_financials import (
-    FutuFinancialError, _statement_data, comparison_rows, fetch_futu_financials,
-    provider_code,
+    FutuFinancialError, _breakdown_data, _statement_data, comparison_rows,
+    fetch_futu_financials, highlight_rows, provider_code, statement_tables,
 )
 
 
@@ -20,15 +20,73 @@ class FutuFinancialTests(SimpleTestCase):
             provider_code(SimpleNamespace(market="OTHER", symbol="MSFT"))
 
     def test_sdk_floats_become_decimal_strings_and_only_fy_is_kept(self):
-        reports = _statement_data({"report_list": [
+        reports = _statement_data({"structure_list": [
+            {"field_id": 8001, "display_name": "营业总收入"},
+        ], "report_list": [
             {"period_text": "2025/FY", "date_time_str": "2025-06-30", "currency_code": "USD",
-             "item_list": [{"field_id": 5001, "display_name": "Total Revenue",
+             "item_list": [{"field_id": 8001,
                             "data": 123456789.25, "yoy": 12.5}]},
             {"period_text": "2025/Q3", "item_list": [{"data": 99}]},
         ]})
         self.assertEqual(len(reports), 1)
         self.assertEqual(reports[0]["items"][0]["amount"], "123456789.25")
         self.assertEqual(reports[0]["items"][0]["yoy"], "12.5")
+        self.assertEqual(reports[0]["items"][0]["name"], "营业总收入")
+
+    def test_provider_fields_are_named_aligned_and_formatted(self):
+        reports = _statement_data({"structure_list": [
+            {"field_id": 8001, "display_name": "营业总收入"},
+        ], "report_list": [
+            {"period_text": "2026/FY", "date_time_str": "2026-06-29", "currency_code": "USD",
+             "item_list": [{"field_id": 8001, "data": 331839000000.0, "yoy": 17.7886}]},
+            {"period_text": "2025/FY", "date_time_str": "2025-06-29", "currency_code": "USD",
+             "item_list": [{"field_id": 8001, "data": 281724000000.0}]},
+        ]})
+        tables = statement_tables([{"type": 1, "title": "利润表", "reports": reports}])
+        self.assertEqual(tables[0]["rows"][0]["name"], "营业总收入")
+        self.assertEqual(tables[0]["rows"][0]["cells"][0]["amount"], "3,318.39 亿美元")
+        self.assertEqual(tables[0]["rows"][0]["cells"][0]["yoy"], "17.79%")
+        self.assertEqual(highlight_rows(tables)[0]["label"], "营业收入")
+
+    def test_reviewed_msft_labels_apply_only_to_msft_and_keep_unknown_fields_secondary(self):
+        statements = [{"type": 1, "title": "利润表", "reports": [
+            {"period": "2026/FY", "currency": "USD", "items": [
+                {"field_id": 8002, "name": "", "amount": "331839000000", "yoy": None},
+                {"field_id": 999999, "name": "", "amount": "123", "yoy": None},
+            ]},
+        ]}]
+        msft = statement_tables(statements, "US.MSFT")[0]
+        self.assertEqual(msft["rows"][0]["name"], "营业总收入")
+        self.assertEqual(msft["rows"][0]["cells"][0]["amount"], "3,318.39 亿美元")
+        self.assertEqual(msft["raw_rows"][0]["field_id"], "999999")
+        other = statement_tables(statements, "US.OTHER")[0]
+        self.assertEqual(other["rows"], [])
+        self.assertEqual(len(other["raw_rows"]), 2)
+
+    def test_reviewed_msft_ratio_has_explicit_unit(self):
+        tables = statement_tables([{"type": 4, "title": "主要指标", "reports": [
+            {"period": "2026/FY", "currency": "USD", "items": [
+                {"field_id": 14002, "name": "", "amount": "67.94", "yoy": None},
+                {"field_id": 14020, "name": "", "amount": "1.23", "yoy": None},
+            ]},
+        ]}], "US.MSFT")
+        self.assertEqual(tables[0]["rows"][0]["cells"][0]["amount"], "67.94%")
+        self.assertEqual(tables[0]["rows"][1]["cells"][0]["amount"], "1.23")
+
+    def test_total_and_operating_revenue_do_not_hide_revenue_highlight(self):
+        tables = statement_tables([{"type": 1, "title": "利润表", "reports": [
+            {"period": "2026/FY", "currency": "USD", "items": [
+                {"field_id": 8001, "name": "", "amount": "331839000000", "yoy": None},
+                {"field_id": 8002, "name": "", "amount": "331839000000", "yoy": None},
+            ]},
+        ]}], "US.MSFT")
+        self.assertEqual(highlight_rows(tables)[0]["label"], "营业收入")
+
+    def test_breakdown_type_from_sdk_string_is_readable(self):
+        breakdown = _breakdown_data({"period": "2026/FY", "currency_code": "USD",
+                                     "breakdown_list": [{"type": "RevenueBreakdownType_Region",
+                                                         "item_list": []}]})
+        self.assertEqual(breakdown["groups"][0]["type"], "地区")
 
     @override_settings(FUTU_OPEND_HOST="127.0.0.1", FUTU_OPEND_PORT=11111)
     @mock.patch("investment_research.futu_financials.socket.create_connection")

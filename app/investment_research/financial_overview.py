@@ -10,6 +10,7 @@ from datetime import date
 from decimal import Decimal
 
 from .tenk_chapters import tenk_chapter_coverage
+from .tenk_financial_index import tenk_item8_index
 from .tenk_metrics import _IXBRL, _amount, _citation, _full_year_end_dates, tenk_metric_grid
 
 
@@ -58,7 +59,30 @@ def _unit_matches(unit, kind):
     return normalized == "XBRLI:SHARES"
 
 
-def _fact_cell(parser, version, item8, period, spec):
+_STATEMENT_LABELS = {
+    "revenue": "利润表", "gross_profit": "利润表",
+    "operating_income": "利润表", "net_income": "利润表",
+    "diluted_eps": "利润表", "diluted_shares": "利润表",
+    "operating_cash": "现金流量表", "capex": "现金流量表",
+    "cash": "资产负债表", "debt_current": "资产负债表",
+    "debt_noncurrent": "资产负债表",
+}
+
+
+def _statement_scopes(version, item8):
+    """Limit citations to the audited statement containing the tagged fact."""
+    all_entries = tenk_item8_index(version, [item8])
+    scopes = {}
+    for entry in all_entries:
+        if entry["kind"] != "statement":
+            continue
+        following = next((other["start"] for other in all_entries
+                          if other["start"] > entry["start"]), item8["end"])
+        scopes[entry["label"]] = {"start": entry["quote_end"], "end": following}
+    return scopes
+
+
+def _fact_cell(parser, version, item8, period, spec, scopes=None):
     code, _, kind, period_kind, tags, label_pattern = spec
     for tag in tags:
         matches = []
@@ -89,7 +113,12 @@ def _fact_cell(parser, version, item8, period, spec):
         if len(amounts) != 1:
             return {"status": "同期间事实冲突，待核对"}
         amount, fact = matches[0]
-        citation = _citation(version.content_text, item8, fact, label_pattern)
+        scope = (scopes or {}).get(_STATEMENT_LABELS.get(code))
+        # A missing statement boundary is not permission to match a repeated
+        # number anywhere in Item 8.
+        if scope is None:
+            return {"status": "报表原文位置待核对"}
+        citation = _citation(version.content_text, scope, fact, label_pattern)
         if not citation:
             return {"status": "原文位置待核对"}
         scale = Decimal("100000000") if kind in {"money", "shares"} else Decimal(1)
@@ -141,13 +170,17 @@ def build_financial_overview(version, historical_versions=()):
     if item8 is None:
         return [], [], "尚未定位年报财务报表章节。"
     periods = list(reversed(_full_year_end_dates(parser, version.document.period_end)))
+    scopes = _statement_scopes(version, item8)
     rows = [{"code": spec[0], "label": spec[1], "unit": spec[2],
-             "cells": [_fact_cell(parser, version, item8, period, spec) for period in periods]}
+             "cells": [_fact_cell(parser, version, item8, period, spec, scopes) for period in periods]}
             for spec in SPECS]
     by_code = {row["code"]: row for row in rows}
     identity = (getattr(version.document, "security_id", None),
                 str((version.document.metadata or {}).get("cik", "")))
     for index, period in enumerate(periods[:-1]):
+        if all("amount" in by_code[code]["cells"][index]
+               for code in ("cash", "debt_current", "debt_noncurrent")):
+            continue
         if not identity[0] or not identity[1]:
             break
         candidates = [old for old in historical_versions
@@ -215,7 +248,7 @@ def build_financial_overview(version, historical_versions=()):
         row["coverage"] = sum("amount" in cell for cell in row["cells"])
     # Company-specific figures are shown as separate lines: they may overlap,
     # so their sum is never presented as a decomposition of total revenue.
-    _, company_rows, _ = tenk_metric_grid(version)
+    _, company_rows, _ = tenk_metric_grid(version, _parser=parser, _item8=item8)
     for row in company_rows:
         if row["code"] not in {"company_revenue", "iphone_revenue", "automotive_revenue"}:
             continue
