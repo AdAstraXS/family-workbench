@@ -20,6 +20,9 @@ body{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
 #selection-actions{position:fixed;bottom:calc(65px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;gap:6px;align-items:center;max-width:94vw;z-index:10;background:#fff;border:1px solid #d5ddcf;border-radius:10px;box-shadow:0 3px 14px #0002;padding:5px}
 #selection-actions button{white-space:nowrap}#selection-status{font-size:12px;color:#9c352c}
 #selection-note{bottom:calc(62px + env(safe-area-inset-bottom));max-height:70dvh;overflow:auto}
+#selection-actions,#selection-note{bottom:auto;right:auto;transform:none}
+#selection-note{padding:14px;max-height:min(70dvh,500px)}
+#notes-list .highlight-toggle{width:auto;background:#fff;border:1px solid #c8d1c6;padding:5px 9px;font-size:13px}
 #notes-panel{top:60px;bottom:calc(65px + env(safe-area-inset-bottom))}
 .pdf-page{margin:8px auto}
 #conflict{position:fixed;top:60px;left:12px;right:12px;z-index:12}

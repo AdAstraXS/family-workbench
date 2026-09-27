@@ -5,9 +5,22 @@ const csrf = document.querySelector('[name=csrfmiddlewaretoken]').value;
 const toc = document.querySelector('#toc');
 let view, pdf, pdfEngine, pdfPage=1, rendering=false, ready=false, restoring=false;
 let revision=0, pending=null, savedKey='', saving=false, conflicted=null, saveTimer;
-let selected=null, annotations=[], highlightDraw, selectionDocument, annotationSaving=false;
+let selected=null, annotations=[], highlightDraw, selectionDocument, selectionEndRect, annotationSaving=false;
 let pdfScale=1, requestedPDF=null;
 const actions=document.querySelector('#selection-actions');
+function placeSelectionPanel(panel){
+  if(!selectionEndRect)return;
+  const margin=8, gap=8, footerTop=document.querySelector('.reader-toolbar').getBoundingClientRect().top;
+  const availableBottom=Math.min(window.innerHeight,footerTop)-margin;
+  panel.style.left='0px';panel.style.top='0px';
+  const bounds=panel.getBoundingClientRect();
+  const right=selectionEndRect.right+gap;
+  panel.style.left=`${Math.max(margin,Math.min(right,window.innerWidth-bounds.width-margin))}px`;
+  const below=selectionEndRect.bottom+gap;
+  panel.style.top=`${Math.max(margin,below+bounds.height<=availableBottom?below:
+    selectionEndRect.top-bounds.height-gap>=margin?selectionEndRect.top-bounds.height-gap:
+    Math.min(below,availableBottom-bounds.height))}px`;
+}
 const setStatus = (text,important=false) => {status.textContent=text;status.classList.toggle('important',important);};
 const fail = e => {setStatus(`未完成：${e.message || '请检查网络后重试。'}`,true);};
 async function getJSON(url) {
@@ -59,6 +72,12 @@ function selection(doc,index) {
     const sel=doc.getSelection(),text=sel?.toString().trim();
     if(!config.writable || !text || !sel.rangeCount || text.length>4000){actions.hidden=true;return;}
     const range=sel.getRangeAt(0).cloneRange();let anchor;
+    const end=range.cloneRange();end.collapse(false);
+    const endRect=[...end.getClientRects()].at(-1) || [...range.getClientRects()].at(-1);
+    if(!endRect)return;
+    const frame=doc.defaultView.frameElement,frameRect=frame?.getBoundingClientRect();
+    selectionEndRect={left:endRect.left+(frameRect?.left || 0),right:endRect.right+(frameRect?.left || 0),
+      top:endRect.top+(frameRect?.top || 0),bottom:endRect.bottom+(frameRect?.top || 0)};
     if(pdf){
       const page=surface.querySelector('.pdf-page');
       if(!page?.querySelector('.textLayer')?.contains(range.commonAncestorContainer))return;
@@ -72,6 +91,7 @@ function selection(doc,index) {
     selectionDocument=doc;
     document.querySelector('#selected-text').textContent=text;
     actions.hidden=false;
+    placeSelectionPanel(actions);
     document.querySelector('#selection-status').textContent='';
     document.querySelector('#annotation-status').textContent='';
   };
@@ -104,24 +124,42 @@ function selection(doc,index) {
 function drawPDFNotes(){
   const page=surface.querySelector('.pdf-page');if(!page)return;
   page.querySelectorAll('.pdf-highlight').forEach(e=>e.remove());
-  for(const note of annotations.filter(n=>n.anchor.page===pdfPage))for(const r of note.anchor.rects){
+  for(const note of annotations.filter(n=>n.highlight_visible && n.anchor.page===pdfPage))for(const r of note.anchor.rects){
     const span=document.createElement('span');span.className='pdf-highlight';
     [span.style.left,span.style.top,span.style.width,span.style.height]=r.map(v=>`${v*100}%`);page.append(span);
   }
 }
 async function refreshNotes(){
-  if(view)for(const n of annotations)await view.deleteAnnotation({value:n.anchor.cfi});
+  if(view)for(const n of annotations.filter(n=>n.highlight_visible))await view.deleteAnnotation({value:n.anchor.cfi});
   annotations=(await getJSON(config.annotations)).items;
   const list=document.querySelector('#notes-list');list.replaceChildren();
   for(const n of annotations){
     const card=document.createElement('article'),quote=document.createElement('button'),body=document.createElement('p'),link=document.createElement('a');
     quote.textContent=n.quote;quote.onclick=()=>navigate(n.anchor).catch(fail);
-    body.textContent=`${n.author} · ${n.visibility==='private'?'仅自己':'已分享'}：${n.note || '划线'}`;
-    link.href=`/reading/notes/${n.id}/`;link.textContent='查看、编辑与回复';card.append(quote,body,link);list.append(card);
-    if(view)await view.addAnnotation({value:n.anchor.cfi,quote:n.quote});
+    body.textContent=`${n.author} · ${n.visibility==='private'?'仅自己':'已分享'} · ${n.highlight_visible?'已划线':'未划线'}：${n.note || '仅摘录'}`;
+    link.href=`/reading/notes/${n.id}/`;link.textContent='查看、编辑与回复';card.append(quote,body,link);
+    if(n.owned && !n.note && !n.has_comments){
+      const toggle=document.createElement('button');toggle.className='highlight-toggle';
+      toggle.textContent=n.highlight_visible?'取消划线':'恢复划线';
+      toggle.onclick=()=>toggleHighlight(n,toggle);
+      card.append(toggle);
+    }
+    list.append(card);
+    if(view && n.highlight_visible)await view.addAnnotation({value:n.anchor.cfi,quote:n.quote});
   }
   if(!annotations.length)list.textContent='选中文字后可以保存划线，分享由你决定。';
   if(pdf)drawPDFNotes();
+}
+async function toggleHighlight(note,button){
+  button.disabled=true;
+  try{
+    const response=await fetch(`/reading/notes/${note.id}/highlight/`,{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json','X-CSRFToken':csrf},
+      body:JSON.stringify({visible:!note.highlight_visible,revision:note.revision})});
+    if(!response.headers.get('content-type')?.includes('application/json'))throw Error('划线未更新，请检查登录状态。');
+    const result=await response.json();if(!response.ok)throw Error(result.error || '划线未更新，请重试。');
+    await refreshNotes();setStatus(result.highlight_visible?'划线已恢复':'划线已取消');
+  }catch(error){fail(error);}finally{button.disabled=false;}
 }
 function addToc(items,parent,go) {
   const list=document.createElement('ul');parent.append(list);
@@ -134,7 +172,8 @@ function addToc(items,parent,go) {
 }
 function fontStyle() {
   const spacing={compact:'-.025em',standard:'-.012em',loose:'0em'}[document.querySelector('#letter-spacing').value];
-  return `html{color:#28362e;background:#fffdf7}body{font-family:Georgia,"Noto Serif SC",serif;font-size:${document.querySelector('#font-size').value}px;line-height:1.85;letter-spacing:${spacing}}a{color:#38694c}img{max-width:100%;height:auto}`;
+  const lineHeight={compact:1.45,standard:1.65,loose:1.85}[document.querySelector('#line-spacing').value];
+  return `html{color:#28362e;background:#fffdf7}body{font-family:Georgia,"Noto Serif SC",serif;font-size:${document.querySelector('#font-size').value}px;line-height:${lineHeight};letter-spacing:${spacing}}a{color:#38694c}img{max-width:100%;height:auto}`;
 }
 async function openEPUB(saved) {
   await import('./vendor/foliate/view.js');
@@ -173,6 +212,7 @@ async function openEPUB(saved) {
   view.renderer.setStyles?.(fontStyle());
   document.querySelector('#font-size').onchange=()=>view.renderer.setStyles?.(fontStyle());
   document.querySelector('#letter-spacing').onchange=()=>view.renderer.setStyles?.(fontStyle());
+  document.querySelector('#line-spacing').onchange=()=>view.renderer.setStyles?.(fontStyle());
   addToc(book.toc?.length ? book.toc : manifest.sections.map((s,i)=>({label:`第 ${i+1} 节`,href:i})),toc,async item=>view.goTo(item.href));
   await view.init({lastLocation:saved.location.cfi,showTextStart:true});
   ready=true;
@@ -253,6 +293,7 @@ document.querySelector('#refresh-notes').onclick=()=>refreshNotes().catch(fail);
 actions.addEventListener('pointerdown',e=>e.preventDefault());
 document.querySelector('#comment-selection').onclick=()=>{
   if(!selected)return;actions.hidden=true;document.querySelector('#selection-note').hidden=false;
+  placeSelectionPanel(document.querySelector('#selection-note'));
   document.querySelector('#annotation-note').focus();
 };
 document.querySelector('#highlight-selection').onclick=()=>saveAnnotation(true);

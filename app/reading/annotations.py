@@ -55,4 +55,5 @@ def validate_annotation(book, data):
 def annotation_payload(item, member):
     return {"id":str(item.pk),"quote":item.quote,"note":item.note,"anchor":item.anchor,
             "author":item.author.display_name,"owned":item.author_id==member.pk,"revision":item.revision,
-            "visibility":item.visibility,"text_matched":item.text_matched}
+            "visibility":item.visibility,"highlight_visible":item.highlight_visible,
+            "has_comments":item.comments.exists(),"text_matched":item.text_matched}

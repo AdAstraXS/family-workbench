@@ -9,7 +9,7 @@ from .permissions import accessible_reading_artifacts
 
 @admin.register(Annotation)
 class AnnotationAdmin(PrivateContentAdmin):
-    list_display=("book","author","visibility","updated_at")
+    list_display=("book","author","visibility","highlight_visible","updated_at")
     def allowed_objects(self,member):return accessible_annotations(member)
 
 

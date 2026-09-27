@@ -35,6 +35,33 @@ def annotations(request, pk):
 
 
 @member_required
+@require_POST
+def highlight_visibility(request, note_id):
+    try:
+        if len(request.body)>1000:
+            raise ValueError
+        data=json.loads(request.body)
+    except (ValueError, UnicodeError):
+        return JsonResponse({"error":"请求格式不正确。"},status=400)
+    if not isinstance(data,dict) or type(data.get("visible")) is not bool or type(data.get("revision")) is not int:
+        return JsonResponse({"error":"划线状态或版本无效。"},status=400)
+    with transaction.atomic():
+        item=get_object_or_404(accessible_annotations(request.reader_member),pk=note_id)
+        book_for(request,item.book_id,lock=True)
+        if item.author_id!=request.reader_member.pk:
+            raise Http404
+        if not data["visible"] and (item.note.strip() or item.comments.exists()):
+            return JsonResponse({"error":"有批注或回复的划线不能取消。"},status=400)
+        changed=Annotation.objects.filter(pk=item.pk,revision=data["revision"]).update(
+            highlight_visible=data["visible"],revision=data["revision"]+1,updated_at=timezone.now())
+        if not changed:
+            return JsonResponse({"error":"划线已在另一个页面更新，请刷新后重试。"},status=409)
+        item.highlight_visible=data["visible"]
+        item.revision+=1
+    return JsonResponse(annotation_payload(item,request.reader_member))
+
+
+@member_required
 @require_http_methods(["GET","POST"])
 def note_detail(request, note_id):
     with transaction.atomic():
@@ -50,7 +77,8 @@ def note_detail(request, note_id):
             else:
                 revision=request.POST.get("revision","")
                 if not revision.isdigit() or not Annotation.objects.filter(pk=item.pk,revision=int(revision)).update(
-                    note=note,visibility=visibility,revision=int(revision)+1,updated_at=timezone.now()):
+                    note=note,visibility=visibility,highlight_visible=bool(note) or item.highlight_visible,
+                    revision=int(revision)+1,updated_at=timezone.now()):
                     messages.error(request,"批注已在另一个页面更新，请重新核对后保存。")
                 else:
                     messages.success(request,"批注已保存。")
@@ -70,6 +98,8 @@ def comment(request, note_id):
         if not body or len(body)>5000:
             messages.error(request,"回复需为 1 至 5000 字。")
         else:
+            if not item.highlight_visible:
+                Annotation.objects.filter(pk=item.pk).update(highlight_visible=True,revision=item.revision+1,updated_at=timezone.now())
             AnnotationComment.objects.create(annotation=item,author=request.reader_member,body=body)
     return redirect("reading:note",note_id=item.pk)
 
