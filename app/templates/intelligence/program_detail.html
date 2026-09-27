@@ -23,9 +23,13 @@
   {% if can_write %}
     <form method="post" action="{% url 'intelligence:program_action' entry.pk %}">
       {% csrf_token %}<input type="hidden" name="action" value="archive"><input type="hidden" name="revision_id" value="{{ revision.pk }}">
+      <fieldset class="program-archive-options"><legend>保存内容</legend>
+        <label><input type="checkbox" name="include_summary" value="on" {% if 'summary' in archive_included and archive_summary_available %}checked{% endif %} {% if not archive_summary_available %}disabled{% endif %}>AI 摘要{% if not archive_summary_available %}（尚未完成）{% endif %}</label>
+        <label><input type="checkbox" name="include_transcript" value="on" {% if 'transcript' in archive_included %}checked{% endif %}>完整原文 / 文字稿</label>
+      </fieldset>
       <button class="button" type="submit">{% if revision.archived_document_id %}保存并打开知识资料{% else %}保存为知识{% endif %}</button>
     </form>
-    <p class="intel-muted">保存原文及本次整理结果到知识待整理。</p>
+    <p class="intel-muted">至少选择一项，保存后进入知识待整理。仅保存摘要时，可通过来源链接返回此页核对原文。{% if revision.archived_document_id %}再次保存会创建新版本，历史版本仍保留。{% endif %}</p>
   {% endif %}
   <details><summary>原文版本信息</summary>
     {% for version in versions %}<p><a href="?version={{ version.pk }}">{{ version.created_at|date:'m-d H:i' }} · {{ version.origin_label }}</a>{% if version.pk == revision.pk %} · 当前阅读{% endif %}</p>{% endfor %}

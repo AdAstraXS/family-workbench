@@ -340,6 +340,56 @@ class ProgramTests(TestCase):
         new_revision = self.revision('更新后的观点')
         self.assertNotEqual(archive_program(new_revision, self.member).pk, document.pk)
 
+    def test_archive_content_checkboxes_save_only_selected_content(self):
+        revision = self.revision('只应出现在原文中的文字。')
+        revision.summary = {'points': [{'topic': 'MSFT', 'kind': '作者观点', 'text': '只应出现在摘要中的观点。', 'refs': [1]}]}
+        revision.summary_complete = True
+        revision.save(update_fields=['summary', 'summary_complete'])
+        path = reverse('intelligence:program_action', args=[self.entry.pk])
+        form = {'action': 'archive', 'revision_id': revision.pk}
+
+        response = self.client.post(path, {**form, 'include_summary': 'on'})
+        revision.refresh_from_db()
+        document = KnowledgeDocument.objects.get(pk=revision.archived_document_id)
+        self.assertRedirects(response, reverse('knowledge:document_detail', args=[document.pk]), fetch_redirect_response=False)
+        self.assertIn('只应出现在摘要中的观点', document.current_revision.plain_text)
+        self.assertNotIn('只应出现在原文中的文字', document.current_revision.plain_text)
+        with document.current_revision.raw_file.open('rb') as stored:
+            payload = json.load(stored)
+        self.assertEqual(payload['included'], ['summary'])
+        self.assertNotIn('segments', payload)
+        self.assertIn('program_detail_url', payload)
+        self.assertIn('在 AI 情报中查看原文及引用', document.current_revision.normalized_html)
+        detail = self.client.get(reverse('intelligence:program_detail', args=[self.entry.pk]))
+        self.assertEqual(detail.context['archive_included'], ['summary'])
+        self.assertContains(detail, 'name="include_summary"')
+        self.assertContains(detail, 'name="include_transcript"')
+        archive_program(revision, self.member, include_summary=True, include_transcript=False)
+        self.assertEqual(document.revisions.count(), 1)
+
+        self.client.post(path, {**form, 'include_summary': 'on', 'include_transcript': 'on'})
+        document.refresh_from_db()
+        self.assertEqual(document.revisions.count(), 2)
+        self.assertIn('只应出现在原文中的文字', document.current_revision.plain_text)
+        self.client.post(path, {**form, 'include_transcript': 'on'})
+        document.refresh_from_db()
+        self.assertEqual(document.revisions.count(), 3)
+        self.assertNotIn('只应出现在摘要中的观点', document.current_revision.plain_text)
+        with document.current_revision.raw_file.open('rb') as stored:
+            payload = json.load(stored)
+        self.assertNotIn('summary', payload)
+        self.assertIn('segments', payload)
+
+    def test_archive_requires_a_selection_and_completed_summary(self):
+        revision = self.revision()
+        path = reverse('intelligence:program_action', args=[self.entry.pk])
+        form = {'action': 'archive', 'revision_id': revision.pk}
+        self.client.post(path, form)
+        self.client.post(path, {**form, 'include_summary': 'on'})
+        self.assertFalse(KnowledgeDocument.objects.exists())
+        revision.refresh_from_db()
+        self.assertIsNone(revision.archived_document_id)
+
     def test_audio_encrypted_expiring_capability(self):
         store_audio(self.entry, b'test-audio-bytes', 'audio/mp4')
         with self.entry.audio_file.open('rb') as file:
