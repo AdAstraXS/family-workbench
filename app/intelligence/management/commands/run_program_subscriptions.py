@@ -40,8 +40,6 @@ class Command(BaseCommand):
                 requested=True).exclude(state__in=['ready', 'failed', 'uncertain']).order_by('updated_at', 'pk')
             if not config or not config.allow_asr or not config.encrypted_credentials:
                 entries = entries.exclude(state='waiting_config')
-            elif not config.public_base_url:
-                entries = entries.exclude(state='waiting_config', subscription__code='rhino')
             if not config or not config.allow_summary or not config.summary_provider_id:
                 entries = entries.exclude(state__in=['text_ready', 'summarizing'])
             for entry in list(entries[:max_steps]):

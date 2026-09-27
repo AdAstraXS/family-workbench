@@ -59,6 +59,12 @@ class ProgramTests(TestCase):
         fallback.assert_not_called()
 
     def setUp(self):
+        self.upload_mock = patch('intelligence.program_processing.upload_asr_audio', return_value='oss://dashscope-instant/test/audio.mp3')
+        self.podcast_mock = patch('intelligence.program_processing.podcast_audio', return_value=(b'ID3test-audio', 'audio/mpeg'))
+        self.upload_mock.start()
+        self.podcast_mock.start()
+        self.addCleanup(self.upload_mock.stop)
+        self.addCleanup(self.podcast_mock.stop)
         self.media = tempfile.TemporaryDirectory()
         self.override = override_settings(MEDIA_ROOT=self.media.name)
         self.override.enable()
@@ -77,6 +83,82 @@ class ProgramTests(TestCase):
 
     def revision(self, text='微软的投资需要关注现金流。'):
         return save_revision(self.entry, [{'text': text, 'start_ms': 1000, 'end_ms': 2000}], origin='fun-asr', source_url=self.entry.url)
+
+    def prepare_download_failure(self):
+        self.entry.task_id, self.entry.submitted_at = 'failed-download', timezone.now()
+        self.entry.asr_reserved_cny, self.entry.asr_error_code = Decimal('.3300'), 'FILE_DOWNLOAD_FAILED'
+        self.entry.state = 'failed'
+        self.entry.save()
+        self.client.post(reverse('intelligence:program_action', args=[self.entry.pk]), {'action': 'retry_transfer'})
+
+    def test_audio_recovery_preserves_old_task_and_reservations(self):
+        self.prepare_download_failure()
+        with patch('intelligence.program_processing.asr_request', side_effect=[
+                {'output': {'task_status': 'FAILED', 'code': 'FILE_DOWNLOAD_FAILED'}},
+                {'output': {'task_id': 'replacement-task'}}]) as remote:
+            self.assertTrue(process_entry(self.entry.pk))
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.task_id, 'replacement-task')
+        self.assertEqual(self.entry.asr_reserved_cny, Decimal('.6600'))
+        self.assertEqual(self.entry.asr_attempt_history[0]['task_id'], 'failed-download')
+        self.assertEqual(remote.call_count, 2)
+        self.assertFalse(self.entry.retry_audio_transfer)
+
+    def test_audio_recovery_does_not_replace_running_or_unknown_tasks(self):
+        self.prepare_download_failure()
+        with patch('intelligence.program_processing.asr_request', return_value={'output': {'task_status': 'RUNNING'}}) as remote:
+            self.assertFalse(process_entry(self.entry.pk))
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.task_id, 'failed-download')
+        self.assertEqual(self.entry.asr_attempt_history, [])
+        self.assertEqual(remote.call_count, 1)
+
+    def test_audio_recovery_budget_and_uncertain_submit(self):
+        self.prepare_download_failure()
+        self.config.monthly_asr_cny = Decimal('.50')
+        self.config.save()
+        with patch('intelligence.program_processing.asr_request', return_value={'output': {'task_status': 'FAILED', 'code': 'FILE_DOWNLOAD_FAILED'}}) as remote:
+            self.assertFalse(process_entry(self.entry.pk))
+        self.assertEqual(remote.call_count, 1)
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.asr_reserved_cny, Decimal('.3300'))
+        self.config.monthly_asr_cny = Decimal('20')
+        self.config.save()
+        self.client.post(reverse('intelligence:program_action', args=[self.entry.pk]), {'action': 'retry_transfer'})
+        with patch('intelligence.program_processing.asr_request', side_effect=[
+                {'output': {'task_status': 'FAILED', 'code': 'FILE_DOWNLOAD_FAILED'}}, ProgramError('timeout')]) as remote:
+            self.assertFalse(process_entry(self.entry.pk))
+            self.assertFalse(process_entry(self.entry.pk))
+        self.entry.refresh_from_db()
+        self.assertEqual(self.entry.state, 'uncertain')
+        self.assertEqual(len(self.entry.asr_attempt_history), 1)
+        self.assertEqual(remote.call_count, 2)
+
+    @patch('intelligence.program_media.private_json_request')
+    def test_oss_input_uses_model_bound_resolver(self, request):
+        asr_request(self.config, audio_url='oss://dashscope-instant/test/audio.m4a')
+        self.assertEqual(request.call_args.kwargs['headers']['X-DashScope-OssResourceResolve'], 'enable')
+        with self.assertRaises(ProgramError):
+            asr_request(self.config, audio_url='oss://unapproved/audio.m4a')
+
+    @patch('intelligence.program_media.build_opener')
+    @patch('intelligence.program_media.validate_public_http_url')
+    @patch('intelligence.program_media.private_json_request')
+    def test_private_upload_does_not_forward_api_key_to_storage(self, policy, validate, opener):
+        from intelligence.program_media import upload_asr_audio
+        data = {'upload_host': 'https://dashscope-file-mgr.oss-cn-beijing.aliyuncs.com',
+            'upload_dir': 'dashscope-instant/test', 'max_file_size_mb': 10, 'oss_access_key_id': 'scoped-upload',
+            'signature': 'upload-signature', 'policy': 'upload-policy', 'x_oss_object_acl': 'private', 'x_oss_forbid_overwrite': 'true'}
+        policy.return_value = {'data': data}
+        opener.return_value.open.return_value.__enter__.return_value.status = 200
+        self.assertTrue(upload_asr_audio(self.config, b'ID3test', 'audio/mpeg').startswith('oss://dashscope-instant/test/'))
+        sent = opener.return_value.open.call_args.args[0]
+        self.assertFalse(sent.has_header('Authorization'))
+        self.assertNotIn(b'test-not-real', sent.data)
+        data['upload_host'] = 'https://attacker.example/upload'
+        with self.assertRaises(ProgramError):
+            upload_asr_audio(self.config, b'ID3test', 'audio/mpeg')
+        self.assertEqual(opener.return_value.open.call_count, 1)
 
     def test_revision_idempotent_and_new_version_preserves_original(self):
         first = self.revision()
@@ -405,7 +487,10 @@ class ProgramBudgetConcurrencyTests(TransactionTestCase):
                 return False
             finally:
                 connections.close_all()
-        with patch('intelligence.program_processing.asr_request', return_value={'output': {'task_id': 'test-task'}}) as remote:
+        with patch('intelligence.program_processing.podcast_audio', return_value=(b'ID3test', 'audio/mpeg')), \
+                patch('intelligence.program_processing.store_audio'), \
+                patch('intelligence.program_processing.upload_asr_audio', return_value='oss://dashscope-instant/test/audio.mp3'), \
+                patch('intelligence.program_processing.asr_request', return_value={'output': {'task_id': 'test-task'}}) as remote:
             with ThreadPoolExecutor(max_workers=2) as executor:
                 results = list(executor.map(run, ids))
             self.assertEqual(sum(results), 1)

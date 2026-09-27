@@ -17,6 +17,7 @@ from knowledge.crypto import _fernet_key, decrypt_json
 from .program_models import ProgramSettings, ProgramEntry, ProgramRevision, ProgramSummaryChunk
 from .program_sources import ProgramError, ProgramConfigurationRequired, fetch_publisher_text
 from .program_media import ASR_MODEL, asr_request, download_asr_result, youtube_metadata, youtube_captions, youtube_audio, private_json_request
+from .program_media import upload_asr_audio, podcast_audio
 
 ASR_CNY_PER_SECOND = Decimal('0.00022')
 STOCKS = ['MSFT', 'TSLA', 'SPCX', 'INTC', 'NVDA', 'GOOG', 'GOOGL']
@@ -74,26 +75,47 @@ def month_start():
     return timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
-def submit_asr(entry, config):
+def submit_asr(entry, config, *, retry_failed=False):
     # Validate credentials and transport before reserving money or marking an uncertain submission.
     if not config.allow_asr or not decrypt_json(config.encrypted_credentials).get('api_key'):
         raise ProgramConfigurationRequired('请先在订阅设置中配置并开启百炼转写。')
+    if not retry_failed and (entry.task_id or entry.submitted_at):
+        raise ProgramError('本期已有转写提交记录，请查询原任务，不能重复提交计费。')
     if not 0 < entry.duration_seconds <= config.max_audio_minutes * 60:
         raise ProgramError('音频时长未知或超过单集上限，暂不提交转写。')
-    audio_url = audio_access_url(entry, config) if entry.audio_file else entry.audio_url
-    if not audio_url:
-        raise ProgramError('节目没有可用的公开音频或文字稿。')
+    if entry.audio_file and entry.audio_expires_at and entry.audio_expires_at > timezone.now():
+        with entry.audio_file.open('rb') as audio:
+            body = Fernet(_fernet_key()).decrypt(audio.read())
+        mime = entry.audio_mime
+    else:
+        body, mime = youtube_audio(entry) if entry.subscription.code == 'rhino' else podcast_audio(entry)
+        store_audio(entry, body, mime)
+    audio_url = upload_asr_audio(config, body, mime)
     cost = (Decimal(entry.duration_seconds) * ASR_CNY_PER_SECOND).quantize(Decimal('.0001'), rounding=ROUND_UP)
     with transaction.atomic():
         locked_config = ProgramSettings.objects.select_for_update().get(pk=config.pk)
         locked = ProgramEntry.objects.select_for_update().get(pk=entry.pk)
-        if locked.task_id or locked.submitted_at:
+        if not locked_config.allow_asr:
+            raise ProgramConfigurationRequired('转写授权已关闭，未提交任务。')
+        if retry_failed:
+            if (not locked.retry_audio_transfer or not locked.task_id or locked.task_id != entry.task_id
+                    or locked.asr_error_code != 'FILE_DOWNLOAD_FAILED'):
+                raise ProgramError('原任务状态已变化，不能重新提交。')
+        elif locked.task_id or locked.submitted_at:
             raise ProgramError('本期已有转写提交记录，请查询原任务，不能重复提交计费。')
         used = ProgramEntry.objects.filter(subscription__family_id=config.family_id, submitted_at__gte=month_start()).aggregate(n=Sum('asr_reserved_cny'))['n'] or Decimal(0)
-        if used + cost > locked_config.monthly_asr_cny:
+        carried = locked.asr_reserved_cny if retry_failed and locked.submitted_at < month_start() else Decimal(0)
+        if used + cost + carried > locked_config.monthly_asr_cny:
             raise ProgramError('本月转写预算不足，文字阅读不受影响。')
-        locked.asr_reserved_cny, locked.submitted_at, locked.state = cost, timezone.now(), 'asr_submit'
-        locked.save(update_fields=['asr_reserved_cny', 'submitted_at', 'state', 'updated_at'])
+        if retry_failed:
+            locked.asr_attempt_history = [*locked.asr_attempt_history, {'task_id': locked.task_id,
+                'submitted_at': locked.submitted_at.isoformat(), 'status': 'FAILED', 'code': locked.asr_error_code,
+                'reserved_total_cny': str(locked.asr_reserved_cny)}]
+        locked.asr_reserved_cny += cost
+        locked.submitted_at, locked.state = timezone.now(), 'asr_submit'
+        locked.task_id, locked.asr_error_code, locked.retry_audio_transfer = '', '', False
+        locked.save(update_fields=['asr_reserved_cny', 'submitted_at', 'state', 'task_id', 'asr_error_code',
+                                   'asr_attempt_history', 'retry_audio_transfer', 'updated_at'])
     # Persist submission intent before the network call. On timeout/crash, never automatically resubmit.
     result = asr_request(config, audio_url=audio_url)
     task_id = result.get('output', {}).get('task_id', '')
@@ -112,6 +134,11 @@ def poll_asr(entry, config):
             raise ProgramError('转写已超过 23 小时，请在百炼控制台核对任务状态。')
         return
     if status != 'SUCCEEDED':
+        code = str(output.get('code') or '')
+        code = code if re.fullmatch(r'[A-Za-z0-9_.-]{1,80}', code) else ''
+        ProgramEntry.objects.filter(pk=entry.pk).update(asr_error_code=code)
+        if code == 'FILE_DOWNLOAD_FAILED':
+            raise ProgramError('百炼未能下载音频。可重新传送音频后转写；原任务和费用记录会保留。')
         raise ProgramError('转写服务报告任务失败；保留原任务与费用记录，请核对后处理。')
     segments = download_asr_result(output)
     save_revision(entry, segments, origin='fun-asr', source_url=entry.url, model=ASR_MODEL)
@@ -248,6 +275,14 @@ def process_entry(entry_id):
         config = ProgramSettings.objects.filter(family=entry.subscription.family).first()
         if entry.state == 'asr_submit':
             raise ProgramError('上次转写提交中断，请核对百炼任务 ID 后继续，系统不会重复扣费。')
+        if entry.retry_audio_transfer:
+            if not config or not entry.task_id or entry.asr_error_code != 'FILE_DOWNLOAD_FAILED':
+                raise ProgramError('没有可恢复的音频下载失败任务。')
+            original = asr_request(config, task_id=entry.task_id).get('output', {})
+            if original.get('task_status') != 'FAILED' or original.get('code') != 'FILE_DOWNLOAD_FAILED':
+                raise ProgramError('原任务未确认下载失败，未重复提交转写。')
+            submit_asr(entry, config, retry_failed=True)
+            return True
         if entry.task_id and not entry.current_revision_id:
             if not config:
                 raise ProgramConfigurationRequired('请先配置转写服务。')
@@ -274,10 +309,8 @@ def process_entry(entry_id):
             if captions:
                 save_revision(entry, captions, origin='youtube_caption', source_url=entry.url)
                 return True
-            if not config or not config.allow_asr or not config.public_base_url:
-                raise ProgramConfigurationRequired('本期未取得字幕；配置百炼 Key 和工作台公网地址后可转写音频。')
-            body, mime = youtube_audio(entry)
-            store_audio(entry, body, mime)
+            if not config or not config.allow_asr:
+                raise ProgramConfigurationRequired('本期未取得字幕；配置百炼 Key 后可转写音频。')
         if not config:
             raise ProgramConfigurationRequired('未取得完整文字稿，请先配置转写服务。')
         submit_asr(entry, config)

@@ -45,7 +45,7 @@ class SettingsForm(forms.ModelForm):
             'allow_asr': '允许将已订阅的公开音频发给百炼 Fun-ASR 转写', 'monthly_asr_cny': '每月转写预算（元）',
             'max_audio_minutes': '单集最长分钟数', 'summary_provider': 'AI 整理模型',
             'allow_summary': '允许该模型读取已订阅节目和文章的完整公开正文', 'monthly_summary_usd': '每月摘要预算（美元）'}
-        help_texts = {'public_base_url': '例如 https://workbench.example.com。YouTube 音频通过限时链接交给百炼，完成或 6 小时后删除；播客公开音频直接使用出版方链接。',
+        help_texts = {'public_base_url': '供旧转写任务访问限时音频。新任务直接上传至百炼私有临时存储，48 小时后由服务商清理；NAS 音频完成后或 6 小时后删除。',
                       'summary_provider': '沿用现有情报模型的费用上限和密钥配置；这里单独授权完整正文。'}
 
     def __init__(self, *args, **kwargs):
@@ -239,6 +239,12 @@ def program_action(request, pk):
                 entry.requested, entry.last_error = True, ''
                 entry.save()
                 messages.success(request, '已加入处理队列，定时任务会继续处理。')
+            elif action == 'retry_transfer':
+                if entry.current_revision_id or not entry.task_id or entry.asr_error_code != 'FILE_DOWNLOAD_FAILED':
+                    raise ProgramError('仅允许恢复已确认的音频下载失败任务，请先查询原任务。')
+                entry.retry_audio_transfer, entry.requested, entry.state, entry.last_error = True, True, 'new', ''
+                entry.save(update_fields=['retry_audio_transfer', 'requested', 'state', 'last_error', 'updated_at'])
+                messages.success(request, '已安排重新传送。系统会再次核对原任务已失败，并保留原任务及全部费用预留。')
             else:
                 raise ProgramError('未知操作。')
     except ProgramError as exc:

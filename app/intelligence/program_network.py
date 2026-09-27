@@ -9,6 +9,7 @@ from .http_client import FetchResponse, SafeHttpError, USER_AGENT, fetch_public_
 SOURCE_HOSTS = frozenset({
     'www.youtube.com', 'youtube.com', 'www.dwarkesh.com', 'dwarkesh.com',
     'feeds.acast.com', 'www.oaktreecapital.com', 'oaktreecapital.com',
+    'sphinx.acast.com', 'stitcher2.acast.com',
 })
 NAS_PROXY = 'http://family-workbench-proxy:7890'
 

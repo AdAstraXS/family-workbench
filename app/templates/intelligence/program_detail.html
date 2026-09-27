@@ -32,5 +32,14 @@
   </details>
 </aside></div>
 {% else %}<section class="intel-empty"><h2>正在等待完整内容</h2><p>先获取出版方文字稿或字幕；没有文字稿时，按已配置预算进行音频转写。</p></section>{% endif %}
-{% if can_admin %}<details class="intel-section"><summary>处理与补充原文</summary><p>保留成功的转写和摘要片段。只有失败的 AI 片段会在确认继续后重试，可能产生新的摘要费用。</p><form method="post" action="{% url 'intelligence:program_action' entry.pk %}" class="program-filters">{% csrf_token %}<input type="hidden" name="action" value="retry">{% if entry.state == 'uncertain' %}<label>百炼控制台中的原任务 ID<input name="task_id" autocomplete="off"></label>{% endif %}<button class="button" type="submit">获取 / 继续处理</button></form><hr><form method="post" action="{% url 'intelligence:program_action' entry.pk %}">{% csrf_token %}<input type="hidden" name="action" value="import"><label for="transcript">导入已有完整文字稿（每行一段，保存新版本）</label><textarea id="transcript" name="transcript" rows="8" maxlength="600000" required></textarea><button class="button" type="submit">保存文字稿</button></form></details>{% endif %}
+{% if can_admin %}<details class="intel-section"><summary>处理与补充原文</summary>
+<p>保留成功的转写和摘要片段。只有失败的 AI 片段会在确认继续后重试，可能产生新的摘要费用。</p>
+<form method="post" action="{% url 'intelligence:program_action' entry.pk %}" class="program-filters">{% csrf_token %}<input type="hidden" name="action" value="retry">{% if entry.state == 'uncertain' %}<label>百炼控制台中的原任务 ID<input name="task_id" autocomplete="off"></label>{% endif %}<button class="button" type="submit">获取 / 继续处理</button></form>
+{% if entry.asr_error_code == 'FILE_DOWNLOAD_FAILED' %}
+<p>百炼未能取得音频。重新传送会使用百炼私有临时存储，48 小时后由服务商清理；只在核对原任务确已失败后提交新任务，仍受月预算限制。</p>
+<form method="post" action="{% url 'intelligence:program_action' entry.pk %}">{% csrf_token %}<input type="hidden" name="action" value="retry_transfer"><button class="button" type="submit">重新传送音频并转写（可能再次计费）</button></form>
+{% endif %}
+{% if entry.task_id %}<p class="intel-muted">当前转写任务：{{ entry.task_id }} · 累计费用预留 ¥{{ entry.asr_reserved_cny }}（实际账单以百炼为准）</p>{% endif %}
+{% for attempt in entry.asr_attempt_history %}<p class="intel-muted">历史任务 {{ attempt.task_id }} · {{ attempt.status }} · {{ attempt.code }} · 当时累计预留 ¥{{ attempt.reserved_total_cny }}</p>{% endfor %}
+<hr><form method="post" action="{% url 'intelligence:program_action' entry.pk %}">{% csrf_token %}<input type="hidden" name="action" value="import"><label for="transcript">导入已有完整文字稿（每行一段，保存新版本）</label><textarea id="transcript" name="transcript" rows="8" maxlength="600000" required></textarea><button class="button" type="submit">保存文字稿</button></form></details>{% endif %}
 {% endblock %}

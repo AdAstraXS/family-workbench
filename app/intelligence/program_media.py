@@ -4,6 +4,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -40,7 +41,7 @@ def private_json_request(url, *, key, payload=None, headers=None):
         raise ProgramError('模型服务请求失败，请核对 Key、额度和网络；未自动重新提交付费请求。') from exc
 
 
-def asr_request(config, *, task_id='', audio_url=''):
+def _asr_access(config):
     key = decrypt_json(config.encrypted_credentials).get('api_key', '')
     if not config.allow_asr or not key:
         raise ProgramConfigurationRequired('转写尚未开启，管理员需配置百炼 Key 并授权发送公开节目音频。')
@@ -49,11 +50,69 @@ def asr_request(config, *, task_id='', audio_url=''):
         raise ProgramError('百炼 Workspace ID 格式不正确。')
     host = f'{workspace}.cn-beijing.maas.aliyuncs.com' if workspace else 'dashscope.aliyuncs.com'
     base = f'https://{host}/api/v1'
+    return key, base
+
+
+def upload_asr_audio(config, body, mime):
+    """Upload public audio using a model-bound, private 48-hour Bailian lease."""
+    if not body or len(body) > MAX_AUDIO_BYTES or mime not in {'audio/mp4', 'audio/mpeg'}:
+        raise ProgramError('音频为空、格式异常或超过传输上限。')
+    key, base = _asr_access(config)
+    policy = private_json_request(base + '/uploads?action=getPolicy&model=' + ASR_MODEL, key=key).get('data', {})
+    host = str(policy.get('upload_host', ''))
+    parsed = urlsplit(host)
+    if (parsed.scheme != 'https' or parsed.username or parsed.password or parsed.port not in (None, 443)
+            or not (parsed.hostname or '').endswith('.oss-cn-beijing.aliyuncs.com')):
+        raise ProgramError('百炼临时存储地址异常，音频未上传。')
+    validate_public_http_url(host)
+    directory = str(policy.get('upload_dir', ''))
+    if not re.fullmatch(r'dashscope-instant/[A-Za-z0-9_/-]+', directory) or '..' in directory:
+        raise ProgramError('百炼临时存储路径异常，音频未上传。')
+    if len(body) > int(policy.get('max_file_size_mb', 0)) * 1024 * 1024:
+        raise ProgramError('音频超过百炼上传凭证的大小限制。')
+    filename = uuid.uuid4().hex + ('.mp3' if mime == 'audio/mpeg' else '.m4a')
+    object_key = directory.rstrip('/') + '/' + filename
+    fields = {'OSSAccessKeyId': policy.get('oss_access_key_id'), 'Signature': policy.get('signature'),
+        'policy': policy.get('policy'), 'x-oss-object-acl': policy.get('x_oss_object_acl'),
+        'x-oss-forbid-overwrite': policy.get('x_oss_forbid_overwrite'), 'key': object_key, 'success_action_status': '200'}
+    if fields['x-oss-object-acl'] != 'private' or any(not isinstance(v, str) or not v for v in fields.values()):
+        raise ProgramError('百炼未返回有效的私有上传凭证。')
+    boundary = 'program-' + uuid.uuid4().hex
+    parts = []
+    for name, value in fields.items():
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
+    parts.extend([f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{filename}"\r\nContent-Type: {mime}\r\n\r\n'.encode(),
+                  body, f'\r\n--{boundary}--\r\n'.encode()])
+    request = Request(host, data=b''.join(parts), headers={'Content-Type': 'multipart/form-data; boundary=' + boundary})
+    try:
+        with build_opener(NoRedirect()).open(request, timeout=180) as response:
+            if response.status != 200:
+                raise ValueError('upload status')
+    except Exception as exc:
+        raise ProgramError('音频上传百炼临时存储失败，尚未提交转写。') from exc
+    return 'oss://' + object_key
+
+
+def podcast_audio(entry):
+    if entry.subscription.code != 'good_company' or urlsplit(entry.audio_url).hostname != 'sphinx.acast.com':
+        raise ProgramError('播客音频地址不属于已批准的出版方。')
+    body = fetch_source_url(entry.audio_url, max_bytes=MAX_AUDIO_BYTES, timeout=90).body
+    if not (body.startswith(b'ID3') or (len(body) > 2 and body[0] == 255 and body[1] & 224 == 224)):
+        raise ProgramError('出版方未返回有效的 MP3 音频，未上传或计费。')
+    return body, 'audio/mpeg'
+
+
+def asr_request(config, *, task_id='', audio_url=''):
+    key, base = _asr_access(config)
     if task_id:
         if not re.fullmatch(r'[a-zA-Z0-9-]{1,150}', task_id):
             raise ProgramError('转写任务 ID 格式不正确。')
         return private_json_request(base + '/tasks/' + task_id, key=key)
     parsed_audio = urlsplit(audio_url)
+    if audio_url.startswith('oss://dashscope-instant/') and not parsed_audio.query and not parsed_audio.fragment and '..' not in audio_url:
+        return private_json_request(base + '/services/audio/asr/transcription', key=key,
+            headers={'X-DashScope-Async': 'enable', 'X-DashScope-OssResourceResolve': 'enable'},
+            payload={'model': ASR_MODEL, 'input': {'file_urls': [audio_url]}, 'parameters': {'channel_id': [0]}})
     if parsed_audio.scheme != 'https' or parsed_audio.username or parsed_audio.password:
         raise ProgramError('音频传输必须使用 HTTPS，且不包含账号密码。')
     # The approved NAS endpoint uses HTTPS on 8443. It is passed to the ASR service,
