@@ -79,7 +79,7 @@ from .analysis_materials import source_preview
 from .thesis_analysis import generate_thesis_analysis, enforce_market_expectation_boundary
 from .valuation_trial import build_valuation_trial
 from .next_day_digest import (active_consent, latest_digest, latest_manual_analysis,
-                              pending_sources, set_auto_digest_consent,
+                              display_digest_result, pending_sources, set_auto_digest_consent,
                               generate_next_day_digest)
 from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
 from .review_plan import (
@@ -550,7 +550,7 @@ def next_day_tracking(request, pk):
     quote = build_valuation_trial(dossier.security, {}, {})
     return render(request, "investment_research/next_day_tracking.html", {
         "dossier": dossier, "digest": digest,
-        "result": digest.result.result_json if digest else None,
+        "result": display_digest_result(digest.result.result_json) if digest else None,
         "pending": pending, "checks": checks,
         "latest_analysis": latest_analysis, "quote": quote,
         "consent": consent, "consent_active": consent_active,

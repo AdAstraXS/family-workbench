@@ -18,7 +18,7 @@ from family_core.models import Family, FamilyMember
 from portfolio.models import PriceSourceChoices, PricingStatusChoices, Security, SecurityMarketSnapshot
 
 from .models import OfficialResearchContentVersion, OfficialResearchDocument
-from .next_day_digest import (_complete_quote, _verified_summary,
+from .next_day_digest import (_complete_quote, _verified_summary, display_digest_result,
                               generate_next_day_digest, pending_sources)
 from .services import create_dossier
 from .valuation_trial import build_valuation_trial
@@ -189,6 +189,13 @@ class ResearchBriefTests(TestCase):
         evidence["E1"]["text"] += " Cloud revenue was 15 billion dollars."
         self.assertEqual(_verified_summary("收入增长15亿元。收入增长15%。", ["E1"], evidence),
                          "收入增长15%。")
+
+    def test_saved_event_cannot_claim_to_answer_market_consensus_without_consensus_data(self):
+        saved = {"events": [{"impact": "增长支持收入假设，并部分回应是否超越市场预期。仍需核查现金。"}]}
+        shown = display_digest_result(saved)
+        self.assertIn("不能判断是否超预期", shown["events"][0]["impact"])
+        self.assertNotIn("部分回应", shown["events"][0]["impact"])
+        self.assertIn("部分回应", saved["events"][0]["impact"])
 
     def test_provider_bound_consent_sends_private_thesis_once_and_can_be_revoked(self):
         self.analysis()

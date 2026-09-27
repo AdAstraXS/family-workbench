@@ -199,6 +199,25 @@ def _verified_summary(value, refs, evidence):
     return "".join(kept).strip() or "具体变化请看下方官方摘录。"
 
 
+def _market_expectation_boundary(value):
+    """A filing excerpt cannot answer an actual-versus-consensus question."""
+    sentences = re.split(r"(?<=[。！？])", value)
+    for index, sentence in enumerate(sentences):
+        if ("市场预期" in sentence or "一致预期" in sentence) and any(
+                phrase in sentence for phrase in ("回应", "支持", "验证", "超越", "高于", "优于")):
+            sentences[index] = "本批官方资料没有同口径市场一致预期，暂不能判断是否超预期。"
+    return "".join(sentences)
+
+
+def display_digest_result(result):
+    """Apply the evidence boundary to saved briefs without altering their audit record."""
+    if not isinstance(result, dict):
+        return result
+    return {**result, "events": [
+        {**event, "impact": _market_expectation_boundary(event.get("impact") or "")}
+        for event in result.get("events", []) if isinstance(event, dict)]}
+
+
 def _clean(raw, evidence):
     if not isinstance(raw, str) or not raw.strip():
         raise ResponseFormatError("模型没有返回次日跟踪内容。")
@@ -222,7 +241,7 @@ def _clean(raw, evidence):
             continue
         title = _qualitative(item.get("title"), 130)
         summary = _verified_summary(item.get("summary"), valid_refs, by_id)
-        impact = _qualitative(item.get("impact"), 350)
+        impact = _market_expectation_boundary(_qualitative(item.get("impact"), 350))
         if not (title and summary and impact):
             continue
         events.append({"title": title, "summary": summary, "impact": impact,
@@ -294,6 +313,7 @@ def generate_next_day_digest(dossier_id, *, transport=None, url_validator=None):
            if private_comparison else
            "impact 只描述对公司基本面研究的一般影响，不声称已对照任何个人判断。") +
         "文字解释只写定性判断；摘录中的数字将由页面另行展示。"
+        "官方摘录没有同口径市场一致预期时，不能称为超预期或部分回应是否超预期。"
     )
     lines = ["以下均为本次新保存的公开官方资料摘录，不代表已读完整文件："]
     lines.extend(f"[{item['id']}] {item['text']}" for item in packet["evidence"])
