@@ -108,6 +108,14 @@ class ProgramTests(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]['published_at'].month, 9)
 
+    def test_youtube_feed_accepts_channel_id_without_uc_prefix_only_for_same_channel(self):
+        from .adapters import FeedParseError
+        template = '<feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015"><yt:channelId>{}</yt:channelId><entry><yt:videoId>OyiGHowGOSI</yt:videoId><title>完整节目</title><link href="https://www.youtube.com/watch?v=OyiGHowGOSI"/></entry></feed>'
+        for channel_id in ['UCFQsi7WaF5X41tcuOryDk8w', 'FQsi7WaF5X41tcuOryDk8w']:
+            self.assertEqual(parse_catalogue_feed('rhino', template.format(channel_id).encode())[0]['external_id'], 'OyiGHowGOSI')
+        with self.assertRaises(FeedParseError):
+            parse_catalogue_feed('rhino', template.format('OtherChannel01234567890').encode())
+
     def test_first_collection_only_latest_automatically_processed(self):
         items = [dict(external_id=str(i), title=str(i), url=f'https://example.com/{i}') for i in range(5)]
         with patch('intelligence.program_sources.fetch_public_url', return_value=SimpleNamespace(body=b'')), patch('intelligence.program_sources.parse_catalogue_feed', side_effect=lambda *args: [dict(i) for i in items]):
