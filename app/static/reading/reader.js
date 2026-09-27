@@ -83,6 +83,18 @@ function turnPage(direction) {
   actions.hidden=true;
   (pdf?renderPDF(pdfPage+direction):(direction<0?view.prev():view.next())).catch(fail);
 }
+function highlightedAtPointer(doc,event){
+  if(pdf){
+    const page=surface.querySelector('.pdf-page');if(!page)return false;
+    const bounds=page.getBoundingClientRect(),x=(event.clientX-bounds.left)/bounds.width,y=(event.clientY-bounds.top)/bounds.height;
+    return annotations.some(n=>n.highlight_visible && n.anchor.page===pdfPage &&
+      n.anchor.rects.some(r=>x>=r[0]&&x<=r[0]+r[2]&&y>=r[1]&&y<=r[1]+r[3]));
+  }
+  const contents=view?.renderer?.getContents?.() || [];
+  const overlay=contents.find(content=>content.doc===doc)?.overlayer;
+  const [value]=overlay?.hitTest(event) || [];
+  return !!value && annotations.some(n=>n.highlight_visible && n.anchor.cfi===value);
+}
 function selection(doc,index) {
   let timer, pointer=null, touching=false;
   const capture=()=>{
@@ -134,9 +146,9 @@ function selection(doc,index) {
       const frame=doc.defaultView.frameElement;
       const x=e.clientX+(frame?frame.getBoundingClientRect().left:0)-bounds.left;
       const direction=x>=0 && x<bounds.width*.25?-1:x>bounds.width*.75 && x<=bounds.width?1:0;
-      // The highlight hit test runs on click, after pointerup. Give it priority
-      // over the page-edge shortcut even when highlighted text reaches the edge.
-      if(direction)setTimeout(()=>{if(card.hidden && !doc.getSelection()?.toString())turnPage(direction);},0);
+      // Page turns happen on pointerup, before the annotation's click handler.
+      // Use the same highlight geometry here so edge highlights take priority.
+      if(direction && !highlightedAtPointer(doc,e))turnPage(direction);
     }
     schedule();
   });
