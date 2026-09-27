@@ -1,5 +1,6 @@
 import io
 import json
+import math
 import re
 import subprocess
 import sys
@@ -11,6 +12,8 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
+from tinytag import TinyTag
+
 from .http_client import fetch_public_url, validate_public_http_url
 from .program_network import fetch_source_url, source_proxy
 from .program_sources import CATALOGUE, ProgramError, ProgramConfigurationRequired
@@ -18,6 +21,16 @@ from knowledge.crypto import decrypt_json
 
 MAX_AUDIO_BYTES = 60 * 1024 * 1024
 ASR_MODEL = 'fun-asr-2025-11-07'
+
+
+def media_duration(body):
+    try:
+        seconds = float(TinyTag.get(file_obj=io.BytesIO(body)).duration)
+        if not math.isfinite(seconds) or seconds <= 0:
+            raise ValueError
+        return math.ceil(seconds)
+    except Exception as exc:
+        raise ProgramError('无法核对音视频时长，未发送至转写服务。') from exc
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -55,7 +68,9 @@ def _asr_access(config):
 
 def upload_asr_audio(config, body, mime):
     """Upload public audio using a model-bound, private 48-hour Bailian lease."""
-    if not body or len(body) > MAX_AUDIO_BYTES or mime not in {'audio/mp4', 'audio/mpeg'}:
+    suffixes = {'audio/mp4': '.m4a', 'audio/mpeg': '.mp3', 'video/mp4': '.mp4',
+                'audio/wav': '.wav', 'audio/webm': '.webm'}
+    if not body or len(body) > MAX_AUDIO_BYTES or mime not in suffixes:
         raise ProgramError('音频为空、格式异常或超过传输上限。')
     key, base = _asr_access(config)
     policy = private_json_request(base + '/uploads?action=getPolicy&model=' + ASR_MODEL, key=key).get('data', {})
@@ -70,7 +85,7 @@ def upload_asr_audio(config, body, mime):
         raise ProgramError('百炼临时存储路径异常，音频未上传。')
     if len(body) > int(policy.get('max_file_size_mb', 0)) * 1024 * 1024:
         raise ProgramError('音频超过百炼上传凭证的大小限制。')
-    filename = uuid.uuid4().hex + ('.mp3' if mime == 'audio/mpeg' else '.m4a')
+    filename = uuid.uuid4().hex + suffixes[mime]
     object_key = directory.rstrip('/') + '/' + filename
     fields = {'OSSAccessKeyId': policy.get('oss_access_key_id'), 'Signature': policy.get('signature'),
         'policy': policy.get('policy'), 'x-oss-object-acl': policy.get('x_oss_object_acl'),
@@ -94,12 +109,20 @@ def upload_asr_audio(config, body, mime):
 
 
 def podcast_audio(entry):
-    if entry.subscription.code != 'good_company' or urlsplit(entry.audio_url).hostname != 'sphinx.acast.com':
-        raise ProgramError('播客音频地址不属于已批准的出版方。')
-    body = fetch_source_url(entry.audio_url, max_bytes=MAX_AUDIO_BYTES, timeout=90).body
-    if not (body.startswith(b'ID3') or (len(body) > 2 and body[0] == 255 and body[1] & 224 == 224)):
-        raise ProgramError('出版方未返回有效的 MP3 音频，未上传或计费。')
-    return body, 'audio/mpeg'
+    if entry.subscription.code == 'good_company':
+        if urlsplit(entry.audio_url).hostname != 'sphinx.acast.com':
+            raise ProgramError('播客音频地址不属于已批准的出版方。')
+        body = fetch_source_url(entry.audio_url, max_bytes=MAX_AUDIO_BYTES, timeout=90).body
+    elif entry.subscription.kind == 'podcast':
+        from .program_network import fetch_user_source_url
+        body = fetch_user_source_url(entry.audio_url, max_bytes=MAX_AUDIO_BYTES, timeout=90).body
+    else:
+        raise ProgramError('该来源没有可用的播客音频。')
+    if body.startswith(b'ID3') or (len(body) > 2 and body[0] == 255 and body[1] & 224 == 224):
+        return body, 'audio/mpeg'
+    if len(body) > 12 and body[4:8] == b'ftyp':
+        return body, 'audio/mp4'
+    raise ProgramError('出版方未返回有效的 MP3/M4A 音频，未上传或计费。')
 
 
 def asr_request(config, *, task_id='', audio_url=''):
@@ -154,8 +177,8 @@ def download_asr_result(output):
     return parse_asr_result(json.loads(body))
 
 
-def _yt_command(args, timeout=180):
-    proxy_args = ['--proxy', source_proxy()] if source_proxy() else []
+def _yt_command(args, timeout=180, *, use_proxy=True):
+    proxy_args = ['--proxy', source_proxy()] if use_proxy and source_proxy() else []
     try:
         completed = subprocess.run([sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-playlist',
             '--no-warnings', '--socket-timeout', '20', '--retries', '1', *proxy_args, *args],
@@ -166,15 +189,17 @@ def _yt_command(args, timeout=180):
 
 
 def youtube_metadata(entry, max_minutes, *, timeout=180):
-    if entry.subscription.code != 'rhino' or not re.fullmatch(r'[A-Za-z0-9_-]{11}', entry.external_id):
-        raise ProgramError('当前只支持已订阅的视野环球财经公开视频。')
+    from .program_custom_sources import source_spec
+    spec = source_spec(entry.subscription)
+    if spec['kind'] != 'youtube' or not re.fullmatch(r'[A-Za-z0-9_-]{11}', entry.external_id):
+        raise ProgramError('当前只支持已订阅的 YouTube 公开视频。')
     url = 'https://www.youtube.com/watch?v=' + entry.external_id
     info = json.loads(_yt_command(['--dump-single-json', '--skip-download', url], timeout=timeout))
-    if info.get('channel_id') != CATALOGUE['rhino']['channel_id']:
+    if spec['channel_id'] and info.get('channel_id') != spec['channel_id']:
         raise ProgramError('视频不属于已批准的频道。')
     if info.get('availability') not in (None, 'public') or info.get('is_live') or info.get('live_status') == 'is_upcoming':
         raise ProgramError('只支持公开且已经结束的节目。')
-    duration = int(info.get('duration') or 0)
+    duration = math.ceil(float(info.get('duration') or 0))
     if not 0 < duration <= max_minutes * 60:
         raise ProgramError('节目时长未知或超过单集上限。')
     return info
@@ -237,3 +262,32 @@ def youtube_audio(entry):
         if not path.exists() or not 0 < path.stat().st_size <= MAX_AUDIO_BYTES:
             raise ProgramError('未取得音频，或音频超过 60 MB 上限。')
         return path.read_bytes(), 'audio/mp4'
+
+
+def bilibili_metadata(entry, max_minutes):
+    if entry.subscription.kind != 'bilibili' or not re.fullmatch(r'BV[A-Za-z0-9]{10}', entry.external_id):
+        raise ProgramError('B 站视频编号无效。')
+    info = json.loads(_yt_command(['--dump-single-json', '--skip-download', entry.url],
+                                  timeout=90, use_proxy=False))
+    if str(info.get('uploader_id') or '') != entry.subscription.channel_id:
+        raise ProgramError('B 站视频不属于已订阅的 UP 主。')
+    if info.get('availability') not in (None, 'public') or info.get('is_live'):
+        raise ProgramError('只支持已经发布的公开视频。')
+    duration = math.ceil(float(info.get('duration') or 0))
+    if not 0 < duration <= max_minutes * 60:
+        raise ProgramError('节目时长未知或超过单集上限。')
+    return info
+
+
+def bilibili_audio(entry):
+    with tempfile.TemporaryDirectory(prefix='intelligence-bili-') as directory:
+        path = Path(directory) / 'audio.m4a'
+        _yt_command(['-f', 'bestaudio[ext=m4a]', '--max-filesize', str(MAX_AUDIO_BYTES),
+                     '--fragment-retries', '1', '--no-progress', '-o', str(path), entry.url],
+                    timeout=300, use_proxy=False)
+        if not path.exists() or not 0 < path.stat().st_size <= MAX_AUDIO_BYTES:
+            raise ProgramError('未取得 B 站音频，或音频超过 60 MB 上限。')
+        body = path.read_bytes()
+        if body[4:8] != b'ftyp':
+            raise ProgramError('B 站返回的音频格式不受支持。')
+        return body, 'audio/mp4'

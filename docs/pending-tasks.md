@@ -7,6 +7,12 @@
 
 ## AI 情报精选订阅 · 2026-09-27
 
+- [ ] 自助信源第一版开发中：公开 YouTube 频道/播放列表、播客 RSS、文章 RSS、文件上传，
+  以及标题包含/排除、任一/全部、发布星期、最短时长和保存前预览。B 站公开视频增加 UP 主
+  订阅尝试与单条视频逐期添加；频道列表在测试网络返回 352/HTTP 412，尚未完成真实频道自动验收。
+  代码和本地 PostgreSQL 回归已通过，尚未发布；详细范围与限制见
+  [自助信源第一版](key-person-intelligence/self-service-sources-v1.md)。
+
 - 与“投研模块2”协调后统一发布，当前实际运行并标记 `ea889db1fc8eb5b82cc718512471870c8bf4ed9a`，已推送。
   包含完整投研/阅读代码。NAS 独立代理与正式 DSM 五分钟任务已启用；仅程序任务使用代理。
 - Dwarkesh、In Good Company、Howard Marks 共收集 9 篇，Dwarkesh 与 Oaktree 最新内容原文和中文整理可读。

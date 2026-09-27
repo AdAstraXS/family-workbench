@@ -139,20 +139,32 @@ def fetch_publisher_text(entry):
 
 def collect_subscription(subscription):
     from .program_processing import save_revision
+    from .program_custom_sources import source_spec, video_items, parse_custom_rss, matches_filters
+    from .program_network import fetch_user_source_url
+    if not subscription.collect_enabled:
+        return 0
     now = timezone.now()
     if not ProgramSubscription.objects.filter(pk=subscription.pk, enabled=True).filter(
             Q(lease_until__isnull=True) | Q(lease_until__lt=now)).update(lease_until=now + timedelta(minutes=5)):
         return 0
     try:
-        spec = CATALOGUE[subscription.code]
-        try:
-            items = parse_catalogue_feed(subscription.code, fetch_public_url(spec['feed'], max_bytes=8000000).body)
-        except SafeHttpError as exc:
-            if subscription.code != 'rhino' or exc.code not in {
-                    'proxy_http_404', 'proxy_http_500', 'proxy_http_502', 'proxy_http_503', 'proxy_http_504'}:
-                raise
-            from .program_media import youtube_recent_entries
-            items = youtube_recent_entries()
+        spec = source_spec(subscription)
+        if subscription.kind in {'youtube', 'bilibili'}:
+            items = video_items(subscription, count=12)
+        elif subscription.kind in {'podcast', 'article'}:
+            items = parse_custom_rss(fetch_user_source_url(spec['feed'], max_bytes=8000000).body,
+                                     subscription.kind, spec['feed'])
+        else:
+            try:
+                items = parse_catalogue_feed(subscription.code, fetch_public_url(spec['feed'], max_bytes=8000000).body)
+            except SafeHttpError as exc:
+                if subscription.code != 'rhino' or exc.code not in {
+                        'proxy_http_404', 'proxy_http_500', 'proxy_http_502', 'proxy_http_503', 'proxy_http_504'}:
+                    raise
+                from .program_media import youtube_recent_entries
+                items = youtube_recent_entries()
+        if subscription.kind:
+            items = [item for item in items if matches_filters(subscription, item)]
         initial = subscription.last_success_at is None
         items = items[:3] if initial else items[:30]
         count = 0

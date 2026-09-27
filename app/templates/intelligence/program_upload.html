@@ -1,0 +1,6 @@
+{% extends 'base.html' %}{% load static %}
+{% block title %}上传节目或文字稿{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/intelligence.css' %}"><link rel="stylesheet" href="{% static 'css/intelligence-programs.css' %}">{% endblock %}
+{% block content %}<a href="{% url 'intelligence:program_list' %}">← 精选订阅</a><h1>上传节目或文字稿</h1><p>上传内容仅你本人可见。文字稿保留加密原件；音视频只保留到转写完成或最迟 6 小时。按本次勾选决定是否发往云端服务。</p>
+<section class="intel-section"><form method="post" enctype="multipart/form-data" class="intel-form">{% csrf_token %}{{ form.non_field_errors }}<div class="intel-form-grid">{% for field in form %}<div class="intel-form-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</div>{% endfor %}</div><button class="button" type="submit">保存并加入阅读列表</button></form></section>
+{% endblock %}

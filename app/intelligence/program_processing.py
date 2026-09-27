@@ -1,5 +1,6 @@
 import hashlib
 import json
+import math
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone as datetime_timezone
@@ -17,7 +18,7 @@ from knowledge.crypto import _fernet_key, decrypt_json
 from .program_models import ProgramSettings, ProgramEntry, ProgramRevision, ProgramSummaryChunk
 from .program_sources import ProgramError, ProgramConfigurationRequired, fetch_publisher_text
 from .program_media import ASR_MODEL, asr_request, download_asr_result, youtube_metadata, youtube_captions, youtube_audio, private_json_request
-from .program_media import upload_asr_audio, podcast_audio
+from .program_media import upload_asr_audio, podcast_audio, bilibili_metadata, bilibili_audio, media_duration
 
 ASR_CNY_PER_SECOND = Decimal('0.00022')
 STOCKS = ['MSFT', 'TSLA', 'SPCX', 'INTC', 'NVDA', 'GOOG', 'GOOGL']
@@ -79,19 +80,37 @@ def submit_asr(entry, config, *, retry_failed=False):
     # Validate credentials and transport before reserving money or marking an uncertain submission.
     if not config.allow_asr or not decrypt_json(config.encrypted_credentials).get('api_key'):
         raise ProgramConfigurationRequired('请先在订阅设置中配置并开启百炼转写。')
+    if entry.private_owner_id and not entry.allow_cloud_asr:
+        raise ProgramConfigurationRequired('这份私人音视频尚未授权发送给百炼转写。')
     if not retry_failed and (entry.task_id or entry.submitted_at):
         raise ProgramError('本期已有转写提交记录，请查询原任务，不能重复提交计费。')
-    if not 0 < entry.duration_seconds <= config.max_audio_minutes * 60:
+    if entry.duration_seconds > config.max_audio_minutes * 60 or (
+            entry.duration_seconds <= 0 and entry.subscription.kind not in {'podcast', 'upload'}):
         raise ProgramError('音频时长未知或超过单集上限，暂不提交转写。')
     if entry.audio_file and entry.audio_expires_at and entry.audio_expires_at > timezone.now():
         with entry.audio_file.open('rb') as audio:
             body = Fernet(_fernet_key()).decrypt(audio.read())
         mime = entry.audio_mime
     else:
-        body, mime = youtube_audio(entry) if entry.subscription.code == 'rhino' else podcast_audio(entry)
+        kind = entry.subscription.kind
+        body, mime = (youtube_audio(entry) if kind == 'youtube' or entry.subscription.code == 'rhino'
+                      else bilibili_audio(entry) if kind == 'bilibili' else podcast_audio(entry))
         store_audio(entry, body, mime)
-    audio_url = upload_asr_audio(config, body, mime)
+    if entry.subscription.kind in {'podcast', 'upload'}:
+        checked_duration = media_duration(body)
+        if checked_duration > config.max_audio_minutes * 60:
+            raise ProgramError('音视频实际时长超过单集上限，未提交转写。')
+        entry.duration_seconds = checked_duration
+        ProgramEntry.objects.filter(pk=entry.pk).update(duration_seconds=checked_duration)
     cost = (Decimal(entry.duration_seconds) * ASR_CNY_PER_SECOND).quantize(Decimal('.0001'), rounding=ROUND_UP)
+    with transaction.atomic():
+        locked_config = ProgramSettings.objects.select_for_update().get(pk=config.pk)
+        used = ProgramEntry.objects.filter(subscription__family_id=config.family_id,
+            submitted_at__gte=month_start()).aggregate(n=Sum('asr_reserved_cny'))['n'] or Decimal(0)
+        carried = entry.asr_reserved_cny if retry_failed and entry.submitted_at < month_start() else Decimal(0)
+        if used + cost + carried > locked_config.monthly_asr_cny:
+            raise ProgramError('本月转写预算不足，音频未上传到模型服务。')
+    audio_url = upload_asr_audio(config, body, mime)
     with transaction.atomic():
         locked_config = ProgramSettings.objects.select_for_update().get(pk=config.pk)
         locked = ProgramEntry.objects.select_for_update().get(pk=entry.pk)
@@ -142,6 +161,8 @@ def poll_asr(entry, config):
         raise ProgramError('转写服务报告任务失败；保留原任务与费用记录，请核对后处理。')
     segments = download_asr_result(output)
     save_revision(entry, segments, origin='fun-asr', source_url=entry.url, model=ASR_MODEL)
+    if entry.private_owner_id and not entry.allow_cloud_summary:
+        ProgramEntry.objects.filter(pk=entry.pk).update(state='ready')
     if entry.audio_file:
         entry.audio_file.delete(save=False)
         ProgramEntry.objects.filter(pk=entry.pk).update(audio_file='', audio_expires_at=None)
@@ -197,6 +218,8 @@ def summarize_next_chunk(entry, config):
     from .ai_enrichment import _provider_policy, _api_key, _chat_url, _enforce_request_limits
     if not config.allow_summary or not config.summary_provider_id:
         return  # Complete text remains readable without cloud authorization.
+    if entry.private_owner_id and not entry.allow_cloud_summary:
+        return
     provider = config.summary_provider
     if not provider.is_active:
         raise ProgramError('所选摘要模型已停用。')
@@ -289,23 +312,39 @@ def process_entry(entry_id):
             poll_asr(entry, config)
             return True
         if entry.current_revision_id:
+            if entry.private_owner_id and not entry.allow_cloud_summary:
+                ProgramEntry.objects.filter(pk=entry.pk).update(state='ready')
+                return True
             if config:
                 summarize_next_chunk(entry, config)
             return True
+        if entry.subscription.kind == 'upload':
+            if not entry.audio_file:
+                raise ProgramError('上传文件已过期，请重新上传。')
+            if not config:
+                raise ProgramConfigurationRequired('请先配置转写服务。')
+            submit_asr(entry, config)
+            return True
         ProgramEntry.objects.filter(pk=entry.pk).update(state='fetching')
-        segments = fetch_publisher_text(entry)
+        if entry.subscription.kind == 'article':
+            from .program_custom_sources import fetch_custom_article
+            segments = fetch_custom_article(entry)
+        else:
+            segments = fetch_publisher_text(entry)
         if segments:
             save_revision(entry, segments, origin='publisher', source_url=entry.url)
             return True
-        if entry.subscription.code == 'rhino':
-            info = youtube_metadata(entry, config.max_audio_minutes if config else 180)
-            entry.duration_seconds = int(info['duration'])
+        if entry.subscription.code == 'rhino' or entry.subscription.kind in {'youtube', 'bilibili'}:
+            info = (bilibili_metadata(entry, config.max_audio_minutes if config else 180)
+                    if entry.subscription.kind == 'bilibili' else
+                    youtube_metadata(entry, config.max_audio_minutes if config else 180))
+            entry.duration_seconds = math.ceil(float(info['duration']))
             entry.title = str(info.get('title') or entry.title)[:500]
             date = str(info.get('upload_date') or '')
             if not entry.published_at and len(date) == 8 and date.isdigit():
                 entry.published_at = datetime.strptime(date, '%Y%m%d').replace(tzinfo=datetime_timezone.utc)
             entry.save(update_fields=['duration_seconds', 'title', 'published_at', 'updated_at'])
-            captions = youtube_captions(info)
+            captions = youtube_captions(info) if entry.subscription.kind != 'bilibili' else []
             if captions:
                 save_revision(entry, captions, origin='youtube_caption', source_url=entry.url)
                 return True
