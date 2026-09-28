@@ -1,10 +1,12 @@
 from decimal import Decimal
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from family_core.models import Family, FamilyMember
 
@@ -57,6 +59,21 @@ class StockResearchPageTests(TestCase):
         self.assertEqual(self.client.get(self.url).status_code, 200)
         self.assertEqual(self.client.get(self.refresh_url).status_code, 405)
         self.assertFalse(StockMarketResearchSnapshot.objects.exists())
+        fetch.assert_not_called()
+
+    @patch("portfolio.views.fetch_stock_research")
+    def test_stale_cache_autofetches_only_after_cooldown(self, fetch):
+        self.client.force_login(self.owner_user)
+        snapshot = StockMarketResearchSnapshot.objects.create(
+            security=self.security,
+            quote={"price": "493.78"},
+            fetched_at=timezone.now() - timedelta(days=2),
+            last_attempt_at=timezone.now() - timedelta(hours=2),
+        )
+        self.assertContains(self.client.get(self.url), 'data-autofetch="true"')
+        snapshot.last_attempt_at = timezone.now()
+        snapshot.save(update_fields=["last_attempt_at"])
+        self.assertContains(self.client.get(self.url), 'data-autofetch="false"')
         fetch.assert_not_called()
 
     @patch("portfolio.views.fetch_stock_research")
