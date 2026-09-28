@@ -11,6 +11,7 @@
     <div class="research-brief-quote">
       {% if valuation.price %}<strong>{% if valuation.currency == 'USD' %}${% elif valuation.currency == 'HKD' %}HK${% else %}{{ valuation.currency }} {% endif %}{{ valuation.price }}</strong><span>{{ valuation.price_as_of|date:"m 月 d 日 H:i" }} 行情 · {{ valuation.price_source }} · {{ valuation.pricing_status }}{% if valuation.is_delayed %} · 延迟{% endif %}</span>
       {% else %}<strong>暂无股价</strong><span>需先更新已保存行情</span>{% endif %}
+      <a href="{% url 'portfolio:stock_market_detail' dossier.security.pk %}">查看个股行情与估值 →</a>
     </div>
   </header>
   <nav class="research-brief-tabs" aria-label="研究视图">

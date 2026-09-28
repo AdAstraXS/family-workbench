@@ -584,6 +584,29 @@ class SecurityMarketSnapshot(models.Model):
         return f"{self.security} {self.quote_time}"
 
 
+class StockMarketResearchSnapshot(models.Model):
+    """Cached public market research for one stock; never stores full reports."""
+
+    security = models.OneToOneField(
+        Security, on_delete=models.CASCADE, related_name="stock_research_snapshot"
+    )
+    quote = models.JSONField(default=dict, blank=True)
+    candles = models.JSONField(default=list, blank=True)
+    valuation = models.JSONField(default=dict, blank=True)
+    analysts = models.JSONField(default=dict, blank=True)
+    morningstar = models.JSONField(default=dict, blank=True)
+    errors = models.JSONField(default=dict, blank=True)
+    fetched_at = models.DateTimeField(null=True, blank=True)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "个股行情与估值缓存"
+        verbose_name_plural = "个股行情与估值缓存"
+
+    def __str__(self):
+        return f"{self.security} · {self.fetched_at or '尚未获取'}"
+
+
 class SecurityQuoteConfig(TimestampedModel):
     security = models.ForeignKey(
         Security,

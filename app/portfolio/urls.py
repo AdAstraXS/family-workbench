@@ -49,6 +49,8 @@ urlpatterns = [
     ),
     path("accounts/<int:pk>/edit/", views.account_edit, name="account_edit"),
     path("securities/", views.security_list, name="security_list"),
+    path("securities/<int:pk>/market/", views.stock_market_detail, name="stock_market_detail"),
+    path("securities/<int:pk>/market/refresh/", views.stock_market_refresh, name="stock_market_refresh"),
     path("securities/watchlist/add/", views.watchlist_add, name="watchlist_add"),
     path(
         "securities/watchlist/<int:pk>/update/",

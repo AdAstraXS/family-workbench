@@ -33,6 +33,7 @@ from .models import (
     SecurityExchange,
     SecurityMarket,
     SecurityMarketSnapshot,
+    StockMarketResearchSnapshot,
     SecurityPriceRecord,
     SecurityQuoteConfig,
     SecurityNews,
@@ -187,6 +188,22 @@ class SecurityMarketSnapshotAdmin(admin.ModelAdmin):
     )
     list_filter = ("price_source", "pricing_status", "is_delayed")
     search_fields = ("security__symbol", "security__name")
+
+
+@admin.register(StockMarketResearchSnapshot)
+class StockMarketResearchSnapshotAdmin(admin.ModelAdmin):
+    list_display = ("security", "fetched_at", "last_attempt_at")
+    search_fields = ("security__symbol", "security__name")
+    readonly_fields = (
+        "security", "quote", "candles", "valuation", "analysts", "morningstar",
+        "errors", "fetched_at", "last_attempt_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(SecurityQuoteConfig)

@@ -111,7 +111,7 @@
       <tbody>
         {% for item in positions %}
           <tr>
-            <td>{{ item.security.symbol }}</td><td>{{ item.security.name }}</td><td>{{ item.account.member }}</td><td>{{ item.account.account_name }}</td>
+            <td>{{ item.security.symbol }}</td><td>{% if item.security.asset_type == 'stock' %}<a href="{% url 'portfolio:stock_market_detail' item.security.pk %}">{{ item.security.name }}</a>{% else %}{{ item.security.name }}{% endif %}</td><td>{{ item.account.member }}</td><td>{{ item.account.account_name }}</td>
             <td>{{ item.quantity|floatformat:"-4" }}</td><td>{{ item.display_price|currency2:item.original_currency }}</td><td>{{ item.market_value_live|currency0:item.original_currency }}</td><td>{{ item.display_cost|currency2:item.original_currency }}</td>
             <td class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}"><span class="money-stack">{{ item.unrealized_live|signed_currency0:item.original_currency }}<small>本位币 {{ item.unrealized_base|signed_currency0:item.account.family.base_currency }}</small></span></td>
             <td class="{% if item.realized_for_year > 0 %}positive{% elif item.realized_for_year < 0 %}negative{% endif %}"><span class="money-stack">{{ item.realized_for_year|signed_currency0:item.original_currency }}<small>本位币 {{ item.realized_base|signed_currency0:item.account.family.base_currency }}</small></span></td>
