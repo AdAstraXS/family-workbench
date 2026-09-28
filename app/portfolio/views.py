@@ -1730,7 +1730,11 @@ def stock_market_detail(request, pk):
     if selected_period not in {"1y", "3y", "5y"}:
         selected_period = "3y"
     valuation = ((snapshot.valuation or {}).get(selected_metric) or {}).get(selected_period) if snapshot else None
-    freshness = snapshot.fetched_at if snapshot else None
+    now = timezone.now()
+    auto_fetch = not snapshot or (
+        (not snapshot.fetched_at or snapshot.fetched_at < now - timedelta(hours=24))
+        and (not snapshot.last_attempt_at or snapshot.last_attempt_at < now - timedelta(hours=1))
+    )
     return render(request, "portfolio/stock_market_detail.html", {
         "security": security,
         "snapshot": snapshot,
@@ -1745,7 +1749,7 @@ def stock_market_detail(request, pk):
         "selected_metric": selected_metric,
         "selected_period": selected_period,
         "dossier": dossier,
-        "auto_fetch": not snapshot or (not freshness and not snapshot.last_attempt_at),
+        "auto_fetch": auto_fetch,
     })
 
 
