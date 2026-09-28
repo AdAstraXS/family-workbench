@@ -55,6 +55,7 @@ from .models import (
     PriceSourceChoices,
     PricingStatusChoices,
     Security,
+    StockMarketResearchSnapshot,
     TradeTypeChoices,
     TransactionSourceChoices,
     WatchlistGroup,
@@ -68,6 +69,7 @@ from .market_data import (
     record_security_price,
     refresh_market_data,
 )
+from .stock_research import fetch_stock_research, number, technical_observations
 from .reconciliation import (
     apply_reconciliation,
     build_reconciliation_preview,
@@ -1705,6 +1707,65 @@ def cash_movement_create(request, account_id):
         "form.html",
         {"form": form, "title": f"{account.account_name} · 入金 / 出金"},
     )
+
+
+@login_required
+def stock_market_detail(request, pk):
+    """Read cached public data only; browser POST starts the initial fetch."""
+    security = get_object_or_404(_visible_securities(request), pk=pk, asset_type=Security.TYPE_STOCK)
+    snapshot = StockMarketResearchSnapshot.objects.filter(security=security).first()
+    member = FamilyMember.objects.filter(user=request.user, is_active=True).first()
+    dossier = None
+    if member:
+        from investment_research.models import ResearchDossier
+
+        dossier = ResearchDossier.objects.filter(owner=member, security=security).first()
+    quote = snapshot.quote if snapshot else {}
+    candles = snapshot.candles if snapshot else []
+    observations = technical_observations(candles, quote.get("price"))
+    selected_metric = request.GET.get("metric", "pe")
+    if selected_metric not in {"pe", "pb", "ps"}:
+        selected_metric = "pe"
+    selected_period = request.GET.get("period", "3y")
+    if selected_period not in {"1y", "3y", "5y"}:
+        selected_period = "3y"
+    valuation = ((snapshot.valuation or {}).get(selected_metric) or {}).get(selected_period) if snapshot else None
+    freshness = snapshot.fetched_at if snapshot else None
+    return render(request, "portfolio/stock_market_detail.html", {
+        "security": security,
+        "snapshot": snapshot,
+        "quote": quote,
+        "quote_change_positive": (number(quote.get("change_rate")) or ZERO) > 0,
+        "quote_change_negative": (number(quote.get("change_rate")) or ZERO) < 0,
+        "candles": candles,
+        "observations": observations,
+        "valuation": valuation or {},
+        "analysts": snapshot.analysts if snapshot else {},
+        "morningstar": snapshot.morningstar if snapshot else {},
+        "selected_metric": selected_metric,
+        "selected_period": selected_period,
+        "dossier": dossier,
+        "auto_fetch": not snapshot or (not freshness and not snapshot.last_attempt_at),
+    })
+
+
+@login_required
+@require_POST
+def stock_market_refresh(request, pk):
+    security = get_object_or_404(_visible_securities(request), pk=pk, asset_type=Security.TYPE_STOCK)
+    try:
+        snapshot = fetch_stock_research(security)
+    except Exception as exc:
+        StockMarketResearchSnapshot.objects.update_or_create(
+            security=security,
+            defaults={"last_attempt_at": timezone.now(), "errors": {"connection": str(exc)[:240]}},
+        )
+        return JsonResponse({"ok": False, "message": str(exc)[:240]})
+    return JsonResponse({
+        "ok": snapshot._refreshed_any,
+        "message": "资料已更新。" if snapshot._refreshed_any else "本次富途没有返回可用资料，原有数据仍可查看。",
+        "errors": snapshot.errors,
+    })
 
 
 @login_required

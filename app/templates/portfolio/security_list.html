@@ -16,7 +16,7 @@
       <p>支持港股、美股和 A 股的代码或名称。</p>
     </div>
     <div class="row-actions">
-      <a class="button ghost" href="{% url 'portfolio:market_data_status' %}">行情与估值</a>
+      <a class="button ghost" href="{% url 'portfolio:market_data_status' %}">批量行情状态</a>
       <a class="button ghost" href="{% url 'portfolio:security_create' %}">手工添加</a>
       <a class="button ghost" href="{% url 'portfolio:option_contract_create' %}">新增期权合约</a>
       <a class="button ghost" href="{% url 'portfolio:bond_create' %}">新增债券</a>
@@ -127,7 +127,7 @@
       {% for item in watchlist_items %}
         {% with security=item.security snapshot=item.security.market_snapshot %}
         <tr>
-          <td class="watchlist-name"><strong>{{ security.name }}</strong><small>{{ security.symbol }} · {{ security.get_asset_type_display }}</small></td>
+          <td class="watchlist-name"><strong>{% if security.asset_type == 'stock' %}<a href="{% url 'portfolio:stock_market_detail' security.pk %}">{{ security.name }}</a>{% else %}{{ security.name }}{% endif %}</strong><small>{{ security.symbol }} · {{ security.get_asset_type_display }}</small></td>
           <td><span class="market-badge market-{{ security.market|lower }}">{{ security.market }}</span></td>
           <td class="{% if snapshot.change_rate > 0 %}positive{% elif snapshot.change_rate < 0 %}negative{% endif %}">{{ snapshot.last_price|money2 }}</td>
           <td class="{% if snapshot.change_rate > 0 %}positive{% elif snapshot.change_rate < 0 %}negative{% endif %}">
@@ -147,6 +147,7 @@
             </form>
           </td>
           <td class="table-actions">
+            {% if security.asset_type == 'stock' %}<a class="text-action" href="{% url 'portfolio:stock_market_detail' security.pk %}">个股行情与估值</a>{% endif %}
             {% if security.data_source == 'futu' %}
               <a class="text-action" href="{{ security.futu_url }}" target="_blank" rel="noopener noreferrer">行情详情</a>
               <span class="source-chip">Futu 同步</span>
