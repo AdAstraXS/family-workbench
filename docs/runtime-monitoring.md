@@ -19,7 +19,7 @@
 
 ## 自动采集
 
-使用 DSM 用户定义脚本，每天 00:00–23:55、每 5 分钟，root 用户执行以下固定脚本：
+使用 DSM 用户定义脚本，每天 00:00–23:30、每 30 分钟，root 用户执行以下固定脚本：
 
 ```sh
 cd /volume1/docker/family-workbench || exit 1

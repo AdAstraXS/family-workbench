@@ -164,6 +164,23 @@ class MonitorTests(TestCase):
         now=timezone.now();ingest_host({'sampled_at':now.isoformat()})
         with self.assertRaises(ValueError):ingest_host({'sampled_at':(now-timedelta(seconds=1)).isoformat()})
 
+    def test_half_hour_collection_and_missed_runs(self):
+        now=timezone.now()
+        HostSample.objects.create(sampled_at=now-timedelta(minutes=30),proxy_ok=True,
+            upload_total=100,download_total=500,session_id='same')
+        self.assertFalse(overview(self.family)['host'].stale)
+        row=ingest_host({'sampled_at':now.isoformat(),'proxy_ok':True,
+            'upload_total':150,'download_total':900,'session_id':'same'})
+        self.assertFalse(row.gap)
+        self.assertEqual(row.download_delta,400)
+        with patch('monitoring.views.timezone.now',return_value=now+timedelta(minutes=66)):
+            self.assertTrue(overview(self.family)['host'].stale)
+        with patch('monitoring.collection.timezone.now',return_value=now+timedelta(minutes=66)):
+            late=ingest_host({'sampled_at':(now+timedelta(minutes=66)).isoformat(),
+                'proxy_ok':True,'upload_total':200,'download_total':1000,'session_id':'same'})
+        self.assertTrue(late.gap)
+        self.assertEqual(late.download_delta,100)
+
     def test_get_is_read_only_and_all_members_can_view(self):
         self.client.force_login(self.user)
         before=BalanceAccount.objects.count()

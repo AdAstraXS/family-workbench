@@ -1,9 +1,9 @@
-from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from .models import HostSample, CollectorState
 from .metering import integer as usage_integer
+from .cadence import STALE_AFTER
 
 
 def integer(value):
@@ -46,7 +46,7 @@ def ingest_host(payload):
         if same_epoch and row.upload_total>=previous.upload_total and row.download_total>=previous.download_total:
             row.upload_delta=row.upload_total-previous.upload_total
             row.download_delta=row.download_total-previous.download_total
-            row.gap=when-previous.sampled_at>timedelta(minutes=10)
+            row.gap=when-previous.sampled_at>STALE_AFTER
         else:
             row.gap=True
     else:

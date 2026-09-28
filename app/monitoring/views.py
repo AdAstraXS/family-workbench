@@ -13,6 +13,7 @@ from django import forms
 from family_core.household import get_household_family
 from knowledge.crypto import encrypt_json
 from .models import BalanceAccount, UsageRecord, HostSample, DownloadRecord, CollectorState, MODULES, VENDORS
+from .cadence import COLLECTION_MINUTES, STALE_AFTER
 
 CONSOLES={'deepseek':'https://platform.deepseek.com/usage','zhipu':'https://bigmodel.cn/console/overview',
           'volcano':'https://console.volcengine.com/finance/overview/','ali':'https://usercenter2.aliyun.com/'}
@@ -83,7 +84,7 @@ def overview(family, period='month', vendor='all', unknown=False, page=1):
     traffic['upload']=byte_label(traffic['up']);traffic['download']=byte_label(traffic['down'])
     host=HostSample.objects.first(); subscriptions=[]
     if host:
-        host.stale=now-host.sampled_at>timedelta(minutes=10)
+        host.stale=now-host.sampled_at>STALE_AFTER
         host.disk_free_label=byte_label(host.disk_free);host.disk_total_label=byte_label(host.disk_total)
         host.disk_percent=round((1-host.disk_free/host.disk_total)*100) if host.disk_total and host.disk_free is not None else None
         host.backup_stale=not host.backup_at or now-host.backup_at>timedelta(days=2)
@@ -100,7 +101,7 @@ def overview(family, period='month', vendor='all', unknown=False, page=1):
     return dict(period=period,period_label={'day':'今天','week':'近 7 天','month':'本月'}[period],vendor=vendor,
         vendors=VENDORS,agg=agg,accounts=accounts,bars=bars,ranks=ranks,traffic=traffic,host=host,
         subscriptions=subscriptions,downloads=downloads,logs=Paginator(logs,30).get_page(page),unknown=unknown,
-        collector=CollectorState.objects.filter(key='main').first(),start_date=start_date,today=today,
+        collector=CollectorState.objects.filter(key='main').first(),collection_minutes=COLLECTION_MINUTES,start_date=start_date,today=today,
         coverage_start=UsageRecord.objects.filter(family=family).order_by('started_at').values_list('started_at',flat=True).first(),
         network_start=HostSample.objects.order_by('sampled_at').values_list('sampled_at',flat=True).first())
 
@@ -119,7 +120,7 @@ def refresh(request):
     family=family_for(request)
     # Only queues safe, rate-limited reads; never performs slow vendor calls in a web request.
     BalanceAccount.objects.filter(family=family).filter(Q(attempted_at__isnull=True)|Q(attempted_at__lt=timezone.now()-timedelta(minutes=5))).update(refresh_requested=True)
-    messages.success(request,'已请求刷新余额；下一次监控采集时更新，通常在 5 分钟内。')
+    messages.success(request,f'已请求刷新余额；下一次监控采集时更新，通常在 {COLLECTION_MINUTES} 分钟内。')
     return redirect('monitoring:index')
 
 
