@@ -263,8 +263,9 @@ def generate_proposals(document, *, cloud_ai_consent="source", requested_by=None
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            response_body = response.read(2 * 1024 * 1024 + 1)
+        from monitoring.metering import tracked_call, read_response
+        response_body = tracked_call(lambda: read_response(urllib.request.urlopen, request, 60, 2*1024*1024+1),
+            provider=provider, module="knowledge", family_id=analysis_request.family_id, source=analysis_request.pk)
         if len(response_body) > 2 * 1024 * 1024:
             raise KnowledgeAiError("AI 返回内容超过大小限制。")
         payload = json.loads(response_body.decode("utf-8"))

@@ -427,7 +427,9 @@ def recognize_ipo_listing_from_image(uploaded_file, provider_id=None):
         )
         # Send the image only once. A read timeout can mean the provider is
         # still processing it, so an automatic retry is unsafe and costly.
-        response_data = json.loads(_read_vision_response(request).decode("utf-8"))
+        from monitoring.metering import tracked_call
+        response_data = json.loads(tracked_call(lambda: _read_vision_response(request),
+            provider=provider, module="ipo").decode("utf-8"))
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
         logger.warning("IPO image recognition HTTP error %s: %s", exc.code, error_body[:300])

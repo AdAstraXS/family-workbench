@@ -180,7 +180,9 @@ def generate_review_plan(*, actor, dossier_id, version_id, provider_id, consent,
                                      headers={"Authorization": f"Bearer {api_key}",
                                               "Content-Type": "application/json"}, method="POST")
     try:
-        body = (transport or _default_transport)(request, timeout=60)
+        from monitoring.metering import tracked_call
+        body = tracked_call(lambda: (transport or _default_transport)(request, timeout=60),
+            provider=provider, module="investment_research", family_id=analysis.family_id, source=analysis.pk)
         if len(body) > MAX_RESPONSE_BYTES:
             raise ResearchAiError("AI 返回内容超过大小上限。")
         response = json.loads(body.decode("utf-8"))

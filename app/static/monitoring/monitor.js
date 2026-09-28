@@ -1,0 +1,1 @@
+(()=>{const root=document.getElementById('runtime-monitor');if(!root)return;root.addEventListener('click',event=>{const button=event.target.closest('.mon-bar-hit');if(button){document.getElementById('chart-detail').textContent=button.dataset.label+' · 已计价费用 ¥'+button.dataset.amount;}});})();

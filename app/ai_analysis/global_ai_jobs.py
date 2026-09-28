@@ -217,13 +217,14 @@ def execute_model_loop(request, config, *, post_json=_post_json):
         if time.monotonic() - started_at >= config["loop_timeout_seconds"]:
             raise GlobalAiJobError("AI 处理时间超过上限，请稍后新建对话重试。")
         http_requests += 1
-        reply = post_json({
+        from monitoring.metering import tracked_call
+        reply = tracked_call(lambda: post_json({
             "model": config["model"],
             "thinking": {"type": "disabled"},
             "messages": messages,
             "tools": TOOL_SCHEMAS,
             "tool_choice": "auto",
-        }, config)
+        }, config), provider=request.provider, module="global_ai", family_id=request.family_id, source=request.pk)
         try:
             choice = reply["choices"][0]
             message = choice["message"]

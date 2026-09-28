@@ -15,6 +15,7 @@ MODULES = (
     ("intelligence", "index", "AI 情报", "sparkles", "动态、人物与资讯线索", "观察与分析"),
     ("macro", "index", "宏观数据", "chart-line", "观察宏观指标与变化", "观察与分析"),
     ("ai_analysis", "index", "AI 检索与问答", "sparkles", "在知识库和已授权资料中查找答案", "观察与分析"),
+    ("monitoring", "index", "运行监控", "chart-line", "AI 用量、账户余额与 NAS 流量", "工作台管理"),
 )
 
 

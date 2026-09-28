@@ -97,6 +97,8 @@ def submit_asr(entry, config, *, retry_failed=False):
         body, mime = (youtube_audio(entry) if kind == 'youtube' or entry.subscription.code == 'rhino'
                       else bilibili_audio(entry) if kind == 'bilibili' else podcast_audio(entry))
         store_audio(entry, body, mime)
+        from monitoring.metering import record_download
+        record_download(entry, len(body), mime)
     if entry.subscription.kind in {'podcast', 'upload'}:
         checked_duration = media_duration(body)
         if checked_duration > config.max_audio_minutes * 60:
@@ -137,7 +139,9 @@ def submit_asr(entry, config, *, retry_failed=False):
         locked.save(update_fields=['asr_reserved_cny', 'submitted_at', 'state', 'task_id', 'asr_error_code',
                                    'asr_attempt_history', 'retry_audio_transfer', 'updated_at'])
     # Persist submission intent before the network call. On timeout/crash, never automatically resubmit.
-    result = asr_request(config, audio_url=audio_url)
+    from monitoring.metering import tracked_call
+    result = tracked_call(lambda: asr_request(config, audio_url=audio_url), provider=None,
+        module="programs", family_id=config.family_id, source=entry.pk, audio=True)
     task_id = result.get('output', {}).get('task_id', '')
     if not isinstance(task_id, str) or not task_id:
         raise ProgramError('未收到转写任务 ID，请在百炼控制台核对，避免重复计费。')
@@ -147,7 +151,10 @@ def submit_asr(entry, config, *, retry_failed=False):
 def poll_asr(entry, config):
     if not entry.task_id:
         raise ProgramError('缺少转写任务 ID，需要管理员在控制台核对后填写。')
-    output = asr_request(config, task_id=entry.task_id).get('output', {})
+    from monitoring.metering import capture_asr
+    reply = asr_request(config, task_id=entry.task_id)
+    capture_asr(entry.task_id, config.family_id, reply)
+    output = reply.get('output', {})
     status = output.get('task_status')
     if status in {'PENDING', 'RUNNING'}:
         if entry.submitted_at and timezone.now() - entry.submitted_at > timedelta(hours=23):
@@ -284,7 +291,9 @@ def summarize_next_chunk(entry, config):
         if policy['disable_thinking']:
             payload['thinking'] = {'type': 'disabled'}
         try:
-            response = private_json_request(url, key=key, payload=payload)
+            from monitoring.metering import tracked_call
+            response = tracked_call(lambda: private_json_request(url, key=key, payload=payload),
+                provider=provider, module="programs", family_id=config.family_id, source=chunk.pk)
             if response['choices'][0].get('finish_reason') == 'length':
                 raise ProgramError('AI 输出被截断，请提高输出上限后重试此段。')
             result = json.loads(response['choices'][0]['message']['content'])

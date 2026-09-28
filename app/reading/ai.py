@@ -117,8 +117,9 @@ def request_completion(job):
              {"role":"user","content":canonical(job.input_snapshot)}],"max_tokens":2048,"stream":False}
     req=Request(url,data=json.dumps(payload,ensure_ascii=False).encode(),headers={"Content-Type":"application/json","Authorization":f"Bearer {key}"},method="POST")
     try:
-        with build_opener(NoRedirect()).open(req,timeout=60) as response:
-            raw=response.read(512*1024+1)
+        from monitoring.metering import tracked_call, read_response
+        raw=tracked_call(lambda: read_response(build_opener(NoRedirect()).open, req, 60, 512*1024+1),
+            provider=job.provider, module="reading", family_id=job.member.family_id, source=job.pk)
         if len(raw)>512*1024:raise ValidationError("AI 响应超过上限。")
         value=json.loads(raw)
         choice=value["choices"][0]

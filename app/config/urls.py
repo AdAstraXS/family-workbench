@@ -22,6 +22,7 @@ urlpatterns = [
     path("trading-journal/", include("trading_journal.urls")),
     path("macro/", include("macro.urls")),
     path("ai/", include("ai_analysis.urls")),
+    path("monitoring/", include("monitoring.urls")),
     path("intelligence/", include("intelligence.urls")),
 ]
 

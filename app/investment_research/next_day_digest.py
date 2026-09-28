@@ -371,7 +371,9 @@ def generate_next_day_digest(dossier_id, *, transport=None, url_validator=None):
         request = urllib.request.Request(endpoint, data=request_body,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             method="POST")
-        body = (transport or _default_transport)(request, timeout=60)
+        from monitoring.metering import tracked_call
+        body = tracked_call(lambda: (transport or _default_transport)(request, timeout=60),
+            provider=provider, module="investment_research", family_id=analysis.family_id, source=analysis.pk)
         if len(body) > MAX_RESPONSE_BYTES:
             raise ResearchAiError("次日跟踪回复超过大小上限。")
         response = json.loads(body.decode("utf-8"))

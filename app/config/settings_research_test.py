@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "ai_analysis",
     "intelligence",
     "dashboard",
+    "monitoring",
     "investment_research",
 ]
 
