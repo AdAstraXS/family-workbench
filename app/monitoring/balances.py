@@ -119,8 +119,11 @@ def sync_account(account):
             if not credentials.get('access_key_id') or not credentials.get('access_key_secret'): raise KeyError('configuration')
             value=(aliyun_balance if account.vendor=='ali' else volcano_balance)(credentials)
         else:
-            account.status='unconfigured'
-            account.message='待接入官方余额查询；可前往服务商控制台查看。'
+            if account.vendor=='zhipu' and account.status=='manual' and account.balance_cny is not None:
+                account.message='官网余额手动记录；请定期核对。'
+            else:
+                account.status='unconfigured'
+                account.message='暂未接入官方余额接口；可在设置页手动记录官网余额。' if account.vendor=='zhipu' else '待接入官方余额查询；可前往服务商控制台查看。'
             account.save(update_fields=['attempted_at','refresh_requested','status','message'])
             return
         if value is None: raise ValueError('no CNY balance')

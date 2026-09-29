@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 from ai_analysis.models import AiProvider
 from family_core.models import Family, FamilyMember
-from .models import UsageRecord, BalanceAccount, HostSample
+from .models import UsageRecord, BalanceAccount, ModelAllowance, HostSample, DownloadRecord
 from .metering import tracked_call, capture_asr
 from .balances import ensure_accounts, sync_account
 from .collection import ingest_host
@@ -218,3 +218,62 @@ class MonitorTests(TestCase):
         ctx=overview(self.family)
         self.assertEqual(sum(Decimal(b['amount']) for b in ctx['bars']),ctx['agg']['cost'].quantize(Decimal('.0001')))
         self.assertEqual(sum(r['cost'] for r in ctx['ranks']),ctx['agg']['cost'])
+
+    def test_account_card_filters_chart_and_shows_model_usage(self):
+        BalanceAccount.objects.create(family=self.family,vendor='deepseek',label='DeepSeek')
+        BalanceAccount.objects.create(family=self.family,vendor='zhipu',label='智谱')
+        self.call({'usage':{'prompt_tokens':1000,'completion_tokens':200}})
+        self.client.force_login(self.user)
+        page=self.client.get(reverse('monitoring:index'),{'vendor':'deepseek','period':'week'})
+        self.assertContains(page,'?period=week&amp;vendor=deepseek#cost-trend')
+        self.assertContains(page,'AI 费用趋势 · DeepSeek')
+        self.assertContains(page,'deepseek-flash')
+        self.assertContains(page,'1200 Token')
+        self.assertContains(page,'mon-bar-value')
+        self.assertEqual(page.context['agg']['n'],1)
+        self.assertEqual(self.client.get(reverse('monitoring:index'),{'vendor':'zhipu'}).context['agg']['n'],0)
+
+    def test_manual_zhipu_balance_survives_collection(self):
+        account=BalanceAccount.objects.create(family=self.family,vendor='zhipu',label='智谱')
+        self.member.role='admin';self.member.save()
+        self.client.force_login(self.user)
+        response=self.client.post(reverse('monitoring:settings'),{'account':account.pk,'threshold':'20','manual_balance':'60.29'})
+        self.assertEqual(response.status_code,302)
+        account.refresh_from_db()
+        self.assertEqual(account.balance_cny,Decimal('60.29'))
+        self.assertEqual(account.status,'manual')
+        original_checked=account.checked_at
+        sync_account(account)
+        account.refresh_from_db()
+        self.assertEqual(account.balance_cny,Decimal('60.29'))
+        self.assertEqual(account.checked_at,original_checked)
+        self.assertContains(self.client.get(reverse('monitoring:index')),'官网余额手动记录')
+
+    def test_quota_units_and_download_subscription_title(self):
+        from intelligence.program_models import ProgramSubscription, ProgramEntry
+        host=HostSample.objects.create(sampled_at=timezone.now(),subscriptions=[{
+            'name':'套餐','total':260*1024**3,'upload':2*1024**3,'download':3*1024**3}])
+        sub=ProgramSubscription.objects.create(family=self.family,code='rhino',kind='youtube')
+        entry=ProgramEntry.objects.create(subscription=sub,external_id='example',title='今日节目',url='https://youtube.com/watch?v=example')
+        DownloadRecord.objects.create(family=self.family,entry_id=entry.pk,source='youtube',file_bytes=1024,media_type='audio/mp4')
+        ctx=overview(self.family)
+        self.assertEqual(ctx['subscriptions'][0]['total'],'260.00 GiB')
+        self.assertEqual(ctx['subscriptions'][0]['remaining'],'255.00 GiB')
+        self.assertEqual(ctx['downloads'][0].subscription_name,'视野环球财经')
+        self.assertEqual(ctx['downloads'][0].entry_title,'今日节目')
+
+    def test_allowance_requires_admin_and_known_model_and_retains_verified_value(self):
+        account=BalanceAccount.objects.create(family=self.family,vendor='deepseek',label='DeepSeek')
+        self.client.force_login(self.user)
+        data={'mode':'allowance','account':account.pk,'model_name':'deepseek-flash','remaining':'123.5','unit':'token'}
+        self.assertEqual(self.client.post(reverse('monitoring:settings'),data).status_code,403)
+        self.member.role='admin';self.member.save()
+        bad={**data,'model_name':'unconfigured-model'}
+        self.assertEqual(self.client.post(reverse('monitoring:settings'),bad).status_code,200)
+        self.assertFalse(ModelAllowance.objects.exists())
+        self.assertEqual(self.client.post(reverse('monitoring:settings'),data).status_code,302)
+        allowance=ModelAllowance.objects.get(account=account,model_name='deepseek-flash')
+        self.assertEqual(allowance.remaining,Decimal('123.5'))
+        self.call({'usage':{'prompt_tokens':100,'completion_tokens':10}})
+        self.assertEqual(overview(self.family)['accounts'][0].models[0]['allowance'].remaining,Decimal('123.5'))
+        self.assertContains(self.client.get(reverse('monitoring:index')),'赠送余额 123.50 Token')

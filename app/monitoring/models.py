@@ -64,6 +64,20 @@ class BalanceAccount(models.Model):
         verbose_name_plural = verbose_name
 
 
+class ModelAllowance(models.Model):
+    UNITS=[('token','Token'),('minute','分钟'),('call','次')]
+    account=models.ForeignKey(BalanceAccount,on_delete=models.CASCADE,related_name='model_allowances')
+    model_name=models.CharField(max_length=150)
+    remaining=models.DecimalField(max_digits=18,decimal_places=2,validators=[MinValueValidator(0)])
+    unit=models.CharField(max_length=12,choices=UNITS)
+    checked_at=models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints=[models.UniqueConstraint(fields=['account','model_name'],name='monitor_unique_model_allowance')]
+        verbose_name='模型剩余额度'
+        verbose_name_plural=verbose_name
+
+
 class HostSample(models.Model):
     sampled_at = models.DateTimeField(unique=True)
     received_at = models.DateTimeField(default=timezone.now)
