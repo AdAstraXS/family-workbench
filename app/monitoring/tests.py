@@ -231,7 +231,9 @@ class MonitorTests(TestCase):
         self.assertContains(page,'1200 Token')
         self.assertContains(page,'mon-bar-value')
         self.assertEqual(page.context['agg']['n'],1)
-        self.assertEqual(self.client.get(reverse('monitoring:index'),{'vendor':'zhipu'}).context['agg']['n'],0)
+        zhipu=self.client.get(reverse('monitoring:index'),{'vendor':'zhipu'})
+        self.assertEqual(zhipu.context['agg']['n'],0)
+        self.assertContains(zhipu,'0 次 · 暂无调用')
 
     def test_manual_zhipu_balance_survives_collection(self):
         account=BalanceAccount.objects.create(family=self.family,vendor='zhipu',label='智谱')
