@@ -229,7 +229,8 @@ def settings_view(request):
                     selected.encrypted_credentials=encrypt_json({'access_key_id':form.cleaned_data['access_key_id'],
                         'access_key_secret':form.cleaned_data['access_key_secret']})
             if not form.errors:
-                selected.refresh_requested=True
+                selected.refresh_requested=(selected.vendor!='zhipu' and
+                    (selected.refresh_requested or bool(form.cleaned_data['access_key_id'])))
                 selected.save(update_fields=['low_threshold','encrypted_credentials','balance_cny','checked_at','status','message','refresh_requested'])
                 messages.success(request,'账户设置已保存，敏感凭据不会回显。')
                 return redirect('monitoring:settings')

@@ -242,6 +242,7 @@ class MonitorTests(TestCase):
         account.refresh_from_db()
         self.assertEqual(account.balance_cny,Decimal('60.29'))
         self.assertEqual(account.status,'manual')
+        self.assertFalse(account.refresh_requested)
         original_checked=account.checked_at
         sync_account(account)
         account.refresh_from_db()
