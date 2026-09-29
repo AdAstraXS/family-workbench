@@ -1182,7 +1182,7 @@ class AccountDashboardTests(TestCase):
         )
         self.assertContains(response, 'class="low-value-account-rows" hidden', count=2)
 
-    def test_balance_is_current_and_not_limited_to_selected_year(self):
+    def test_unknown_snapshot_year_does_not_display_current_balance(self):
         InvestmentCashMovement.objects.create(
             account=self.account,
             movement_date=date(2025, 12, 31),
@@ -1195,7 +1195,8 @@ class AccountDashboardTests(TestCase):
         current_year = self.client.get(reverse("portfolio:account_list"), {"year": "2026"})
 
         self.assertEqual(all_years.context["account_rows"][0]["cash"], Decimal("10500"))
-        self.assertEqual(current_year.context["account_rows"][0]["cash"], Decimal("10500"))
+        self.assertEqual(current_year.context["account_rows"], [])
+        self.assertContains(current_year, "所选年份没有可用快照")
 
     def test_year_filter_only_lists_snapshot_years_and_uses_year_end_snapshot(self):
         for snapshot_date, cash in (

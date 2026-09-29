@@ -26,6 +26,7 @@ from .daily_valuation import (
     DailyPortfolioValuationError,
     run_daily_portfolio_valuation as execute_daily_portfolio_valuation,
 )
+from .account_history import family_snapshots, snapshot_account_data
 from .forms import (
     BondForm,
     InvestmentAccountForm,
@@ -56,6 +57,7 @@ from .models import (
     PricingStatusChoices,
     Security,
     StockMarketResearchSnapshot,
+    TradeStatusChoices,
     TradeTypeChoices,
     TransactionSourceChoices,
     WatchlistGroup,
@@ -155,88 +157,6 @@ def _sum_or_none(values):
     return sum(values, ZERO) if all(value is not None for value in values) else None
 
 
-def _snapshot_balance_data(accounts, family, selected_currency, requested_year):
-    snapshots = PortfolioSnapshot.objects.filter(
-        family=family,
-        member=None,
-        account=None,
-    ).order_by("-snapshot_date", "-pk")
-    years = sorted(
-        {item.year for item in snapshots.values_list("snapshot_date", flat=True)},
-        reverse=True,
-    )
-    selected_year = requested_year if requested_year.isdigit() and int(requested_year) in years else "all"
-    if selected_year != "all":
-        snapshots = snapshots.filter(snapshot_date__year=int(selected_year))
-    snapshot = snapshots.first()
-    if not snapshot:
-        return None, years, selected_year
-
-    rows = {account.pk: {"account": account, "cash": ZERO, "market_value": ZERO, "unrealized": ZERO} for account in accounts}
-    for line in snapshot.position_lines.filter(account__in=accounts):
-        value = _convert_currency(
-            line.market_value,
-            snapshot.currency,
-            selected_currency,
-            snapshot.snapshot_date,
-        )
-        unrealized = _convert_currency(
-            line.unrealized_pnl,
-            snapshot.currency,
-            selected_currency,
-            snapshot.snapshot_date,
-        )
-        row = rows[line.account_id]
-        if value is None:
-            row["cash"] = row["market_value"] = None
-            continue
-        if line.asset_type == "cash":
-            if row["cash"] is not None:
-                row["cash"] += value
-        elif row["market_value"] is not None:
-            row["market_value"] += value
-            row["unrealized"] += unrealized or ZERO
-
-    realized_by_account = defaultdict(Decimal)
-    for item in InvestmentTransaction.objects.filter(
-        account__in=accounts,
-        trade_date__lte=snapshot.snapshot_date,
-    ).exclude(realized_pnl=0):
-        converted = _convert_currency(
-            item.realized_pnl,
-            item.currency,
-            selected_currency,
-            snapshot.snapshot_date,
-        )
-        if converted is not None:
-            realized_by_account[item.account_id] += converted
-
-    account_rows = []
-    for row in rows.values():
-        row["total_asset"] = (
-            row["cash"] + row["market_value"]
-            if row["cash"] is not None and row["market_value"] is not None
-            else None
-        )
-        row["total_asset_cny"] = _convert_currency(
-            row["total_asset"],
-            selected_currency,
-            "CNY",
-            snapshot.snapshot_date,
-        )
-        row["position_ratio"] = (
-            row["market_value"] / row["total_asset"] * 100
-            if row["market_value"] is not None and row["total_asset"]
-            else ZERO
-        )
-        row["cash_ratio"] = Decimal("100") - row["position_ratio"]
-        row["today_pnl"] = ZERO
-        row["realized"] = realized_by_account[row["account"].pk]
-        account_rows.append(row)
-    account_rows.sort(key=lambda row: row["total_asset"] or ZERO, reverse=True)
-    return (snapshot, account_rows), years, selected_year
-
-
 def _summary_rows(account_rows):
     scopes = [("家庭汇总", account_rows)]
     members = []
@@ -261,10 +181,12 @@ def _summary_rows(account_rows):
     ]
 
 
-def _account_member_groups(account_rows, family):
+def _account_member_groups(account_rows, family, *, include_inactive=False):
     members = (
         list(
-            FamilyMember.objects.filter(family=family, is_active=True).order_by(
+            FamilyMember.objects.filter(family=family).filter(
+                Q() if include_inactive else Q(is_active=True)
+            ).order_by(
                 "display_order", "id"
             )
         )
@@ -309,16 +231,15 @@ def _account_member_groups(account_rows, family):
     return groups
 
 
-def _visible_accounts(request):
+def _visible_accounts(request, *, include_inactive=False):
     accounts = InvestmentAccount.objects.select_related(
         "bank_account",
         "bank_account__family",
         "bank_account__member",
         "bank_account__account_region",
-    ).filter(
-        bank_account__is_active=True,
-        bank_account__supports_investment=True,
     )
+    if not include_inactive:
+        accounts = accounts.filter(bank_account__is_active=True, bank_account__supports_investment=True)
     if request.user.is_superuser:
         return accounts
     member = FamilyMember.objects.filter(user=request.user, is_active=True).first()
@@ -406,7 +327,10 @@ def _account_dashboard_data(request, account=None):
     positions = _latest_positions(accounts, year)
     price_resolutions = resolve_position_prices(positions, date.today())
 
-    transaction_filter = InvestmentTransaction.objects.filter(account__in=accounts)
+    transaction_filter = InvestmentTransaction.objects.filter(
+        account__in=accounts,
+        status__in=[TradeStatusChoices.PARTIAL, TradeStatusChoices.COMPLETED],
+    )
     cash_filter = InvestmentCashMovement.objects.filter(account__in=accounts)
     if year != "all":
         transaction_filter = transaction_filter.filter(trade_date__year=year)
@@ -1268,22 +1192,11 @@ def reconciliation_revert(request):
 
 @login_required
 def account_list(request):
-    rate_info = cached_daily_exchange_rates()
+    if request.GET.get("year", "all") != "all":
+        return _historical_account_page(request)
     context = _account_dashboard_data(request)
-    snapshot_data, years, selected_year = _snapshot_balance_data(
-        context["accounts"],
-        context["family"],
-        context["selected_currency"],
-        request.GET.get("year", "all"),
-    )
-    if snapshot_data and selected_year != "all":
-        snapshot, account_rows = snapshot_data
-        context["account_rows"] = account_rows
-        context["summary_rows"] = _summary_rows(account_rows)
-        context["balance_snapshot_date"] = snapshot.snapshot_date
-    context["year_options"] = years
-    context["selected_year"] = selected_year
-    context["rate_info"] = rate_info
+    context["year_options"] = _account_snapshot_years(_request_family(request))
+    context["rate_info"] = cached_daily_exchange_rates()
     context["account_groups"] = _account_member_groups(
         context["account_rows"],
         context["family"],
@@ -1294,6 +1207,41 @@ def account_list(request):
         "portfolio/account_dashboard.html",
         context,
     )
+
+
+def _account_snapshot_years(family):
+    return sorted({day.year for day in family_snapshots(family).values_list("snapshot_date", flat=True)}, reverse=True)
+
+
+def _historical_account_page(request, account=None):
+    family = account.family if account else _request_family(request)
+    year = request.GET.get("year", "")
+    years = _account_snapshot_years(family)
+    currency_options = Currency.objects.filter(is_active=True)
+    selected_currency = request.GET.get("currency", get_site_setting().base_currency).upper()
+    if selected_currency not in set(currency_options.values_list("code", flat=True)):
+        selected_currency = family.base_currency
+    snapshot = family_snapshots(family).filter(snapshot_date__year=int(year)).first() if year.isdigit() and int(year) in years else None
+    context = {
+        "family": family, "account": account, "selected_year": year, "year_options": years,
+        "selected_currency": selected_currency, "currency_options": currency_options,
+        "historical_view": True, "account_rows": [], "historical_positions": [],
+        "low_value_account_threshold_cny": LOW_VALUE_ACCOUNT_THRESHOLD_CNY,
+    }
+    if snapshot:
+        accounts = _visible_accounts(request, include_inactive=True).filter(bank_account__family=family)
+        if account:
+            accounts = accounts.filter(pk=account.pk)
+        context.update(snapshot_account_data(snapshot, accounts, selected_currency))
+        context["snapshot_audit"] = _snapshot_audit_summary(snapshot)
+    else:
+        context["history_error"] = "所选年份没有可用快照，未用当前余额代替历史数据。"
+    context["summary_rows"] = _summary_rows(context["account_rows"]) if context["account_rows"] else []
+    if account and context["summary_rows"]:
+        context["summary_rows"] = context["summary_rows"][:1]
+        context["summary_rows"][0]["label"] = "该账户汇总"
+    context["account_groups"] = _account_member_groups(context["account_rows"], family, include_inactive=True)
+    return render(request, "portfolio/account_dashboard.html", context)
 
 
 def _account_asset_cards(account_row, positions, balances, selected_currency):
@@ -1554,6 +1502,9 @@ def _individual_profit_data(request, account, transactions):
 
 @login_required
 def account_detail(request, pk):
+    if request.GET.get("year", "all") != "all":
+        account = get_object_or_404(_visible_accounts(request, include_inactive=True), pk=pk)
+        return _historical_account_page(request, account)
     rate_info = cached_daily_exchange_rates()
     account = get_object_or_404(_visible_accounts(request), pk=pk)
     context = _account_dashboard_data(request, account)
