@@ -3,12 +3,15 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
+import re
 import uuid
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode, quote
 from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.error import HTTPError
 from django.utils import timezone
 from knowledge.crypto import decrypt_json
 from .models import BalanceAccount
@@ -80,8 +83,21 @@ def aliyun_balance(credentials):
     canonical=urlencode(sorted(params.items()),quote_via=quote,safe='~')
     sign='GET&%2F&'+quote(canonical,safe='~')
     params['Signature']=base64.b64encode(hmac.new((secret+'&').encode(),sign.encode(),hashlib.sha1).digest()).decode()
-    payload=read_json(Request('https://business.aliyuncs.com/?'+urlencode(params)))
-    if payload.get('Code')!='200' or payload.get('Success') is not True: raise ValueError('balance query rejected')
+    try:
+        payload=read_json(Request('https://business.aliyuncs.com/?'+urlencode(params)))
+    except HTTPError as exc:
+        try:
+            code=json.loads(exc.read(65536)).get('Code','')
+        except (ValueError, TypeError, AttributeError, UnicodeDecodeError):
+            code=''
+        safe_code=code if isinstance(code,str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',code) else 'unknown'
+        logging.getLogger(__name__).warning('Alibaba balance API HTTP %s code %s',exc.code,safe_code)
+        raise
+    if payload.get('Code')!='200' or payload.get('Success') is not True:
+        code=payload.get('Code','')
+        safe_code=code if isinstance(code,str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',code) else 'unknown'
+        logging.getLogger(__name__).warning('Alibaba balance API rejected code %s',safe_code)
+        raise ValueError('balance query rejected')
     data=payload.get('Data') or {}
     if data.get('Currency')!='CNY': raise ValueError('non CNY balance')
     return balance_value(data.get('AvailableAmount'))
