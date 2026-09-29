@@ -42,8 +42,6 @@
     pending?.abort();
     const controller = new AbortController();
     pending = controller;
-    const anchor = root.querySelector('.mon-section');
-    const anchorTop = anchor.getBoundingClientRect().top;
     const scrollTop = window.scrollY;
     root.querySelector('.mon-columns').setAttribute('aria-busy', 'true');
     try {
@@ -68,11 +66,9 @@
       root.querySelector('.mon-records').open = wasOpen;
       updateNavigation(next);
       if (push) history.pushState({ monitorFilter: true }, '', target.pathname + target.search);
+      window.scrollTo(0, scrollTop);
       if (focusVendor) {
-        window.scrollBy(0, anchor.getBoundingClientRect().top - anchorTop);
         root.querySelector(`.mon-card-target[data-vendor="${focusVendor}"]`)?.focus({ preventScroll: true });
-      } else {
-        window.scrollTo(0, scrollTop);
       }
       const selected = root.querySelector('#vendor').selectedOptions[0].textContent;
       status.textContent = `已显示${selected}的费用数据`;

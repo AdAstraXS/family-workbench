@@ -26,4 +26,4 @@
   <footer class="mon-footer"><span>家庭成员共同查看</span><span>{% if coverage_start %}用量记录始于 {{ coverage_start|date:'Y-m-d H:i' }}{% else %}等待首次模型调用{% endif %} · 历史用量未补算</span></footer>
 </div>
 {% endblock %}
-{% block scripts %}<script src="{% static 'monitoring/monitor.js' %}" defer></script>{% endblock %}
+{% block scripts %}<script src="{% static 'monitoring/monitor.js' %}?v=20260929b" defer></script>{% endblock %}
