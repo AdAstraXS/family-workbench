@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load money %}
+{% load money static %}
 
 {% block title %}{{ account.account_name }}{% endblock %}
 
@@ -41,11 +41,11 @@
 </section>
 
 <nav class="account-tabs" aria-label="账户详情标签页">
-  <a class="{% if active_tab == 'overview' %}active{% endif %}" href="?tab=overview&currency={{ selected_currency }}&cost_method={{ cost_method }}">账户概览</a>
-  <a class="{% if active_tab == 'positions' %}active{% endif %}" href="?tab=positions&currency={{ selected_currency }}&cost_method={{ cost_method }}">持仓资产</a>
-  <a class="{% if active_tab == 'individual-profit' %}active{% endif %}" href="?tab=individual-profit&currency={{ selected_currency }}&cost_method={{ cost_method }}">个股盈亏</a>
-  <a class="{% if active_tab == 'cashflows' %}active{% endif %}" href="?tab=cashflows&currency={{ selected_currency }}&cost_method={{ cost_method }}">现金流水</a>
-  <a class="{% if active_tab == 'transactions' %}active{% endif %}" href="?tab=transactions&currency={{ selected_currency }}&cost_method={{ cost_method }}">交易记录</a>
+  <a class="{% if active_tab == 'overview' %}active{% endif %}" {% if active_tab == 'overview' %}aria-current="page"{% endif %} href="?tab=overview&currency={{ selected_currency }}&cost_method={{ cost_method }}">账户概览</a>
+  <a class="{% if active_tab == 'positions' %}active{% endif %}" {% if active_tab == 'positions' %}aria-current="page"{% endif %} href="?tab=positions&currency={{ selected_currency }}&cost_method={{ cost_method }}">持仓资产</a>
+  <a class="{% if active_tab == 'individual-profit' %}active{% endif %}" {% if active_tab == 'individual-profit' %}aria-current="page"{% endif %} href="?tab=individual-profit&currency={{ selected_currency }}&cost_method={{ cost_method }}">个股盈亏</a>
+  <a class="{% if active_tab == 'cashflows' %}active{% endif %}" {% if active_tab == 'cashflows' %}aria-current="page"{% endif %} href="?tab=cashflows&currency={{ selected_currency }}&cost_method={{ cost_method }}">现金流水</a>
+  <a class="{% if active_tab == 'transactions' %}active{% endif %}" {% if active_tab == 'transactions' %}aria-current="page"{% endif %} href="?tab=transactions&currency={{ selected_currency }}&cost_method={{ cost_method }}">交易记录</a>
 </nav>
 
 <section class="panel account-tab-content">
@@ -130,23 +130,4 @@
 </section>
 {% endblock %}
 
-{% block scripts %}
-{% if active_tab == "transactions" %}<script>
-  (() => {
-    const dialog = document.querySelector("[data-trade-dialog]");
-    const open = (row) => {
-      ["title", "logic", "source", "exit", "note"].forEach((key) => {
-        dialog.querySelector(`[data-detail-${key}]`).textContent = row.dataset[key];
-      });
-      dialog.showModal();
-    };
-    document.querySelectorAll("[data-trade-row]").forEach((row) => {
-      row.addEventListener("click", () => open(row));
-      row.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") open(row);
-      });
-    });
-    dialog.querySelector("[data-dialog-close]").addEventListener("click", () => dialog.close());
-  })();
-</script>{% endif %}
-{% endblock %}
+{% block scripts %}<script src="{% static 'portfolio/account_detail_tabs.js' %}" defer></script>{% endblock %}

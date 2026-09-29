@@ -1011,6 +1011,15 @@ class AccountDashboardTests(TestCase):
         self.assertContains(detail, "变动后现金余额")
         self.assertNotContains(detail, "变动后本位币余额")
 
+    def test_account_tabs_keep_shareable_urls_and_load_in_place_script(self):
+        url = reverse("portfolio:account_detail", args=[self.account.pk])
+        for tab in ("overview", "positions", "individual-profit", "cashflows", "transactions"):
+            page = self.client.get(url, {"tab": tab, "currency": "CNY", "cost_method": "moving_average"})
+            self.assertEqual(page.status_code, 200)
+            self.assertContains(page, 'account_detail_tabs.js')
+            self.assertContains(page, f'?tab={tab}&currency=CNY&cost_method=moving_average')
+            self.assertContains(page, 'aria-current="page"')
+
     def test_holding_rows_offer_price_and_sell_shortcuts_with_prefilled_trade(self):
         security = Security.objects.create(
             symbol="AAPL",

@@ -225,7 +225,8 @@ class MonitorTests(TestCase):
         self.call({'usage':{'prompt_tokens':1000,'completion_tokens':200}})
         self.client.force_login(self.user)
         page=self.client.get(reverse('monitoring:index'),{'vendor':'deepseek','period':'week'})
-        self.assertContains(page,'?period=week&amp;vendor=deepseek#cost-trend')
+        self.assertContains(page,'data-vendor="deepseek" href="?period=week&amp;vendor=all"')
+        self.assertContains(page,'data-vendor="zhipu" href="?period=week&amp;vendor=zhipu"')
         self.assertContains(page,'AI 费用趋势 · DeepSeek')
         self.assertContains(page,'deepseek-flash')
         self.assertContains(page,'1200 Token')
@@ -234,6 +235,14 @@ class MonitorTests(TestCase):
         zhipu=self.client.get(reverse('monitoring:index'),{'vendor':'zhipu'})
         self.assertEqual(zhipu.context['agg']['n'],0)
         self.assertContains(zhipu,'0 次 · 暂无调用')
+
+    def test_low_balance_is_shown_on_card_without_duplicate_page_notice(self):
+        BalanceAccount.objects.create(family=self.family,vendor='deepseek',label='DeepSeek',
+            balance_cny=Decimal('0'),low_threshold=Decimal('20'))
+        self.client.force_login(self.user)
+        page=self.client.get(reverse('monitoring:index'))
+        self.assertContains(page,'余额偏低')
+        self.assertNotContains(page,'DeepSeek余额偏低')
 
     def test_manual_zhipu_balance_survives_collection(self):
         account=BalanceAccount.objects.create(family=self.family,vendor='zhipu',label='智谱')
