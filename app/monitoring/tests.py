@@ -112,8 +112,10 @@ class MonitorTests(TestCase):
             self.assertTrue(req.full_url.startswith('https://open.volcengineapi.com/'))
             self.assertIn('SignedHeaders=',req.get_header('Authorization'))
             self.assertNotIn('test-sk',req.full_url+str(req.headers))
-        with patch('monitoring.balances.read_json',return_value={'Code':'Success','Data':{'Currency':'CNY','AvailableAmount':'1,234.50'}}):
+        with patch('monitoring.balances.read_json',return_value={'Code':'200','Success':True,'Data':{'Currency':'CNY','AvailableAmount':'1,234.50'}}):
             self.assertEqual(aliyun_balance(creds),Decimal('1234.50'))
+        with patch('monitoring.balances.read_json',return_value={'Code':'200','Success':False,'Data':{'Currency':'CNY','AvailableAmount':'1,234.50'}}):
+            with self.assertRaises(ValueError):aliyun_balance(creds)
         with patch('monitoring.balances.read_json',return_value={'Result':{'Currency':'USD','AvailableBalance':'12.50'}}):
             with self.assertRaises(ValueError):volcano_balance(creds)
 

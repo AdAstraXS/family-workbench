@@ -81,7 +81,7 @@ def aliyun_balance(credentials):
     sign='GET&%2F&'+quote(canonical,safe='~')
     params['Signature']=base64.b64encode(hmac.new((secret+'&').encode(),sign.encode(),hashlib.sha1).digest()).decode()
     payload=read_json(Request('https://business.aliyuncs.com/?'+urlencode(params)))
-    if payload.get('Code')!='Success': raise ValueError('balance query rejected')
+    if payload.get('Code')!='200' or payload.get('Success') is not True: raise ValueError('balance query rejected')
     data=payload.get('Data') or {}
     if data.get('Currency')!='CNY': raise ValueError('non CNY balance')
     return balance_value(data.get('AvailableAmount'))
