@@ -29,6 +29,7 @@ from .forms import (
 from .expense_import import ExpenseWorkbookError, import_expense_workbook
 from .expense_export import build_expense_workbook
 from .asset_snapshot_export import build_asset_snapshot_workbook
+from .asset_snapshot_comparison import SnapshotComparisonForm, build_snapshot_comparison
 from .investment_goals import (
     InvestmentGoalInitializationError,
     get_goal_actuals,
@@ -1786,6 +1787,28 @@ def annual_budget_edit(request, pk):
         form = AnnualBudgetForm(instance=budget)
         formset = AnnualBudgetLineFormSet(instance=budget)
     return render(request, "ledger/annual_budget_form.html", {"form": form, "formset": formset, "title": "编辑年度预算"})
+
+
+@login_required
+def asset_snapshot_compare(request):
+    member = getattr(request, "family_member", None)
+    family = member.family if member else get_household_family()
+    available = AssetBalanceSnapshot.objects.filter(family=family, is_draft=False)
+    initial = {
+        "snapshots": list(available.order_by("-snapshot_date", "-pk").values_list("pk", flat=True)[:2]),
+        "members": list(FamilyMember.objects.filter(family=family).values_list("pk", flat=True)),
+        "amount_mode": "base",
+    }
+    form = SnapshotComparisonForm(request.GET if request.GET else None, family=family, initial=initial)
+    report = None
+    if form.is_bound and form.is_valid():
+        report = build_snapshot_comparison(
+            list(form.cleaned_data["snapshots"]), list(form.cleaned_data["members"]),
+            form.cleaned_data["amount_mode"],
+        )
+    return render(request, "ledger/asset_snapshot_compare.html", {
+        "form": form, "report": report, "amount_mode": form["amount_mode"].value(),
+    })
 
 
 @login_required
