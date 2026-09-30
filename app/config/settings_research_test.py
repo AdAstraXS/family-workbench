@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "dashboard",
     "monitoring",
     "investment_research",
+    "investment_watch",
 ]
 
 MIDDLEWARE = [

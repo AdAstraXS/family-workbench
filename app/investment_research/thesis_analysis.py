@@ -144,7 +144,7 @@ def _validate_output(raw, targets, evidence):
         citations = []
         for ref in valid_refs[:3]:
             citations.extend({**cite, "id": ref} for cite in evidence_by_id[ref]["citations"])
-        citations = list({(cite["version_id"], cite["start"], cite["end"]): cite
+        citations = list({(cite.get("kind","official"), cite["version_id"], cite["start"], cite["end"]): cite
                           for cite in citations}.values())
         detail = _model_text(item.get("detail"), 550)
         boundary = _model_text(item.get("boundary"), 300)
@@ -187,7 +187,7 @@ def _validate_output(raw, targets, evidence):
 
 
 def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
-                             transport=None, url_validator=None):
+                             transport=None, url_validator=None, include_news=False):
     _require_writer(actor)
     if consent is not True:
         raise ResearchAiError("请先确认本次发送给云端模型的资料和个人判断。")
@@ -201,6 +201,12 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
     if not targets or len(targets) > 12:
         raise ResearchAiError("请先保存包含 1–12 条假设或待验证问题的正式判断。")
     packet = prepare_analysis_materials(dossier)
+    if include_news:
+        from django.conf import settings
+        from investment_watch.research_bridge import append_news
+        if not getattr(settings,"INVESTMENT_WATCH_MODEL_ENABLED",False):
+            raise ResearchAiError("新闻研究模型总开关未启用；可继续阅读与手工研究。")
+        packet = append_news(packet,dossier)
     evidence = packet["evidence"]
     if not evidence:
         raise ResearchAiError("尚无可核查的整理后资料。请先查看财务概览或保存官方 IR 正文。")
@@ -228,6 +234,7 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
         "另返回 gaps 字符串数组、next_checks 字符串数组、suggested_revision 字符串。"
         "所有解释只写定性判断，不另算金额、数量或百分比；指标数值已在财务概览展示。"
         "引用只能支持其对应的断言，不能将公司披露、AI 推断和成员观点混为一谈。"
+        "标注为新闻来源的摘录是媒体报道，不等于官方披露；区分报道事实、作者观点与推断，保留出处和不确定性。"
         "在 reason、detail、boundary、implication 中用自然语言解释，不直接写 E 编号；编号只放在 evidence_ids。"
         "如果资料包不足以回答某项，verdict 设 unknown 并说清缺口。"
         "行情快照只说明某一时点的股价和TTM市盈率，不证明市场未来会提高倍数；"
@@ -270,6 +277,20 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
     retry_cost = _cost(len(retry_body), policy["max_output_tokens"], policy)
     can_retry = worst_cost + retry_cost <= policy["max_cost"]
     estimated_cost = worst_cost + retry_cost if can_retry else worst_cost
+    news_receipt = None
+    if include_news and packet.get("news_snapshots"):
+        from investment_watch.budget import amount, reserve
+        from investment_watch.services import digest, WatchError
+        from investment_watch.analysis import provider_signature
+        try:
+            exchange = amount(provider.extra_data.get("watch_usd_cny",0))
+            if exchange <= 0:
+                raise WatchError("请先配置模型费用换算值。")
+            news_key = digest(["synthesis",actor.pk,revision.pk,packet["sources"],
+                               packet["news_snapshots"],provider_signature(provider),PROMPT_VERSION])
+            news_receipt = reserve(actor,provider,news_key,estimated_cost*exchange)
+        except WatchError as exc:
+            raise ResearchAiError(str(exc)) from exc
     analysis = AiAnalysisRequest.objects.create(
         family=actor.family, member=actor, provider=provider, module="investment_research",
         analysis_type="thesis_synthesis", prompt=system,
@@ -282,6 +303,7 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                "narrative_count": packet["narrative_count"],
                "preparation_problem": packet["problem"],
                "prompt_version": PROMPT_VERSION, "consent": "one_time",
+               "news_snapshots": packet.get("news_snapshots", []),
                "estimated_max_cost_usd": str(estimated_cost)},
         sanitized_input={"source_count": len(packet["sources"]),
                          "evidence_count": len(evidence), "provided_characters": len(user_prompt),
@@ -337,6 +359,9 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                                     "model_attempts": attempts,
                                     "reported_tokens": total_in + total_out if usage_complete else None}
         analysis.save(update_fields=["status", "error_message", "sanitized_input", "updated_at"])
+        if news_receipt:
+            from investment_watch.budget import settle
+            settle(news_receipt,failed=True)
         raise ResearchAiError(message) from exc
     with transaction.atomic():
         analysis.status = AiAnalysisRequest.STATUS_SUCCESS
@@ -347,4 +372,7 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                                         result_json=result,
                                         tokens_used=(total_in + total_out if usage_complete else None),
                                         cost_estimate=actual_cost)
+    if news_receipt:
+        from investment_watch.budget import settle
+        settle(news_receipt,actual_cost*exchange if actual_cost is not None else None)
     return analysis

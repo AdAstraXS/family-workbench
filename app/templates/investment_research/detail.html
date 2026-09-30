@@ -8,6 +8,7 @@
   </header>
   <nav class="research-workflow" aria-label="公司研究步骤"><span aria-current="step">1 · 当前判断</span><a href="{% url 'investment_research:financials' dossier.pk %}">2 · 财务概览</a><a href="{% if latest_analysis %}{% url 'investment_research:thesis_analysis_detail' dossier.pk latest_analysis.pk %}{% else %}{% url 'investment_research:thesis_analysis' dossier.pk %}{% endif %}">3 · 公司研究</a><a href="{% url 'investment_research:next_day_tracking' dossier.pk %}">次日跟踪</a><a href="{% url 'investment_research:documents' dossier.pk %}">官方资料</a>{% if dossier.security.asset_type == 'stock' %}<a href="{% url 'portfolio:stock_market_detail' dossier.security.pk %}">个股行情与估值 ↗</a>{% endif %}</nav>
   {% if dossier.initial_thesis %}<details class="research-initial"><summary>最初记录（不会随当前判断修改）</summary><p>{{ dossier.initial_thesis|linebreaksbr }}</p></details>{% endif %}
+  <p><a href="{% url 'investment_watch:items' %}?dossier={{ dossier.pk }}">查看本公司的新闻与证据变化 →</a> · <a href="{% url 'investment_watch:rules' %}">关注设置</a></p>
   {% if revision %}
     <section class="research-current research-hero"><p class="research-eyebrow">我的正式判断 · 第 {{ revision.revision_number }} 版 · {{ revision.created_at|date:"Y-m-d H:i" }}</p><h2>{{ revision.thesis|linebreaksbr }}</h2>
       {% if revision.change_reason %}<p class="research-reason">上次修改原因：{{ revision.change_reason }}</p>{% endif %}

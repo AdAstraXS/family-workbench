@@ -8,7 +8,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -90,6 +90,33 @@ class ThesisAnalysisTests(TestCase):
         arguments.update(changes)
         with patch.dict(os.environ, {"SYNTHESIS_TEST_KEY": "test-token"}):
             return generate_thesis_analysis(**arguments)
+
+    @override_settings(INVESTMENT_WATCH_MODEL_ENABLED=True)
+    def test_selected_news_is_a_frozen_new_analysis_input(self):
+        import re
+        from investment_watch.models import NewsSource, BudgetReceipt
+        from investment_watch.services import ingest, associate
+        self.provider.extra_data["watch_usd_cny"]="7"
+        self.provider.save()
+        source=NewsSource.objects.create(family=self.actor.family,key="test-news",name="News",url="https://example.com")
+        version,_=ingest(source,external_id="one",title="Demand public news",summary="Demand rose; this is a media report.",url="https://example.com/news")
+        candidate=associate(self.actor,self.dossier.pk,version.pk,self.dossier.current_revision_id)
+        candidate.selected_for_research=True
+        candidate.save()
+        def transport(request,**kwargs):
+            prompt=json.loads(request.data)["messages"][1]["content"]
+            return self.response(re.findall(r"\[(E\d+)\]",prompt)[-1])
+        analysis=self.generate(include_news=True,transport=transport)
+        snapshots=analysis.scope["news_snapshots"]
+        self.assertEqual(snapshots[0]["version_id"],version.pk)
+        self.assertEqual(analysis.result.result_json["assessments"][0]["citations"][0]["kind"],"news")
+        self.assertEqual(BudgetReceipt.objects.count(),1)
+        ingest(source,external_id="one",title=version.title,summary="Corrected report",url=version.url)
+        analysis.refresh_from_db()
+        self.assertEqual(analysis.scope["news_snapshots"],snapshots)
+        self.client.force_login(self.user)
+        response=self.client.get(reverse("investment_research:thesis_analysis_detail",args=[self.dossier.pk,analysis.pk]))
+        self.assertContains(response,"查看新闻摘录")
 
     def test_prepared_sources_are_sent_once_and_result_links_saved_versions(self):
         sent = []

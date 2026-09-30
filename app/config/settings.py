@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "dashboard",
     "monitoring",
     "investment_research",
+    "investment_watch",
 ]
 
 MIDDLEWARE = [
@@ -180,5 +181,9 @@ OPTION_WHEEL_EXECUTION_ENABLED = False
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LOGIN_URL = "/accounts/login/"
+INVESTMENT_WATCH_COLLECT_ENABLED = env_bool("INVESTMENT_WATCH_COLLECT_ENABLED")
+INVESTMENT_WATCH_MODEL_ENABLED = env_bool("INVESTMENT_WATCH_MODEL_ENABLED")
+INVESTMENT_WATCH_DAILY_CNY = os.getenv("INVESTMENT_WATCH_DAILY_CNY", "1")
+INVESTMENT_WATCH_MONTHLY_CNY = os.getenv("INVESTMENT_WATCH_MONTHLY_CNY", "30")
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/accounts/login/"

@@ -1,0 +1,9 @@
+"""Isolated tests: no dotenv, credentials or production database."""
+
+from .settings_research_test import *
+
+ROOT_URLCONF = "config.urls"
+INVESTMENT_WATCH_COLLECT_ENABLED = False
+INVESTMENT_WATCH_MODEL_ENABLED = False
+INVESTMENT_WATCH_DAILY_CNY = "1"
+INVESTMENT_WATCH_MONTHLY_CNY = "30"

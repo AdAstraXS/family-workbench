@@ -425,6 +425,7 @@ def thesis_analysis(request, pk):
                 actor=member, dossier_id=dossier.pk,
                 provider_id=provider_id,
                 consent=request.POST.get("one_time_consent") == "yes",
+                include_news=request.POST.get("include_news") == "yes",
             )
         except (ResearchAiError, ResearchValidationError) as exc:
             messages.error(request, str(exc))
@@ -434,6 +435,8 @@ def thesis_analysis(request, pk):
                             analysis_pk=analysis.pk)
         return redirect("investment_research:thesis_analysis", pk=pk)
     sources = source_preview(dossier)
+    from investment_watch.research_bridge import selected_candidates
+    selected_news = list(selected_candidates(dossier).order_by("-pk")[:10])
     histories = [analysis for analysis in AiAnalysisRequest.objects.filter(
         member=member, family=member.family, module="investment_research",
         analysis_type="thesis_synthesis",
@@ -443,6 +446,7 @@ def thesis_analysis(request, pk):
         "dossier": dossier, "revision": dossier.current_revision,
         "sources": sources, "providers": available_research_providers() if can_write else [],
         "can_write": can_write, "histories": histories,
+        "selected_news": selected_news, "has_analysis_material": bool(sources or selected_news),
     })
 
 
@@ -473,6 +477,7 @@ def thesis_analysis_detail(request, pk, analysis_pk):
     return render(request, "investment_research/thesis_analysis_brief.html", {
         "dossier": dossier, "analysis": analysis, "result": result,
         "valuation": valuation,
+        "new_candidate_count": dossier.news_candidates.filter(created_at__gt=analysis.created_at).count(),
         "is_current_revision": (analysis.scope or {}).get("thesis_revision_id") == dossier.current_revision_id,
     })
 

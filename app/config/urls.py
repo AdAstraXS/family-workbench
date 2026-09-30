@@ -13,6 +13,7 @@ urlpatterns = [
     path("family/", include("family_core.urls")),
     path("portfolio/", include("portfolio.urls")),
     path("research/", include("investment_research.urls")),
+    path("research/watch/", include("investment_watch.urls")),
     path("option-wheel/", include("option_wheel.urls")),
     path("ledger/", include("ledger.urls")),
     path("ipo/", include("ipo.urls")),

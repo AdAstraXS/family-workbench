@@ -20,6 +20,8 @@
     <a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">生成新分析</a>
   </nav>
   {% if not is_current_revision %}<div class="research-document-empty">这是按旧版判断生成的研究简报。当前判断已修改；请按生成时的语境阅读。</div>{% endif %}
+  <p><a href="{% url 'investment_watch:items' %}?dossier={{ dossier.pk }}">查看新闻与证据变化{% if new_candidate_count %} · 此后新增 {{ new_candidate_count }} 条候选{% endif %} →</a></p>
+  {% if analysis.scope.news_snapshots %}<details class="research-brief-card"><summary>本次纳入的新闻快照 · {{ analysis.scope.news_snapshots|length }} 条</summary>{% for news in analysis.scope.news_snapshots %}<p><a href="{% url 'investment_watch:news_detail' news.material_id %}?version={{ news.version_id }}">{{ news.title }}</a> · {{ news.source }}</p>{% endfor %}<p>按生成时的材料版本保存，后续更新不改写本简报。</p></details>{% endif %}
   {% if result %}
     {% if result.invalid_reference_count %}<div class="research-document-empty">有 {{ result.invalid_reference_count }} 项模型引文无效，已降为“证据不足”。请在下方核对原文。</div>{% endif %}
     <section class="research-brief-card research-brief-summary">
@@ -41,7 +43,7 @@
             {% if item.cited_facts %}<div class="research-brief-facts"><strong>可核查的资料数字与要点</strong><ul>{% for fact in item.cited_facts %}<li>{{ fact.text }}</li>{% endfor %}</ul></div>{% endif %}
             {% if item.boundary %}<p><strong>证据边界：</strong>{{ item.boundary }}</p>{% endif %}
             {% if item.implication %}<p><strong>对我的判断：</strong>{{ item.implication }}</p>{% endif %}
-            {% if item.citations %}<div class="research-metric-links">{% for cite in item.citations %}<a href="{% url 'investment_research:document_detail' dossier.pk cite.document_id %}?version={{ cite.version_id }}&amp;start={{ cite.start }}&amp;end={{ cite.end }}&amp;hash={{ cite.hash }}#research-citation">查看原文 {{ cite.id }}</a>{% endfor %}</div>{% else %}<p class="research-private-note">本项暂无可核查引文。</p>{% endif %}
+            {% if item.citations %}<div class="research-metric-links">{% for cite in item.citations %}{% if cite.kind == 'news' %}<a href="{% url 'investment_watch:news_detail' cite.material_id %}?version={{ cite.version_id }}">查看新闻摘录 {{ cite.id }}</a>{% else %}<a href="{% url 'investment_research:document_detail' dossier.pk cite.document_id %}?version={{ cite.version_id }}&amp;start={{ cite.start }}&amp;end={{ cite.end }}&amp;hash={{ cite.hash }}#research-citation">查看原文 {{ cite.id }}</a>{% endif %}{% endfor %}</div>{% else %}<p class="research-private-note">本项暂无可核查引文。</p>{% endif %}
           </details>
         </article>
       {% endfor %}

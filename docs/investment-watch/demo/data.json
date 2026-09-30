@@ -1,0 +1,279 @@
+{
+  "version": 2,
+  "topics": [
+    {"id":"us","name":"美国市场","group":"市场与资产","description":"美国公司的经营披露、产品与市场变化。","articles":["earnings","copilot"]},
+    {"id":"china","name":"中国市场","group":"市场与资产","description":"中国经济、企业经营与供需变化。","articles":["commodity-demo"]},
+    {"id":"commodities","name":"商品与供需","group":"市场与资产","description":"库存、价格、产能与产业链传导。","articles":["commodity-demo"]},
+    {"id":"funds","name":"基金与 ETF","group":"市场与资产","description":"基金配置、资金流向与产品变化。","articles":[]},
+    {"id":"microsoft","name":"微软","group":"公司与行业","description":"财报、Azure、Copilot 及业务进展。","articles":["earnings","copilot"]},
+    {"id":"cloud-ai","name":"云计算与 AI 商业化","group":"公司与行业","description":"云服务增长、企业采用和产品收费。","articles":["earnings","copilot"]},
+    {"id":"capex","name":"资本开支与基础设施","group":"公司与行业","description":"数据中心建设、供电与投资兑现。","articles":["power-demo"]},
+    {"id":"rates","name":"宏观、利率与债券","group":"全球环境","description":"利率、融资条件及企业需求变化。","articles":["rates-demo"]},
+    {"id":"geopolitics","name":"地缘政治与贸易","group":"全球环境","description":"贸易限制、跨境政策和供应链风险。","articles":[]}
+  ],
+  "notice": "历史公开材料 + 明确标记的模拟场景。分析为人工编写的交互样例，未调用 AI。不是当前投资结论。",
+  "researchUrl": "https://adastrax.top/research/1/",
+  "thesis": {
+    "company": "微软",
+    "symbol": "MSFT",
+    "version": 1,
+    "summary": "AI 算力投入能否随着应用普及转化为持续收入和现金流，并支撑估值？",
+    "assumptions": [
+      {
+        "id": "demand",
+        "title": "AI 算力需求持续增长",
+        "watch": "企业采用、实际用量、订单与供给约束",
+        "gap": "缺少可比的实际用量和利用率数据"
+      },
+      {
+        "id": "returns",
+        "title": "资本投入转化为收入和现金流",
+        "watch": "建设进度、投入、折旧、现金流和回报率",
+        "gap": "缺少可归因于 AI 基础设施的回报率"
+      },
+      {
+        "id": "growth",
+        "title": "云与 AI 业务收入保持较快增长",
+        "watch": "Azure 增长、AI 贡献、指引与同口径预期",
+        "gap": "缺少同口径市场一致预期"
+      },
+      {
+        "id": "valuation",
+        "title": "估值倍数获得持续支撑",
+        "watch": "盈利兑现、利率、风险溢价与市场预期",
+        "gap": "经营增长不能独自证明估值倍数将提升"
+      }
+    ]
+  },
+  "rule": {
+    "enabled": true,
+    "aliases": [
+      "微软",
+      "Microsoft",
+      "MSFT"
+    ],
+    "topics": [
+      "Azure",
+      "Copilot"
+    ],
+    "include": [],
+    "exclude": [
+      "促销",
+      "抽奖"
+    ]
+  },
+  "articles": [
+    {
+      "id": "earnings",
+      "title": "云收入增长已有披露，资本回报仍待验证",
+      "summary": "微软 FY2025 第四财季披露 Azure 及其他云服务收入同比增长 39%。这是历史季度数据，不能单独证明 AI 的独立贡献。",
+      "originalTitle": "Microsoft Cloud and AI Strength Fuels Fourth Quarter Results",
+      "sourceText": "Microsoft Azure and other cloud services revenue increased 39%.",
+      "source": "Microsoft Investor Relations",
+      "published": "2025-07-30",
+      "occurred": "2025-06-30",
+      "found": "2026-09-29",
+      "kind": "historical",
+      "category": "公司经营",
+      "chain": "msft-fy25-q4",
+      "sources": [
+        {
+          "name": "Microsoft IR 财报原文",
+          "url": "https://www.microsoft.com/en-us/Investor/earnings/FY-2025-Q4/press-release-webcast",
+          "chain": "msft-fy25-q4"
+        },
+        {
+          "name": "Microsoft 新闻中心转引",
+          "url": "https://news.microsoft.com/source/2025/07/30/microsoft-earnings-press-release-available-on-investor-relations-website-27/",
+          "chain": "msft-fy25-q4"
+        }
+      ],
+      "fact": "该财季 Azure 及其他云服务收入同比增长 39%。",
+      "opinion": "管理层将云与 AI 视为增长动力；它是管理层对经营表现的解释。",
+      "inference": "可支持这一历史期间的云收入增长，不能把全部增长归因于 AI，或推导资本回报率改善。",
+      "limits": "历史样本；收入与资本支出不是同一指标。缺少可比的利用率、投资回报及市场预期。",
+      "links": [
+        {
+          "assumption": "growth",
+          "direction": "support",
+          "text": "支持历史期间的云收入增长；AI 独立贡献仍需拆解。",
+          "quote": "Azure and other cloud services revenue increased 39%.",
+          "locator": "FY25 Q4 press release · Intelligent Cloud"
+        },
+        {
+          "assumption": "returns",
+          "direction": "unknown",
+          "text": "收入增长不足以证明资本投入转化率改善。",
+          "quote": "",
+          "locator": ""
+        }
+      ],
+      "market": "美国",
+      "newsTitle": "微软公布 FY2025 第四财季业绩",
+      "newsSummary": "该财季 Azure 及其他云服务收入同比增长 39%。"
+    },
+    {
+      "id": "copilot",
+      "title": "Copilot Chat 增加智能体计费，商业转化等待数据",
+      "summary": "微软在 2025 年推出面向商业客户的 Copilot Chat，并提供按使用量计费的智能体。产品发布带来商业化线索。",
+      "originalTitle": "Copilot for all: Introducing Microsoft 365 Copilot Chat",
+      "sourceText": "Microsoft Copilot Chat free chat and pay-as-you-go agents for commercial customers.",
+      "source": "Microsoft 产品博客",
+      "published": "2025-01-15",
+      "occurred": "2025-01-15",
+      "found": "2026-09-29",
+      "kind": "historical",
+      "category": "产品与商业化",
+      "chain": "copilot-chat",
+      "sources": [
+        {
+          "name": "Microsoft 产品博客",
+          "url": "https://www.microsoft.com/en-us/copilot/blog/2025/01/15/copilot-for-all-introducing-microsoft-365-copilot-chat/",
+          "chain": "copilot-chat"
+        }
+      ],
+      "fact": "发布 Copilot Chat，包含免费聊天和按使用量计费的智能体。",
+      "opinion": "发布方强调企业 AI 应用价值，属于产品方观点。",
+      "inference": "计费路径更清晰，但产品发布不能证明实际采用量和新增利润。",
+      "limits": "缺少付费客户数、使用频率、收入规模和服务成本。",
+      "links": [
+        {
+          "assumption": "demand",
+          "direction": "unknown",
+          "text": "入口扩大是需求线索，实际用量尚未证明。",
+          "quote": "",
+          "locator": ""
+        },
+        {
+          "assumption": "growth",
+          "direction": "unknown",
+          "text": "出现收费方式，仍需收入和付费转化数据。",
+          "quote": "",
+          "locator": ""
+        }
+      ],
+      "market": "美国",
+      "newsTitle": "微软发布 Microsoft 365 Copilot Chat",
+      "newsSummary": "发布 Copilot Chat，包含免费聊天和按使用量计费的智能体。"
+    },
+    {
+      "id": "power-demo",
+      "title": "模拟：数据中心接电延期，投入兑现可能后移",
+      "summary": "用于测试间接反证：假设某行业报告指出部分大型数据中心接电延期。材料没有提微软，关联是否成立仍需核实。",
+      "originalTitle": "模拟场景：大型数据中心接电延期",
+      "sourceText": "数据中心 电力 接电延期 资本支出 基础设施。模拟材料，不是真实新闻。",
+      "source": "交互测试场景",
+      "published": null,
+      "occurred": null,
+      "found": null,
+      "kind": "synthetic",
+      "category": "行业与基础设施",
+      "chain": "demo-power",
+      "sources": [
+        {
+          "name": "合成材料 · 没有真实来源",
+          "url": null,
+          "chain": "demo-power"
+        }
+      ],
+      "fact": "模拟前提：部分大型数据中心接电延期。并无已核实的微软项目事实。",
+      "opinion": "模拟行业观点：电力接入可能限制新增算力释放。",
+      "inference": "只有相关项目确实包含微软投资，且延误无法被其他产能抵消，才可能推迟收入兑现。",
+      "limits": "需要微软项目范围、延期时长、替代产能和费用影响。此例仅演示影响路径。",
+      "links": [
+        {
+          "assumption": "returns",
+          "direction": "weaken",
+          "text": "条件性反证：若微软相关项目受影响，投入兑现可能后移。",
+          "quote": "模拟前提：部分大型数据中心接电延期。",
+          "locator": "合成场景第 1 条"
+        },
+        {
+          "assumption": "demand",
+          "direction": "unknown",
+          "text": "供给受限无法证明需求下降。",
+          "quote": "",
+          "locator": ""
+        }
+      ],
+      "market": "全球",
+      "newsTitle": "模拟：行业报告讨论数据中心接电延期",
+      "newsSummary": "模拟前提：部分大型数据中心接电延期。并无已核实的微软项目事实。"
+    },
+    {
+      "id": "rates-demo",
+      "title": "模拟：利率回落与增长担忧同时出现",
+      "summary": "用于测试矛盾信息：假设利率回落，但同时出现企业 IT 预算趋于保守的讨论。对估值和收入的作用可能不同。",
+      "originalTitle": "模拟场景：利率回落，企业 IT 预算仍谨慎",
+      "sourceText": "利率 估值 企业 IT 预算 云支出 宏观。模拟材料，不是真实新闻。",
+      "source": "交互测试场景",
+      "published": null,
+      "occurred": null,
+      "found": null,
+      "kind": "synthetic",
+      "category": "宏观与金融",
+      "chain": "demo-rates",
+      "sources": [
+        {
+          "name": "合成材料 · 没有真实来源",
+          "url": null,
+          "chain": "demo-rates"
+        }
+      ],
+      "fact": "模拟前提：利率回落与企业 IT 预算谨慎同时发生。",
+      "opinion": "模拟观点：较低利率可能改善估值条件，需求放缓可能形成相反作用。",
+      "inference": "不能仅根据利率变化给出微软估值倍数上升的结论，需要一起核对盈利预期和风险溢价。",
+      "limits": "需要同口径市场预期、预算调查和公司实际订单。",
+      "links": [
+        {
+          "assumption": "valuation",
+          "direction": "mixed",
+          "text": "估值条件可能改善，但盈利预期走弱可抵消；作用方向并存。",
+          "quote": "模拟前提：利率回落与企业 IT 预算谨慎同时发生。",
+          "locator": "合成场景第 1 条"
+        },
+        {
+          "assumption": "growth",
+          "direction": "weaken",
+          "text": "若预算谨慎传导到 Azure 订单，可能削弱增长假设。",
+          "quote": "模拟前提：企业 IT 预算谨慎。",
+          "locator": "合成场景第 1 条"
+        }
+      ],
+      "market": "全球",
+      "newsTitle": "模拟：利率回落与企业 IT 预算谨慎并存",
+      "newsSummary": "模拟前提：利率回落与企业 IT 预算谨慎同时发生。"
+    },
+    {
+      "id": "commodity-demo",
+      "title": "模拟：商品库存报告更新",
+      "newsTitle": "模拟：商品库存报告更新",
+      "summary": "普通财经材料，当前没有与微软投资假设建立关联。",
+      "newsSummary": "模拟一份商品库存监测材料，用于演示基础新闻池中未命中个人关注的内容。",
+      "originalTitle": "模拟场景：商品库存报告更新",
+      "sourceText": "商品 库存 供需 合成测试材料。",
+      "source": "交互测试场景",
+      "market": "中国",
+      "published": null,
+      "occurred": null,
+      "found": null,
+      "kind": "synthetic",
+      "category": "商品与供需",
+      "chain": "demo-commodity",
+      "sources": [
+        {
+          "name": "合成材料 · 没有真实来源",
+          "url": null,
+          "chain": "demo-commodity"
+        }
+      ],
+      "fact": "模拟库存信息，没有真实观测数值。",
+      "opinion": "未提供来源观点。",
+      "inference": "尚未分析。手动关联不证明它与微软相关。",
+      "limits": "先核查与研究问题的关系，再决定是否分析。",
+      "links": []
+    }
+  ],
+  "implementationVersion": "0.2.0",
+  "analysisUrl": "https://adastrax.top/research/1/analysis/56/"
+}

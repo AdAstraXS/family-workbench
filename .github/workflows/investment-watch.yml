@@ -1,0 +1,49 @@
+name: Investment watch
+on:
+  pull_request:
+    paths: ['app/**', 'docs/investment-watch/**', 'scripts/*investment-watch*', 'config/investment-watch*', '.github/workflows/investment-watch.yml']
+  push:
+    branches: ['codex/investment-watch']
+    paths: ['app/**', 'docs/investment-watch/**', 'scripts/*investment-watch*', 'config/investment-watch*', '.github/workflows/investment-watch.yml']
+permissions:
+  contents: read
+jobs:
+  offline-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m unittest discover -s app/investment_watch -p 'test_*.py'
+      - run: node scripts/check-investment-watch.mjs
+      - run: git diff --check
+  django-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: watch_test
+          POSTGRES_USER: watch_test
+          POSTGRES_PASSWORD: watch-test-local-only
+        ports: ['55439:5432']
+        options: >-
+          --health-cmd "pg_isready -U watch_test -d watch_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -r app/requirements.txt
+      - working-directory: app
+        run: |
+          python manage.py check --settings=config.settings_watch_pg_test
+          python manage.py makemigrations --check --dry-run --settings=config.settings_watch_pg_test
+          python manage.py test investment_watch investment_research --settings=config.settings_watch_pg_test --noinput

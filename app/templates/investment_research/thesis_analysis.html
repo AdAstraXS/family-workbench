@@ -23,7 +23,9 @@
   {% else %}
     <div class="research-document-empty"><strong>先写下自己的第一版判断</strong><p>至少记录一条关键假设或待验证问题，AI 才能围绕它逐项检查。</p><a href="{% url 'investment_research:first_thesis' dossier.pk %}">保存第一版判断</a></div>
   {% endif %}
-  {% if revision and can_write and sources and providers %}
+  <p><a href="{% url 'investment_watch:items' %}?dossier={{ dossier.pk }}">查看这家公司的新闻与证据变化 →</a></p>
+  {% if selected_news %}<section class="research-analysis-context"><h2>已选择的新闻材料 · {{ selected_news|length }} 条</h2><ul>{% for candidate in selected_news %}<li><a href="{% url 'investment_watch:item' candidate.pk %}">{{ candidate.material_version.title }}</a> · {{ candidate.material_version.material.source.name }}</li>{% endfor %}</ul><p class="research-private-note">材料选择已经保存；只有确认生成新分析时才会发送给模型。</p></section>{% endif %}
+  {% if revision and can_write and has_analysis_material and providers %}
     <form method="post" class="research-form research-analysis-form" id="research-synthesis-form">
       {% csrf_token %}
       <h2>本次自动整理的资料</h2>
@@ -31,6 +33,8 @@
       <details><summary>查看本次采用的官方资料</summary><ul>{% for source in sources %}
         <li>{{ source.document.get_source_display }} · {{ source.document.title }}{% if source.document.period_end %} · 截至 {{ source.document.period_end }}{% endif %}</li>
       {% endfor %}</ul></details>
+      {% if selected_news %}
+      <label class="research-consent"><input type="checkbox" name="include_news" value="yes"> 本次同时发送以上新闻摘录，结合当前判断重新分析（计入投资动态模型预算）。</label><p class="research-private-note">新闻报道与官方披露会区分标注。每次生成新快照，历史分析不变。</p>{% endif %}
       <h2>生成分析草稿</h2>
       <label for="synthesis-provider">本次使用的文本模型</label>
       <select id="synthesis-provider" name="provider" required>{% for provider in providers %}<option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }} · 单次费用上限 ${{ provider.extra_data.research_max_estimated_usd }}</option>{% endfor %}</select>
@@ -63,7 +67,7 @@
       })();
     </script>
   {% elif revision and can_write %}
-    <div class="research-document-empty"><strong>还不能生成综合分析</strong><p>{% if not sources %}请先在官方资料中保存 SEC 年报或近期 IR 正文。{% else %}尚未配置获准处理投研资料的文本模型。{% endif %}</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看官方资料</a></div>
+    <div class="research-document-empty"><strong>还不能生成综合分析</strong><p>{% if not has_analysis_material %}请先保存官方资料，或从新闻候选中选择要纳入的材料。{% elif not providers %}尚未配置获准处理投研资料的文本模型。已选材料仍保留，可继续手工研究。{% endif %}</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看官方资料</a></div>
   {% endif %}
   <section class="research-analysis-history"><h2>过去的公司研究简报</h2>
     {% if histories %}<ul>{% for item in histories %}<li><a href="{% url 'investment_research:thesis_analysis_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }} · 第 {{ item.scope.thesis_revision_number }} 版判断 · {{ item.get_status_display }}</a></li>{% endfor %}</ul>

@@ -1,0 +1,2 @@
+{% extends "investment_watch/base.html" %}
+{% block watch_content %}<h1>我的收藏</h1><p>仅自己可见；材料更正或撤回后仍保留备注。</p>{% for n in notes %}<article class="iw-card"><h2><a href="{% url 'investment_watch:news_detail' n.material.pk %}">{{ n.event.title }}</a></h2><p>{{ n.note|linebreaksbr }}</p><small>{{ n.material.current_version.get_status_display }}</small></article>{% empty %}<div class="iw-empty">暂无收藏。可在新闻详情中收藏并记录问题。</div>{% endfor %}{% endblock %}
