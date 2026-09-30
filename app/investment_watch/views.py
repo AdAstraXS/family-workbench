@@ -195,6 +195,15 @@ def version_json(version):
 def news(request):
     member = request.watch_member
     query = filter_news(member, request.GET)
+    company_name = ""
+    if request.GET.get("dossier"):
+        from .workspace import reading_rule
+        from .catalogue import match_rule
+
+        dossier = dossier_for(member, integer(request.GET["dossier"]))
+        rule = reading_rule(dossier)
+        company_name = dossier.security.name
+        query = [v for v in query if match_rule(rule, v)[0]]
     # One exact-content event in the feed; each source/version remains available in details.
     seen = set()
     items = []
@@ -223,7 +232,7 @@ def news(request):
             categories=CATEGORIES,
             filters=request.GET,
             topic_name=next(
-                (t[1] for t in TOPICS if t[0] == request.GET.get("topic")), ""
+                (t[1] for t in TOPICS if t[0] == request.GET.get("topic")), company_name
             ),
             filter_query=filter_query(request),
         ),
@@ -232,6 +241,9 @@ def news(request):
 
 @endpoint(["GET"])
 def topics(request):
+    from .workspace import reading_rule
+    from .catalogue import match_rule
+
     versions = list(public_versions(request.watch_member).exclude(status="withdrawn"))
     result = [
         {
@@ -251,13 +263,33 @@ def topics(request):
     ]
     if wants_json(request):
         return JsonResponse({"topics": result})
+    companies = []
+    for dossier in accessible_dossiers(request.watch_member):
+        rule = reading_rule(dossier)
+        companies.append(
+            {
+                "dossier": dossier,
+                "total": len(
+                    {
+                        v.material.event.merged_into_id or v.material.event_id
+                        for v in versions
+                        if match_rule(rule, v)[0]
+                    }
+                ),
+            }
+        )
     return render(
-        request, "investment_watch/topics.html", context(request, topics=result)
+        request,
+        "investment_watch/topics.html",
+        context(request, topics=result, companies=companies),
     )
 
 
 @endpoint(["GET"])
 def news_detail(request, pk):
+    from .events import latest_relation, suggestions
+    from .models import MaterialRelation
+
     member = request.watch_member
     material = (
         NewsMaterial.objects.filter(pk=pk, source__family=member.family)
@@ -294,6 +326,23 @@ def news_detail(request, pk):
             .exclude(pk=material.event_id)
             .order_by("-pk")[:100],
             stale=material.current_version_id != version.pk,
+            relation=latest_relation(version),
+            developments=[
+                r
+                for r in MaterialRelation.objects.filter(
+                    target=version,
+                    source__material__current_version_id=F("source_id"),
+                    kind__in=["followup", "conflict"],
+                )
+                .select_related("source__material")
+                .order_by("created_at")[:50]
+                if latest_relation(r.source).pk == r.pk
+            ],
+            suggestions=suggestions(member, version),
+            earlier_versions=public_versions(member)
+            .exclude(status="withdrawn")
+            .exclude(pk=version.pk)
+            .order_by("-pk")[:100],
         ),
     )
 
@@ -302,8 +351,19 @@ def news_detail(request, pk):
 def news_associate(request, pk):
     body = payload(
         request,
-        ["dossier_id", "material_version", "expected_revision", "idempotency_key"],
+        [
+            "dossier_id",
+            "material_version",
+            "expected_revision",
+            "idempotency_key",
+            "selection",
+        ],
     )
+    if body.get("selection"):
+        parts = str(body.pop("selection")).split(":")
+        if len(parts) != 2:
+            raise WatchError("请选择公司研究档案。")
+        body["dossier_id"], body["expected_revision"] = map(integer, parts)
     member = request.watch_member
     v = version_for(member, integer(body.get("material_version")))
     if v.material_id != pk:
@@ -338,6 +398,8 @@ def news_associate(request, pk):
 
 @endpoint(["GET"])
 def items(request):
+    from .analysis import targets
+
     member = request.watch_member
     query = (
         ResearchCandidate.objects.filter(
@@ -376,8 +438,6 @@ def items(request):
             ]
         )
         for evidence in candidate.current_evidence:
-            from .analysis import targets
-
             evidence.assumption_label = targets(candidate.dossier.current_revision).get(
                 evidence.assumption_key, evidence.assumption_key
             )
@@ -437,6 +497,7 @@ def items(request):
             items=page,
             dossier=dossier,
             dossiers=accessible_dossiers(member),
+            assumptions=targets(dossier.current_revision) if dossier else {},
             filters=request.GET,
             filter_query=filter_query(request),
         ),
@@ -488,6 +549,9 @@ def item(request, pk):
                         "assumption_key": e.assumption_key,
                         "direction": e.direction,
                         "explanation": e.explanation,
+                        "source_claim": e.source_claim,
+                        "author_opinion": e.author_opinion,
+                        "input_relation_id": e.input_relation_id,
                         "quote": e.quote,
                         "locator": e.locator,
                         "conditions": e.conditions,
@@ -503,6 +567,18 @@ def item(request, pk):
             }
         )
     from .analysis import targets
+    from .events import canonical_version
+
+    canonical = canonical_version(candidate.material_version)
+    original_candidate = (
+        ResearchCandidate.objects.filter(
+            dossier=candidate.dossier,
+            revision=candidate.revision,
+            material_version=canonical,
+        ).first()
+        if canonical.pk != candidate.material_version_id
+        else None
+    )
 
     rows = list(candidate.evidence.prefetch_related("reviews").order_by("-created_at"))
     for evidence in rows:
@@ -518,6 +594,7 @@ def item(request, pk):
             evidence=rows,
             stale=candidate_stale(candidate),
             version=candidate.material_version,
+            original_candidate=original_candidate,
         ),
     )
 
@@ -545,6 +622,22 @@ def rules(request):
                     for w in re.split("[,，\n]", body.get(key, ""))
                     if w.strip()
                 ]
+        if request.POST.get("action") == "preview":
+            from .workspace import preview_rule
+
+            writer(member)
+            dossier = dossier_for(member, integer(body.get("dossier_id")))
+            submitted = {k: request.POST[k] for k in body if k in request.POST}
+            return render(
+                request,
+                "investment_watch/rule_preview.html",
+                context(
+                    request,
+                    dossier=dossier,
+                    preview=preview_rule(member, body),
+                    submitted=submitted,
+                ),
+            )
         rule = save_rule(
             member,
             integer(body.get("dossier_id")),
@@ -596,6 +689,63 @@ def rules(request):
             request,
             dossiers=dossiers,
             providers=available_research_providers() if is_writer(member) else [],
+        ),
+    )
+
+
+@endpoint(["GET", "POST"])
+def company_add(request):
+    from django import forms
+    from .workspace import CompanyForm, add_company, search_companies
+
+    writer(request.watch_member)
+    form = CompanyForm(request.POST if request.method == "POST" else None)
+    query = request.GET.get("q", "").strip()[:100]
+    if query and request.method == "GET":
+        form.fields["security"].queryset = search_companies(query)
+    if request.method == "POST" and form.is_valid():
+        try:
+            dossier = add_company(request.watch_member, form.cleaned_data)
+        except forms.ValidationError as exc:
+            form.add_error(None, exc)
+        else:
+            messages.success(
+                request, f"{dossier.security.name} 已加入。请预览规则，再启用关注。"
+            )
+            return redirect("investment_watch:rules")
+    return render(
+        request,
+        "investment_watch/company_add.html",
+        context(request, form=form, query=query),
+    )
+
+
+@endpoint(["GET"])
+def company(request, pk):
+    from ai_analysis.models import AiAnalysisRequest
+
+    dossier = dossier_for(request.watch_member, pk)
+    analyses = list(
+        AiAnalysisRequest.objects.filter(
+            member=request.watch_member,
+            module="investment_research",
+            analysis_type="thesis_synthesis",
+            scope__dossier_id=dossier.pk,
+        ).order_by("-created_at")[:50]
+    )
+    return render(
+        request,
+        "investment_watch/company.html",
+        context(
+            request,
+            dossier=dossier,
+            research_analyses=[
+                a for a in analyses if not a.scope.get("news_snapshots")
+            ],
+            combined_analyses=[a for a in analyses if a.scope.get("news_snapshots")],
+            candidates=dossier.news_candidates.select_related(
+                "material_version"
+            ).order_by("-created_at")[:20],
         ),
     )
 
@@ -667,7 +817,7 @@ def research_context(request):
         {
             "dossier_id": dossier.pk,
             "revision_id": dossier.current_revision_id,
-            "research_url": reverse("investment_research:detail", args=[dossier.pk]),
+            "research_url": reverse("investment_watch:company", args=[dossier.pk]),
             "latest_analysis_url": reverse(
                 "investment_research:thesis_analysis_detail",
                 args=[dossier.pk, latest.pk],
@@ -815,3 +965,102 @@ def coverage(request):
             is_admin=member.role == FamilyMember.ROLE_ADMIN,
         ),
     )
+
+
+@endpoint(["GET", "POST"])
+def source_edit(request, pk=None):
+    from intelligence.http_client import fetch_public_url, SafeHttpError
+    from .source_templates import SourceForm, parse_source
+
+    member = request.watch_member
+    writer(member)
+    if member.role != FamilyMember.ROLE_ADMIN:
+        raise PermissionDenied("仅家庭管理员可配置共享信源。")
+    source = NewsSource(family=member.family, key="custom-" + uuid.uuid4().hex)
+    if pk:
+        source = (
+            NewsSource.objects.filter(pk=pk, family=member.family)
+            .exclude(adapter="official")
+            .first()
+        )
+        if not source:
+            raise Http404
+    keys = [
+        "name",
+        "url",
+        "adapter",
+        "market",
+        "interval_minutes",
+        "max_items",
+        "config",
+    ]
+    form = SourceForm(
+        request.POST if request.method == "POST" else None,
+        initial={key: getattr(source, key) for key in keys},
+    )
+    rows = None
+    token = ""
+    if request.method == "POST" and form.is_valid():
+        for key in keys:
+            setattr(source, key, form.cleaned_data[key])
+        signature = digest([member.pk, pk, source.updated_at, form.cleaned_data])
+        if request.POST.get("action") == "save":
+            try:
+                tested = signing.loads(
+                    request.POST.get("tested", ""),
+                    salt="watch-source-test",
+                    max_age=1800,
+                )
+                if tested != signature:
+                    raise signing.BadSignature
+            except signing.BadSignature:
+                form.add_error(None, "配置已改变或测试已过期，请先测试读取。")
+            else:
+                source.enabled = False
+                source.cursor = {}
+                source.last_checked_at = None
+                source.last_success_at = None
+                source.last_error = ""
+                with transaction.atomic():
+                    if source.pk:
+                        current = NewsSource.objects.select_for_update().get(pk=source.pk)
+                        if current.updated_at != source.updated_at:
+                            raise Conflict("来源已被其他操作更新，请重新测试后保存。")
+                    source.save()
+                messages.success(
+                    request, "来源已保存为暂停状态，核对后可在来源与运行启用。"
+                )
+                return redirect("investment_watch:coverage")
+        else:
+            try:
+                response = fetch_public_url(source.url)
+                rows = parse_source(response.body, source)
+                if not rows:
+                    raise WatchError("没有读取到文章，请检查订阅地址。")
+                token = signing.dumps(signature, salt="watch-source-test")
+            except (SafeHttpError, WatchError) as exc:
+                form.add_error(None, getattr(exc, "safe_message", str(exc)))
+    return render(
+        request,
+        "investment_watch/source_edit.html",
+        context(request, form=form, rows=rows, tested=token),
+    )
+
+
+@endpoint(["POST"])
+def material_relation(request, pk):
+    from .events import relate
+
+    relation = relate(
+        request.watch_member,
+        pk,
+        integer(request.POST.get("target"), 0),
+        request.POST.get("kind", ""),
+        request.POST.get("reason", ""),
+        integer(request.POST.get("expected"), 0),
+    )
+    messages.success(
+        request,
+        "关系已记录。仅确认无新增信息的重复材料共用分析；进展和矛盾仍保留独立分析。",
+    )
+    return redirect("investment_watch:news_detail", pk=relation.source.material_id)

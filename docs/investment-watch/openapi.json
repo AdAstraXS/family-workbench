@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "投资动态可用版接口",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "description": "Django session + CSRF. Public news is family-scoped; dossiers, candidates, reviews and notes are owner-scoped with no admin bypass. GET does not collect or call models. Cursors expire after 24h and bind to member, route and filters; live results are not frozen snapshots."
   },
   "security": [
@@ -79,6 +79,14 @@
               "const": "json"
             },
             "description": "Omit for HTML; alternatively Accept: application/json."
+          },
+          {
+            "name": "dossier",
+            "in": "query",
+            "description": "仅限本人公司规则；暂停关注仍可阅读",
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -1072,6 +1080,193 @@
         "responses": {
           "200": {
             "description": "HTML"
+          }
+        }
+      }
+    },
+    "/research/watch/companies/add/": {
+      "get": {
+        "summary": "搜索并添加本人关注公司；POST 建立或复用探索档案",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          }
+        }
+      },
+      "post": {
+        "summary": "搜索并添加本人关注公司；POST 建立或复用探索档案",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          },
+          "302": {
+            "description": "保存后跳转"
+          },
+          "409": {
+            "description": "并发版本冲突"
+          }
+        }
+      }
+    },
+    "/research/watch/companies/{id}/": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      ],
+      "get": {
+        "summary": "本人公司研究总览：投研、新闻、综合分析",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          }
+        }
+      }
+    },
+    "/research/watch/sources/add/": {
+      "get": {
+        "summary": "管理员测试及保存来源模板",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          }
+        }
+      },
+      "post": {
+        "summary": "管理员测试及保存来源模板",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          },
+          "302": {
+            "description": "保存后跳转"
+          },
+          "409": {
+            "description": "并发版本冲突"
+          }
+        }
+      }
+    },
+    "/research/watch/sources/{id}/edit/": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      ],
+      "get": {
+        "summary": "管理员编辑来源，修改配置须重新测试",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          }
+        }
+      },
+      "post": {
+        "summary": "管理员编辑来源，修改配置须重新测试",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          },
+          "302": {
+            "description": "保存后跳转"
+          },
+          "409": {
+            "description": "并发版本冲突"
+          }
+        }
+      }
+    },
+    "/research/watch/versions/{id}/relation/": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      ],
+      "post": {
+        "summary": "管理员追加版本关系复核；expected 冲突返回 409",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          },
+          "302": {
+            "description": "保存后跳转"
+          },
+          "409": {
+            "description": "并发版本冲突"
           }
         }
       }

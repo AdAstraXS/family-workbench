@@ -2,7 +2,7 @@
 {% block watch_content %}
 <header class="iw-header"><div><h1>{% if topic_name %}{{ topic_name }}{% else %}新闻浏览{% endif %}</h1><p>从财经材料中发现线索，按原始发布时间阅读。</p></div><a href="{% url 'investment_watch:items' %}">我的投资动态 →</a></header>
 {% if topic_name %}<p><a href="{% url 'investment_watch:topics' %}">返回主题</a> · <a href="{% url 'investment_watch:news' %}">全部新闻</a></p>{% endif %}
-<form method="get" class="iw-filters">{% if filters.topic %}<input type="hidden" name="topic" value="{{ filters.topic }}">{% endif %}
+<form method="get" class="iw-filters">{% if filters.dossier %}<input type="hidden" name="dossier" value="{{ filters.dossier }}">{% endif %}{% if filters.topic %}<input type="hidden" name="topic" value="{{ filters.topic }}">{% endif %}
 <nav class="iw-categories" aria-label="新闻类别"><button name="category" value=""{% if not filters.category %} aria-current="page"{% endif %}>全部</button>{% for c in categories %}<button name="category" value="{{ c }}"{% if filters.category == c %} aria-current="page"{% endif %}>{{ c }}</button>{% endfor %}</nav>
 <div class="iw-search"><label class="iw-grow">搜索<input type="search" name="q" value="{{ filters.q }}" placeholder="标题与简介"></label><button name="category" value="{{ filters.category }}">筛选</button></div>
 <details{% if filters.market or filters.source or filters.date_from or filters.date_to %} open{% endif %}><summary>市场、来源与日期</summary><div class="iw-search">

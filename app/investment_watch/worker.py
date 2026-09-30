@@ -1,6 +1,7 @@
 import uuid
 from datetime import timedelta
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 from family_core.models import Family
 from .models import (
@@ -35,7 +36,10 @@ def acquire(family):
 
 
 def pending_candidates(dossier, provider):
+    from .events import canonical_candidate
+
     result = []
+    seen = set()
     for candidate in (
         ResearchCandidate.objects.filter(
             dossier=dossier, revision=dossier.current_revision
@@ -45,7 +49,11 @@ def pending_candidates(dossier, provider):
     ):
         if candidate_stale(candidate):
             continue
+        candidate = canonical_candidate(candidate)
         key = analysis_key(candidate, provider)
+        if key in seen:
+            continue
+        seen.add(key)
         # Reserved or failed calls have unknown costs and are never silently repeated.
         if (
             not ThesisEvidence.objects.filter(input_key=key).exists()
@@ -56,6 +64,9 @@ def pending_candidates(dossier, provider):
 
 
 def queue_run(dossier):
+    from .models import MaterialRelation
+    from .analysis import PROMPT_VERSION
+
     consent = (
         WatchConsent.objects.filter(dossier=dossier, active=True)
         .select_related("provider")
@@ -75,6 +86,13 @@ def queue_run(dossier):
             dossier.current_revision_id,
             versions,
             provider_signature(consent.provider) if consent else "no-consent",
+            PROMPT_VERSION,
+            MaterialRelation.objects.filter(
+                source__material__source__family=dossier.family
+            )
+            .order_by("-pk")
+            .values_list("pk", flat=True)
+            .first(),
         ]
     )
     run, _ = WatchRun.objects.get_or_create(
@@ -94,9 +112,16 @@ def run_cycle(family, *, collect=True, analyze=True, limit=3):
     try:
         results = []
         if collect:
-            for source in NewsSource.objects.filter(
-                family=family, enabled=True
-            ).exclude(adapter="official")[:8]:
+            due_sources = [
+                source
+                for source in NewsSource.objects.filter(family=family, enabled=True)
+                .exclude(adapter="official")
+                .order_by(F("last_checked_at").asc(nulls_first=True), "pk")
+                if not source.last_checked_at
+                or timezone.now() - source.last_checked_at
+                >= timedelta(minutes=max(15, source.interval_minutes))
+            ]
+            for source in due_sources[:8]:
                 results.append({"source": source.key, **collect_source(source)})
         import_official(family)
         recalled = 0

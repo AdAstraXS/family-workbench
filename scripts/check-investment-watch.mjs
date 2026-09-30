@@ -38,7 +38,7 @@ assert.equal(stale(data.articles[0],{...state,thesis:{...data.thesis,version:2}}
 const refs=o=>{if(!o||typeof o!=='object')return;if(o.$ref)assert.ok(o.$ref.slice(2).split('/').reduce((x,k)=>x?.[k],spec),o.$ref);Object.values(o).forEach(refs);};refs(spec);
 assert.deepEqual(spec.security,[{Session:[]}]);
 for(const schema of ['RuleInput','Annotation','Review','Run','Associate']){assert.equal(spec.components.schemas[schema].additionalProperties,false);assert.ok(!('owner_id' in spec.components.schemas[schema].properties));}
-assert.equal(spec.info.version,'0.3.0');
+assert.equal(spec.info.version,'0.4.0');
 assert.ok(spec.paths['/research/watch/news/']);
 assert.ok(spec.paths['/research/watch/news/{id}/associate/']);
 const demoApp=await readFile(new URL('demo/app.js',base),'utf8');

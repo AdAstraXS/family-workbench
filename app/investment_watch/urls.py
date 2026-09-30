@@ -3,6 +3,13 @@ from . import views
 
 app_name = "investment_watch"
 urlpatterns = [
+    path(
+        "versions/<int:pk>/relation/", views.material_relation, name="material_relation"
+    ),
+    path("sources/add/", views.source_edit, name="source_add"),
+    path("sources/<int:pk>/edit/", views.source_edit, name="source_edit"),
+    path("companies/add/", views.company_add, name="company_add"),
+    path("companies/<int:pk>/", views.company, name="company"),
     path("", views.news, name="index"),
     path("news/", views.news, name="news"),
     path("topics/", views.topics, name="topics"),

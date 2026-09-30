@@ -1,0 +1,9 @@
+<section class="iw-card"><h2>关联到我的研究</h2><p>先加入待分析候选，不会修改已有分析或正式判断。</p>
+<p><a href="{% url 'investment_watch:company_add' %}">添加关注公司 →</a></p>
+{% if dossiers %}<form method="post" action="{% url 'investment_watch:associate' version.material_id %}">{% csrf_token %}
+<input type="hidden" name="material_version" value="{{ version.pk }}"><input type="hidden" name="idempotency_key" value="{{ operation_key }}">
+<label>搜索已有研究公司<input type="search" id="company-search" placeholder="公司名称或证券代码"></label>
+<label>选择公司<select name="selection" id="company-selection" required><option value="">请选择</option>{% for d in dossiers %}<option value="{{ d.pk }}:{{ d.current_revision_id|default:0 }}">{{ d.security.name }} · {{ d.security.symbol }} · {{ d.security.market }}</option>{% endfor %}</select></label>
+<button{% if stale or version.status == 'withdrawn' %} disabled{% endif %}>关联到所选公司</button></form>
+<script>document.getElementById('company-search').addEventListener('input',function(){const q=this.value.toLocaleLowerCase();const s=document.getElementById('company-selection');for(const o of s.options){o.hidden=!!o.value&&!o.text.toLocaleLowerCase().includes(q);o.disabled=o.hidden;}if(s.selectedOptions[0]?.disabled)s.value='';});</script>
+{% else %}<p>尚无公司档案，可先添加关注公司。</p>{% endif %}</section>

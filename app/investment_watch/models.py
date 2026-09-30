@@ -18,6 +18,7 @@ class NewsSource(TimestampedModel):
     last_error = models.CharField(max_length=500, blank=True)
     cursor = models.JSONField(default=dict)
     public_metadata_only = models.BooleanField(default=True)
+    config = models.JSONField(default=dict, blank=True)
 
     class Meta:
         constraints = [
@@ -203,6 +204,11 @@ class ThesisEvidence(models.Model):
         ],
     )
     explanation = models.TextField()
+    source_claim = models.TextField(blank=True)
+    author_opinion = models.TextField(blank=True)
+    input_relation = models.ForeignKey(
+        "MaterialRelation", null=True, blank=True, on_delete=models.PROTECT
+    )
     quote = models.TextField(blank=True)
     locator = models.CharField(max_length=100, blank=True)
     conditions = models.TextField(blank=True)
@@ -303,3 +309,28 @@ class WorkerLease(models.Model):
     key = models.CharField(max_length=100, unique=True)
     token = models.CharField(max_length=64)
     expires_at = models.DateTimeField()
+
+
+class MaterialRelation(models.Model):
+    source = models.ForeignKey(
+        MaterialVersion, on_delete=models.PROTECT, related_name="relation_history"
+    )
+    target = models.ForeignKey(
+        MaterialVersion,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="related_reports",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=[
+            ("duplicate", "同一证据，无新增信息"),
+            ("followup", "新增进展"),
+            ("conflict", "存在矛盾"),
+            ("independent", "独立材料 / 撤销关系"),
+        ],
+    )
+    reason = models.CharField(max_length=500)
+    member = models.ForeignKey("family_core.FamilyMember", on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)

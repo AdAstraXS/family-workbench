@@ -7,7 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 from bs4 import BeautifulSoup
 from intelligence.http_client import fetch_public_url, SafeHttpError
-from intelligence.adapters import parse_rss_or_atom, _parse_datetime, _clean_text
+from intelligence.adapters import _parse_datetime, _clean_text
 from investment_research.models import OfficialResearchDocument
 from .models import NewsSource
 from .services import ingest, WatchError
@@ -160,25 +160,10 @@ def collect_source(source, fetcher=fetch_public_url, force=False):
         response = fetcher(source.url, headers=headers)
         if response.not_modified:
             rows = []
-        elif source.adapter == "rss":
-            rows = [
-                {
-                    "external_id": r.external_id,
-                    "title": r.title,
-                    "summary": r.excerpt,
-                    "url": r.canonical_url,
-                    "published_at": r.published_at,
-                }
-                for r in parse_rss_or_atom(
-                    response.body,
-                    base_url=source.url,
-                    max_items=min(source.max_items, 50),
-                )
-            ]
-        elif source.adapter in {"wallstreetcn", "huxiu", "zhitong", "caixin"}:
-            rows = parse_list(response.body, source)
         else:
-            raise WatchError("此来源没有已验证的解析器。")
+            from .source_templates import parse_source
+
+            rows = parse_source(response.body, source)
         added = 0
         skipped = 0
         for row in rows:

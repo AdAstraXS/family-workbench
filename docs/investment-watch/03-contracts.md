@@ -1,4 +1,18 @@
-# 接口契约 v0.3 · 已实现
+# 接口契约 v0.4 · 已实现边界
+
+## v0.4 新增表单接口
+
+| 方法 / 后缀 | 内容 |
+|---|---|
+| GET / POST companies/add/ | GET q 搜索已有股票；POST security 或 name/symbol/market，复用本人档案或建立无正式判断的探索档案；成功 302 到关注设置 |
+| GET companies/{id}/ | 本人公司研究总览，投研 / 新闻 / 综合分析分区；其他成员含管理员不能访问 |
+| POST rules/，action=preview | 用尚未保存的规则预览最近 500 份材料，最多显示 30 条命中；不写入、不联网 |
+| GET / POST sources/add/、sources/{id}/edit/ | 管理员 HTML 表单。action=test 安全获取公开列表；action=save 校验测试签名、保存为暂停来源；配置字段见页面示例 |
+| POST versions/{id}/relation/ | 管理员 kind、target、reason、expected；追加关系历史，版本冲突 409。目标只能是家庭内另一份有效材料，重复关系禁止循环；independent 撤销关联 |
+
+news/ 增加 dossier 参数，仅按本人的公司规则筛选阅读；主题页新增仅本人可见的公司入口，不混入公共主题 JSON。关联表单可提交 selection=dossier_id:revision_id，仍执行版本检查和幂等校验。旧 JSON 参数保留。
+
+新闻证据详情增加 source_claim、author_opinion。旧记录为空时不补造观点。综合分析最多纳入 10 条去重后有效新闻，原材料及判断版本冻结；不是自动覆盖上一份研究结论。
 
 正式页面使用 Django 模板；同一路由通过 `?format=json` 或 `Accept: application/json` 返回 JSON。纯表单操作在 [OpenAPI](openapi.json) 中标明，成功跳转 302。业务校验复用服务层。
 

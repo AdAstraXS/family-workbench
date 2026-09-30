@@ -21,7 +21,7 @@ from .research_ai import (
 from .services import DossierNotFound, _require_writer
 
 
-PROMPT_VERSION = "research-thesis-synthesis-v6"
+PROMPT_VERSION = "research-thesis-synthesis-v7"
 MARKET_EXPECTATION_QUESTION = re.compile(
     r"超越市场预期|超出市场预期|超预期|市场一致预期|分析师预期")
 
@@ -235,6 +235,8 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
         "所有解释只写定性判断，不另算金额、数量或百分比；指标数值已在财务概览展示。"
         "引用只能支持其对应的断言，不能将公司披露、AI 推断和成员观点混为一谈。"
         "标注为新闻来源的摘录是媒体报道，不等于官方披露；区分报道事实、作者观点与推断，保留出处和不确定性。"
+        "同时存在投研和新闻证据时，逐假设说明两类依据相互印证、矛盾或仍有缺口；多家转述同一披露不是多份独立事实。"
+        "结合新材料解释哪些条件发生变化；没有前次分析输入时，不虚构与前次结论的差异。"
         "在 reason、detail、boundary、implication 中用自然语言解释，不直接写 E 编号；编号只放在 evidence_ids。"
         "如果资料包不足以回答某项，verdict 设 unknown 并说清缺口。"
         "行情快照只说明某一时点的股价和TTM市盈率，不证明市场未来会提高倍数；"
@@ -304,6 +306,7 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                "preparation_problem": packet["problem"],
                "prompt_version": PROMPT_VERSION, "consent": "one_time",
                "news_snapshots": packet.get("news_snapshots", []),
+               "evidence_scope": "combined" if packet.get("news_snapshots") else "research",
                "estimated_max_cost_usd": str(estimated_cost)},
         sanitized_input={"source_count": len(packet["sources"]),
                          "evidence_count": len(evidence), "provided_characters": len(user_prompt),

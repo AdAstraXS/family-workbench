@@ -20,6 +20,8 @@ def selected_candidates(dossier):
 
 
 def append_news(packet, dossier):
+    from .events import canonical_version
+
     packet = {
         **packet,
         "evidence": list(packet["evidence"]),
@@ -28,11 +30,16 @@ def append_news(packet, dossier):
     snapshots = []
     seen = set()
     # Do not count imported official records a second time.
-    for candidate in selected_candidates(dossier).order_by("-pk")[:10]:
+    candidates = list(selected_candidates(dossier).order_by("-pk"))
+    for candidate in candidates:
         version = candidate.material_version
-        if version.material.official_document_id or version.original_chain in seen:
+        canonical = canonical_version(version)
+        chain = canonical.original_chain
+        if canonical.material.official_document_id or chain in seen:
             continue
-        seen.add(version.original_chain)
+        if len(snapshots) >= 10:
+            continue
+        seen.add(chain)
         text = version.title + "\n" + version.summary
         frozen = text[:1500]
         citation = {
@@ -67,4 +74,5 @@ def append_news(packet, dossier):
             }
         )
     packet["news_snapshots"] = snapshots
+    packet["news_selection_count"] = len(candidates)
     return packet

@@ -18,10 +18,15 @@ from .models import WatchConsent, ResearchCandidate, ThesisEvidence
 from .services import writer, dossier_for, digest, WatchError, candidate_stale
 from .budget import amount, reserve, settle
 
-PROMPT_VERSION = "watch-evidence-v1"
+PROMPT_VERSION = "watch-evidence-v2"
+_UNSET = object()
 
 
-def analysis_key(candidate, provider):
+def analysis_key(candidate, provider, relation=_UNSET):
+    from .events import latest_relation
+
+    if relation is _UNSET:
+        relation = latest_relation(candidate.material_version)
     return digest(
         [
             candidate.dossier.owner_id,
@@ -31,6 +36,7 @@ def analysis_key(candidate, provider):
             candidate.rule_version,
             provider_signature(provider),
             PROMPT_VERSION,
+            relation.pk if relation else None,
         ]
     )
 
@@ -105,7 +111,7 @@ def validate_result(raw, candidate):
             raise WatchError("模型引文不在本次材料中。")
         if direction != "unknown" and (len(quote.strip()) < 8 or quote not in text):
             raise WatchError("方向性结论必须提供可核查引文。")
-        for field in ("conditions", "gaps"):
+        for field in ("conditions", "gaps", "source_claim", "author_opinion"):
             if (
                 not isinstance(item.get(field, ""), str)
                 or len(item.get(field, "")) > 1200
@@ -121,6 +127,8 @@ def validate_result(raw, candidate):
                 "locator": f"text:{start}:{start + len(quote)}" if quote else "",
                 "conditions": item.get("conditions", ""),
                 "gaps": item.get("gaps", ""),
+                "source_claim": item.get("source_claim", ""),
+                "author_opinion": item.get("author_opinion", ""),
             }
         )
         seen.add(key)
@@ -141,6 +149,13 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
         raise WatchError("模型调用未启用，材料保留为待分析候选。")
     if candidate_stale(candidate) or not targets(candidate.dossier.current_revision):
         raise WatchError("材料或判断已变更，或尚未保存正式假设。")
+    from .events import canonical_candidate
+
+    canonical = canonical_candidate(candidate)
+    if canonical.pk != candidate.pk:
+        return analyze_candidate(
+            canonical.pk, transport=transport, url_validator=url_validator
+        )
     consent = (
         WatchConsent.objects.select_related("provider")
         .filter(dossier=candidate.dossier, active=True)
@@ -165,12 +180,24 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
     if not api_key:
         raise WatchError("模型密钥尚未配置。")
     revision = candidate.dossier.current_revision
-    key = analysis_key(candidate, provider)
+    from .events import latest_relation
+
+    relation = latest_relation(candidate.material_version)
+    key = analysis_key(candidate, provider, relation)
     if ThesisEvidence.objects.filter(input_key=key).exists():
         return 0
     prompt = (Path(__file__).parent / "prompts" / "evidence.txt").read_text(
         encoding="utf-8"
     )
+    previous = None
+    if relation and relation.target and relation.kind in {"followup", "conflict"}:
+        previous = {
+            "relation_id": relation.pk,
+            "kind": relation.kind,
+            "title": relation.target.title,
+            "excerpt": relation.target.summary,
+            "review_reason": relation.reason,
+        }
     user = json.dumps(
         {
             "thesis": revision.thesis[:3000],
@@ -178,6 +205,7 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
             "title": candidate.material_version.title,
             "excerpt": candidate.material_version.summary,
             "published_at": str(candidate.material_version.published_at),
+            "previous_material": previous,
             "status": candidate.material_version.status,
         },
         ensure_ascii=False,
@@ -226,7 +254,11 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
             # Freeze against the input revision; changed inputs are retained as stale history.
             for row in rows:
                 ThesisEvidence.objects.create(
-                    candidate=candidate, revision=revision, input_key=key, **row
+                    candidate=candidate,
+                    revision=revision,
+                    input_key=key,
+                    input_relation=relation,
+                    **row,
                 )
             candidate.status = (
                 "stale" if locked.current_revision_id != revision.pk else "analyzed"
