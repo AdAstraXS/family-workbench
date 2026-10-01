@@ -189,7 +189,7 @@ class MaterialTests(TestCase):
     def test_results_for_quarter_headline_and_unknown_audit_status(self):
         from .sec_financial_overview import report_info
         version, _ = save_material(self.security, "quarter", "sec_document", "release",
-            text="MICRON REPORTS RESULTS FOR THE THIRD QUARTER OF FISCAL 2026. Quarter ended May 28, 2026.",
+            text="MICRON REPORTS RECORD RESULTS FOR THE\n\nTHIRD QUARTER OF FISCAL 2026. Quarter ended May 28, 2026.",
             data={"document_type": "8-k", "filing_date": "2026-06-24"})
         info = report_info(version)
         self.assertTrue(info["earnings"])
