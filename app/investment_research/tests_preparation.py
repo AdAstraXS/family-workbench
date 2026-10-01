@@ -213,3 +213,4 @@ class PreparationTests(TestCase):
         self.assertIn("2026-03-31", content)
         self.assertIn("CNY", content)
         self.assertIn("单季", content)
+        self.assertIn("全年", content)
