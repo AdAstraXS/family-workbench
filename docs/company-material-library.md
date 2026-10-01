@@ -123,3 +123,14 @@ DB 和 OpenD 运行周期、健康状态未变，未新增计划任务，未修�
 https://openapi.futunn.com/futu-api-doc/quote/get-company-profile.html
 https://openapi.futunn.com/futu-api-doc/quote/get-industrial-chain-detail.html
 https://openapi.futunn.com/futu-api-doc/quote/get-research-analyst-consensus.html
+
+本次修订已部署 `be614c629c3b19a3ce112e5bd4bcd1ac89451209` 并推送远端。
+401 项 PostgreSQL 回归通过；浏览器核对桌面、窄屏、NAS 真实存档读取与停用入口。
+无新增迁移、无资料删除、无采集任务触发；原业务七项基线及配置哈希与修订前一致。
+内部 HTTP 跳转 HTTPS 正常，DB / OpenD 健康周期未变。
+
+修订前备份：`family-workbench-material-reading-20261001.dump`（约 46 MiB，pg_restore 校验通过），
+SHA-256 `2212753f6b520c2a5e0886889e137e7274454fa3a1b8abaab3eb13edc0ea3cc9`。
+源码回滚包：`source-predeploy-52667e7ec30b90c963669bb5e48ef8b6c0ddcd56-20261001-211917.tar.gz`，
+SHA-256 `0487547451fdf5fa2ffbe0d5c10293149740fe1aebe25e73e6e5bf4b071074f8`。
+以上均位于 NAS 既有 backups 目录。
