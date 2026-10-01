@@ -29,7 +29,7 @@ def reading_sections(version):
                     sections.append({"title": label, "text": value["context"],
                                      "date": value.get("update_time_str", "")})
     elif version.material.kind == "ratings":
-        labels = {"buy": "买入", "hold": "持有", "sell": "卖出", "strong_buy": "强烈买入", "underperform": "跑输大盘",
+        labels = {"buy": "买入占比", "hold": "持有占比", "sell": "卖出占比", "strong_buy": "强烈买入占比", "underperform": "跑输大盘占比",
                   "buy_count": "买入", "hold_count": "持有", "sell_count": "卖出",
                   "strong_buy_count": "强烈买入", "strong_sell_count": "强烈卖出",
                   "analyst_count": "分析师数量", "rating": "评级", "rating_name": "评级",
@@ -39,6 +39,9 @@ def reading_sections(version):
                 for k, v in value.items():
                     if k in labels and not isinstance(v, (dict, list)):
                         display = {"BUY": "买入", "HOLD": "持有", "SELL": "卖出", "STRONG_BUY": "强烈买入", "UNDERPERFORM": "跑输大盘"}.get(str(v), str(v))
+                        if k in {"buy", "hold", "sell", "strong_buy", "underperform"}:
+                            ratio = number(v)
+                            display = f"{ratio:,.2f}%" if ratio is not None else "来源未标注"
                         sections.append({"title": labels[k], "text": display})
                     elif isinstance(v, (dict, list)):
                         walk(v)
@@ -127,7 +130,7 @@ STEPS = (
 
 
 def inventory(security):
-    materials = list(CompanyMaterial.objects.filter(security=security).exclude(kind__in=["labels", "statement", "sec_index"]).order_by("kind", "title"))
+    materials = list(CompanyMaterial.objects.filter(security=security).exclude(kind__in=["labels", "statement", "sec_index"]).exclude(source_url__endswith="-index-headers.html").order_by("kind", "title"))
     refs = []
     for material in materials:
         version = material.versions.annotate(text_size=Length("text")).only("id", "number", "report_date", "fetched_at").first()

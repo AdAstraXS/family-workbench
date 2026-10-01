@@ -156,7 +156,7 @@ def collect_financials(security, code, context):
         raise ValueError("富途未返回可用的报表或主营构成，已有版本仍保留。")
     data = {"statements": statements, "breakdown": breakdown, "breakdown_error": breakdown_error, "warnings": errors}
     FutuFinancialSnapshot.objects.update_or_create(security=security, defaults={
-        "provider_code": code, "data": data, "fetched_at": timezone.now(), "last_error": ""})
+        "provider_code": code, "data": data, "fetched_at": timezone.now(), "last_error": "；".join(errors)[:500]})
     tables = statement_tables(statements, code)
     missing = sum(t["missing_names"] for t in tables)
     _, changed = save_material(security, "financials", "financials", SOURCE_TASKS["financials"],

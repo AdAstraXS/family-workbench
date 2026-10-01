@@ -32,5 +32,7 @@ def save_material(security, key, kind, title, *, source_url="", raw=None,
 
 
 def record_failure(security, key, kind, title, error):
-    CompanyMaterial.objects.update_or_create(security=security, key=key,
-        defaults={"kind": kind, "title": title, "checked_at": timezone.now(), "last_error": str(error)[:500]})
+    material, _ = CompanyMaterial.objects.get_or_create(security=security, key=key,
+        defaults={"kind": kind, "title": title})
+    CompanyMaterial.objects.filter(pk=material.pk).update(
+        checked_at=timezone.now(), last_error=str(error)[:500], updated_at=timezone.now())

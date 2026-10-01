@@ -12,7 +12,7 @@ from .company_sources import SOURCE_TASKS
 from .models import CompanyIdentity, CompanyMaterialVersion
 from .services import ResearchValidationError
 from .material_reading import inventory, reading_sections, fact_rows
-from .futu_financials import statement_tables, breakdown_tables
+from .futu_financials import statement_tables, breakdown_tables, provider_code
 
 
 @login_required
@@ -62,7 +62,9 @@ def library(request, pk):
                 else dossier.security.market in {"US", "HK", "CN", "CN_B"}} for k, v in SOURCE_TASKS.items()]
     return render(request, "investment_research/material_library.html", {
         "dossier": dossier, "identity": identity, "identity_info": info,
-        "materials": materials, "manifest": manifest, "sources": sources,
+        "materials": [m for m in materials if m.kind != "sec_document"],
+        "sec_materials": [m for m in materials if m.kind == "sec_document"],
+        "manifest": manifest, "sources": sources,
         "job": job, "active": active, "can_write": is_writer(member)})
 
 
@@ -83,7 +85,7 @@ def read(request, pk, version_pk):
     return render(request, "investment_research/material_read.html", {
         "dossier": dossier, "version": version, "sections": reading_sections(version),
         "facts": fact_rows(data) if version.material.kind == "facts" else [],
-        "tables": statement_tables(data.get("statements", [])) if version.material.kind == "financials" else [],
+        "tables": statement_tables(data.get("statements", []), provider_code(dossier.security)) if version.material.kind == "financials" else [],
         "groups": breakdown_tables(data.get("breakdown")) if version.material.kind == "financials" else [],
         "versions": version.material.versions.only("id", "number", "fetched_at", "report_date"),
     })

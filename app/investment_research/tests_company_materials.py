@@ -22,6 +22,14 @@ from .material_reading import fact_rows
 
 
 class DisplayTests(SimpleTestCase):
+    def test_ratings_show_source_percentage_without_rescaling(self):
+        from .material_reading import reading_sections
+        version = SimpleNamespace(material=SimpleNamespace(kind="ratings"),
+            data={"payload": {"buy": "60.0", "hold": "30", "sell": "10", "total": 10}})
+        sections = reading_sections(version)
+        self.assertEqual(sections[0], {"title": "买入占比", "text": "60.00%"})
+        self.assertEqual(sections[-1], {"title": "样本数量", "text": "10"})
+
     def test_paginated_sdk_result_preserves_cursor_without_guessing(self):
         from .company_sources import call
         context = SimpleNamespace(get_industrial_chain_list=lambda *a, **k: (0, [{"name": "汽车"}], "opaque", 12))
@@ -93,8 +101,9 @@ class MaterialTests(TestCase):
         self.assertEqual(first.pk, second.pk)
         third, changed = save_material(self.security, "profile", "profile", "公司概况", data={"a": "2"})
         self.assertEqual(third.number, 2)
-        record_failure(self.security, "profile", "profile", "公司概况", "fail")
+        record_failure(self.security, "profile", "profile", "失败任务的通用标题", "fail")
         first.refresh_from_db()
+        self.assertEqual(first.material.title, "公司概况")
         self.assertEqual(json.loads(gzip.decompress(bytes(first.raw_gzip))), {"a": "1"})
         self.assertEqual(CompanyMaterialVersion.objects.count(), 2)
 
@@ -141,6 +150,19 @@ class MaterialTests(TestCase):
         _, manifest = inventory(self.security)
         self.assertEqual(manifest["steps"][0]["status"], "待补充")
         self.assertEqual(manifest["steps"][-1]["status"], "待分析")
+
+    def test_source_warnings_and_sec_index_headers_are_not_evidence(self):
+        from .material_reading import inventory
+        version, _ = save_material(self.security, "financials", "financials", "财务资料",
+            data={"warnings": ["现金流量表本次获取失败，已有版本仍保留。"]})
+        save_material(self.security, "sec:header", "sec_document", "索引头",
+            source_url="https://www.sec.gov/Archives/edgar/data/1/1/1-index-headers.html", text="index")
+        self.client.force_login(self.actor.user)
+        url = reverse("investment_research:material_read", args=[self.dossier.pk, version.pk])
+        self.assertContains(self.client.get(url), "现金流量表本次获取失败")
+        materials, manifest = inventory(self.security)
+        self.assertEqual([m.key for m in materials], ["financials"])
+        self.assertFalse(any(ref["title"] == "索引头" for step in manifest["steps"] for ref in step["materials"]))
 
 
 @skipUnless(connection.vendor == "postgresql", "Row locks require PostgreSQL")

@@ -60,7 +60,7 @@ def download(security, cik, record, client=None):
         if name == record["primary_document"] or not re.fullmatch(r"[A-Za-z0-9_.-]+\.(?:htm|html|pdf)", name, re.I):
             continue
         # Skip XBRL rendered tables; select narrative exhibits/report attachments.
-        if re.fullmatch(r"R\d+\.html?", name, re.I) or name.endswith("-index.html"):
+        if re.fullmatch(r"R\d+\.html?", name, re.I) or name.endswith(("-index.html", "-index-headers.html")):
             continue
         candidates.append(name)
     if len(candidates) > 12:
