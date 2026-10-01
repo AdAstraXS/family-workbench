@@ -186,6 +186,16 @@ class MaterialTests(TestCase):
         save_material(other, "release", "sec_document", "release", text="Reports financial results", data=record)
         self.assertEqual(financial_overview(self.security)["releases"], [])
 
+    def test_results_for_quarter_headline_and_unknown_audit_status(self):
+        from .sec_financial_overview import report_info
+        version, _ = save_material(self.security, "quarter", "sec_document", "release",
+            text="MICRON REPORTS RESULTS FOR THE THIRD QUARTER OF FISCAL 2026. Quarter ended May 28, 2026.",
+            data={"document_type": "8-k", "filing_date": "2026-06-24"})
+        info = report_info(version)
+        self.assertTrue(info["earnings"])
+        self.assertEqual(info["period"], "2026-05-28")
+        self.assertEqual(info["audit"], "审计状态请见原文")
+
     def test_read_download_and_get_do_not_fetch_or_write(self):
         version, _ = save_material(self.security, "profile", "profile", "公司概况", data={"payload": [{"name": "业务", "value": "制造"}]})
         self.client.force_login(self.actor.user)

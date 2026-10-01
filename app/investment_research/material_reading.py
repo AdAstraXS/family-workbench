@@ -142,7 +142,12 @@ def fact_rows(data, frequency="annual"):
                     if not previous or value.get("filed", "") > previous.get("filed", ""):
                         by_period[period] = {**value, "duration": duration}
                 selected = sorted(by_period.items(), key=lambda item: (item[0][1], item[0][0]), reverse=True)
-                for (start, end), value in selected[:12 if frequency == "quarterly" else 3]:
+                counts = {}
+                for (start, end), value in selected:
+                    bucket = value["duration"] if frequency == "quarterly" else "annual"
+                    if counts.get(bucket, 0) >= 3:
+                        continue
+                    counts[bucket] = counts.get(bucket, 0) + 1
                     rows.append({"label": CORE_FACTS[code], "source_label": fact.get("label", ""),
                         "code": code, "start": start, "end": end, "value": number(value.get("val")),
                         "period": f"{start} — {end}" if start else end, "currency": unit,

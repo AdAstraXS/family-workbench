@@ -53,4 +53,6 @@ def fact_tables(data, frequency="annual"):
                                     "filed": max((r["filed"] or "" for r in values if (r["start"], r["end"]) == (start, end)), default="")}
                                    for start, end in periods]})
     category_order = {"年度经营数据": 0, "年末资产与负债": 1, "每股数据": 2}
+    if frequency == "quarterly":
+        category_order = {title: i for i, title in enumerate(("单季经营数据", "单季每股数据", "期末资产与负债", "半年累计经营数据", "半年累计每股数据", "九个月累计经营数据", "九个月累计每股数据"))}
     return sorted(tables, key=lambda t: (t["standard"], t["currency"], category_order.get(t["title"], 3), t["title"]))

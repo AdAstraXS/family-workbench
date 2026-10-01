@@ -13,7 +13,7 @@ def report_info(version):
     if headline is None:
         headline = (version.text or "")[:4000]
     announcement = re.search(
-        r"(?:reports?|announces?).{0,180}(?:financial results|quarter.{0,70}results|full.year.{0,70}results)|业绩公告|财务业绩",
+        r"(?:reports?|announces?).{0,180}(?:financial results|quarter.{0,70}results|full.year.{0,70}results)|(?:reports?|announces?)\s+(?:financial\s+)?results\s+for.{0,100}(?:quarter|fiscal|year)|业绩公告|财务业绩",
         headline, re.I | re.S)
     earnings = form in {"8-K", "6-K"} and bool(announcement)
     period = ""
