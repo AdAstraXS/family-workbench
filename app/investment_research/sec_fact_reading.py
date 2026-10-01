@@ -5,12 +5,14 @@ from .material_reading import fact_rows, CORE_FACTS
 from .number_display import CURRENCIES
 
 
-def fact_tables(data):
+def fact_tables(data, frequency="annual"):
     groups = defaultdict(list)
-    for row in fact_rows(data):
+    for row in fact_rows(data, frequency):
         if not row["end"]:
             continue
         category = "每股数据" if row["currency"].endswith("/shares") else "年度经营数据" if row["start"] else "年末资产与负债"
+        if frequency == "quarterly":
+            category = (row["duration"] + ("每股数据" if row["currency"].endswith("/shares") else "经营数据")) if row["start"] else "期末资产与负债"
         groups[(row["standard"], row["currency"], category)].append(row)
     tables = []
     order = {code: i for i, code in enumerate(CORE_FACTS)}
@@ -47,6 +49,8 @@ def fact_tables(data):
             rows.append({"label": title, "code": code, "source_label": next(r["source_label"] for r in values if r["code"] == code), "cells": cells})
         tables.append({"title": category, "standard": standard, "currency": currency,
                        "unit": display_unit, "rows": rows, "has_alternatives": any(v > 1 for v in counts.values()),
-                       "periods": [{"year": end[:4], "start": start, "end": end} for start, end in periods]})
+                       "periods": [{"year": end[:4] if frequency == "annual" else end, "start": start, "end": end,
+                                    "filed": max((r["filed"] or "" for r in values if (r["start"], r["end"]) == (start, end)), default="")}
+                                   for start, end in periods]})
     category_order = {"年度经营数据": 0, "年末资产与负债": 1, "每股数据": 2}
-    return sorted(tables, key=lambda t: (t["standard"], t["currency"], category_order[t["title"]]))
+    return sorted(tables, key=lambda t: (t["standard"], t["currency"], category_order.get(t["title"], 3), t["title"]))

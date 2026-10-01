@@ -11,6 +11,7 @@
     <a class="button" href="{% url 'investment_research:company_research' dossier.pk %}">进入公司研究</a></header>
   <nav class="material-tabs" aria-label="公司资料导航"><a href="#library">公司资料</a><a href="#inventory">五步资料清单</a><a href="#acquisition">获取与更新</a><a href="{% url 'investment_research:documents' dossier.pk %}">已有官方资料</a></nav>
   <section id="library"><h2>已保存的资料</h2><p class="research-private-note">点开阅读整理后的内容，也可查看历史版本和下载原件。原有官方资料继续保留。</p>
+    {% if sec_materials or facts_version %}{% include "investment_research/sec_financial_overview.html" %}{% endif %}
     <div class="material-grid">{% for item in materials %}{% include "investment_research/material_card.html" %}{% empty %}<article class="research-current"><h3>开始积累这家公司的资料</h3><p>选择下方可用来源获取资料。已有的 SEC、IR 文件可从“已有官方资料”进入。</p></article>{% endfor %}</div>
     {% if sec_materials %}<details class="research-current"><summary>SEC 报告与附件 · {{ sec_materials|length }} 项</summary><p class="material-meta">年报、近期公告及其附件，按原报告保存，可逐份阅读和重试。</p><div class="material-grid">{% for item in sec_materials %}{% include "investment_research/material_card.html" %}{% endfor %}</div></details>{% endif %}
   </section>

@@ -1,5 +1,5 @@
 <article class="research-current"><h3>{{ item.title }}</h3>
-      {% if item.latest %}<p class="material-meta">报告期 {{ item.latest.report_date|default:"来源未标注" }}<br>获取于 {{ item.latest.fetched_at|date:"Y-m-d H:i" }} · 第 {{ item.latest.number }} 版</p>
+      {% if item.latest %}<p class="material-meta">{% if item.kind == 'facts' %}报告期见年度财务与季度财务{% else %}报告期 {{ item.latest.report_date|default:"来源未标注" }}{% endif %}<br>获取于 {{ item.latest.fetched_at|date:"Y-m-d H:i" }} · 第 {{ item.latest.number }} 版</p>
       <a href="{% url 'investment_research:material_read' dossier.pk item.latest.pk %}">阅读资料 →</a>{% else %}<p>尚未取得可用内容</p>{% endif %}
       {% if item.last_error %}<p class="research-source-error">{{ item.last_error }}</p>{% endif %}
       {% if item.retired %}<p class="material-meta">已停止采集，不纳入五步资料清单。</p>{% elif can_write and not active %}<form method="post" style="margin-top:12px">{% csrf_token %}<input type="hidden" name="source" value="{{ item.key }}"><button type="submit">{% if item.last_error %}重试此项{% else %}更新此项{% endif %}</button></form>{% endif %}

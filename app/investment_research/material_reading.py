@@ -107,7 +107,7 @@ CORE_FACTS = {
 }
 
 
-def fact_rows(data):
+def fact_rows(data, frequency="annual"):
     rows = []
     for taxonomy, facts in data.get("facts", {}).items():
         if taxonomy not in {"us-gaap", "ifrs-full"}:
@@ -120,27 +120,35 @@ def fact_rows(data):
                     continue
                 by_period = {}
                 for value in values:
-                    if value.get("form") not in {"10-K", "20-F", "40-F", "10-K/A", "20-F/A", "40-F/A"}:
+                    forms = {"10-Q", "10-Q/A"} if frequency == "quarterly" else {"10-K", "20-F", "40-F", "10-K/A", "20-F/A", "40-F/A"}
+                    if value.get("form") not in forms:
                         continue
                     start, end = value.get("start", ""), value.get("end", "")
+                    duration = "时点"
                     if start:
                         from datetime import date
                         try:
                             days = (date.fromisoformat(end) - date.fromisoformat(start)).days
                         except ValueError:
                             continue
-                        if not 330 <= days <= 380:
+                        if frequency == "quarterly":
+                            duration = next((label for low, high, label in ((60, 120, "单季"), (150, 210, "半年累计"), (240, 300, "九个月累计")) if low <= days <= high), "")
+                            if not duration:
+                                continue
+                        elif not 330 <= days <= 380:
                             continue
                     period = (start, end)
                     previous = by_period.get(period)
                     if not previous or value.get("filed", "") > previous.get("filed", ""):
-                        by_period[period] = value
-                for (start, end), value in sorted(by_period.items(), reverse=True)[:3]:
+                        by_period[period] = {**value, "duration": duration}
+                selected = sorted(by_period.items(), key=lambda item: (item[0][1], item[0][0]), reverse=True)
+                for (start, end), value in selected[:12 if frequency == "quarterly" else 3]:
                     rows.append({"label": CORE_FACTS[code], "source_label": fact.get("label", ""),
                         "code": code, "start": start, "end": end, "value": number(value.get("val")),
                         "period": f"{start} — {end}" if start else end, "currency": unit,
                         "standard": "IFRS" if taxonomy == "ifrs-full" else "US GAAP",
                         "amount": money(value.get("val"), unit.split("/")[0], per_share=unit.endswith("/shares")),
+                        "duration": value["duration"], "form": value.get("form"),
                         "filed": value.get("filed"), "accession": value.get("accn")})
     return rows
 

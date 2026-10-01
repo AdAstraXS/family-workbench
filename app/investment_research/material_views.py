@@ -13,6 +13,7 @@ from .models import CompanyIdentity, CompanyMaterialVersion
 from .services import ResearchValidationError
 from .material_reading import inventory, reading_sections, profile_content
 from .sec_fact_reading import fact_tables
+from .sec_financial_overview import financial_overview, report_info
 from .futu_financials import statement_tables, breakdown_tables, provider_code
 
 
@@ -68,6 +69,8 @@ def library(request, pk):
         "materials": [m for m in materials if m.kind != "sec_document" and not m.retired],
         "retired_materials": [m for m in materials if m.retired],
         "sec_materials": [m for m in materials if m.kind == "sec_document"],
+        "sec_overview": financial_overview(dossier.security),
+        "facts_version": next((m.latest for m in materials if m.kind == "facts"), None),
         "manifest": manifest, "sources": sources,
         "job": job, "active": active, "can_write": is_writer(member)})
 
@@ -89,6 +92,10 @@ def read(request, pk, version_pk):
     return render(request, "investment_research/material_read.html", {
         "dossier": dossier, "version": version, "sections": reading_sections(version),
         "fact_tables": fact_tables(data) if version.material.kind == "facts" else [],
+        "quarterly_tables": fact_tables(data, "quarterly") if version.material.kind == "facts" else [],
+        "sec_overview": financial_overview(dossier.security) if version.material.kind == "facts" else None,
+        "facts_version": version if version.material.kind == "facts" else None,
+        "sec_report": report_info(version) if version.material.kind == "sec_document" else None,
         "profile": profile_content(data) if version.material.kind == "profile" else None,
         "retired": version.material.kind in RETIRED_SOURCES,
         "tables": statement_tables(data.get("statements", []), provider_code(dossier.security)) if version.material.kind == "financials" else [],

@@ -22,6 +22,20 @@ from .material_reading import fact_rows
 
 
 class DisplayTests(SimpleTestCase):
+    def test_quarterly_separates_single_quarter_and_cumulative_without_deriving_values(self):
+        from .sec_fact_reading import fact_tables
+        values = [{"start": start, "end": "2026-09-30", "val": val, "form": "10-Q",
+                   "filed": "2026-11-01", "accn": "q"}
+                  for start, val in [("2026-07-01", 300), ("2026-04-01", 600), ("2026-01-01", 900)]]
+        values += [{**values[0], "form": "10-Q/A", "filed": "2026-11-02", "val": 301},
+                   {**values[0], "form": "8-K", "val": 999}]
+        data = {"facts": {"us-gaap": {"Revenues": {"units": {"USD": values}}}}}
+        self.assertEqual(fact_tables(data), [])
+        tables = {t["title"]: t for t in fact_tables(data, "quarterly")}
+        self.assertEqual(set(tables), {"单季经营数据", "半年累计经营数据", "九个月累计经营数据"})
+        self.assertEqual(tables["单季经营数据"]["rows"][0]["cells"][0]["amount"], "301.00")
+        self.assertEqual(tables["九个月累计经营数据"]["rows"][0]["cells"][0]["amount"], "900.00")
+
     def test_sec_tables_align_years_and_keep_units_separate(self):
         from .sec_fact_reading import fact_tables
         def annual(year, val, **extra):
@@ -137,6 +151,40 @@ class MaterialTests(TestCase):
         self.assertEqual(first.material.title, "公司概况")
         self.assertEqual(json.loads(gzip.decompress(bytes(first.raw_gzip))), {"a": "1"})
         self.assertEqual(CompanyMaterialVersion.objects.count(), 2)
+
+    def test_saved_earnings_are_visible_separately_from_annual_and_quarterly(self):
+        from .sec_financial_overview import financial_overview
+        text = "Reports Fiscal Fourth-Quarter and Full-Year 2026 Results. The fiscal year ended September 3, 2026. Statements (Unaudited)."
+        record = {"document_type": "8-k", "filing_date": "2026-09-30", "accession": "release"}
+        save_material(self.security, "cover", "sec_document", "8-K", text=text, data=record)
+        exhibit, _ = save_material(self.security, "exhibit", "sec_document", "EX99", text=text,
+            data={**record, "attachment": "release.htm"}, report_date="2026-09-30")
+        save_material(self.security, "other", "sec_document", "press-release.htm", text="Announces a new director.", data=record)
+        save_material(self.security, "annual", "sec_document", "10-K", text="Annual report", report_date="2025-08-28",
+            data={"document_type": "10-k", "filing_date": "2025-10-03"})
+        facts, _ = save_material(self.security, "facts", "facts", "SEC 财务指标", data={})
+        overview = financial_overview(self.security)
+        self.assertEqual(len(overview["releases"]), 1)
+        self.assertEqual(overview["releases"][0]["version"].pk, exhibit.pk)
+        self.assertEqual(overview["releases"][0]["period"], "2026-09-03")
+        self.assertEqual(overview["releases"][0]["audit"], "未经审计（原文标注）")
+        self.assertEqual(overview["annual"][0]["period"], "2025-08-28")
+        self.client.force_login(self.actor.user)
+        for url in [reverse("investment_research:materials", args=[self.dossier.pk]),
+                    reverse("investment_research:material_read", args=[self.dossier.pk, facts.pk])]:
+            response = self.client.get(url)
+            for label in ["最新业绩公告", "年度财务", "季度财务", "全年业绩公告", "2026-09-03", "未经审计"]:
+                self.assertContains(response, label)
+        self.assertEqual(CompanyMaterialVersion.objects.count(), 5)
+
+    def test_release_detection_uses_latest_version_and_current_security(self):
+        from .sec_financial_overview import financial_overview
+        record = {"document_type": "8-k", "filing_date": "2026-09-30"}
+        save_material(self.security, "release", "sec_document", "release", text="Reports financial results", data=record)
+        save_material(self.security, "release", "sec_document", "release", text="Corrected unrelated document", data=record)
+        other = Security.objects.create(symbol="OTHER", name="Other", market="US", asset_type="stock")
+        save_material(other, "release", "sec_document", "release", text="Reports financial results", data=record)
+        self.assertEqual(financial_overview(self.security)["releases"], [])
 
     def test_read_download_and_get_do_not_fetch_or_write(self):
         version, _ = save_material(self.security, "profile", "profile", "公司概况", data={"payload": [{"name": "业务", "value": "制造"}]})
