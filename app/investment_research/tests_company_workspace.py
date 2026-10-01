@@ -34,30 +34,43 @@ class CompanyWorkspaceTests(TestCase):
 
     def test_original_page_and_news_entry_are_one_workspace(self):
         self.client.force_login(self.user)
-        response = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
-        for text in ("研究结论", "最新变化", "证据资料", "我的正式判断", "财务概览"):
+        response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]))
+        for text in ("公司研究", "最新变化", "证据资料", "当前判断", "财务概览"):
             self.assertContains(response, text)
         self.assertRedirects(self.client.get(reverse("investment_watch:company", args=[self.dossier.pk])),
-                             reverse("investment_research:detail", args=[self.dossier.pk]))
+                             reverse("investment_research:company_research", args=[self.dossier.pk]))
 
     def test_reading_all_three_views_does_not_write_or_call_model(self):
         self.news("pending")
         self.client.force_login(self.user)
         for view in ("conclusion", "changes", "evidence"):
             with CaptureQueriesContext(connection) as queries:
-                response = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]), {"view": view})
+                response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]), {"view": view})
             self.assertEqual(response.status_code, 200)
             self.assertFalse(any(query["sql"].lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for query in queries))
 
     def test_private_workspace_has_no_administrator_bypass(self):
         self.client.force_login(self.other_user)
-        self.assertEqual(self.client.get(reverse("investment_research:detail", args=[self.dossier.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk])).status_code, 404)
+
+    def test_original_judgment_and_company_list_keep_original_structure(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
+        self.assertTemplateUsed(response, "investment_research/detail.html")
+        for text in ("1 · 当前判断", "2 · 财务概览", "3 · 公司研究", "次日跟踪", "官方资料", "个股行情与估值"):
+            self.assertContains(response, text)
+        self.assertContains(response, self.dossier.current_revision.thesis)
+        self.assertNotContains(response, 'css/company-research.css')
+        listing = self.client.get(reverse("investment_research:index"))
+        for text in ("标的", "当前判断", "更新时间"):
+            self.assertContains(listing, text)
+        self.assertContains(listing, reverse("investment_research:company_research", args=[self.dossier.pk]))
 
     def test_evidence_filter_respects_citations_and_type(self):
         self.generate()
         self.news("not-analyzed")
         self.client.force_login(self.user)
-        response = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]),
+        response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]),
                                    {"view": "evidence", "source_type": "official", "assumption": "pillar:0"})
         self.assertEqual(len(response.context["official_rows"]), 1)
         self.assertEqual(response.context["news_rows"], [])
@@ -120,7 +133,8 @@ class CompanyWorkspaceTests(TestCase):
         baseline.refresh_from_db()
         self.assertEqual(baseline.scope, original_scope)
         self.client.force_login(self.user)
-        response = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
+        response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]),
+                                   {"view": "changes"})
         self.assertEqual(response.context["pending_news_count"], 0)
 
     def test_material_selection_returns_to_original_company_page(self):
@@ -128,5 +142,5 @@ class CompanyWorkspaceTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.post(reverse("investment_watch:select_research", args=[candidate.pk]),
                                     {"return_to": "company"})
-        self.assertRedirects(response, reverse("investment_research:detail", args=[self.dossier.pk]) + "?view=changes")
+        self.assertRedirects(response, reverse("investment_research:company_research", args=[self.dossier.pk]) + "?view=changes")
         self.assertFalse(ResearchCandidate.objects.get(pk=candidate.pk).selected_for_research)

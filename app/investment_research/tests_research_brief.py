@@ -102,7 +102,12 @@ class ResearchBriefTests(TestCase):
         self.assertContains(response, "161.05")
         self.assertContains(response, "波段辅助")
         self.assertContains(self.client.get(reverse("investment_research:detail",
-                                                    args=[self.dossier.pk])), url)
+                                                    args=[self.dossier.pk])),
+                            reverse("investment_research:company_research", args=[self.dossier.pk]))
+        unified = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]))
+        self.assertEqual(unified.context["analysis"].pk, analysis.pk)
+        for text in ("财报、SEC 与 IR", "相关新闻", "综合分析与判断", "估值试算", "最新变化", "证据资料"):
+            self.assertContains(unified, text)
         legacy = self.client.get(url + "?mode=audit")
         self.assertContains(legacy, "公司研究简报")
         self.assertNotContains(legacy, "逐项核查")

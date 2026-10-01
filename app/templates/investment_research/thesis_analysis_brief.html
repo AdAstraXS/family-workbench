@@ -14,14 +14,7 @@
       <a href="{% url 'portfolio:stock_market_detail' dossier.security.pk %}">查看个股行情与估值 →</a>
     </div>
   </header>
-  <nav class="research-brief-tabs" aria-label="研究视图">
-    <a href="{% url 'investment_research:detail' dossier.pk %}">研究结论</a>
-    <a href="{% url 'investment_research:detail' dossier.pk %}?view=changes">最新变化</a>
-    <a href="{% url 'investment_research:detail' dossier.pk %}?view=evidence">证据资料</a>
-    <span aria-current="page">本次报告</span>
-    <a href="{% url 'investment_research:next_day_tracking' dossier.pk %}">次日跟踪</a>
-    <a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">生成新分析</a>
-  </nav>
+  {% include "investment_research/company_navigation.html" %}
   {% if not is_current_revision %}<div class="research-document-empty">这是按旧版判断生成的研究简报。当前判断已修改；请按生成时的语境阅读。</div>{% endif %}
   <p><a href="{% url 'investment_watch:items' %}?dossier={{ dossier.pk }}">查看新闻与证据变化{% if new_candidate_count %} · 此后新增 {{ new_candidate_count }} 条候选{% endif %} →</a></p>
   {% if analysis.scope.news_snapshots %}<details class="research-brief-card"><summary>本次纳入的新闻快照 · {{ analysis.scope.news_snapshots|length }} 条</summary>{% for news in analysis.scope.news_snapshots %}<p><a href="{% url 'investment_watch:news_detail' news.material_id %}?version={{ news.version_id }}">{{ news.title }}</a> · {{ news.source }}</p>{% endfor %}<p>按生成时的材料版本保存，后续更新不改写本简报。</p></details>{% endif %}
@@ -40,13 +33,9 @@
         <article>
           <header><h3>{{ forloop.counter|stringformat:"02d" }} · {{ item.text }}</h3><span class="research-verdict research-verdict-{{ item.verdict }}">{{ item.verdict_label }}</span></header>
           <p class="research-brief-finding">{{ item.reason }}</p>
-          {% if item.cited_facts %}{% with lead=item.cited_facts|last %}<p class="research-brief-evidence-lead">官方资料：{{ lead.text|truncatechars:190 }}</p>{% endwith %}{% endif %}
+          {% if item.cited_facts %}{% with lead=item.cited_facts|last %}<p class="research-brief-evidence-lead">资料依据：{{ lead.text|truncatechars:190 }}</p>{% endwith %}{% endif %}
           <details><summary>查看证据、边界与对判断的影响</summary>
-            {% if item.detail %}<p>{{ item.detail }}</p>{% endif %}
-            {% if item.cited_facts %}<div class="research-brief-facts"><strong>可核查的资料数字与要点</strong><ul>{% for fact in item.cited_facts %}<li>{{ fact.text }}</li>{% endfor %}</ul></div>{% endif %}
-            {% if item.boundary %}<p><strong>证据边界：</strong>{{ item.boundary }}</p>{% endif %}
-            {% if item.implication %}<p><strong>对我的判断：</strong>{{ item.implication }}</p>{% endif %}
-            {% if item.citations %}<div class="research-metric-links">{% for cite in item.citations %}{% if cite.kind == 'news' %}<a href="{% url 'investment_watch:news_detail' cite.material_id %}?version={{ cite.version_id }}">查看新闻摘录 {{ cite.id }}</a>{% else %}<a href="{% url 'investment_research:document_detail' dossier.pk cite.document_id %}?version={{ cite.version_id }}&amp;start={{ cite.start }}&amp;end={{ cite.end }}&amp;hash={{ cite.hash }}#research-citation">查看原文 {{ cite.id }}</a>{% endif %}{% endfor %}</div>{% else %}<p class="research-private-note">本项暂无可核查引文。</p>{% endif %}
+            {% for part in item.source_sections %}{% include "investment_research/source_section.html" %}{% endfor %}
           </details>
         </article>
       {% endfor %}
@@ -74,6 +63,6 @@
     <details class="research-brief-card research-brief-expand"><summary>波段辅助 · 收盘后检查</summary><p>这里预留价格阈值、均线与事件提醒。完整复权日线和你的触发条件尚未接入，暂不计算技术信号。</p><span class="research-brief-pending">技术数据待接入</span><p><a href="{% url 'portfolio:security_list' %}">前往投资组合 · 自选股与行情</a></p></details>
     {% if result.suggested_revision %}<section class="research-brief-card"><h2>我可以怎样更新判断？</h2><p>AI 建议以下措辞。编辑页会保留这条建议供你对照，只有你保存的新版本才会成为正式判断。</p><blockquote>{{ result.suggested_revision|linebreaksbr }}</blockquote>{% if is_current_revision %}<a class="button" href="{% url 'investment_research:edit' dossier.pk %}">查看建议并修改我的判断</a>{% endif %}</section>{% endif %}
   {% else %}<div class="research-document-empty"><strong>这次分析没有可展示的简报</strong><p>{{ analysis.error_message|default:"请求尚未完成。" }}</p></div>{% endif %}
-  <footer class="research-private-note">本页根据保存的官方资料生成；分析范围为 {{ analysis.scope.financial_count|default:0 }} 项财务指标、{{ analysis.scope.narrative_count|default:0 }} 条官方要点。每条结论可展开核查证据与出处。</footer>
+  <p><a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">生成新分析</a> · <a href="{% url 'investment_research:company_research' dossier.pk %}?view=evidence">查看证据资料与研究历史</a></p><footer class="research-private-note">本页根据生成时保存的资料形成；分析范围为 {{ analysis.scope.financial_count|default:0 }} 项财务指标、{{ analysis.scope.narrative_count|default:0 }} 条官方要点。每条结论可展开核查证据与出处。</footer>
 </div>
 {% endblock %}

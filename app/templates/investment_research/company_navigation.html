@@ -1,0 +1,13 @@
+<nav class="research-workflow" aria-label="公司研究步骤">
+  <a href="{% url 'investment_research:detail' dossier.pk %}">1 · 当前判断</a>
+  <a href="{% url 'investment_research:financials' dossier.pk %}">2 · 财务概览</a>
+  <a href="{% url 'investment_research:company_research' dossier.pk %}" aria-current="page">3 · 公司研究</a>
+  <a href="{% url 'investment_research:next_day_tracking' dossier.pk %}">次日跟踪</a>
+  <a href="{% url 'investment_research:documents' dossier.pk %}">官方资料</a>
+  <a href="{% url 'portfolio:stock_market_detail' dossier.security.pk %}">个股行情与估值 ↗</a>
+</nav>
+<nav class="research-brief-tabs" aria-label="公司研究视图">
+  <a href="{% url 'investment_research:company_research' dossier.pk %}"{% if not company_view or company_view == 'conclusion' %} aria-current="page"{% endif %}>公司研究</a>
+  <a href="{% url 'investment_research:company_research' dossier.pk %}?view=changes"{% if company_view == 'changes' %} aria-current="page"{% endif %}>最新变化</a>
+  <a href="{% url 'investment_research:company_research' dossier.pk %}?view=evidence"{% if company_view == 'evidence' %} aria-current="page"{% endif %}>证据资料</a>
+</nav>

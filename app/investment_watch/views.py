@@ -723,7 +723,7 @@ def company_add(request):
 @endpoint(["GET"])
 def company(request, pk):
     dossier = dossier_for(request.watch_member, pk)
-    return redirect("investment_research:detail", pk=dossier.pk)
+    return redirect("investment_research:company_research", pk=dossier.pk)
 
 
 @endpoint(["POST"])
@@ -879,7 +879,7 @@ def select_research(request, pk):
         candidate.save(update_fields=["selected_for_research", "updated_at"])
     messages.success(request, "已更新下一次研究的材料选择；旧分析保持原样。")
     if request.POST.get("return_to") == "company":
-        return redirect(reverse("investment_research:detail", kwargs={"pk": candidate.dossier_id}) + "?view=changes")
+        return redirect(reverse("investment_research:company_research", kwargs={"pk": candidate.dossier_id}) + "?view=changes")
     return redirect("investment_watch:item", pk=pk)
 
 

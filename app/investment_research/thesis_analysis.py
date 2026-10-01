@@ -21,7 +21,7 @@ from .research_ai import (
 from .services import DossierNotFound, _require_writer
 
 
-PROMPT_VERSION = "research-thesis-synthesis-v8"
+PROMPT_VERSION = "research-thesis-synthesis-v9"
 MARKET_EXPECTATION_QUESTION = re.compile(
     r"超越市场预期|超出市场预期|超预期|市场一致预期|分析师预期")
 
@@ -79,7 +79,7 @@ def enforce_market_expectation_boundary(assessment):
             "citations": [], "cited_facts": []}
 
 
-def _validate_output(raw, targets, evidence):
+def _validate_output(raw, targets, evidence, *, validate_parts=True):
     if not isinstance(raw, str) or not raw.strip():
         raise ResponseFormatError("文本模型返回了空内容，无法生成草稿。")
     raw = raw.strip().lstrip("\ufeff")
@@ -155,11 +155,26 @@ def _validate_output(raw, targets, evidence):
         cited_facts = ([{"id": ref, "text": evidence_by_id[ref]["text"]}
                         for ref in valid_refs[:3] if evidence_by_id[ref].get("text")]
                        if valid_refs else [])
-        cleaned.append(enforce_market_expectation_boundary({
+        assessment = enforce_market_expectation_boundary({
                         **target, "verdict": verdict, "reason": reason,
                         "detail": detail, "boundary": boundary,
                         "implication": implication, "cited_facts": cited_facts,
-                        "citations": citations}))
+                        "citations": citations})
+        if validate_parts:
+            for source_kind in ("official", "news"):
+                subset = [entry for entry in evidence if entry.get("citations") and all(
+                    cite.get("kind", "official") == source_kind for cite in entry["citations"])]
+                part = item.get(source_kind + "_analysis")
+                if isinstance(part, dict):
+                    parsed = _validate_output(json.dumps({"assessments": [{**part, **target}]}),
+                                              [target], subset, validate_parts=False)
+                    assessment[source_kind + "_analysis"] = parsed["assessments"][0]
+                    invalid_refs += parsed["invalid_reference_count"]
+                else:
+                    assessment[source_kind + "_analysis"] = {
+                        **target, "verdict": "unknown", "reason": "本次未返回此类资料的独立分析。",
+                        "citations": [], "cited_facts": []}
+        cleaned.append(assessment)
     notes = []
     for field in ("gaps", "next_checks"):
         entries = value.get(field) or []
@@ -256,6 +271,10 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
         "必须返回一个非空的简体中文 JSON 对象，不能返回空内容、Markdown 或代码围栏。"
         "先写 headline（本次最重要的简短结论）和 overview（两三句，说明与用户判断的关系）。"
         "assessments 数组按输入顺序，每项含 kind、index、verdict、reason、detail、boundary、implication、evidence_ids；"
+        "每项还必须包含 official_analysis 和 news_analysis 两个对象，各含 verdict、reason、detail、boundary、implication、evidence_ids。"
+        "official_analysis 仅依据 SEC/IR/财报的资料编号分析；news_analysis 仅依据标注新闻来源的编号分析。"
+        "两类资料必须分别判断，不得互相借用引用；某类没有资料时该类返回 unknown 并说明缺口。"
+        "最外层 verdict、reason、detail、boundary、implication、evidence_ids 是综合前两类的分析，解释相互印证、矛盾与剩余缺口。"
         "reason 是一句话结论；detail 解释支持和反证；boundary 说明证据不能证明什么；implication 说明对个人判断的影响。"
         "每项 reason、detail、boundary、implication 分别尽量控制在 35、80、50、50 个汉字内，优先覆盖全部条目。"
         "verdict 仅 supports/weakens/mixed/unknown；有结论必须引用本次资料包中的 E 编号，未知可以无引用。"
@@ -272,7 +291,11 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
         '格式示例：{"headline":"现金回报仍待验证","overview":"收入有支持，投入回报仍需跟踪。",'
         '"assessments":[{"kind":"pillar","index":0,"verdict":"unknown",'
         '"reason":"本次资料尚无证据","detail":"","boundary":"尚无现金口径",'
-        '"implication":"暂不提高长期增长假设","evidence_ids":[]}],'
+        '"implication":"暂不提高长期增长假设","evidence_ids":[], '
+        '"official_analysis":{"verdict":"unknown","reason":"官方资料不足","detail":"",'
+        '"boundary":"缺少对应披露","implication":"继续核查","evidence_ids":[]},'
+        '"news_analysis":{"verdict":"unknown","reason":"新闻资料不足","detail":"",'
+        '"boundary":"缺少相关新闻","implication":"继续核查","evidence_ids":[]}}],'
         '"gaps":[],"next_checks":[],"suggested_revision":""}。'
     )
     lines = [f"公司：{dossier.security.symbol}；当前判断版本：{revision.revision_number}。",

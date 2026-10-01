@@ -1,0 +1,10 @@
+<section class="research-brief-facts">
+  <h4>{{ part.title }}{% if part.verdict_label %} · {{ part.verdict_label }}{% endif %}</h4>
+  {% if part.note %}<p class="research-private-note">{{ part.note }}</p>{% endif %}
+  {% if part.reason %}<p>{{ part.reason }}</p>{% endif %}
+  {% if part.detail %}<p>{{ part.detail }}</p>{% endif %}
+  {% if part.cited_facts %}<strong>可核查的资料数字与要点</strong><ul>{% for fact in part.cited_facts %}<li>{{ fact.text }}</li>{% endfor %}</ul>{% endif %}
+  {% if part.boundary %}<p><strong>证据边界：</strong>{{ part.boundary }}</p>{% endif %}
+  {% if part.implication %}<p><strong>对我的判断：</strong>{{ part.implication }}</p>{% endif %}
+  <div class="research-metric-links">{% for cite in part.citations %}{% if cite.kind == 'news' %}<a href="{% url 'investment_watch:news_detail' cite.material_id %}?version={{ cite.version_id }}">查看新闻摘录 {{ cite.id }}</a>{% else %}<a href="{% url 'investment_research:document_detail' dossier.pk cite.document_id %}?version={{ cite.version_id }}&amp;start={{ cite.start }}&amp;end={{ cite.end }}&amp;hash={{ cite.hash }}#research-citation">查看原文 {{ cite.id }}</a>{% endif %}{% empty %}<p class="research-private-note">本部分暂无可核查引文。</p>{% endfor %}</div>
+</section>

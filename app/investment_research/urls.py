@@ -15,6 +15,7 @@ urlpatterns = [
     path("new/", views.create, name="create"),
     path("explore/new/", views.explore, name="explore"),
     path("<int:pk>/", views.detail, name="detail"),
+    path("<int:pk>/company/", views.company_research, name="company_research"),
     path("<int:pk>/metric-focus/", views.metric_focus, name="metric_focus"),
     path("<int:pk>/review-plan/", views.review_plan, name="review_plan"),
     path("<int:pk>/financials/", views.financials, name="financials"),

@@ -266,11 +266,9 @@ def detail(request, pk):
     current_plan = (ResearchReviewPlan.objects.filter(
         dossier=dossier, thesis_revision_id=dossier.current_revision_id,
     ).first() if dossier.current_revision_id else None)
-    from .company_workspace import workspace_context
-    company_context = workspace_context(dossier, request.GET)
     return render(
         request,
-        "investment_research/company_overview.html",
+        "investment_research/detail.html",
         {
             "dossier": dossier,
             "revision": dossier.current_revision,
@@ -287,7 +285,6 @@ def detail(request, pk):
             "pending_review_count": sum(item["pending"] for item in review_items),
             "needs_revision_count": sum(item["needs_revision"] for item in review_items),
             "current_plan": current_plan,
-            **company_context,
         },
     )
 
@@ -476,20 +473,32 @@ def thesis_analysis_detail(request, pk, analysis_pk):
         raise Http404("分析记录不属于此档案。")
     result = analysis.result.result_json if analysis.status == AiAnalysisRequest.STATUS_SUCCESS else None
     if result:
-        result = {**result, "assessments": [
-            enforce_market_expectation_boundary(item)
-            for item in result.get("assessments", [])]}
-        for item in result.get("assessments", []):
-            item["verdict_label"] = {
-                "supports": "有支持", "weakens": "有反证", "mixed": "证据混合",
-                "unknown": "证据不足",
-            }.get(item.get("verdict"), "待核对")
+        from .report_sections import source_sections
+        result = source_sections(result, analysis.scope or {})
     valuation = build_valuation_trial(dossier.security, analysis.scope, request.GET)
     return render(request, "investment_research/thesis_analysis_brief.html", {
         "dossier": dossier, "analysis": analysis, "result": result,
         "valuation": valuation,
         "new_candidate_count": dossier.news_candidates.filter(created_at__gt=analysis.created_at).count(),
         "is_current_revision": (analysis.scope or {}).get("thesis_revision_id") == dossier.current_revision_id,
+    })
+
+
+@_method(["GET"])
+def company_research(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    from .company_workspace import workspace_context, research_history
+    report = research_history(dossier).filter(status=AiAnalysisRequest.STATUS_SUCCESS).first()
+    view = request.GET.get("view", "conclusion")
+    if view not in {"changes", "evidence"} and report:
+        return thesis_analysis_detail(request, pk, report.pk)
+    context = workspace_context(dossier, request.GET)
+    return render(request, "investment_research/company_materials.html", {
+        "dossier": dossier, "revision": dossier.current_revision,
+        "can_write": is_writer(member), **context,
     })
 
 
