@@ -304,8 +304,21 @@ def build_cashflow_trend_data(annual_rows, selected_year):
     }
 
 
-def build_expense_category_pie_data(selected_year, selected_month=None, unit="万元"):
+def build_expense_category_pie_data(selected_year, selected_month=None, unit="万元", member_id=None):
     _, _, expense_records = get_default_family_records()
+    if member_id is not None:
+        expense_records = expense_records.filter(member_id=member_id)
+    return build_category_pie_data(expense_records, "expense_date", selected_year, selected_month, unit)
+
+
+def build_income_category_pie_data(selected_year, selected_month=None, unit="元", member_id=None):
+    _, income_records, _ = get_default_family_records()
+    if member_id is not None:
+        income_records = income_records.filter(member_id=member_id)
+    return build_category_pie_data(income_records, "income_date", selected_year, selected_month, unit)
+
+
+def build_category_pie_data(records, date_field, selected_year, selected_month, unit):
     exact_category_totals = {}
     totals = {
         "primary": {},
@@ -325,10 +338,10 @@ def build_expense_category_pie_data(selected_year, selected_month=None, unit="�
         )
         item["amount"] += amount
 
-    for record in expense_records:
-        if selected_year != "all" and get_record_year(record, "expense_date") != selected_year:
+    for record in records:
+        if selected_year != "all" and get_record_year(record, date_field) != selected_year:
             continue
-        if selected_month and get_record_month(record, "expense_date") != (
+        if selected_month and get_record_month(record, date_field) != (
             selected_year,
             selected_month,
         ):
@@ -2129,11 +2142,22 @@ def income_delete(request, pk):
 @login_required
 def cashflow_summary(request, year=None):
     members, sections = build_cashflow_monthly_rows(year)
+    family = get_household_family()
+    chart_members = list(FamilyMember.objects.filter(family=family).order_by("display_order", "pk")) if family else []
+    chart_member_map = {str(member.pk): member for member in chart_members}
+    expense_member = chart_member_map.get(request.GET.get("category_member"))
+    income_member = chart_member_map.get(request.GET.get("income_category_member"))
     requested_month = str(request.GET.get("category_month") or "").strip().lower()
     if requested_month.isdigit() and 1 <= int(requested_month) <= 12:
         selected_category_month = int(requested_month)
     else:
         selected_category_month = "all"
+    requested_income_month = str(request.GET.get("income_category_month") or "").strip()
+    selected_income_category_month = (
+        int(requested_income_month)
+        if requested_income_month.isdigit() and 1 <= int(requested_income_month) <= 12
+        else "all"
+    )
     return render(
         request,
         "ledger/cashflow_summary.html",
@@ -2142,6 +2166,21 @@ def cashflow_summary(request, year=None):
             "sections": sections,
             "year": year,
             "selected_category_month": selected_category_month,
+            "selected_income_category_month": selected_income_category_month,
+            "chart_members": chart_members,
+            "selected_category_member": expense_member.pk if expense_member else "all",
+            "selected_income_category_member": income_member.pk if income_member else "all",
+            "expense_category_scope": expense_member.display_name if expense_member else "整个家庭",
+            "income_category_scope": income_member.display_name if income_member else "整个家庭",
+            "category_months": range(1, 13),
+            "income_chart_levels": [("primary", "一级"), ("secondary", "二级"), ("tertiary", "三级")],
+            "income_category_pie_data": (
+                build_income_category_pie_data(
+                    year, selected_income_category_month if selected_income_category_month != "all" else None,
+                    member_id=income_member.pk if income_member else None,
+                )
+                if year else {"unit": "元", "primary": [], "secondary": [], "tertiary": []}
+            ),
             "expense_category_pie_data": (
                 build_expense_category_pie_data(
                     year,
@@ -2149,6 +2188,7 @@ def cashflow_summary(request, year=None):
                     if selected_category_month != "all"
                     else None,
                     unit="元",
+                    member_id=expense_member.pk if expense_member else None,
                 )
                 if year
                 else {"unit": "万元", "primary": [], "secondary": [], "tertiary": []}
