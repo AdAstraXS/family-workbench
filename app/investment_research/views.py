@@ -386,12 +386,13 @@ def futu_financials(request, pk):
             messages.error(request, code_problem)
         else:
             try:
-                refresh_futu_financials(dossier.security)
-            except FutuFinancialError as exc:
+                from .company_jobs import enqueue
+                enqueue(member, dossier, ["financials"])
+            except (FutuFinancialError, ResearchValidationError) as exc:
                 messages.error(request, str(exc))
             else:
-                messages.success(request, "富途年度财务资料已更新。")
-        return redirect("investment_research:futu_financials", pk=pk)
+                messages.success(request, "正在获取富途财务资料并核对字段名称，请在公司资料页查看进度。")
+        return redirect("investment_research:materials", pk=pk)
     snapshot = FutuFinancialSnapshot.objects.filter(security=dossier.security).first()
     statements = snapshot.data.get("statements", []) if snapshot else []
     breakdown = snapshot.data.get("breakdown") if snapshot else None
@@ -961,7 +962,7 @@ def document_detail(request, pk, document_pk):
         {
             "dossier": dossier, "document": document,
             "can_write": is_writer(member),
-            "can_fetch_sec": document.source == "sec" and document.document_type in {"10-k", "10-q", "8-k"},
+            "can_fetch_sec": document.source == "sec" and document.document_type in {"10-k", "10-q", "8-k", "20-f", "40-f", "6-k"},
             "can_fetch_ir": document.source in ('official_ir', 'microsoft_ir') and bool(company_for_security(document.security)),
             "current_content_version": current_version,
             "selected_version": selected_version,

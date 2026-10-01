@@ -1,0 +1,17 @@
+{% extends "investment_research/base.html" %}
+{% block title %}了解公司 · 查找公司{% endblock %}
+{% block research_content %}
+<section class="research-page">
+  <p><a href="{% url 'investment_research:index' %}">公司研究</a> / 了解公司</p>
+  <header class="research-header"><div><h1>先了解一家公司</h1><p class="research-private-note">查找公司 → 确认上市市场 → 获取基础资料 → 阅读与检查缺失</p></div></header>
+  <form method="post" class="research-form">{% csrf_token %}<label for="company-query">公司中文名、英文名或股票代码</label>
+    <input id="company-query" name="query" value="{{ query }}" placeholder="例如：蔚来、Tencent、ASML、600519" maxlength="80" minlength="2" required>
+    <p>同一家公司可能在多个市场上市，请选择你研究的证券。系统会显示已经核对的其他上市代码。</p><button type="submit">查找公司</button></form>
+  {% if error %}<p role="alert" class="research-source-error">{{ error }}</p>{% endif %}
+  {% if searched %}<h2>确认公司与市场</h2><p class="research-private-note">搜索也可能返回相关公司，请核对名称；不会自动选择第一条结果。</p>{% endif %}
+  {% for item in candidates %}<article class="research-current"><h3>{{ item.name }} · {{ item.code }}</h3>
+    <p>已确认的上市代码：{{ item.listings|join:" · " }}</p><p class="research-private-note">识别来源：{{ item.source }}{% if item.sec_ticker %} · SEC 申报对应 {{ item.sec_ticker }}{% endif %}</p>
+    <form method="post">{% csrf_token %}<input type="hidden" name="choice" value="{{ item.token }}"><button type="submit">选择这家公司</button></form></article>
+  {% empty %}{% if searched %}<p>没有找到可确认的公司。可改用带市场的股票代码或英文名搜索。</p>{% endif %}{% endfor %}
+</section>
+{% endblock %}

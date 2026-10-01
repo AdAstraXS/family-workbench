@@ -1,10 +1,13 @@
 from django.urls import path
 
-from . import views, ir_views
+from . import views, ir_views, material_views
 
 app_name = "investment_research"
 
 urlpatterns = [
+    path('materials/start/', material_views.start, name='material_start'),
+    path('<int:pk>/materials/', material_views.library, name='materials'),
+    path('<int:pk>/materials/version/<int:version_pk>/', material_views.read, name='material_read'),
     path('ir/', ir_views.catalogue, name='ir_catalogue'),
     path('ir/<slug:company_key>/sync/', ir_views.sync_company, name='sync_ir_company'),
     path('ir/<slug:company_key>/import/', ir_views.import_originals, name='import_ir_originals'),

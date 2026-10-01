@@ -29,7 +29,7 @@ class FinancialPageTests(ResearchViewTestBase):
         self.assertContains(self.client.get(futu), "还没有富途财务数据")
         refresh.assert_not_called()
 
-    @mock.patch("investment_research.views.refresh_futu_financials")
+    @mock.patch("investment_research.company_jobs.enqueue")
     def test_futu_refresh_requires_post_and_owner(self, refresh):
         url = reverse("investment_research:futu_financials", args=[self.dossier.pk])
         self.login(self.other)
@@ -37,7 +37,7 @@ class FinancialPageTests(ResearchViewTestBase):
         refresh.assert_not_called()
         self.login(self.member)
         self.assertEqual(self.client.post(url).status_code, 302)
-        refresh.assert_called_once_with(self.dossier.security)
+        refresh.assert_called_once_with(self.member, self.dossier, ["financials"])
 
     def test_saved_futu_statement_and_breakdown_render_without_open_d(self):
         FutuFinancialSnapshot.objects.create(

@@ -14,7 +14,8 @@
     <a href="{% url 'investment_research:detail' dossier.pk %}">当前判断</a>
     <a href="{% url 'investment_research:financials' dossier.pk %}">SEC 财务概览</a>
     <span aria-current="page">富途财务数据</span>
-    <a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">AI 综合分析</a>
+    <a href="{% url 'investment_research:company_research' dossier.pk %}">公司研究</a>
+    <a href="{% url 'investment_research:materials' dossier.pk %}">公司资料</a>
   </nav>
 
   <section class="research-source-summary">
@@ -38,7 +39,7 @@
       </table></div>
     </section>{% endif %}
 
-    {% if has_missing_names %}<p class="research-private-note">字段说明：OpenD 本次有部分空名称。{% if code == "US.MSFT" %}微软三张报表中已与富途官网核对的字段显示在主表；{% endif %}其余数字收在各报表末尾的“原始字段”中。</p>{% endif %}
+    {% if has_missing_names %}<p class="research-private-note">部分项目的名称尚未从数据源核对。原始记录已保留；更新时会尝试从同一家公司的富途财报页面核对。未确认名称的数字不作为可读指标展示。</p>{% endif %}
 
     {% if breakdown_groups %}
       <section class="research-financial-group">
@@ -57,26 +58,21 @@
     {% for table in tables %}
       <details class="research-financial-group"{% if forloop.first %} open{% endif %}>
         <summary>{{ table.title }} · 近三年</summary>
-        <p class="research-private-note">金额按亿为单位展示，每股项目单独标注；同比保留两位小数。主要指标同时含比率等项目。富途字段编码放在名称下方，方便核对。</p>
+        <p class="research-private-note">金额保留原币种，按大小使用万、亿单位；每股项目单独标注，同比保留两位小数。</p>
         <div class="research-metric-scroll"><table class="research-metric-table">
           <thead><tr><th scope="col">指标</th>{% for report in table.reports %}<th scope="col">{{ report.period }}<small>{{ report.period_end }} · {{ report.currency }}</small><small>{{ report.standards_display|default:"会计准则未标注" }}{% if report.auditor %} · {{ report.auditor }}{% endif %}</small></th>{% endfor %}</tr></thead>
           <tbody>
             {% for row in table.rows %}
-              <tr><th scope="row">{{ row.name|default:"名称待更新" }}<small class="research-metric-source">富途字段 {{ row.field_id }}</small></th>
+              <tr><th scope="row">{{ row.name|default:"名称待更新" }}</th>
                 {% for cell in row.cells %}<td><strong>{{ cell.amount }}</strong>{% if cell.yoy %}<small class="research-metric-source">同比 {{ cell.yoy }}</small>{% endif %}</td>{% endfor %}
               </tr>
-            {% empty %}<tr><td colspan="4">此报表暂没有能可靠命名的字段；原始数字可在下方展开。</td></tr>{% endfor %}
+            {% empty %}<tr><td colspan="4">此报表暂没有已核对名称的字段，请更新资料后再查看。</td></tr>{% endfor %}
           </tbody>
         </table></div>
-        {% if table.raw_rows %}<details class="research-method-note"><summary>原始字段 · {{ table.missing_names }} 项名称待核对</summary>
-          <p>这些数字保留富途返回的原值与字段编码。未确认字段含义和单位前，不用于计算或判断。</p>
-          <div class="research-metric-scroll"><table class="research-metric-table"><thead><tr><th scope="col">富途编码</th>{% for report in table.reports %}<th scope="col">{{ report.period }}</th>{% endfor %}</tr></thead><tbody>
-            {% for row in table.raw_rows %}<tr><th scope="row">{{ row.field_id }}</th>{% for cell in row.cells %}<td>{{ cell.amount }}</td>{% endfor %}</tr>{% endfor %}
-          </tbody></table></div>
-        </details>{% endif %}
+        {% if table.raw_rows %}<p class="research-private-note">{{ table.missing_names }} 项名称待核对。新获取的原始记录和历史版本可在<a href="{% url 'investment_research:materials' dossier.pk %}">公司资料</a>中下载。</p>{% endif %}
       </details>
     {% endfor %}
-    <details class="research-method-note"><summary>数据来源与口径</summary><p>财务数值来自富途 OpenD 的年度报表快照。接口没有返回名称的微软字段，使用<a href="https://www.futunn.com/stock/MSFT-US/financials-income-statement">富途公开利润表</a>、<a href="https://www.futunn.com/stock/MSFT-US/financials-balance-sheet">资产负债表</a>和<a href="https://www.futunn.com/stock/MSFT-US/financials-cash-flow">现金流量表</a>核对后的名称；未核对的编码保持原样。页面保留报告期、币种、会计准则和审计意见。查看官方披露可进入 SEC 财务概览。</p></details>
+    <details class="research-method-note"><summary>数据来源与口径</summary><p>财务数值来自富途 OpenD 年度报表。接口缺少字段名称时，仅采用经过同源核对的名称；未核对项目保留在原始记录中。页面保留报告期、币种、会计准则和审计意见，不做货币换算。查看官方披露可进入 SEC 财务概览。</p></details>
   {% else %}
     <div class="research-document-empty"><strong>还没有富途财务数据</strong><p>点击“更新富途财务数据”会通过 OpenD 获取最近三个完整财年的年度报表和主营构成。</p></div>
   {% endif %}

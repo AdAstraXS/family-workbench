@@ -28,6 +28,9 @@ DOCUMENT_TYPE_CHOICES = [
     (DOC_TYPE_10K, "10-K 年报"),
     (DOC_TYPE_10Q, "10-Q 季报"),
     (DOC_TYPE_8K, "8-K 重大事件"),
+    ("20-f", "20-F 外国公司年报"),
+    ("40-f", "40-F 加拿大公司年报"),
+    ("6-k", "6-K 外国公司公告"),
     (DOC_TYPE_ANNUAL_REPORT, "年度报告"),
     (DOC_TYPE_EARNINGS_RELEASE, "财报新闻稿"),
     (DOC_TYPE_EARNINGS_CALL, "财报电话会/网络直播"),
@@ -39,6 +42,69 @@ DOCUMENT_TYPE_CHOICES = [
     ("shareholder_letter", "股东信"),
     (DOC_TYPE_OTHER, "其他"),
 ]
+
+
+class CompanyIdentity(TimestampedModel):
+    security = models.OneToOneField(Security, on_delete=models.PROTECT, related_name="research_identity")
+    name = models.CharField(max_length=200)
+    aliases = models.JSONField(default=list)
+    listings = models.JSONField(default=list)
+    sec_ticker = models.CharField(max_length=30, blank=True)
+    cik = models.CharField(max_length=10, blank=True)
+    provenance = models.JSONField(default=dict)
+
+    class Meta:
+        verbose_name = "公司资料身份"
+        verbose_name_plural = verbose_name
+
+
+class CompanyMaterial(TimestampedModel):
+    """Public source item. Private judgments remain in their original dossier."""
+    security = models.ForeignKey(Security, on_delete=models.PROTECT, related_name="company_materials")
+    key = models.CharField(max_length=180)
+    kind = models.CharField(max_length=40)
+    title = models.CharField(max_length=500)
+    source_url = models.URLField(max_length=1500, blank=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["security", "key"], name="unique_company_material")]
+        verbose_name = "公司基础资料"
+        verbose_name_plural = verbose_name
+
+
+class CompanyMaterialVersion(models.Model):
+    material = models.ForeignKey(CompanyMaterial, on_delete=models.PROTECT, related_name="versions")
+    number = models.PositiveIntegerField()
+    raw_gzip = models.BinaryField()
+    sha256 = models.CharField(max_length=64)
+    source_url = models.URLField(max_length=1500, blank=True)
+    media_type = models.CharField(max_length=80, default="application/json")
+    data = models.JSONField(default=dict)
+    text = models.TextField(blank=True)
+    report_date = models.CharField(max_length=80, blank=True)
+    fetched_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-number"]
+        constraints = [models.UniqueConstraint(fields=["material", "number"], name="unique_company_material_version")]
+        verbose_name = "公司基础资料历史版本"
+        verbose_name_plural = verbose_name
+
+
+class CompanyAcquisitionJob(TimestampedModel):
+    dossier = models.ForeignKey("ResearchDossier", on_delete=models.PROTECT, related_name="acquisition_jobs")
+    status = models.CharField(max_length=20, default="queued")
+    selection = models.JSONField(default=list)
+    items = models.JSONField(default=list)
+    expires_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "公司资料获取任务"
+        verbose_name_plural = verbose_name
 
 
 class ResearchDossier(TimestampedModel):

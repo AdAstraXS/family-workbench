@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from .futu_field_labels import reviewed_label
 from .models import FutuFinancialSnapshot
+from .number_display import money as display_money, number
 
 
 class FutuFinancialError(Exception):
@@ -54,7 +55,7 @@ def _decimal_string(value):
     return str(number) if number.is_finite() else None
 
 
-def _statement_data(payload):
+def _statement_data(payload, *, annual_only=True):
     if not isinstance(payload, dict):
         raise FutuFinancialError("富途返回的财务报表格式不正确。")
     names = {}
@@ -66,7 +67,7 @@ def _statement_data(payload):
         if not isinstance(report, dict):
             continue
         period = str(report.get("period_text") or "")[:32]
-        if not period.endswith("/FY"):
+        if annual_only and not period.endswith("/FY"):
             continue
         items = []
         for item in (report.get("item_list") or [])[:250]:
@@ -173,7 +174,8 @@ _CURRENCY_NAMES = {"USD": "美元", "CNY": "元", "HKD": "港元"}
 
 def _display_number(value, places=2):
     try:
-        return f"{Decimal(str(value)):,.{places}f}"
+        parsed = number(value)
+        return f"{parsed:,.{places}f}" if parsed is not None else "—"
     except (InvalidOperation, TypeError, ValueError):
         return "—"
 
@@ -187,12 +189,11 @@ def _display_item(item, statement_type, currency):
         return f"{_display_number(amount)}%"
     if statement_type in {1, 2, 3} and name:
         if re.search(r"每股|per share|\beps\b", name):
-            return f"{_display_number(amount)} {_CURRENCY_NAMES.get(currency, currency)}/股"
+            return display_money(amount, currency, per_share=True)
         if re.search(r"股份数|股数|shares? outstanding", name):
             shares = Decimal(str(amount)) / Decimal("100000000")
             return f"{_display_number(shares)} 亿股"
-        money = Decimal(str(amount)) / Decimal("100000000")
-        return f"{_display_number(money)} 亿{_CURRENCY_NAMES.get(currency, currency)}"
+        return display_money(amount, currency)
     # Older snapshots lack structure_list names. Their unit cannot be inferred
     # safely, so retain the raw magnitude with separators until refreshed.
     return _display_number(amount)
@@ -270,10 +271,8 @@ def breakdown_tables(breakdown):
         rows = []
         for item in group.get("items") or []:
             amount = item.get("amount")
-            money = Decimal(str(amount)) / Decimal("100000000") if amount is not None else None
             rows.append({"name": item.get("name") or "未命名项目",
-                         "amount": f"{_display_number(money)} 亿{_CURRENCY_NAMES.get(currency, currency)}"
-                         if money is not None else "—",
+                         "amount": display_money(amount, currency),
                          "ratio": f"{_display_number(item['ratio'])}%"
                          if item.get("ratio") is not None else "—"})
         groups.append({"type": group.get("type") or "未标注维度", "rows": rows})
