@@ -1,7 +1,8 @@
 (function () {
   "use strict";
 
-  var source = document.getElementById("expense-category-pie-data");
+  function initialize(type) {
+  var source = document.getElementById(type + "-category-pie-data");
   if (!source) {
     return;
   }
@@ -20,22 +21,22 @@
   };
   var charts = {
     primary: {
-      svg: document.getElementById("primary-expense-pie"),
-      legend: document.getElementById("primary-expense-pie-legend"),
-      empty: document.getElementById("primary-expense-pie-empty"),
-      scope: document.getElementById("primary-pie-scope"),
+      svg: document.getElementById("primary-" + type + "-pie"),
+      legend: document.getElementById("primary-" + type + "-pie-legend"),
+      empty: document.getElementById("primary-" + type + "-pie-empty"),
+      scope: document.getElementById(type === "expense" ? "primary-pie-scope" : "primary-income-pie-scope"),
     },
     secondary: {
-      svg: document.getElementById("secondary-expense-pie"),
-      legend: document.getElementById("secondary-expense-pie-legend"),
-      empty: document.getElementById("secondary-expense-pie-empty"),
-      scope: document.getElementById("secondary-pie-scope"),
+      svg: document.getElementById("secondary-" + type + "-pie"),
+      legend: document.getElementById("secondary-" + type + "-pie-legend"),
+      empty: document.getElementById("secondary-" + type + "-pie-empty"),
+      scope: document.getElementById(type === "expense" ? "secondary-pie-scope" : "secondary-income-pie-scope"),
     },
     tertiary: {
-      svg: document.getElementById("tertiary-expense-pie"),
-      legend: document.getElementById("tertiary-expense-pie-legend"),
-      empty: document.getElementById("tertiary-expense-pie-empty"),
-      scope: document.getElementById("tertiary-pie-scope"),
+      svg: document.getElementById("tertiary-" + type + "-pie"),
+      legend: document.getElementById("tertiary-" + type + "-pie-legend"),
+      empty: document.getElementById("tertiary-" + type + "-pie-empty"),
+      scope: document.getElementById(type === "expense" ? "tertiary-pie-scope" : "tertiary-income-pie-scope"),
     },
   };
 
@@ -262,4 +263,11 @@
   }
 
   renderAll();
+  }
+  initialize("expense");
+  initialize("income");
+  document.addEventListener("category-composition-updated", function () {
+    initialize("expense");
+    initialize("income");
+  });
 })();
