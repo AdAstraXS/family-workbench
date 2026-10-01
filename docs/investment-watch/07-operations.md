@@ -27,6 +27,18 @@
 
 已保存的数据在重启后保留。原 4318 静态 Demo 仍用于设计对照，不是正式业务入口。
 
+### Windows 登录后恢复预览（2026-10-01）
+
+本机任务 `FamilyWorkbench-LocalInvestmentPreview` 在当前用户登录后运行
+`scripts/keep-investment-preview.ps1`，维持 4319 可用版与 4318 静态 Demo。
+两个服务均只监听 `127.0.0.1`。任务使用当前用户的普通运行级别，不保存密码。
+每 30 秒检查端口，服务退出后尝试恢复；日志保存在 `.watch-local/preview-supervisor.log`
+及对应服务的时间戳日志。该任务不会执行迁移、采集或模型调用。
+
+一键恢复并打开新版 Demo：运行 `scripts/open-investment-preview.ps1`，或双击项目根目录的
+“打开投资研究预览”快捷方式。电脑关机或用户尚未登录时，本机网址不可访问。
+停用自动恢复可在 Windows 任务计划程序中禁用上述任务；已运行的服务需另行停止。
+
 ## 采集与后台
 
 ```text

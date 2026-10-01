@@ -45,7 +45,7 @@ const demoApp=await readFile(new URL('demo/app.js',base),'utf8');
 const demoHtml=await readFile(new URL('demo/index.html',base),'utf8');
 assert.ok(!demoApp.includes('thesis-form')&&!demoApp.includes('function thesis('),'no duplicate thesis editor');
 assert.ok(!demoHtml.includes('data-view="thesis"')&&demoHtml.includes('data-view="news"'));
-for(const f of ['demo/app.js','demo/engine.mjs']){const result=spawnSync(process.execPath,['--check',fileURLToPath(new URL(f,base))],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);}
+for(const f of ['demo/app.js','demo/engine.mjs','demo/company.js']){const result=spawnSync(process.execPath,['--check',fileURLToPath(new URL(f,base))],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);}
 const server=createPreviewServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-try{const url=`http://127.0.0.1:${server.address().port}`;for(const path of ['/','/app.js','/engine.mjs','/data.json','/base.css','/styles.css'])assert.equal((await fetch(url+path)).status,200);assert.equal((await fetch(url+'/.env')).status,404);assert.equal((await fetch(url+'/openapi.json')).status,404);assert.equal((await fetch(url+'/',{method:'POST'})).status,405);}finally{await new Promise(resolve=>server.close(resolve));}
+try{const url=`http://127.0.0.1:${server.address().port}`;for(const path of ['/','/app.js','/engine.mjs','/data.json','/base.css','/styles.css','/company.html','/company.js','/company.css'])assert.equal((await fetch(url+path)).status,200);assert.equal((await fetch(url+'/.env')).status,404);assert.equal((await fetch(url+'/openapi.json')).status,404);assert.equal((await fetch(url+'/',{method:'POST'})).status,405);}finally{await new Promise(resolve=>server.close(resolve));}
 console.log('PASS: fixture provenance, evidence links, matching, filters, version invalidation, private contracts, syntax and preview isolation.');

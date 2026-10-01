@@ -3,7 +3,7 @@ import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {pathToFileURL} from 'node:url';
 const root = new URL('../docs/investment-watch/',import.meta.url);
-const paths = new Map([['/','demo/index.html'],['/index.html','demo/index.html'],['/base.css','demo-base.css'],...['app.js','engine.mjs','data.json','styles.css'].map(f=>['/'+f,'demo/'+f])]);
+const paths = new Map([['/','demo/index.html'],['/index.html','demo/index.html'],['/base.css','demo-base.css'],...['app.js','engine.mjs','data.json','styles.css','company.html','company.js','company.css'].map(f=>['/'+f,'demo/'+f])]);
 const mime = {html:'text/html',css:'text/css',js:'text/javascript',mjs:'text/javascript',json:'application/json'};
 export function createPreviewServer(){return http.createServer(async(req,res)=>{
   if(!['GET','HEAD'].includes(req.method)){res.writeHead(405);res.end();return;}
