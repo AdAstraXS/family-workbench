@@ -1,5 +1,5 @@
 {% extends "investment_research/base.html" %}
-{% block title %}公司资料 · {{ dossier.security.name }}{% endblock %}
+{% block title %}{% if request.GET.context == "prepare" %}准备资料{% else %}资料库{% endif %} · {{ dossier.security.name }}{% endblock %}
 {% block extra_head %}{{ block.super }}{% if active %}<meta http-equiv="refresh" content="12">{% endif %}
 <style>.material-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,310px),1fr));gap:16px}.material-grid article{margin:0;padding:20px}.material-meta{font-size:.9rem;color:#626d67}.material-source-options{display:flex;flex-wrap:wrap;gap:14px;margin:18px 0}.material-source-options label{display:flex;align-items:center;gap:6px}.material-tabs{display:flex;gap:20px;flex-wrap:wrap;padding:16px 0;border-bottom:1px solid #dde4d8;margin-bottom:24px}</style>{% endblock %}
 {% block research_content %}

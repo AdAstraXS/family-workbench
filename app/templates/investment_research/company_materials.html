@@ -1,5 +1,5 @@
 {% extends "investment_research/base.html" %}
-{% block title %}公司研究 · {{ dossier.security.name }}{% endblock %}
+{% block title %}{% if tracking_page %}公司动态{% elif library_page %}新闻与外部资料{% else %}公司研究{% endif %} · {{ dossier.security.name }}{% endblock %}
 {% block research_content %}<div class="research-page research-brief-page">
 <header class="research-header"><div><h1>{% if tracking_page %}公司动态{% elif library_page %}新闻与外部资料{% else %}公司研究{% endif %}</h1><p class="research-private-note">本档案仅自己可见。</p></div></header>
 {% include "investment_research/company_navigation.html" %}

@@ -1,5 +1,5 @@
 {% extends "investment_research/base.html" %}
-{% block title %}次日跟踪 · {{ dossier.security.name }}{% endblock %}
+{% block title %}{% if request.GET.tab == "settings" %}次日跟踪设置{% else %}次日跟踪摘要{% endif %} · {{ dossier.security.name }}{% endblock %}
 {% block research_content %}
 <div class="research-page research-brief-page">
   <header class="research-brief-top">
