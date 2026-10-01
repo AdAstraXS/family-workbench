@@ -1,27 +1,21 @@
 {% extends "investment_research/base.html" %}
-{% block title %}AI 综合分析 · {{ dossier.security.name }}{% endblock %}
+{% block title %}公司研究 · {{ dossier.security.name }}{% endblock %}
 {% block research_content %}
 <div class="research-page">
   <header class="research-header">
-    <div><p class="research-eyebrow">公司研究 / {{ dossier.security.symbol }}</p><h1>重新评估公司研究</h1><a href="{% url 'investment_research:company_research' dossier.pk %}">公司研究 →</a>
+    <div><p class="research-eyebrow">公司研究 / {{ dossier.security.symbol }}</p><h1>更新公司研究</h1><a href="{% url 'investment_research:company_research' dossier.pk %}">公司研究 →</a>
 <p class="research-private-note">系统先整理已保存的官方财务数据和近期 IR 要点，再让 AI 检查你的假设和问题。生成后可在公司研究简报中展开每项证据，也可查看次日跟踪。结果仅你可见，核对来源后再决定是否修改正式判断。</p></div>
-    <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回当前判断</a>
+
   </header>
-  <nav class="research-workflow" aria-label="公司研究步骤">
-    <a href="{% url 'investment_research:detail' dossier.pk %}">1 · 当前判断</a>
-    <a href="{% url 'investment_research:financials' dossier.pk %}">2 · 财务概览</a>
-    <span aria-current="step">3 · 公司研究</span>
-    <a href="{% url 'investment_research:documents' dossier.pk %}">官方资料</a>
-    <a href="{% url 'investment_research:next_day_tracking' dossier.pk %}">次日跟踪</a>
-  </nav>
+
   {% if revision %}
-    <section class="research-analysis-context"><h2>本次要检查的判断 · 第 {{ revision.revision_number }} 版</h2>
+    <section class="research-analysis-context"><h2>{% if revision.pk %}本次要检查的判断 · 第 {{ revision.revision_number }} 版{% else %}本次要核查的候选假设与研究问题{% endif %}</h2>
       <p>{{ revision.thesis|linebreaksbr }}</p>
       <div class="research-context-columns"><div><h3>关键假设</h3><ol>{% for item in revision.pillars %}<li>{{ item }}</li>{% empty %}<li>尚未记录</li>{% endfor %}</ol></div>
         <div><h3>待验证问题</h3><ol>{% for item in revision.questions %}<li>{{ item }}</li>{% empty %}<li>尚未记录</li>{% endfor %}</ol></div></div>
     </section>
   {% else %}
-    <div class="research-document-empty"><strong>先写下自己的第一版判断</strong><p>至少记录一条关键假设或待验证问题，AI 才能围绕它逐项检查。</p><a href="{% url 'investment_research:first_thesis' dossier.pk %}">保存第一版判断</a></div>
+    <div class="research-document-empty"><strong>先确认研究问题与候选假设</strong><p>在研究准备中确认问题与假设后即可研究，无需提前形成正式判断。</p><a href="{% url 'investment_research:prepare' dossier.pk %}?tab=questions">确认研究方向</a></div>
   {% endif %}
   <p><a href="{% url 'investment_watch:items' %}?dossier={{ dossier.pk }}">查看这家公司的新闻与证据变化 →</a></p>
   {% if selected_news %}<section class="research-analysis-context"><h2>已选择的新闻材料 · {{ selected_news|length }} 条</h2><ul>{% for candidate in selected_news %}<li><a href="{% url 'investment_watch:item' candidate.pk %}">{{ candidate.material_version.title }}</a> · {{ candidate.material_version.material.source.name }}</li>{% endfor %}</ul><p class="research-private-note">材料选择已经保存；每次最多纳入 10 条去重后的有效新闻，按最新选择顺序处理。已在官方资料中的同源披露不重复计入。只有确认生成新分析时才会发送给模型。</p></section>{% endif %}
@@ -73,9 +67,6 @@
   {% elif revision and can_write %}
     <div class="research-document-empty"><strong>还不能生成综合分析</strong><p>{% if not has_analysis_material %}请先保存官方资料，或从新闻候选中选择要纳入的材料。{% elif not providers %}尚未配置获准处理投研资料的文本模型。已选材料仍保留，可继续手工研究。{% endif %}</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看官方资料</a></div>
   {% endif %}
-  <section class="research-analysis-history"><h2>过去的公司研究简报</h2>
-    {% if histories %}<ul>{% for item in histories %}<li><a href="{% url 'investment_research:thesis_analysis_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }} · 第 {{ item.scope.thesis_revision_number }} 版判断 · {{ item.get_status_display }} · {% if item.scope.news_snapshots %}含新闻的综合分析{% else %}投研证据分析{% endif %}</a></li>{% endfor %}</ul>
-    {% else %}<p class="research-private-note">还没有综合分析记录。</p>{% endif %}
-  </section>
+
 </div>
 {% endblock %}

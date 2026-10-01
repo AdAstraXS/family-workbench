@@ -1,15 +1,1 @@
-<nav class="research-workflow" aria-label="公司研究步骤">
-  <a href="{% url 'investment_research:detail' dossier.pk %}">1 · 当前判断</a>
-  <a href="{% url 'investment_research:financials' dossier.pk %}">2 · 财务概览</a>
-  <span aria-current="step">3 · 公司研究</span>
-  <a href="{% url 'investment_research:next_day_tracking' dossier.pk %}">次日跟踪</a>
-  <a href="{% url 'investment_research:documents' dossier.pk %}">官方资料</a>
-  <a href="{% url 'portfolio:stock_market_detail' dossier.security.pk %}">个股行情与估值 ↗</a>
-</nav>
-<p class="research-private-note"><a href="{% url 'investment_research:materials' dossier.pk %}">公司资料 · 获取、阅读与五步资料清单</a> · <a href="{% url 'investment_research:prepare' dossier.pk %}">研究准备 · 初识报告与研究方向</a></p>
-{% include "investment_research/preparation_handoff.html" %}
-<nav class="research-brief-tabs" aria-label="公司研究视图">
-  {% if not company_view or company_view == 'conclusion' %}<span aria-current="page">公司研究</span>{% else %}<a href="{% url 'investment_research:company_research' dossier.pk %}">公司研究</a>{% endif %}
-  {% if company_view == 'changes' %}<span aria-current="page">最新变化</span>{% else %}<a href="{% url 'investment_research:company_research' dossier.pk %}?view=changes">最新变化</a>{% endif %}
-  {% if company_view == 'evidence' %}<span aria-current="page">证据资料</span>{% else %}<a href="{% url 'investment_research:company_research' dossier.pk %}?view=evidence">证据资料</a>{% endif %}
-</nav>
+{% if not tracking_page and not library_page %}{% include "investment_research/preparation_handoff.html" %}{% endif %}

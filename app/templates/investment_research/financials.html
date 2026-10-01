@@ -8,14 +8,9 @@
       <h1>财务概览</h1>
       <p class="research-private-note">先看增长、利润、现金和财务承受力，再回到自己的投资判断。最近三个完整财年按同一份年报的比较数核对。</p>
     </div>
-    <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回公司研究</a>
+
   </header>
-  <nav class="research-workflow" aria-label="公司研究步骤">
-    <a href="{% url 'investment_research:detail' dossier.pk %}">1 · 当前判断</a>
-    <span aria-current="step">2 · 财务概览</span>
-    <a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">3 · AI 综合分析</a>
-    <a href="{% url 'investment_research:documents' dossier.pk %}">官方资料</a>
-  </nav>
+
   {% if versions %}
     <form method="get" class="research-version-picker">
       <label for="financial-version">年报版本</label>

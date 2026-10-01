@@ -7,6 +7,7 @@ from ai_analysis.models import AiAnalysisRequest
 from investment_watch.models import ResearchCandidate
 from .models import OfficialResearchContentVersion
 from .thesis_analysis import enforce_market_expectation_boundary
+from .research_basis import basis_matches, research_basis
 
 
 def research_history(dossier):
@@ -28,7 +29,7 @@ def workspace_context(dossier, params):
     history = research_history(dossier)
     histories = list(history[:50])
     latest = history.filter(status=AiAnalysisRequest.STATUS_SUCCESS).first()
-    report_is_current = bool(latest and (latest.scope or {}).get("thesis_revision_id") == dossier.current_revision_id)
+    report_is_current = bool(latest and basis_matches(dossier, latest.scope or {}))
     result = deepcopy(latest.result.result_json) if latest else None
     if result:
         for index, item in enumerate(result.get("assessments", [])):
@@ -83,7 +84,7 @@ def workspace_context(dossier, params):
              "relations": list(candidate.evidence.all())} for candidate in candidates[:100]]
     official_rows = [{"version": version, "used": version.pk in used_official}
                      for version in official[:100]]
-    revision = dossier.current_revision
+    revision = research_basis(dossier)
     assumptions = ([{"key": f"pillar:{i}", "text": text} for i, text in enumerate(revision.pillars)] +
                    [{"key": f"question:{i}", "text": text} for i, text in enumerate(revision.questions)]) if revision else []
     return {"company_view": view, "research_report": latest, "research_result": result,

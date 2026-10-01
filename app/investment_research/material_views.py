@@ -29,7 +29,7 @@ def start(request):
         try:
             if request.POST.get("choice"):
                 dossier = choose_company(member, request.POST["choice"])
-                return redirect("investment_research:materials", pk=dossier.pk)
+                return redirect(f"/research/{dossier.pk}/materials/?context=prepare")
             query = request.POST.get("query", "")
             candidates, error = search_companies(query)
         except ResearchValidationError as exc:
@@ -51,7 +51,9 @@ def library(request, pk):
             messages.success(request, "资料正在后台获取，可以留在这里查看进度，也可以稍后返回。")
         except ResearchValidationError as exc:
             messages.error(request, str(exc))
-        return redirect("investment_research:materials", pk=pk)
+        from .navigation import url
+        return redirect(url('materials', pk, context='prepare') if request.GET.get('context') == 'prepare'
+                        else url('materials', pk, tab='acquisition'))
     materials, manifest = inventory(dossier.security)
     if request.GET.get("format") == "manifest":
         return JsonResponse(manifest, json_dumps_params={"ensure_ascii": False})
@@ -70,9 +72,13 @@ def library(request, pk):
     _, fiscal, _ = annual_reading(facts_version.data if facts_version else {}, overview)
     calendar = fiscal_calendar(facts_version.data if facts_version else {}, overview)
     fiscal = max((item for item in (fiscal, calendar) if item), key=lambda item: item["end"], default=None)
+    display_materials = [m for m in materials if m.kind != 'sec_document' and not m.retired]
+    if request.GET.get('context') != 'prepare':
+        official_kinds = {'facts', 'ir'}
+        display_materials = [m for m in display_materials if (m.kind not in official_kinds if request.GET.get('tab') == 'futu' else m.kind in official_kinds)]
     return render(request, "investment_research/material_library.html", {
         "dossier": dossier, "identity": identity, "identity_info": info,
-        "materials": [m for m in materials if m.kind != "sec_document" and not m.retired],
+        "materials": display_materials,
         "retired_materials": [m for m in materials if m.retired],
         "sec_materials": [m for m in materials if m.kind == "sec_document"],
         "sec_overview": overview,

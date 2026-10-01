@@ -394,5 +394,7 @@ def confirm(actor, dossier, job, post):
         saved.questions, saved.hypotheses, saved.decision, saved.reason = questions, hypotheses, decision, reason
         saved.revision += 1
         saved.save()
+        if decision == 'watch':
+            type(dossier).objects.filter(pk=dossier.pk).update(is_watched=True)
         locked.save(update_fields=["updated_at"])
     return saved

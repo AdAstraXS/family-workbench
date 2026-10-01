@@ -138,7 +138,30 @@ def index(request):
     member = _get_member_or_403(request)
     if member is None:
         return _forbidden()
-    dossiers = accessible_dossiers(member).order_by("-updated_at", "-pk")
+    from .navigation import company_state
+    from portfolio.models import InvestmentPosition
+    search = request.GET.get('q', '').strip()[:100]
+    selected_filter = request.GET.get('filter', 'all')
+    dossiers = accessible_dossiers(member).order_by("-updated_at", "-pk").prefetch_related('preparations')
+    if search:
+        dossiers = dossiers.filter(Q(security__name__icontains=search) | Q(security__symbol__icontains=search))
+    held = set(InvestmentPosition.objects.filter(account__bank_account__member=member,
+        account__bank_account__family=member.family, quantity__gt=0).values_list('security_id', flat=True))
+    items = []
+    for dossier in dossiers:
+        dossier.navigation_state = company_state(dossier)
+        dossier.has_holding = dossier.security_id in held
+        state = dossier.navigation_state
+        if selected_filter == 'held' and not (dossier.has_holding and dossier.current_revision_id):
+            continue
+        if selected_filter == 'watch' and not state['watching']:
+            continue
+        if selected_filter == 'pause' and not state['paused']:
+            continue
+        if selected_filter in {'initial', 'research', 'judgment'} and (state['stage'] != selected_filter or state['paused']):
+            continue
+        items.append(dossier)
+    dossiers = items
     paginator = Paginator(dossiers, PAGE_SIZE)
     page = paginator.get_page(request.GET.get("page"))
     for dossier in page.object_list:
@@ -148,7 +171,9 @@ def index(request):
     return render(
         request,
         "investment_research/index.html",
-        {"page": page, "can_write": is_writer(member)},
+        {"page": page, "can_write": is_writer(member), 'search': search, 'selected_filter': selected_filter,
+         'filters': [('all', '全部'), ('initial', '初识中'), ('research', '深入研究'), ('judgment', '已有判断'),
+                     ('held', '已持仓且有判断'), ('watch', '已加入观察'), ('pause', '暂不研究')]},
     )
 
 
@@ -416,6 +441,8 @@ def thesis_analysis(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    from .research_basis import research_basis
+    basis = research_basis(dossier)
     can_write = is_writer(member)
     if request.method == "POST":
         if not can_write:
@@ -453,11 +480,11 @@ def thesis_analysis(request, pk):
     ).select_related("provider").order_by("-created_at")[:40]
         if (analysis.scope or {}).get("dossier_id") == dossier.pk][:10]
     return render(request, "investment_research/thesis_analysis.html", {
-        "dossier": dossier, "revision": dossier.current_revision,
+        "dossier": dossier, "revision": basis,
         "sources": sources, "providers": available_research_providers() if can_write else [],
         "can_write": can_write, "histories": histories,
         "selected_news": selected_news, "has_analysis_material": bool(sources or selected_news),
-        "baseline_analysis": baseline,
+        "baseline_analysis": baseline if dossier.current_revision_id else None,
         "review_mode": request.GET.get("mode", "full") if baseline else "full",
     })
 
@@ -480,11 +507,12 @@ def thesis_analysis_detail(request, pk, analysis_pk):
         from .report_sections import source_sections
         result = source_sections(result, analysis.scope or {})
     valuation = build_valuation_trial(dossier.security, analysis.scope, request.GET)
+    from .research_basis import basis_matches
     return render(request, "investment_research/thesis_analysis_brief.html", {
         "dossier": dossier, "analysis": analysis, "result": result,
         "valuation": valuation,
         "new_candidate_count": dossier.news_candidates.filter(created_at__gt=analysis.created_at).count(),
-        "is_current_revision": (analysis.scope or {}).get("thesis_revision_id") == dossier.current_revision_id,
+        "is_current_revision": basis_matches(dossier, analysis.scope or {}),
     })
 
 
@@ -494,6 +522,8 @@ def company_research(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if request.GET.get('view') == 'changes':
+        return redirect('investment_research:follow', pk=pk)
     from .company_workspace import workspace_context, research_history
     report = research_history(dossier).filter(status=AiAnalysisRequest.STATUS_SUCCESS).first()
     view = request.GET.get("view", "conclusion")

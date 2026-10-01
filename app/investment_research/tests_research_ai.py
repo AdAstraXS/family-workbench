@@ -97,7 +97,7 @@ class ResearchAiTests(TestCase):
         self.assertContains(page, "仅自己可见")
         self.assertContains(page, "本草稿已隐藏 0 句模型重述的金额或数量")
         dossier_page = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
-        self.assertContains(dossier_page, "公司研究简报")
+        self.assertContains(dossier_page, "公司研究")
         self.assertNotContains(dossier_page, "逐段资料草稿")
 
     def test_unverified_amount_sentence_is_hidden_but_citation_remains(self):
@@ -189,7 +189,7 @@ class ResearchAiTests(TestCase):
         self.assertContains(cited, '<mark id="research-citation">')
         with patch.dict(os.environ, {"RESEARCH_TEST_KEY": "test-token"}):
             detail = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
-        self.assertContains(detail, "公司研究简报")
+        self.assertContains(detail, "公司研究")
         self.assertNotContains(detail, f'value="{version.pk}:1"')
 
     def test_invalid_segment_is_rejected_before_model_request(self):
@@ -315,6 +315,6 @@ class ResearchAiTests(TestCase):
             with patch("investment_research.research_ai._default_transport") as transport:
                 response = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "公司研究简报")
+        self.assertContains(response, "公司研究")
         self.assertNotContains(response, "生成一份带原文引用的草稿")
         transport.assert_not_called()

@@ -35,7 +35,7 @@ def prepare(request, pk):
             messages.success(request, f"已保存：{saved.get_decision_display()}。研究问题与候选假设已保留。")
             if saved.decision == "research":
                 return redirect("investment_research:company_research", pk=pk)
-            return redirect(f"{request.path}?report={job.pk}#confirmation")
+            return redirect(f"{request.path}?report={job.pk}&tab=questions")
         except ResearchAiError as exc:
             error = str(exc)
     result = job.result.result_json if job and job.status == "success" else None
@@ -61,5 +61,6 @@ def prepare(request, pk):
         "stale": job and job.scope.get("thesis_revision_id") != dossier.current_revision_id,
         "evidence": job.sanitized_input.get("evidence", []) if job else [],
         "saved": saved, "hypothesis_rows": rows, "questions": questions, "error": error,
+        "questions_tab": request.GET.get('tab') == 'questions' or request.POST.get('action') == 'confirm',
         "can_write": is_writer(member), "nonce": str(uuid.uuid4()),
         "reason": request.POST.get("reason", saved.reason if saved else "")})

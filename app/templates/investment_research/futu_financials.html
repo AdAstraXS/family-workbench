@@ -10,13 +10,7 @@
     </div>
     <a class="button" href="{% url 'investment_research:financials' dossier.pk %}">查看 SEC 财务概览</a>
   </header>
-  <nav class="research-workflow" aria-label="公司研究步骤">
-    <a href="{% url 'investment_research:detail' dossier.pk %}">当前判断</a>
-    <a href="{% url 'investment_research:financials' dossier.pk %}">SEC 财务概览</a>
-    <span aria-current="page">富途财务数据</span>
-    <a href="{% url 'investment_research:company_research' dossier.pk %}">公司研究</a>
-    <a href="{% url 'investment_research:materials' dossier.pk %}">公司资料</a>
-  </nav>
+
 
   <section class="research-source-summary">
     <div>

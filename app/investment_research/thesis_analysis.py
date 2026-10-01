@@ -214,10 +214,13 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
     ).select_related("current_revision", "security").first()
     if dossier is None:
         raise DossierNotFound("研究档案不存在或不属于你。")
-    revision = dossier.current_revision
+    from .research_basis import research_basis
+    revision = research_basis(dossier)
     targets = _targets(revision) if revision else []
     if not targets or len(targets) > 12:
-        raise ResearchAiError("请先保存包含 1–12 条假设或待验证问题的正式判断。")
+        raise ResearchAiError("请先确认包含 1–12 条问题或候选假设的研究方向，或保存正式判断。")
+    if not revision.pk and review_mode == 'incremental':
+        raise ResearchAiError('候选假设阶段请使用完整重评；保存个人判断后可检查最新变化。')
     packet = prepare_analysis_materials(dossier)
     baseline = None
     baseline_context = None
@@ -353,6 +356,9 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
         analysis_type="thesis_synthesis", prompt=system,
         scope={"dossier_id": dossier.pk, "thesis_revision_id": revision.pk,
                "thesis_revision_number": revision.revision_number,
+               "preparation_id": getattr(revision, 'preparation_id', None),
+               "preparation_revision": getattr(revision, 'preparation_revision', None),
+               "research_basis": 'formal_judgment' if revision.pk else 'candidate_hypotheses',
                "sources": packet["sources"], "financial_periods": packet["periods"],
                "valuation_basis": packet["valuation_basis"],
                "market_context": packet["market_context"],

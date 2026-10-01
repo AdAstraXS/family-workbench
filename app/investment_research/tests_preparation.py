@@ -91,7 +91,7 @@ class PreparationTests(TestCase):
         self.assertContains(page, "现金流可能恢复")
         form = self.client.get(reverse("investment_research:first_thesis", args=[self.dossier.pk]))
         self.assertContains(form, "现金流可能恢复")
-        self.assertContains(self.client.get(reverse("investment_research:index")), "继续研究 · 研究准备")
+        self.assertContains(self.client.get(reverse("investment_research:index")), "深入研究")
 
     def test_confirmation_validation_conflicts_and_foreign_references(self):
         job = self.job()

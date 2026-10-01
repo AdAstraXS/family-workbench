@@ -214,7 +214,7 @@ class MaterialTests(TestCase):
         version, _ = save_material(self.security, "profile", "profile", "公司概况", data={"payload": [{"name": "业务", "value": "制造"}]})
         self.client.force_login(self.actor.user)
         with patch("investment_research.company_sources.quote_context") as fetch:
-            response = self.client.get(reverse("investment_research:materials", args=[self.dossier.pk]))
+            response = self.client.get(reverse("investment_research:materials", args=[self.dossier.pk]) + "?tab=inventory")
             self.assertContains(response, "五步资料清单")
             self.assertEqual(CompanyMaterialVersion.objects.count(), 1)
             fetch.assert_not_called()

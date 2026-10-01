@@ -35,7 +35,7 @@ class CompanyWorkspaceTests(TestCase):
     def test_original_page_and_news_entry_are_one_workspace(self):
         self.client.force_login(self.user)
         response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]))
-        for text in ("公司研究", "最新变化", "证据资料", "当前判断", "财务概览"):
+        for text in ("公司研究", "持续跟踪", "资料库", "个人判断", "财务与估值"):
             self.assertContains(response, text)
         self.assertRedirects(self.client.get(reverse("investment_watch:company", args=[self.dossier.pk])),
                              reverse("investment_research:company_research", args=[self.dossier.pk]))
@@ -45,7 +45,7 @@ class CompanyWorkspaceTests(TestCase):
         self.client.force_login(self.user)
         for view in ("conclusion", "changes", "evidence"):
             with CaptureQueriesContext(connection) as queries:
-                response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]), {"view": view})
+                response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]), {"view": view}, follow=True)
             self.assertEqual(response.status_code, 200)
             self.assertFalse(any(query["sql"].lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for query in queries))
 
@@ -57,12 +57,12 @@ class CompanyWorkspaceTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
         self.assertTemplateUsed(response, "investment_research/detail.html")
-        for text in ("1 · 当前判断", "2 · 财务概览", "3 · 公司研究", "次日跟踪", "官方资料", "个股行情与估值"):
+        for text in ("研究准备", "公司研究", "个人判断", "持续跟踪", "资料库", "财务与估值"):
             self.assertContains(response, text)
         self.assertContains(response, self.dossier.current_revision.thesis)
         self.assertNotContains(response, 'css/company-research.css')
         listing = self.client.get(reverse("investment_research:index"))
-        for text in ("标的", "当前判断", "更新时间"):
+        for text in ("公司", "研究进度", "观察状态"):
             self.assertContains(listing, text)
         self.assertContains(listing, reverse("investment_research:company_research", args=[self.dossier.pk]))
 
@@ -134,7 +134,7 @@ class CompanyWorkspaceTests(TestCase):
         self.assertEqual(baseline.scope, original_scope)
         self.client.force_login(self.user)
         response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]),
-                                   {"view": "changes"})
+                                   {"view": "changes"}, follow=True)
         self.assertEqual(response.context["pending_news_count"], 0)
 
     def test_material_selection_returns_to_original_company_page(self):
@@ -142,5 +142,5 @@ class CompanyWorkspaceTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.post(reverse("investment_watch:select_research", args=[candidate.pk]),
                                     {"return_to": "company"})
-        self.assertRedirects(response, reverse("investment_research:company_research", args=[self.dossier.pk]) + "?view=changes")
+        self.assertRedirects(response, reverse("investment_research:company_research", args=[self.dossier.pk]) + "?view=changes", target_status_code=302)
         self.assertFalse(ResearchCandidate.objects.get(pk=candidate.pk).selected_for_research)

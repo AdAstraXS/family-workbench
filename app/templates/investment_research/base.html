@@ -1,7 +1,10 @@
 {% extends "base.html" %}
+{% load static research_navigation %}
 
 {% block extra_head %}
 {{ block.super }}
+<link rel="stylesheet" href="{% static 'css/research-navigation.css' %}?v=20261002">
+<script src="{% static 'js/research-navigation.js' %}?v=20261002" defer></script>
 <style>
   .research-page { overflow-wrap: anywhere; }
   .research-header { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
@@ -202,8 +205,8 @@
 {% endblock %}
 
 {% block content %}
-{% if request.resolver_match.url_name != "index" and request.resolver_match.url_name != "thesis_analysis_detail" and request.resolver_match.url_name != "next_day_tracking" %}
-<a class="research-back" href="{% url 'investment_research:index' %}">返回研究列表</a>
-{% endif %}
-{% block research_content %}{% endblock %}
+{% research_navigation as research_nav %}
+{% research_writer as research_can_write %}
+{% include 'investment_research/navigation.html' %}
+<div class="rn-body" data-area="{{ research_nav.area }}" data-tab="{{ request.GET.tab }}">{% include "investment_research/follow_state.html" %}{% block research_content %}{% endblock %}</div>
 {% endblock %}

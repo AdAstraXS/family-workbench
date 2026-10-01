@@ -10,7 +10,7 @@
       <p class="research-private-note">这里存放官方文件目录和已保存的正文。目录中有文件，不代表正文已经可读；浏览本页不会访问外部网站或修改研究判断。</p>
     </div>
     <div class="research-actions">
-      <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a>
+
       {% if can_write %}
         <form class="research-inline-form" method="post" action="{% url 'investment_research:sync_documents' dossier.pk %}">
           {% csrf_token %}
@@ -24,7 +24,7 @@
     </div>
   </div>
 
-  <nav class="research-workflow" aria-label="公司研究步骤"><a href="{% url 'investment_research:detail' dossier.pk %}">1 · 当前判断</a><a href="{% url 'investment_research:financials' dossier.pk %}">2 · 财务概览</a><a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">3 · AI 综合分析</a><span aria-current="step">官方资料</span></nav>
+
 
   {% if ir_company %}
     <section class="research-document-body" aria-label="官方 IR 覆盖">

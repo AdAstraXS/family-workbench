@@ -98,6 +98,7 @@ class ResearchBriefTests(TestCase):
         response = self.client.get(url)
         self.assertContains(response, "公司研究简报")
         self.assertContains(response, "$100.00")
+        response = self.client.get(reverse("investment_research:valuation", args=[self.dossier.pk]))
         self.assertContains(response, "估值试算")
         self.assertContains(response, "161.05")
         self.assertContains(response, "波段辅助")
@@ -106,7 +107,7 @@ class ResearchBriefTests(TestCase):
                             reverse("investment_research:company_research", args=[self.dossier.pk]))
         unified = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]))
         self.assertEqual(unified.context["analysis"].pk, analysis.pk)
-        for text in ("财报、SEC 与 IR", "相关新闻", "综合分析与判断", "估值试算", "最新变化", "证据资料"):
+        for text in ("财报、SEC 与 IR", "相关新闻", "综合分析与判断", "财务与估值", "持续跟踪", "资料库"):
             self.assertContains(unified, text)
         legacy = self.client.get(url + "?mode=audit")
         self.assertContains(legacy, "公司研究简报")
@@ -249,7 +250,7 @@ class ResearchBriefTests(TestCase):
         tracking_url = reverse("investment_research:next_day_tracking",
                                args=[self.dossier.pk])
         tracking_page = self.client.get(tracking_url)
-        self.assertContains(tracking_page, "已开启个人判断对照")
+        self.assertContains(self.client.get(tracking_url + "?tab=settings"), "已开启个人判断对照")
         self.assertContains(tracking_page, "现在生成事件简报")
         self.assertContains(tracking_page, "正在整理官方资料并分析")
         with patch("investment_research.views.generate_next_day_digest", return_value=None) as run:

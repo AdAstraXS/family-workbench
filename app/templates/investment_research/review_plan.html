@@ -4,7 +4,7 @@
 
 {% block research_content %}
 <section class="research-page">
-  <div class="research-header"><div><p class="research-private-note">{{ dossier.security.name }}（{{ dossier.security.symbol }}）· 仅自己可见</p><h1>下期财报复核计划</h1></div><a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a></div>
+  <div class="research-header"><div><p class="research-private-note">{{ dossier.security.name }}（{{ dossier.security.symbol }}）· 仅自己可见</p><h1>下期财报复核计划</h1></div></div>
   <p class="research-private-note">这是下一份财报发布前的核查清单。历史 10-K 摘录只说明已有证据和缺口，不能当作未来财报的结论。AI 草稿不会自动改变你的判断或确认计划。</p>
   {% if not revision %}<p class="research-document-empty">请先保存包含关键假设或待验证问题的正式判断。</p>{% if can_write %}<a class="button" href="{% url 'investment_research:first_thesis' dossier.pk %}">记录第一版判断</a>{% endif %}
   {% else %}

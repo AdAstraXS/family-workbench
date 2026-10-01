@@ -79,7 +79,7 @@ class FilingReviewJourneyTests(TestCase):
     def test_full_explore_thesis_next_filing_review_and_revision_journey(self):
         self.client.force_login(self.member.user)
         detail_url = reverse("investment_research:detail", args=[self.dossier.pk])
-        self.assertContains(self.client.get(detail_url), "1 · 了解公司")
+        self.assertContains(self.client.get(detail_url), "尚无个人判断")
         self.assertContains(self.client.get(detail_url), "记录第一版判断")
         revision = self.first_thesis()
         old_document, _ = self.filing(days_after=-10)
@@ -87,7 +87,7 @@ class FilingReviewJourneyTests(TestCase):
         reviews_url = reverse("investment_research:filing_reviews", args=[self.dossier.pk])
         review_url = reverse("investment_research:filing_review",
                              args=[self.dossier.pk, future.pk])
-        self.assertContains(self.client.get(detail_url), "1 份新财报待复核")
+        self.assertContains(self.client.get(reverse("investment_research:follow", args=[self.dossier.pk])), "1 份新财报待复核")
         self.assertContains(self.client.get(reverse("investment_research:index")),
                             "1 份新财报待复核")
         self.assertContains(self.client.get(reviews_url), future.title)
@@ -104,7 +104,7 @@ class FilingReviewJourneyTests(TestCase):
             version, review.citation["start"], review.citation["end"],
             review.citation["hash"],
         )[1])
-        self.assertContains(self.client.get(detail_url), "待修订判断")
+        self.assertContains(self.client.get(reverse("investment_research:follow", args=[self.dossier.pk])), "待修订判断")
         self.assertContains(self.client.get(reverse("investment_research:index")),
                             "1 份复核提示修订判断")
         self.assertContains(self.client.get(review_url), "核对本次引用的原文")
@@ -114,7 +114,7 @@ class FilingReviewJourneyTests(TestCase):
             thesis="服务收入增长，但现金回报仍需核查。", pillars=["现金回报"],
             questions=["下一期现金流如何？"], change_reason="复核后调整",
         )
-        self.assertNotContains(self.client.get(detail_url), "待修订判断")
+        self.assertNotContains(self.client.get(reverse("investment_research:follow", args=[self.dossier.pk])), "待修订判断")
         self.assertNotContains(self.client.get(reverse("investment_research:index")),
                                "复核提示修订判断")
         review.refresh_from_db()
