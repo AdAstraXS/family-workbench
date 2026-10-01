@@ -35,3 +35,18 @@ AI 请求/结果沿用 `AiAnalysisRequest` / `AiAnalysisResult`，类型 `compan
 
 投研完整回归包括权限、来源冻结、原币种年度/季度、空材料、候选引用、原判断保留、三种去向、并发编辑冲突、重复生成、费用与超时失败。
 本地界面示例只保存在隔离预览库，禁止部署演示数据库或伪造生产 AI 结果。
+
+## 2026-10-01 上线记录
+
+- 运行提交：`00a5d2ed8ba681c86311fe5eac0d51dcaeaf9801`，已推送 GitHub。
+- 合并保留同日 NAS 账本更新 `a8435a4709c2a2efa8e2b1b557a02f0e23162d40`，未更改该功能的口径。
+- 投研完整回归与账本收入构成回归共 435 项通过；迁移完整性、Django 检查和 diff 检查通过。
+- 本地浏览器验证：四部分报告、来源内容、移动布局无横向溢出、保存观察、继续研究及统一公司研究页面带入确认内容。
+- NAS 新增 `investment_research.0014_researchpreparation`；正式判断和投资账本均未变。
+- 部署前后账户 35、持仓 483、流水 1080、快照 2255、快照明细 14058、最新快照 2026-10-01、估值运行 79 均一致；`.env` SHA-256 `78d7894b721698adf1d5a4ce3c969e4983b2ee079cdebdb5082db3aca985b51c` 未变。
+- 迁移前备份：`family-workbench-research-preparation-20261001.dump`，SHA-256 `5771abb5c2b62854a39a0bafa144376ed8350dd23c6fd427bce60255cb66a766`。
+- 最终发布前备份：`family-workbench-research-preparation-final-20261001.dump`，SHA-256 `84cde0e56c9ba063b909913fddf1a44ae99f34ea9b9b28866d36acd2117701fd`。
+- 源码恢复包：`source-predeploy-a8435a4709c2a2efa8e2b1b557a02f0e23162d40-20261001-230800.tar.gz`，SHA-256 `1038aca9c222a46ebe6ce9454dacc4ec1fee4dee986a52e80857d68f08886257`。恢复包保存在 NAS backups；恢复数据库需单独确认，不能用本地预览库覆盖。
+- 最后提示修正前备份：`family-workbench-research-period-guard-20261001.dump`，SHA-256 `6eb3ce0a8d65d686213194cdde549e51e5f8187f3ab44987e2722397946b4f9c`；对应前一源码包 `source-predeploy-0f5833c5210192a1f76ab59bd2ac5d6c9c6740a4-20261001-231401.tar.gz`，SHA-256 `95f4a0212e2136b5cbc59066ead5a6f3c99fe45d0e1ea8a42cadbf1800e73df6`。
+- 真实验证：美光档案 20，报告 58，用户明确授权 DeepSeek 文本整理一次调用。8 项资料、17 条摘录，四部分报告、5 条问题、3 条候选假设完整返回，估算费用 USD 0.003649；仅生成报告，未替本人确认任何投资假设或研究去向。
+- 实际输出仍可能把不同报告期的差异称为“证据冲突”。已在界面提示先对齐口径，并对后续提示词增加规则；不能将模型标签当作已证实的会计矛盾。最后年度时段标注与规则提示修改通过 30 项针对性测试；按用户授权次数，没有再付费生成第三份报告。
