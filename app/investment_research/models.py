@@ -58,6 +58,22 @@ class CompanyIdentity(TimestampedModel):
         verbose_name_plural = verbose_name
 
 
+class ResearchPreparation(TimestampedModel):
+    """Owner-confirmed preparation; never replaces a formal thesis revision."""
+    dossier = models.ForeignKey("ResearchDossier", on_delete=models.CASCADE, related_name="preparations")
+    analysis = models.OneToOneField("ai_analysis.AiAnalysisRequest", on_delete=models.PROTECT,
+                                   related_name="preparation")
+    questions = models.JSONField(default=list)
+    hypotheses = models.JSONField(default=list)
+    decision = models.CharField(max_length=20, choices=[("research", "继续研究"),
+        ("watch", "加入观察"), ("pause", "暂不研究")])
+    reason = models.TextField(blank=True)
+    revision = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        ordering = ["updated_at", "pk"]
+
+
 class CompanyMaterial(TimestampedModel):
     """Public source item. Private judgments remain in their original dossier."""
     security = models.ForeignKey(Security, on_delete=models.PROTECT, related_name="company_materials")

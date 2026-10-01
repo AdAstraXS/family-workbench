@@ -8,7 +8,7 @@
   <header class="research-header"><div><p class="research-eyebrow">了解公司 · 基础资料</p><h1>{{ dossier.security.name }}</h1>
     <p>{{ dossier.security.symbol }} · {{ dossier.security.market }}{% if identity.cik %} · SEC CIK {{ identity.cik }}{% endif %}</p>
     <p class="material-meta">已确认上市代码：{{ identity_info.listings|join:" · " }}。财务数据保留来源币种与统计口径，不做货币换算。</p></div>
-    <a class="button" href="{% url 'investment_research:company_research' dossier.pk %}">进入公司研究</a></header>
+    <div class="research-actions"><a class="button" href="{% url 'investment_research:prepare' dossier.pk %}">下一步 · AI 公司初识</a><a href="{% url 'investment_research:company_research' dossier.pk %}">进入公司研究</a></div></header>
   <nav class="material-tabs" aria-label="公司资料导航"><a href="#library">公司资料</a><a href="#inventory">五步资料清单</a><a href="#acquisition">获取与更新</a><a href="{% url 'investment_research:documents' dossier.pk %}">已有官方资料</a></nav>
   <section id="library"><h2>已保存的资料</h2><p class="research-private-note">点开阅读整理后的内容，也可查看历史版本和下载原件。原有官方资料继续保留。</p>
     {% if sec_materials or facts_version %}{% include "investment_research/sec_financial_overview.html" %}{% endif %}

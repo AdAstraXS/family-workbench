@@ -4,6 +4,7 @@
 <section class="research-page">
   <h1>形成判断：{{ dossier.security.name }}（{{ dossier.security.symbol }}）</h1>
   <p class="research-private-note">这是你的第一版正式判断，会保留原始版本和历史。资料或 AI 草稿不会替你自动保存判断。</p>
+  {% if dossier.preparations.exists %}<p>已带入你确认过的候选假设与研究问题。请核查后编辑，并用自己的话填写判断。<a href="{% url 'investment_research:prepare' dossier.pk %}">回看初识报告与证据</a></p>{% endif %}
   {% if conflict %}<div class="app-message warning">判断已经保存，请查看最新档案，再决定是否编辑。<a href="{% url 'investment_research:detail' dossier.pk %}">查看最新详情</a></div>{% endif %}
   <form method="post" class="research-form">
     {% csrf_token %}

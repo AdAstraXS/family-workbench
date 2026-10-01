@@ -226,7 +226,10 @@ def first_thesis(request, pk):
         return HttpResponseForbidden("查看者角色不能保存判断。")
     if dossier.current_revision_id and request.method == "GET":
         return redirect("investment_research:edit", pk=pk)
-    form = FirstThesisForm(request.POST if request.method == "POST" else None)
+    preparation = dossier.preparations.last()
+    initial = {"pillars": "\n".join(h["claim"] for h in preparation.hypotheses),
+               "questions": "\n".join(preparation.questions)} if preparation else {}
+    form = FirstThesisForm(request.POST if request.method == "POST" else None, initial=initial)
     if request.method == "POST" and form.is_valid():
         try:
             save_first_thesis(
