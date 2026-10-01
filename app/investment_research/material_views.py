@@ -14,6 +14,7 @@ from .services import ResearchValidationError
 from .material_reading import inventory, reading_sections, profile_content
 from .sec_fact_reading import fact_tables
 from .sec_financial_overview import financial_overview, report_info
+from .sec_annual_release import annual_reading, fiscal_calendar
 from .futu_financials import statement_tables, breakdown_tables, provider_code
 
 
@@ -64,13 +65,19 @@ def library(request, pk):
                 else dossier.security.market in {"US", "HK", "CN", "CN_B"}} for k, v in SOURCE_TASKS.items()]
     for material in materials:
         material.retired = material.kind in RETIRED_SOURCES
+    overview = financial_overview(dossier.security)
+    facts_version = next((m.latest for m in materials if m.kind == "facts"), None)
+    _, fiscal, _ = annual_reading(facts_version.data if facts_version else {}, overview)
+    calendar = fiscal_calendar(facts_version.data if facts_version else {}, overview)
+    fiscal = max((item for item in (fiscal, calendar) if item), key=lambda item: item["end"], default=None)
     return render(request, "investment_research/material_library.html", {
         "dossier": dossier, "identity": identity, "identity_info": info,
         "materials": [m for m in materials if m.kind != "sec_document" and not m.retired],
         "retired_materials": [m for m in materials if m.retired],
         "sec_materials": [m for m in materials if m.kind == "sec_document"],
-        "sec_overview": financial_overview(dossier.security),
-        "facts_version": next((m.latest for m in materials if m.kind == "facts"), None),
+        "sec_overview": overview,
+        "fiscal_calendar": fiscal,
+        "facts_version": facts_version,
         "manifest": manifest, "sources": sources,
         "job": job, "active": active, "can_write": is_writer(member)})
 
@@ -89,11 +96,16 @@ def read(request, pk, version_pk):
         response["Content-Security-Policy"] = "sandbox"
         return response
     data = version.data
+    overview = financial_overview(dossier.security) if version.material.kind == "facts" else None
+    annual_rows, fiscal, notices = annual_reading(data, overview) if overview else ([], None, [])
+    calendar = fiscal_calendar(data, overview) if overview else None
+    fiscal = max((item for item in (fiscal, calendar) if item), key=lambda item: item["end"], default=None)
     return render(request, "investment_research/material_read.html", {
         "dossier": dossier, "version": version, "sections": reading_sections(version),
-        "fact_tables": fact_tables(data) if version.material.kind == "facts" else [],
+        "fact_tables": fact_tables(data, rows=annual_rows) if version.material.kind == "facts" else [],
         "quarterly_tables": fact_tables(data, "quarterly") if version.material.kind == "facts" else [],
-        "sec_overview": financial_overview(dossier.security) if version.material.kind == "facts" else None,
+        "sec_overview": overview, "fiscal_calendar": fiscal,
+        "annual_notices": notices,
         "facts_version": version if version.material.kind == "facts" else None,
         "sec_report": report_info(version) if version.material.kind == "sec_document" else None,
         "profile": profile_content(data) if version.material.kind == "profile" else None,

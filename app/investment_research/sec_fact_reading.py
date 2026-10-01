@@ -5,9 +5,9 @@ from .material_reading import fact_rows, CORE_FACTS
 from .number_display import CURRENCIES
 
 
-def fact_tables(data, frequency="annual"):
+def fact_tables(data, frequency="annual", rows=None):
     groups = defaultdict(list)
-    for row in fact_rows(data, frequency):
+    for row in fact_rows(data, frequency) if rows is None else rows:
         if not row["end"]:
             continue
         category = "每股数据" if row["currency"].endswith("/shares") else "年度经营数据" if row["start"] else "年末资产与负债"
@@ -50,6 +50,8 @@ def fact_tables(data, frequency="annual"):
         tables.append({"title": category, "standard": standard, "currency": currency,
                        "unit": display_unit, "rows": rows, "has_alternatives": any(v > 1 for v in counts.values()),
                        "periods": [{"year": end[:4] if frequency == "annual" else end, "start": start, "end": end,
+                                    "is_release": any(r.get("source_kind") == "release" for r in values if (r["start"], r["end"]) == (start, end)),
+                                    "audit": " / ".join(sorted({r.get("audit", "正式年报，审计意见见原文") for r in values if (r["start"], r["end"]) == (start, end)})),
                                     "filed": max((r["filed"] or "" for r in values if (r["start"], r["end"]) == (start, end)), default="")}
                                    for start, end in periods]})
     category_order = {"年度经营数据": 0, "年末资产与负债": 1, "每股数据": 2}

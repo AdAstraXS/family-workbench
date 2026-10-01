@@ -8,13 +8,13 @@
   <div class="sec-table-heading"><h2>{{ table.title }}</h2><span>{{ table.currency }} · {{ table.standard }} · 单位：{{ table.unit }}</span></div>
   <p class="sec-scroll-hint research-private-note">左右滑动表格可查看全部期间。</p>
   <div class="research-metric-scroll"><table class="research-metric-table sec-comparison">
-    <thead><tr><th scope="col">指标</th>{% for period in table.periods %}<th scope="col">{{ period.year }}<small>{% if period.start %}{{ period.start }} 至{% else %}截至{% endif %}<br>{{ period.end }}<br>最近申报 {{ period.filed|default:"未标注" }}</small></th>{% endfor %}</tr></thead>
+    <thead><tr><th scope="col">指标</th>{% for period in table.periods %}<th scope="col">{{ period.year }}{% if period.is_release %} · 业绩公告{% endif %}<small>{% if period.start %}{{ period.start }} 至{% else %}截至{% endif %}<br>{{ period.end }}<br>最近申报 {{ period.filed|default:"未标注" }}{% if period.is_release %}<br>{{ period.audit }}{% endif %}</small></th>{% endfor %}</tr></thead>
     <tbody>{% for row in table.rows %}<tr><th scope="row">{{ row.label }}</th>{% for cell in row.cells %}<td>{{ cell.amount }}</td>{% endfor %}</tr>{% endfor %}</tbody>
   </table></div>
   {% if table.has_alternatives %}<p class="research-private-note">同名指标存在不同披露口径，分别列出，没有相加或替换。</p>{% endif %}
   <details class="sec-provenance"><summary>查看指标口径与申报来源</summary>
     {% for row in table.rows %}<div><h3>{{ row.label }}</h3><p>{{ row.source_label }} <small>（{{ row.code }}）</small></p>
-      <ul>{% for cell in row.cells %}{% if cell.source %}<li>{{ cell.source.period }} · 申报于 {{ cell.source.filed }} · SEC 申报编号 {{ cell.source.accession }}</li>{% endif %}{% endfor %}</ul>
+      <ul>{% for cell in row.cells %}{% if cell.source %}<li>{{ cell.source.period }} · 申报于 {{ cell.source.filed }} · SEC 申报编号 {{ cell.source.accession }}{% if cell.source.source_kind == 'release' %} · <a href="{% url 'investment_research:material_read' dossier.pk cell.source.version_id %}">全年业绩公告原文</a> · {{ cell.source.audit }} · {{ cell.source.period_basis }} · 币种与会计口径经上期可比指标核对{% endif %}</li>{% endif %}{% endfor %}</ul>
     </div>{% endfor %}
   </details>
 </section>

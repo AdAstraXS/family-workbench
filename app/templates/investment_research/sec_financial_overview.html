@@ -1,6 +1,7 @@
 <section class="research-current" aria-label="SEC 财务资料">
   <h2>SEC 财务资料</h2>
   <p>业绩公告可能早于正式年报发布。这里显示已保存的资料；获取时间与报告期分别标注。</p>
+  <div class="research-method-note"><h3>公司财年</h3>{% if fiscal_calendar %}<p>最新已披露全年：{{ fiscal_calendar.start|default:"起始日待确认" }} 至 {{ fiscal_calendar.end }}{% if fiscal_calendar.days %}（{{ fiscal_calendar.days }} 天）{% endif %}</p><p class="research-private-note">{{ fiscal_calendar.basis }}。财年不一定等于自然年，采用 52 / 53 周财年的公司，结束日期会在相邻年份小幅移动；请以每份报告的实际日期为准。</p>{% else %}<p>尚无可确认的财年起止日期；补充年报或全年业绩公告后显示，不默认采用 1 月至 12 月。</p>{% endif %}</div>
   <nav class="material-tabs" aria-label="SEC 财务导航" style="display:flex;flex-wrap:wrap;gap:20px;padding:16px 0">
     <a href="#sec-releases">最新业绩公告</a>
     {% if facts_version %}<a href="{% url 'investment_research:material_read' dossier.pk facts_version.pk %}#sec-annual">年度财务</a><a href="{% url 'investment_research:material_read' dossier.pk facts_version.pk %}#sec-quarterly">季度财务</a>{% endif %}

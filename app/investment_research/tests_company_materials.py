@@ -196,6 +196,20 @@ class MaterialTests(TestCase):
         self.assertEqual(info["period"], "2026-05-28")
         self.assertEqual(info["audit"], "审计状态请见原文")
 
+    def test_annual_page_includes_announcement_values_and_fiscal_calendar_without_writing(self):
+        from .tests_sec_annual_release import fixture
+        data, _, _, html = fixture()
+        facts, _ = save_material(self.security, "facts", "facts", "SEC 财务指标", data=data)
+        release, _ = save_material(self.security, "release", "sec_document", "Annual results", raw=html.encode(),
+            media_type="text/html", text="Reports full-year 2026 results for year ended December 31, 2026. Unaudited.",
+            data={"document_type": "8-k", "filing_date": "2027-01-15", "accession": "a", "attachment": "earnings.htm"})
+        self.client.force_login(self.actor.user)
+        response = self.client.get(reverse("investment_research:material_read", args=[self.dossier.pk, facts.pk]))
+        for text in ["2026 · 业绩公告", "2026-01-01", "2026-12-31", "1.20", "-0.05", "未经审计", "公司财年"]:
+            self.assertContains(response, text)
+        self.assertContains(response, reverse("investment_research:material_read", args=[self.dossier.pk, release.pk]))
+        self.assertEqual(CompanyMaterialVersion.objects.count(), 2)
+
     def test_read_download_and_get_do_not_fetch_or_write(self):
         version, _ = save_material(self.security, "profile", "profile", "公司概况", data={"payload": [{"name": "业务", "value": "制造"}]})
         self.client.force_login(self.actor.user)

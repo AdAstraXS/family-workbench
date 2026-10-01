@@ -18,7 +18,8 @@
     <div class="research-metric-scroll"><table class="research-metric-table"><thead><tr><th>指标</th>{% for report in table.reports %}<th>{{ report.period }}<small>{{ report.currency }} · {{ report.standards_display }}</small></th>{% endfor %}</tr></thead><tbody>{% for row in table.rows %}<tr><th>{{ row.name }}</th>{% for cell in row.cells %}<td>{{ cell.amount }}{% if cell.yoy %}<small>同比 {{ cell.yoy }}</small>{% endif %}</td>{% endfor %}</tr>{% empty %}<tr><td>暂无已确认名称的项目。</td></tr>{% endfor %}</tbody></table></div></section>{% endfor %}
   {% if version.material.kind == 'facts' %}
     {% include "investment_research/sec_financial_overview.html" %}
-    <section id="sec-annual"><h2>年度财务</h2><p>仅采用正式年报中的全年数据；最新业绩公告单独列示。审计意见见对应年报原文。</p>
+    <section id="sec-annual"><h2>年度财务</h2><p>正式年报尚未更新时，补充已核对的全年业绩公告指标，并逐列标明来源状态。正式年报发布且指标更新后优先采用正式年报值，公告及历史版本继续保留。</p>
+    {% for notice in annual_notices %}<p class="research-method-note"><a href="{% url 'investment_research:material_read' dossier.pk notice.report.version.pk %}">{{ notice.report.period }} 全年业绩公告</a> · {% if notice.count %}已核对 {{ notice.count }} 项指标；未确认的指标留空，不推算。{% endif %}{% for warning in notice.warnings %}{{ warning }}{% endfor %}</p>{% endfor %}
     {% if fact_tables %}{% include "investment_research/sec_fact_tables.html" %}{% else %}<p>当前存档尚无可展示的年度指标。</p>{% endif %}</section>
     <section id="sec-quarterly"><h2>季度财务</h2><p>采用 10-Q 季报披露值。单季、半年累计、九个月累计和期末余额分别展示，不相减推算；审计或审阅说明见季报原文。</p>
     {% if quarterly_tables %}{% include "investment_research/sec_fact_tables.html" with fact_tables=quarterly_tables %}{% else %}<p>当前存档没有可展示的 10-Q 指标。外国发行人的 6-K 中期报告请从报告正文阅读。</p>{% endif %}</section>
