@@ -9,6 +9,7 @@
   <div class="section-head">
     <h1>资产快照</h1>
     <div class="inline-actions">
+      <a class="button ghost" href="{% url 'ledger:asset_snapshot_compare' %}">自定义对比</a>
       <a class="button ghost" href="{% url 'ledger:asset_snapshot_export' %}">导出到 Excel</a>
       <a class="button" href="{% url 'ledger:asset_snapshot_create' %}">新增资产快照</a>
     </div>
