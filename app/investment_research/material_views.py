@@ -8,10 +8,11 @@ from django.views.decorators.http import require_http_methods
 from .permissions import get_current_member, get_accessible_dossier_or_404, is_writer
 from .company_identity import search_companies, choose_company, relation, qualified
 from .company_jobs import enqueue
-from .company_sources import SOURCE_TASKS
+from .company_sources import SOURCE_TASKS, RETIRED_SOURCES
 from .models import CompanyIdentity, CompanyMaterialVersion
 from .services import ResearchValidationError
-from .material_reading import inventory, reading_sections, fact_rows
+from .material_reading import inventory, reading_sections, profile_content
+from .sec_fact_reading import fact_tables
 from .futu_financials import statement_tables, breakdown_tables, provider_code
 
 
@@ -60,9 +61,12 @@ def library(request, pk):
     sources = [{"key": k, "title": v, "applicable": bool(info["sec_ticker"]) if k in {"sec", "facts"}
                 else bool(company_for_security(dossier.security)) if k == "ir"
                 else dossier.security.market in {"US", "HK", "CN", "CN_B"}} for k, v in SOURCE_TASKS.items()]
+    for material in materials:
+        material.retired = material.kind in RETIRED_SOURCES
     return render(request, "investment_research/material_library.html", {
         "dossier": dossier, "identity": identity, "identity_info": info,
-        "materials": [m for m in materials if m.kind != "sec_document"],
+        "materials": [m for m in materials if m.kind != "sec_document" and not m.retired],
+        "retired_materials": [m for m in materials if m.retired],
         "sec_materials": [m for m in materials if m.kind == "sec_document"],
         "manifest": manifest, "sources": sources,
         "job": job, "active": active, "can_write": is_writer(member)})
@@ -84,7 +88,9 @@ def read(request, pk, version_pk):
     data = version.data
     return render(request, "investment_research/material_read.html", {
         "dossier": dossier, "version": version, "sections": reading_sections(version),
-        "facts": fact_rows(data) if version.material.kind == "facts" else [],
+        "fact_tables": fact_tables(data) if version.material.kind == "facts" else [],
+        "profile": profile_content(data) if version.material.kind == "profile" else None,
+        "retired": version.material.kind in RETIRED_SOURCES,
         "tables": statement_tables(data.get("statements", []), provider_code(dossier.security)) if version.material.kind == "financials" else [],
         "groups": breakdown_tables(data.get("breakdown")) if version.material.kind == "financials" else [],
         "versions": version.material.versions.only("id", "number", "fetched_at", "report_date"),

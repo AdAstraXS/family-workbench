@@ -13,14 +13,38 @@ RESEARCH_SECTIONS = {
 }
 
 
+def profile_content(data):
+    payload = data.get("payload", data)
+    result = {"narratives": [], "highlights": [], "details": []}
+    if not isinstance(payload, list):
+        return result
+    narrative_names = ("公司业务", "主营业务", "业务", "公司简介", "公司介绍", "业务描述")
+    highlights = {"成立日期", "CEO", "总经理", "员工数量", "年结日"}
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        name, value = str(row.get("name") or "").strip(), str(row.get("value") or "").strip()
+        if not name or value.lower() in {"", "n/a", "nan", "none", "--", "-"}:
+            continue
+        item = {"title": name, "text": value}
+        if name in narrative_names:
+            result["narratives"].append(item)
+        elif name in highlights:
+            if name == "员工数量" and value.isdigit():
+                item["text"] = f"{int(value):,} 人"
+            result["highlights"].append(item)
+        else:
+            result["details"].append(item)
+    result["narratives"].sort(key=lambda r: narrative_names.index(r["title"]))
+    return result
+
+
 def reading_sections(version):
     data = version.data
     payload = data.get("payload", data)
     sections = []
     if version.material.kind == "profile" and isinstance(payload, list):
-        for row in payload:
-            if row.get("name") and row.get("value"):
-                sections.append({"title": row["name"], "text": row["value"]})
+        return profile_content(data)["narratives"]
     elif version.material.kind == "research":
         for key, label in RESEARCH_SECTIONS.items():
             values = payload.get(key, [])
@@ -72,8 +96,8 @@ def reading_sections(version):
 
 
 CORE_FACTS = {
-    "RevenueFromContractWithCustomerExcludingAssessedTax": "营业收入", "Revenues": "营业收入",
-    "SalesRevenueNet": "营业收入", "Revenue": "营业收入", "GrossProfit": "毛利",
+    "RevenueFromContractWithCustomerExcludingAssessedTax": "客户合同收入（不含代收税费）", "Revenues": "收入（广义口径）",
+    "SalesRevenueNet": "销售收入净额", "Revenue": "营业收入", "GrossProfit": "毛利",
     "OperatingIncomeLoss": "营业利润", "ProfitLossFromOperatingActivities": "营业利润",
     "NetIncomeLoss": "净利润", "ProfitLoss": "净利润", "Assets": "资产总额",
     "Liabilities": "负债总额", "StockholdersEquity": "股东权益", "Equity": "股东权益",
@@ -113,6 +137,7 @@ def fact_rows(data):
                         by_period[period] = value
                 for (start, end), value in sorted(by_period.items(), reverse=True)[:3]:
                     rows.append({"label": CORE_FACTS[code], "source_label": fact.get("label", ""),
+                        "code": code, "start": start, "end": end, "value": number(value.get("val")),
                         "period": f"{start} — {end}" if start else end, "currency": unit,
                         "standard": "IFRS" if taxonomy == "ifrs-full" else "US GAAP",
                         "amount": money(value.get("val"), unit.split("/")[0], per_share=unit.endswith("/shares")),
@@ -122,9 +147,9 @@ def fact_rows(data):
 
 STEPS = (
     ("了解生意", ("profile", "financials", "sec_document"), "公司概况、主营构成、年报业务描述"),
-    ("看懂竞争", ("research", "industry", "sec_document"), "第三方研究、行业归属、年报竞争讨论；供应链关系仍需核实"),
+    ("看懂竞争", ("research", "sec_document"), "晨星研究与年报竞争讨论；实际客户、供应商与竞争关系需有正文证据"),
     ("核查财务", ("financials", "facts", "sec_document"), "财务报表、原币种、报告期和会计准则"),
-    ("机会与风险", ("research", "ratings", "sec_document"), "年报风险、研究报告、多空观点和评级日期"),
+    ("机会与风险", ("research", "sec_document"), "年报风险、晨星研究与多空论据；评级比例不作为事实证据"),
     ("形成待验证假设", (), "基于前四步资料由 AI 辅助提出问题，再由你确认；资料齐全不代表判断成立"),
 )
 
@@ -135,12 +160,13 @@ def inventory(security):
     for material in materials:
         version = material.versions.annotate(text_size=Length("text")).only("id", "number", "report_date", "fetched_at").first()
         material.latest = version
-        if version:
+        if version and material.kind not in {"industry", "ratings"}:
             refs.append({"material_id": material.pk, "version_id": version.pk,
                          "kind": material.kind, "title": material.title,
                          "report_date": version.report_date, "fetched_at": version.fetched_at.isoformat(),
                          "last_error": material.last_error,
-                         "has_readable_text": version.text_size > 0 if material.kind == "sec_document" else None})
+                         "has_readable_text": version.text_size > 0 if material.kind == "sec_document"
+                         else bool(profile_content(version.data)["narratives"]) if material.kind == "profile" else None})
     legacy = documents_for_security(security).exclude(content_text="").order_by("-published_at")
     legacy_refs = list(legacy.values("id", "title", "source", "published_at", "source_url")[:100])
     for item in legacy_refs:

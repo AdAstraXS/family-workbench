@@ -14,6 +14,7 @@
     <div class="material-grid">{% for item in materials %}{% include "investment_research/material_card.html" %}{% empty %}<article class="research-current"><h3>开始积累这家公司的资料</h3><p>选择下方可用来源获取资料。已有的 SEC、IR 文件可从“已有官方资料”进入。</p></article>{% endfor %}</div>
     {% if sec_materials %}<details class="research-current"><summary>SEC 报告与附件 · {{ sec_materials|length }} 项</summary><p class="material-meta">年报、近期公告及其附件，按原报告保存，可逐份阅读和重试。</p><div class="material-grid">{% for item in sec_materials %}{% include "investment_research/material_card.html" %}{% endfor %}</div></details>{% endif %}
   </section>
+  {% if retired_materials %}<details class="research-current"><summary>已停用资料 · 历史存档</summary><p>行业标签与关键词匹配的产业链不能证明公司关系；评级汇总没有分析理由。这两项已停止采集，历史原件保留，不计入五步研究资料。</p><div class="material-grid">{% for item in retired_materials %}{% include "investment_research/material_card.html" %}{% endfor %}</div></details>{% endif %}
   <section id="inventory" class="research-current"><h2>五步资料清单</h2><p>这是后续分析的材料准备情况，已有材料仍需判断是否充分、是否过期。</p>
     {% for step in manifest.steps %}<details class="research-method-note"><summary>{{ forloop.counter }} · {{ step.title }} — {{ step.status }}</summary><p>{{ step.boundary }}</p>
       {% for ref in step.materials %}<p>{% if ref.version_id %}<a href="{% url 'investment_research:material_read' dossier.pk ref.version_id %}">{{ ref.title }}</a>{% else %}<a href="{% url 'investment_research:document_detail' dossier.pk ref.legacy_document_id %}">{{ ref.title }}</a>{% endif %} · {{ ref.report_date|default:"报告期未标注" }}</p>{% endfor %}

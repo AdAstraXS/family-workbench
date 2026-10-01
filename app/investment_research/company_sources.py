@@ -13,9 +13,10 @@ from .providers.futu_public import public_url, fetch_page, enrich_names
 SOURCE_TASKS = {
     "sec": "SEC 官方文件", "facts": "SEC 财务指标",
     "profile": "公司概况", "financials": "富途财务报表与主营构成",
-    "research": "晨星研究报告", "ratings": "分析师评级", "industry": "行业与产业链",
+    "research": "晨星研究报告",
     "ir": "公司官方 IR",
 }
+RETIRED_SOURCES = {"ratings", "industry"}
 
 
 def json_value(value):
@@ -65,6 +66,8 @@ def search_futu(query):
 
 
 def collect_futu(security, kind):
+    if kind in RETIRED_SOURCES:
+        raise ValueError("此类资料已停止采集：现有接口未提供公司研究所需的事实或分析理由。")
     code = provider_code(security)
     with quote_context() as context:
         if kind == "financials":

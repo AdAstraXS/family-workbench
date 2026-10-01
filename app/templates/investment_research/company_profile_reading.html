@@ -1,0 +1,4 @@
+<p class="research-private-note">以下是富途提供的业务简介，来源未注明内容更新时间，可能滞后。请结合最新年报和主营构成核对，不将抓取时间视为内容更新日。</p>
+{% for section in profile.narratives %}<article class="research-current"><h2>{{ section.title }}</h2><div class="material-paragraph">{{ section.text }}</div></article>{% empty %}<p class="research-source-error">本次来源只有登记资料，没有可用的业务简介；不计入“了解生意”的有效材料。</p>{% endfor %}
+{% if profile.highlights %}<section class="research-current"><h2>基本情况</h2><dl class="profile-facts">{% for item in profile.highlights %}<div><dt>{{ item.title }}</dt><dd>{{ item.text }}</dd></div>{% endfor %}</dl></section>{% endif %}
+{% if profile.details %}<details class="research-current"><summary>其他登记资料（地址、联系方式、上市信息等）</summary><dl class="profile-facts">{% for item in profile.details %}<div><dt>{{ item.title }}</dt><dd>{{ item.text }}</dd></div>{% endfor %}</dl></details>{% endif %}

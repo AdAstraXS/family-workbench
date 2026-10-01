@@ -22,6 +22,37 @@ from .material_reading import fact_rows
 
 
 class DisplayTests(SimpleTestCase):
+    def test_sec_tables_align_years_and_keep_units_separate(self):
+        from .sec_fact_reading import fact_tables
+        def annual(year, val, **extra):
+            return {"start": f"{year}-01-01", "end": f"{year}-12-31", "val": val,
+                    "form": "20-F", "filed": "2026-04-01", "accn": "a", **extra}
+        data = {"facts": {"us-gaap": {
+            "Revenues": {"label": "Revenues", "units": {"CNY": [annual(2025, 123456789000), annual(2024, 100000000000)],
+                                                       "USD": [annual(2025, 800000000)]}},
+            "NetIncomeLoss": {"label": "Net income", "units": {"CNY": [annual(2025, 0)]}},
+            "EarningsPerShareDiluted": {"label": "EPS", "units": {"CNY/shares": [annual(2025, "1.235")]}}
+        }}}
+        tables = fact_tables(data)
+        cny = next(t for t in tables if t["currency"] == "CNY" and t["title"] == "年度经营数据")
+        self.assertEqual(cny["unit"], "亿元")
+        self.assertEqual([p["year"] for p in cny["periods"]], ["2025", "2024"])
+        self.assertEqual(cny["rows"][0]["cells"][0]["amount"], "1,234.57")
+        self.assertEqual([c["amount"] for c in cny["rows"][1]["cells"]], ["0.00", "—"])
+        eps = next(t for t in tables if t["title"] == "每股数据")
+        self.assertEqual(eps["unit"], "元/股")
+        self.assertEqual(eps["rows"][0]["cells"][0]["amount"], "1.24")
+        self.assertTrue(any(t["currency"] == "USD" for t in tables))
+
+    def test_profile_prioritizes_business_over_registration(self):
+        from .material_reading import profile_content
+        content = profile_content({"payload": [{"name": "电话", "value": "123"},
+            {"name": "员工数量", "value": "35032"}, {"name": "公司简介", "value": "设计制造汽车"},
+            {"name": "公司业务", "value": "汽车销售与服务"}]})
+        self.assertEqual(content["narratives"][0]["title"], "公司业务")
+        self.assertEqual(content["highlights"][0]["text"], "35,032 人")
+        self.assertEqual(content["details"][0]["title"], "电话")
+
     def test_ratings_show_source_percentage_without_rescaling(self):
         from .material_reading import reading_sections
         version = SimpleNamespace(material=SimpleNamespace(kind="ratings"),
@@ -150,6 +181,28 @@ class MaterialTests(TestCase):
         _, manifest = inventory(self.security)
         self.assertEqual(manifest["steps"][0]["status"], "待补充")
         self.assertEqual(manifest["steps"][-1]["status"], "待分析")
+
+    def test_retired_sources_cannot_fetch_or_count_as_research(self):
+        from .material_reading import inventory
+        from .company_sources import collect_futu
+        for kind in ("ratings", "industry"):
+            save_material(self.security, kind, kind, kind, data={"payload": {"total": 10}})
+            with self.assertRaises(ValueError):
+                enqueue(self.actor, self.dossier, [kind])
+            with patch("investment_research.company_sources.quote_context") as fetch:
+                with self.assertRaises(ValueError):
+                    collect_futu(self.security, kind)
+                fetch.assert_not_called()
+        save_material(self.security, "profile", "profile", "公司概况", data={"payload": [{"name": "电话", "value": "123"}]})
+        _, manifest = inventory(self.security)
+        self.assertEqual(manifest["steps"][0]["status"], "待补充")
+        self.assertEqual(manifest["steps"][1]["status"], "待补充")
+        self.assertEqual(manifest["steps"][3]["status"], "待补充")
+        self.client.force_login(self.actor.user)
+        response = self.client.get(reverse("investment_research:materials", args=[self.dossier.pk]))
+        self.assertContains(response, "已停用资料")
+        self.assertNotContains(response, 'value="ratings"')
+        self.assertNotContains(response, 'value="industry"')
 
     def test_source_warnings_and_sec_index_headers_are_not_evidence(self):
         from .material_reading import inventory
