@@ -178,7 +178,7 @@ class ImprovementTests(TestCase):
         self.client.force_login(self.user)
         self.assertEqual(
             self.client.get(
-                reverse("investment_watch:company", args=[dossier.pk])
+                reverse("investment_watch:company", args=[dossier.pk]), follow=True
             ).status_code,
             200,
         )
@@ -394,7 +394,7 @@ class ImprovementTests(TestCase):
         ]:
             self.assertEqual(
                 self.client.get(
-                    reverse("investment_watch:" + name, args=args)
+                    reverse("investment_watch:" + name, args=args), follow=True
                 ).status_code,
                 200,
             )

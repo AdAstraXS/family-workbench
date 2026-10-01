@@ -15,7 +15,10 @@
     </div>
   </header>
   <nav class="research-brief-tabs" aria-label="研究视图">
-    <span aria-current="page">公司研究</span>
+    <a href="{% url 'investment_research:detail' dossier.pk %}">研究结论</a>
+    <a href="{% url 'investment_research:detail' dossier.pk %}?view=changes">最新变化</a>
+    <a href="{% url 'investment_research:detail' dossier.pk %}?view=evidence">证据资料</a>
+    <span aria-current="page">本次报告</span>
     <a href="{% url 'investment_research:next_day_tracking' dossier.pk %}">次日跟踪</a>
     <a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">生成新分析</a>
   </nav>

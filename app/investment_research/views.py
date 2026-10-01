@@ -266,9 +266,11 @@ def detail(request, pk):
     current_plan = (ResearchReviewPlan.objects.filter(
         dossier=dossier, thesis_revision_id=dossier.current_revision_id,
     ).first() if dossier.current_revision_id else None)
+    from .company_workspace import workspace_context
+    company_context = workspace_context(dossier, request.GET)
     return render(
         request,
-        "investment_research/detail.html",
+        "investment_research/company_overview.html",
         {
             "dossier": dossier,
             "revision": dossier.current_revision,
@@ -285,6 +287,7 @@ def detail(request, pk):
             "pending_review_count": sum(item["pending"] for item in review_items),
             "needs_revision_count": sum(item["needs_revision"] for item in review_items),
             "current_plan": current_plan,
+            **company_context,
         },
     )
 
@@ -426,6 +429,7 @@ def thesis_analysis(request, pk):
                 provider_id=provider_id,
                 consent=request.POST.get("one_time_consent") == "yes",
                 include_news=request.POST.get("include_news") == "yes",
+                review_mode=request.POST.get("review_mode", "full"),
             )
         except (ResearchAiError, ResearchValidationError) as exc:
             messages.error(request, str(exc))
@@ -437,6 +441,11 @@ def thesis_analysis(request, pk):
     sources = source_preview(dossier)
     from investment_watch.research_bridge import selected_candidates
     selected_news = list(selected_candidates(dossier).order_by("-pk")[:10])
+    from .company_workspace import research_history
+    baseline = research_history(dossier).filter(
+        status=AiAnalysisRequest.STATUS_SUCCESS,
+        scope__thesis_revision_id=dossier.current_revision_id,
+    ).first()
     histories = [analysis for analysis in AiAnalysisRequest.objects.filter(
         member=member, family=member.family, module="investment_research",
         analysis_type="thesis_synthesis",
@@ -447,6 +456,8 @@ def thesis_analysis(request, pk):
         "sources": sources, "providers": available_research_providers() if can_write else [],
         "can_write": can_write, "histories": histories,
         "selected_news": selected_news, "has_analysis_material": bool(sources or selected_news),
+        "baseline_analysis": baseline,
+        "review_mode": request.GET.get("mode", "full") if baseline else "full",
     })
 
 

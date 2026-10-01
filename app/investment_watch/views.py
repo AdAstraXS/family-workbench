@@ -722,32 +722,8 @@ def company_add(request):
 
 @endpoint(["GET"])
 def company(request, pk):
-    from ai_analysis.models import AiAnalysisRequest
-
     dossier = dossier_for(request.watch_member, pk)
-    analyses = list(
-        AiAnalysisRequest.objects.filter(
-            member=request.watch_member,
-            module="investment_research",
-            analysis_type="thesis_synthesis",
-            scope__dossier_id=dossier.pk,
-        ).order_by("-created_at")[:50]
-    )
-    return render(
-        request,
-        "investment_watch/company.html",
-        context(
-            request,
-            dossier=dossier,
-            research_analyses=[
-                a for a in analyses if not a.scope.get("news_snapshots")
-            ],
-            combined_analyses=[a for a in analyses if a.scope.get("news_snapshots")],
-            candidates=dossier.news_candidates.select_related(
-                "material_version"
-            ).order_by("-created_at")[:20],
-        ),
-    )
+    return redirect("investment_research:detail", pk=dossier.pk)
 
 
 @endpoint(["POST"])
@@ -902,6 +878,8 @@ def select_research(request, pk):
         candidate.selected_for_research = boolean(request.POST.get("selected"))
         candidate.save(update_fields=["selected_for_research", "updated_at"])
     messages.success(request, "已更新下一次研究的材料选择；旧分析保持原样。")
+    if request.POST.get("return_to") == "company":
+        return redirect(reverse("investment_research:detail", kwargs={"pk": candidate.dossier_id}) + "?view=changes")
     return redirect("investment_watch:item", pk=pk)
 
 

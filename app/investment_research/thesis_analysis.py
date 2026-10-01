@@ -21,7 +21,7 @@ from .research_ai import (
 from .services import DossierNotFound, _require_writer
 
 
-PROMPT_VERSION = "research-thesis-synthesis-v7"
+PROMPT_VERSION = "research-thesis-synthesis-v8"
 MARKET_EXPECTATION_QUESTION = re.compile(
     r"超越市场预期|超出市场预期|超预期|市场一致预期|分析师预期")
 
@@ -187,10 +187,13 @@ def _validate_output(raw, targets, evidence):
 
 
 def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
-                             transport=None, url_validator=None, include_news=False):
+                             transport=None, url_validator=None, include_news=False,
+                             review_mode="full"):
     _require_writer(actor)
     if consent is not True:
         raise ResearchAiError("请先确认本次发送给云端模型的资料和个人判断。")
+    if review_mode not in {"full", "incremental"}:
+        raise ResearchAiError("请选择检查最新变化或完整重评。")
     dossier = ResearchDossier.objects.filter(
         pk=dossier_id, owner=actor, family=actor.family,
     ).select_related("current_revision", "security").first()
@@ -201,12 +204,37 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
     if not targets or len(targets) > 12:
         raise ResearchAiError("请先保存包含 1–12 条假设或待验证问题的正式判断。")
     packet = prepare_analysis_materials(dossier)
+    baseline = None
+    baseline_context = None
+    if review_mode == "incremental":
+        from .company_workspace import research_history, adopted_news
+        baseline = research_history(dossier).filter(
+            status=AiAnalysisRequest.STATUS_SUCCESS,
+            scope__thesis_revision_id=revision.pk,
+        ).first()
+        if baseline is None:
+            raise ResearchAiError("当前判断尚无成功的研究背景，请先完整重评。")
+        previous_result = baseline.result.result_json or {}
+        baseline_context = {
+            "analysis_id": baseline.pk, "created_at": baseline.created_at.isoformat(),
+            "thesis_revision_id": revision.pk,
+            "headline": str(previous_result.get("headline", ""))[:300],
+            "overview": str(previous_result.get("overview", ""))[:1500],
+            "assessments": [{key: item.get(key) for key in
+                             ("kind", "index", "text", "verdict", "reason", "boundary")}
+                            for item in previous_result.get("assessments", [])[:12]],
+        }
     if include_news:
         from django.conf import settings
         from investment_watch.research_bridge import append_news
         if not getattr(settings,"INVESTMENT_WATCH_MODEL_ENABLED",False):
             raise ResearchAiError("新闻研究模型总开关未启用；可继续阅读与手工研究。")
-        packet = append_news(packet,dossier)
+        packet = append_news(packet,dossier, excluded_versions=adopted_news(baseline) if baseline else set())
+    if baseline:
+        old_versions = {item.get("version_id") for item in baseline.scope.get("sources", [])}
+        if not packet.get("news_snapshots") and not any(item["version_id"] not in old_versions
+                                                       for item in packet["sources"]):
+            raise ResearchAiError("没有尚未采用的所选新闻或新官方资料，可改为完整重评。")
     evidence = packet["evidence"]
     if not evidence:
         raise ResearchAiError("尚无可核查的整理后资料。请先查看财务概览或保存官方 IR 正文。")
@@ -250,6 +278,9 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
     lines = [f"公司：{dossier.security.symbol}；当前判断版本：{revision.revision_number}。",
              f"当前判断：{revision.thesis[:2000]}",
              "逐项问题：" + json.dumps(targets, ensure_ascii=False)]
+    if baseline_context:
+        lines.append("本次为检查最新变化。以下是冻结的上一版研究背景，属于旧研究推断，不是新增事实或证据。重点说明本次资料改变了哪些条件、哪些问题仍然保留；旧报告不能独自支撑新的方向性结论：" +
+                     json.dumps(baseline_context, ensure_ascii=False))
     if packet["market_context"]:
         lines.append("已保存的行情快照（不是官方财报，且没有历史倍数或市场一致预期）：" +
                      json.dumps(packet["market_context"], ensure_ascii=False))
@@ -289,7 +320,8 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
             if exchange <= 0:
                 raise WatchError("请先配置模型费用换算值。")
             news_key = digest(["synthesis",actor.pk,revision.pk,packet["sources"],
-                               packet["news_snapshots"],provider_signature(provider),PROMPT_VERSION])
+                               packet["news_snapshots"],review_mode,baseline.pk if baseline else None,
+                               provider_signature(provider),PROMPT_VERSION])
             news_receipt = reserve(actor,provider,news_key,estimated_cost*exchange)
         except WatchError as exc:
             raise ResearchAiError(str(exc)) from exc
@@ -306,6 +338,9 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                "preparation_problem": packet["problem"],
                "prompt_version": PROMPT_VERSION, "consent": "one_time",
                "news_snapshots": packet.get("news_snapshots", []),
+               "review_mode": review_mode, "baseline_context": baseline_context,
+               "baseline_news_snapshots": ((baseline.scope.get("news_snapshots", []) +
+                                             baseline.scope.get("baseline_news_snapshots", [])) if baseline else []),
                "evidence_scope": "combined" if packet.get("news_snapshots") else "research",
                "estimated_max_cost_usd": str(estimated_cost)},
         sanitized_input={"source_count": len(packet["sources"]),

@@ -19,7 +19,7 @@ def selected_candidates(dossier):
     )
 
 
-def append_news(packet, dossier):
+def append_news(packet, dossier, excluded_versions=None):
     from .events import canonical_version
 
     packet = {
@@ -33,7 +33,11 @@ def append_news(packet, dossier):
     candidates = list(selected_candidates(dossier).order_by("-pk"))
     for candidate in candidates:
         version = candidate.material_version
+        if version.pk in (excluded_versions or set()):
+            continue
         canonical = canonical_version(version)
+        if canonical.pk in (excluded_versions or set()):
+            continue
         chain = canonical.original_chain
         if canonical.material.official_document_id or chain in seen:
             continue

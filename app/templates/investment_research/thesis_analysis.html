@@ -3,7 +3,7 @@
 {% block research_content %}
 <div class="research-page">
   <header class="research-header">
-    <div><p class="research-eyebrow">公司研究 / {{ dossier.security.symbol }}</p><h1>围绕我的判断分析</h1><a href="{% url 'investment_watch:company' dossier.pk %}">公司研究总览 →</a>
+    <div><p class="research-eyebrow">公司研究 / {{ dossier.security.symbol }}</p><h1>重新评估公司研究</h1><a href="{% url 'investment_research:detail' dossier.pk %}">公司研究总览 →</a>
 <p class="research-private-note">系统先整理已保存的官方财务数据和近期 IR 要点，再让 AI 检查你的假设和问题。生成后可在公司研究简报中展开每项证据，也可查看次日跟踪。结果仅你可见，核对来源后再决定是否修改正式判断。</p></div>
     <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回当前判断</a>
   </header>
@@ -28,18 +28,22 @@
   {% if revision and can_write and has_analysis_material and providers %}
     <form method="post" class="research-form research-analysis-form" id="research-synthesis-form">
       {% csrf_token %}
+      <h2>这次想检查什么？</h2>
+      <label class="research-consent"><input type="radio" name="review_mode" value="incremental"{% if review_mode == 'incremental' %} checked{% endif %}{% if not baseline_analysis %} disabled{% endif %}> 检查最新变化：沿用同版判断下最近一次成功研究，重点核对未采用的新材料。</label>
+      <label class="research-consent"><input type="radio" name="review_mode" value="full"{% if review_mode != 'incremental' %} checked{% endif %}> 完整重评：重新核对全部假设和本次资料。首次研究或判断已修改时使用。</label>
+      {% if baseline_analysis %}<p class="research-private-note">研究背景：{{ baseline_analysis.created_at|date:"Y-m-d H:i" }} 的报告。旧报告及新闻快照保留；本次仍提供已整理的官方资料以便核查。</p>{% endif %}
       <h2>本次自动整理的资料</h2>
       <p class="research-private-note">会汇总近三年已核对的财务指标，并提取近期官方披露中的少量相关要点。无须挑选 10-K 章节；每个有结论的条目都应能跳回保存的原文。</p>
       <details><summary>查看本次采用的官方资料</summary><ul>{% for source in sources %}
         <li>{{ source.document.get_source_display }} · {{ source.document.title }}{% if source.document.period_end %} · 截至 {{ source.document.period_end }}{% endif %}</li>
       {% endfor %}</ul></details>
       {% if selected_news %}
-      <label class="research-consent"><input type="checkbox" name="include_news" value="yes"{% if request.GET.include_news == '1' %} checked{% endif %}> 本次同时发送以上新闻摘录，结合当前判断重新分析（计入投资动态模型预算）。</label><p class="research-private-note">新闻报道与官方披露会区分标注。每次生成新快照，历史分析不变。</p>{% endif %}
+      <label class="research-consent"><input type="checkbox" name="include_news" value="yes"{% if request.GET.include_news == '1' or review_mode == 'incremental' %} checked{% endif %}> 纳入已选新闻、行业与宏观摘录（计入投资动态模型预算）。</label><p class="research-private-note">不勾选时仅使用投研资料。检查最新变化时，背景已采用的新闻不重复作为新增资料。</p>{% endif %}
       <h2>生成分析草稿</h2>
       <label for="synthesis-provider">本次使用的文本模型</label>
       <select id="synthesis-provider" name="provider" required>{% for provider in providers %}<option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }} · 单次费用上限 ${{ provider.extra_data.research_max_estimated_usd }}</option>{% endfor %}</select>
       <p class="research-private-note">若模型偶尔返回空内容或无效 JSON，系统会在上方单次费用上限内自动重试一次。</p>
-      <p class="research-private-note">本次会向所选模型发送：上面的官方资料经整理的指标与短摘录，以及你当前的判断、假设和问题。不会发送整份年报或其他知识库内容。AI 只能生成草稿，不能修改正式判断。</p>
+      <p class="research-private-note">本次会向所选模型发送：上面的官方资料经整理的指标与短摘录、勾选的新闻摘录，以及你当前的判断、假设和问题。检查最新变化时还会发送上次研究的结论摘要作为背景。AI 只能生成草稿，不能修改正式判断。</p>
       <label class="research-consent"><input type="checkbox" name="one_time_consent" value="yes" required> 我确认仅本次将上述内容发送给所选云端模型。</label>
       <button type="submit" id="research-synthesis-submit">生成公司研究简报</button>
       <p class="research-analysis-progress" id="research-synthesis-progress" role="status" aria-live="polite" hidden>请求已发出，正在生成分析和公司研究简报。通常需要几十秒，请保持页面打开。</p>
