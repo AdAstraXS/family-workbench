@@ -90,6 +90,21 @@ class SimplificationTests(TestCase):
         with self.assertRaisesMessage(ValueError, "不一致"):
             link_sec_version(version)
 
+    def test_historical_catalogue_conflict_is_preserved_without_blocking_migration(self):
+        version, _ = self.archive()
+        doc = OfficialResearchDocument.objects.get(external_id="0000000123-26-000001")
+        doc.source_url = "https://www.sec.gov/Archives/edgar/data/123/000000012326000001/old.htm"
+        doc.save(update_fields=["source_url"])
+        original_url = doc.source_url
+        count = OfficialResearchContentVersion.objects.count()
+        with self.assertLogs("investment_research.archive_bridge", level="WARNING"):
+            self.assertEqual(link_sec_version(version), (None, False))
+            link_saved_sec_materials(apps, SimpleNamespace(connection=connection))
+        doc.refresh_from_db()
+        self.assertEqual(doc.source_url, original_url)
+        self.assertEqual(OfficialResearchContentVersion.objects.count(), count)
+        self.assertTrue(type(version).objects.filter(pk=version.pk).exists())
+
     def test_conditions_freeze_with_judgment_and_modified_claim_loses_old_conditions(self):
         self.dossier.current_revision = None
         self.dossier.initial_thesis = ""

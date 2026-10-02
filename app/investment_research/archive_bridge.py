@@ -6,12 +6,15 @@ This service runs on explicit acquisition or migration, never on a GET page.
 """
 import gzip
 import hashlib
+import logging
 import re
 from datetime import date
 from urllib.parse import urlsplit
 
 from django.db import transaction
 from django.db.models import OuterRef, Subquery
+
+logger = logging.getLogger(__name__)
 
 
 def _date(value):
@@ -67,7 +70,12 @@ def link_sec_version(version, *, apps=None, using="default"):
                       "metadata": {**record, "cik": path[1].zfill(10), "company_material_id": material.pk}})
         doc = Document.objects.using(using).select_for_update().get(pk=doc.pk)
         if doc.security_id != material.security_id or doc.source_url != url:
-            raise ValueError("SEC 申报已关联其他证券或原件链接，停止建立引用。")
+            # A historical catalogue identity can already refer to another
+            # security or URL. Keep both originals untouched and quarantine
+            # this projection; one conflict must not prevent application startup.
+            logger.warning("SEC archive projection skipped: material=%s version=%s document=%s identity conflict",
+                           material.pk, version.pk, doc.pk)
+            return None, False
         existing = Content.objects.using(using).filter(document=doc,
             raw_sha256=version.sha256, content_sha256=digest).first()
         if existing:
