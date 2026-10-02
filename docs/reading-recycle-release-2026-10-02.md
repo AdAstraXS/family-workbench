@@ -21,4 +21,36 @@
 - 桌面及 390px 手机宽度检查通过，本地临时测试库完成删除、回收站和恢复流程。
 - 合入生产 `a6384d1` 后，保留 AI 调用计量及现有依赖；一次性 PostgreSQL 库完整阅读回归
   43 项全部通过（无跳过），迁移检查无遗漏。
-- NAS 发布、备份和运行提交待生产验收后补充。
+
+## NAS 发布与恢复点
+
+- 发布时间：2026-10-02 16:17–16:20（Asia/Shanghai）。
+- 实际运行提交：`73584d84f824338acb17817987b83ea8f5a2dab7`，已推送 `origin/codex/reading-nas-release`。
+- 发布前运行 `a6384d1ed03fa13999cdf3f9bb8fe7f126ab15aa`；本轮已合入并保留其投资研究、监控及其他生产更新。
+- 受限包装器仅安装精确 Git 归档的 `app/` 并重启 Web。14 个变更文件的 NAS SHA-256 与归档逐项一致，未跟踪 demo 与本地测试数据未打包。
+
+以下恢复点均在 NAS `/volume1/docker/family-workbench/backups/`：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `family-workbench-pre-reading-recycle-20261002-1612.dump`（46 MB，包装器完成 `pg_restore -l` 验证） | `4d303d6efd043c514f3d312d868b1baf0300ccf45fe0596aa932809a64b6fd33` |
+| `source-predeploy-a6384d1ed03fa13999cdf3f9bb8fe7f126ab15aa-20261002-161543.tar.gz`（安装前自动生成并验证可读） | `854977baa2f63be03b2b77c0d6329556861ab06d050b8e670025a0dd26f58858` |
+| `family-workbench-reading-recycle-73584d8.tar.gz`（4,655,869 字节，上传前后哈希一致） | `24e80ab6658971d986ce0683e2e957a34b151f5b889026ebbbc661bdbaf6ed32` |
+
+## 生产验收
+
+- 启动日志确认 `reading.0005_book_deleted_at_booklifecycleevent... OK`，只新增删除时间字段与生命周期审计表，未执行其他迁移。
+- Django 系统检查无问题；272 个静态文件复制、128 个未变，Gunicorn 正常启动。
+- 内部 HTTP（正确 Host 与 HTTPS 转发头）书库入口正常；外部 HTTPS 书库和回收站匿名访问均返回登录跳转 302，阅读器 JS/CSS 返回 200。
+- 财务基线前后一致：账户 35、持仓 483、流水 1080、快照 2284、快照明细 14244、每日估值运行 80，最新快照日期 2026-10-02。
+- `.env` SHA-256 保持 `78d7894b721698adf1d5a4ce3c969e4983b2ee079cdebdb5082db3aca985b51c`；DB、OpenD 原创建时间与运行状态保持且健康，Web 仅重启。
+- 未执行生产图书删除、恢复或测试数据创建；未导入本地数据库，未修改 media、数据库卷、OpenD 状态、Compose、权限或定时任务。
+- 验收后更新并复核 `DEPLOYED_COMMIT` 为 `73584d84f824338acb17817987b83ea8f5a2dab7`。
+
+### 依赖核验与限制
+
+- 发布归档的 `requirements.txt`、Dockerfile 与部署前 NAS 实际文件逐项 SHA-256 一致，保留 `futu-api>=10.6,<11.0`；未构建或替换镜像。
+- 在原镜像中完成实际迁移、Django check 和 Gunicorn 启动，未出现缺依赖错误。现有受限包装器不提供包版本查询，本轮未单独读取容器内 `futu-api` 的精确安装版本。
+- 删除和恢复交互已在临时库完成桌面/手机宽度验收；生产仅做只读访问，未以成员真实图书执行试删。
+
+本节为部署后的文档记录，实际运行代码仍以 `73584d8` 为准。长期部署密钥与受限包装器保留，未创建临时权限。
