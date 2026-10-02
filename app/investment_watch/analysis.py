@@ -2,8 +2,11 @@
 
 import json
 import os
+import re
 from pathlib import Path
 from urllib.request import Request
+from urllib.parse import urlsplit
+from urllib.error import HTTPError
 from django.conf import settings
 from django.db import transaction
 from knowledge.ai import _chat_url, KnowledgeAiError
@@ -18,7 +21,7 @@ from .models import WatchConsent, ResearchCandidate, ThesisEvidence
 from .services import writer, dossier_for, digest, WatchError, candidate_stale
 from .budget import amount, reserve, settle
 
-PROMPT_VERSION = "watch-evidence-v2"
+PROMPT_VERSION = "watch-evidence-v7"
 _UNSET = object()
 
 
@@ -82,7 +85,17 @@ def set_consent(member, dossier_id, provider, active):
 
 
 def validate_result(raw, candidate):
-    value = json.loads(raw)
+    if not isinstance(raw, str):
+        raise WatchError("模型未返回完整的 JSON 文本。")
+    raw = raw.strip()
+    # An outer Markdown fence is presentation, not evidence or extra instructions.
+    fence = re.fullmatch(r"```(?:json)?\s+([\s\S]*?)\s*```", raw, re.IGNORECASE)
+    if fence:
+        raw = fence.group(1)
+    try:
+        value = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise WatchError("模型返回的 JSON 无法读取。") from exc
     if not isinstance(value, dict) or not isinstance(value.get("assessments"), list):
         raise WatchError("模型输出结构不正确。")
     allowed = targets(candidate.dossier.current_revision)
@@ -96,6 +109,8 @@ def validate_result(raw, candidate):
         direction = item.get("direction")
         reason = item.get("explanation")
         quote = item.get("quote", "")
+        if quote is None and direction == "unknown":
+            quote = ""
         if (
             key not in allowed
             or key in seen
@@ -117,6 +132,8 @@ def validate_result(raw, candidate):
                 or len(item.get(field, "")) > 1200
             ):
                 raise WatchError("条件或缺口格式无效。")
+        if direction != "unknown" and not item.get("conditions", "").strip():
+            raise WatchError("方向性结论必须说明成立条件。")
         start = text.find(quote) if quote else 0
         rows.append(
             {
@@ -212,7 +229,13 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
     )
     if len(prompt) + len(user) > policy["max_input_chars"]:
         raise WatchError("输入超出模型上限。")
-    output_limit = min(policy["max_output_tokens"], 2000)
+    is_glm53 = (
+        urlsplit(provider.base_url).hostname == "open.bigmodel.cn"
+        and provider.model_name.casefold() in {"glm-5.3", "glm-5.3-flash", "glm-5.3-flashx"}
+    )
+    # GLM-5.3 counts reasoning in its output budget and always enables thinking.
+    # Use its documented low reasoning tier for bounded evidence extraction.
+    output_limit = min(policy["max_output_tokens"], 4000 if is_glm53 else 2000)
     payload = {
         "model": provider.model_name,
         "temperature": 0,
@@ -222,11 +245,15 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
             {"role": "user", "content": user},
         ],
     }
+    if is_glm53:
+        payload.update(thinking={"type": "enabled"}, reasoning_effort="low",
+                       temperature=1, response_format={"type": "json_object"})
     body = json.dumps(payload, ensure_ascii=False).encode()
     worst_usd = _cost(len(body), output_limit, policy)
     if worst_usd > policy["max_cost"]:
         raise WatchError("本次分析超过模型单次费用限制。")
     receipt = reserve(member, provider, key, worst_usd * exchange)
+    actual = None
     try:
         request = Request(
             endpoint,
@@ -245,6 +272,13 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
             source=receipt.pk,
         )
         result = json.loads(response)
+        usage = result.get("usage", {})
+        counts = [usage.get("prompt_tokens"), usage.get("completion_tokens")]
+        actual = (
+            _cost(*counts, policy) * exchange
+            if all(type(x) is int and x >= 0 for x in counts)
+            else None
+        )
         choice = result["choices"][0]
         if choice.get("finish_reason") not in (None, "stop"):
             raise WatchError("模型未完整返回结果。")
@@ -264,19 +298,19 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
                 "stale" if locked.current_revision_id != revision.pk else "analyzed"
             )
             candidate.save(update_fields=["status", "updated_at"])
-        usage = result.get("usage", {})
-        counts = [usage.get("prompt_tokens"), usage.get("completion_tokens")]
-        actual = (
-            _cost(*counts, policy) * exchange
-            if all(type(x) is int and x >= 0 for x in counts)
-            else None
-        )
         settle(receipt, actual)
         return len(rows)
-    except Exception:
-        settle(receipt, failed=True)
+    except Exception as exc:
+        settle(receipt, actual, failed=True)
         candidate.status = "failed"
         candidate.save(update_fields=["status", "updated_at"])
-        raise WatchError(
-            "分析未完成或引用校验失败；保留候选及费用预留，请查看运行记录。"
-        ) from None
+        if isinstance(exc, WatchError):
+            reason = str(exc)
+        elif isinstance(exc, HTTPError):
+            reason = f"模型服务返回 HTTP {exc.code}。"
+        elif isinstance(exc, TimeoutError):
+            reason = "模型服务请求超时。"
+        else:
+            reason = "分析未完成或返回格式无效。"
+        charge = "已记录返回用量" if actual is not None else "保留费用预留"
+        raise WatchError(f"{reason}材料仍保留；{charge}，请查看运行记录。") from None

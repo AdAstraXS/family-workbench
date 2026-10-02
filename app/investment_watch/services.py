@@ -413,6 +413,18 @@ def organize_event(member, event_id, target_id, action, reason, expected_updated
     return event
 
 
+def current_evidence(candidate, rows=None):
+    """One latest successful analysis batch; keep earlier batches as history."""
+    if candidate_stale(candidate):
+        return []
+    eligible = [e for e in (rows if rows is not None else candidate.evidence.all())
+                if e.revision_id == candidate.dossier.current_revision_id]
+    if not eligible:
+        return []
+    key = max(eligible, key=lambda e: e.pk).input_key
+    return [e for e in eligible if e.input_key == key]
+
+
 def recall(dossier):
     rule = WatchRule.objects.filter(dossier=dossier, enabled=True).first()
     if not rule or not dossier.owner.is_active or not is_writer(dossier.owner):
@@ -467,6 +479,7 @@ def review(member, evidence_id, direction, reason):
     if (
         candidate_stale(evidence.candidate)
         or evidence.revision_id != evidence.candidate.dossier.current_revision_id
+        or evidence.pk not in {e.pk for e in current_evidence(evidence.candidate)}
     ):
         raise Conflict("证据版本已失效，请使用最新材料重新分析。")
     if direction != "unknown" and (not evidence.quote or not evidence.locator):
