@@ -11,7 +11,7 @@ MODULES = (
     ("ipo", "index", "港股打新", "building-bank", "新股、申购与收益记录", "财富管理"),
     ("notes", "index", "投资笔记", "notes", "记录观点，回顾思考", "阅读与积累"),
     ("knowledge", "index", "知识中心", "book-2", "收集、整理与查找资料", "阅读与积累"),
-    ("reading", "index", "在线书库", "book-2", "阅读空间 · 功能筹备中", "阅读与积累"),
+    ("reading", "index", "在线书库", "book-2", "书籍、阅读计划与批注", "阅读与积累"),
     ("trading_journal", "index", "交易复盘", "report-money", "交易案例 · 功能筹备中", "阅读与积累"),
     ("intelligence", "index", "AI 情报", "sparkles", "动态、人物与资讯线索", "观察与分析"),
     ("macro", "index", "宏观数据", "chart-line", "观察宏观指标与变化", "观察与分析"),

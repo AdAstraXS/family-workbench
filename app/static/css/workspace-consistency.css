@@ -1,0 +1,117 @@
+/* Shared geometry. Modules constrain reading columns, never the outer page. */
+.songting {
+  --ws-page-width: 1560px;
+  --ws-page-gutter: 32px;
+}
+.songting .page {
+  max-width: var(--ws-page-width);
+  padding-inline: var(--ws-page-gutter);
+}
+.songting .ws-topbar,
+.songting .ws-footer {
+  max-width: var(--ws-page-width);
+  margin-inline: auto;
+  padding-inline: var(--ws-page-gutter);
+}
+.songting .iw {
+  max-width: none;
+  margin: 0;
+  color: var(--ws-text);
+}
+.songting :is(.rn-body, .iw, .reading-module-main) { min-width: 0; }
+.songting .rn-filters { flex-wrap: wrap; }
+.songting .rn-filter-options { min-width: 0; max-width: 100%; }
+.songting :is(.rn-crumbs, .rn-tabs) { max-width: 100%; }
+.songting textarea:focus-visible {
+  outline: 3px solid var(--ws-accent);
+  outline-offset: 3px;
+}
+.songting .ws-breadcrumb b { overflow-wrap: anywhere; }
+.songting .ws-nav-link { min-height: 44px; }
+
+/* Navigation and controls follow the selected palette, not fixed green/blue. */
+.songting :is(.rn-navigation, .rn-follow-state, .reading-recent) {
+  background: var(--ws-soft);
+  border-color: var(--ws-line);
+}
+.songting :is(.rn-crumbs, .rn-company p, .rn-company h1 small, .rn-company label,
+  .rn-caption span, .rn-aux > span, .rn-follow-state small, .iw-meta, .iw-muted,
+  .iw-dynamic-meta, .iw-more-evidence, .iw-filter-panel, .iw-day > h2,
+  .reading-heading p, .reading-recent-grid span) { color: var(--ws-muted); }
+.songting :is(.rn-crumbs strong, .rn-caption) { color: var(--ws-text); }
+.songting :is(.rn-crumbs a, .rn-tabs a, .reading-recent-grid a) { color: var(--ws-accent); }
+.songting :is(.rn-stages a, .rn-aux a, .rn-filter-options button) {
+  background: var(--ws-panel);
+  border-color: var(--ws-line);
+  color: var(--ws-accent);
+}
+.songting :is(.rn-stages a[aria-current], .rn-filter-options button[aria-pressed=true]) {
+  background: var(--ws-accent);
+  border-color: var(--ws-accent);
+  color: #fff;
+  box-shadow: none;
+}
+.songting :is(.rn-tabs, .research-question) { border-color: var(--ws-line); }
+.songting .rn-tabs a[aria-current] {
+  color: var(--ws-accent);
+  border-bottom-color: var(--ws-accent);
+}
+.songting .rn-aux a[aria-current] { background: var(--ws-soft); border-color: var(--ws-accent); }
+.songting .iw a { color: var(--ws-accent); }
+.songting .iw :is(.iw-nav a, .iw-actions a) {
+  background: var(--ws-soft);
+  color: var(--ws-accent);
+}
+.songting .iw-nav a[aria-current=page] {
+  background: var(--ws-accent);
+  color: #fff;
+  font-weight: 600;
+}
+.songting .iw :is(button, .button):where(:not(.secondary):not(.ghost):not(.danger)) {
+  background: var(--ws-accent);
+  color: #fff;
+}
+.songting .iw .iw-categories button:not([aria-current]) {
+  background: transparent;
+  color: var(--ws-muted);
+}
+.songting :is(.iw-card, .iw-empty, .reading-card, .reading-panel, .reading-filters, .reading-empty) {
+  background: var(--ws-panel);
+  border-color: var(--ws-line);
+}
+.songting :is(.iw-nav, .iw-card footer, .iw-categories) { border-color: var(--ws-line); }
+.songting .iw-card footer { color: var(--ws-muted); }
+.songting .iw :focus-visible { outline-color: var(--ws-accent); }
+.songting :is(.iw-evidence, .iw pre, .iw blockquote, .reading-badge) {
+  background: var(--ws-soft);
+  color: var(--ws-text);
+}
+.songting .reading-module-main progress { accent-color: var(--ws-accent); }
+.songting .iw-header h1 {
+  margin: 0 0 8px;
+  font: 500 30px/1.6 var(--ws-serif);
+}
+.songting .iw-header p { margin: 0; }
+/* Evidence verdicts, warnings, profit/loss and book-cover art keep their semantics. */
+
+@media (min-width: 1800px) {
+  .songting { --ws-page-gutter: 45px; }
+}
+@media (max-width: 1250px) {
+  .songting { --ws-page-gutter: 22px; }
+}
+@media (max-width: 760px) {
+  .songting { --ws-page-gutter: 16px; }
+  .songting :is(.ws-icon-button, .ws-search-button) { min-width: 44px; min-height: 44px; }
+  .songting .ws-top-actions { gap: 4px; }
+  .songting .rn-filters { align-items: stretch; }
+  .songting .rn-filters input { flex: 1 1 100%; width: 100% !important; }
+  .songting .rn-filter-options { flex: 1 1 100%; padding-bottom: 4px; }
+  .songting .iw-nav { gap: 6px; padding-bottom: 12px; margin-bottom: 18px; }
+  .songting .iw-nav a { min-height: 40px; display: inline-flex; align-items: center; }
+  .songting .iw-card { overflow-wrap: anywhere; }
+  .songting .iw-header h1 { font-size: 27px; }
+}
+@media print {
+  .songting .page { padding: 0; max-width: none; }
+}
