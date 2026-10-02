@@ -304,6 +304,10 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
     lines = [f"公司：{dossier.security.symbol}；当前判断版本：{revision.revision_number}。",
              f"当前判断：{revision.thesis[:2000]}",
              "逐项问题：" + json.dumps(targets, ensure_ascii=False)]
+    hypothesis_context = getattr(revision, "hypothesis_context", [])
+    if hypothesis_context:
+        lines.append("用户确认的假设背景（含反证条件、跟踪项目和资料缺口；其中 refs 是初识报告的历史证据编号，不是本次 E 编号，不能作为本次引用）：" +
+                     json.dumps(hypothesis_context, ensure_ascii=False))
     if baseline_context:
         lines.append("本次为检查最新变化。以下是冻结的上一版研究背景，属于旧研究推断，不是新增事实或证据。重点说明本次资料改变了哪些条件、哪些问题仍然保留；旧报告不能独自支撑新的方向性结论：" +
                      json.dumps(baseline_context, ensure_ascii=False))
@@ -359,6 +363,7 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                "preparation_id": getattr(revision, 'preparation_id', None),
                "preparation_revision": getattr(revision, 'preparation_revision', None),
                "research_basis": 'formal_judgment' if revision.pk else 'candidate_hypotheses',
+               "hypothesis_context": hypothesis_context,
                "sources": packet["sources"], "financial_periods": packet["periods"],
                "valuation_basis": packet["valuation_basis"],
                "market_context": packet["market_context"],

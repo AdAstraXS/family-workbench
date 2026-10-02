@@ -87,7 +87,7 @@ class PreparationTests(TestCase):
         self.assertEqual(AiAnalysisRequest.objects.count(), 1)
         self.assertEqual(ResearchThesisRevision.objects.count(), 0)
         page = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]))
-        self.assertContains(page, "已确认的研究方向")
+        self.assertContains(page, "关键问题与证据")
         self.assertContains(page, "现金流可能恢复")
         form = self.client.get(reverse("investment_research:first_thesis", args=[self.dossier.pk]))
         self.assertContains(form, "现金流可能恢复")

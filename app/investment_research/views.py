@@ -271,8 +271,9 @@ def first_thesis(request, pk):
             form.add_error(None, str(exc))
         else:
             messages.success(request, "第一版正式判断已保存。")
-            return redirect("investment_research:detail", pk=pk)
-    return render(request, "investment_research/first_thesis.html", {"dossier": dossier, "form": form})
+            return redirect("investment_research:company_research", pk=pk)
+    return render(request, "investment_research/first_thesis.html", {"dossier": dossier, "form": form,
+        "preparation": preparation, "hypothesis_context": preparation.hypotheses if preparation else []})
 
 
 @_method(["GET"])
@@ -463,8 +464,7 @@ def thesis_analysis(request, pk):
             messages.error(request, str(exc))
         else:
             messages.success(request, "公司研究简报已生成；关键结论可展开核对原文。")
-            return redirect("investment_research:thesis_analysis_detail", pk=pk,
-                            analysis_pk=analysis.pk)
+            return redirect("investment_research:company_research", pk=pk)
         return redirect("investment_research:thesis_analysis", pk=pk)
     sources = source_preview(dossier)
     from investment_watch.research_bridge import selected_candidates
@@ -525,14 +525,29 @@ def company_research(request, pk):
     if request.GET.get('view') == 'changes':
         return redirect('investment_research:follow', pk=pk)
     from .company_workspace import workspace_context, research_history
-    report = research_history(dossier).filter(status=AiAnalysisRequest.STATUS_SUCCESS).first()
-    view = request.GET.get("view", "conclusion")
-    if view not in {"changes", "evidence"} and report:
-        return thesis_analysis_detail(request, pk, report.pk)
+    view = request.GET.get("view", request.GET.get("tab", "conclusion"))
+    if view == "evidence":
+        return render(request, "investment_research/company_materials.html", {
+            "dossier": dossier, "can_write": is_writer(member),
+            **workspace_context(dossier, {**request.GET.dict(), "view": "evidence"}),
+        })
     context = workspace_context(dossier, request.GET)
-    return render(request, "investment_research/company_materials.html", {
+    from .preparation import history as introduction_history
+    from .research_basis import research_basis
+    from .report_sections import source_sections
+    introduction = introduction_history(dossier).filter(status=AiAnalysisRequest.STATUS_SUCCESS).select_related("result").first()
+    preparation = dossier.preparations.last()
+    basis = research_basis(dossier)
+    report = context["research_report"]
+    result = source_sections(context["research_result"], report.scope or {}) if report else None
+    return render(request, "investment_research/company_research.html", {
         "dossier": dossier, "revision": dossier.current_revision,
         "can_write": is_writer(member), **context,
+        "result": result, "analysis": report, "introduction": introduction,
+        "introduction_result": introduction.result.result_json if introduction else None,
+        "introduction_evidence": introduction.sanitized_input.get("evidence", []) if introduction else [],
+        "basis": basis, "preparation": preparation,
+        "hypothesis_context": getattr(basis, "hypothesis_context", []) if basis else [],
     })
 
 
@@ -699,7 +714,7 @@ def edit(request, pk):
                 form.add_error(None, str(exc))
             else:
                 messages.success(request, "判断已保存为新版本。")
-                return redirect("investment_research:detail", pk=dossier.pk)
+                return redirect("investment_research:company_research", pk=dossier.pk)
     else:
         form = EditThesisForm(
             initial={

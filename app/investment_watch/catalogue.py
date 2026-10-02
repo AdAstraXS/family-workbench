@@ -227,4 +227,5 @@ def match_rule(rule, version):
     if rule.include and not any(contains(text, word) for word in rule.include):
         return False, "未命中包含词"
     hits = [w for w in rule.aliases + rule.topics if contains(text, w)]
-    return bool(hits), ("命中 " + "、".join(hits) + "；仅为候选相关性")[:500]
+    return bool(hits), (("命中 " + "、".join(hits) + "；仅为候选相关性")[:500]
+                        if hits else "未命中公司别名或关联领域")

@@ -24,7 +24,7 @@ class Command(BaseCommand):
             family, collect=not options["no_collect"], analyze=not options["no_analyze"]
         )
         self.stdout.write(json.dumps(result, ensure_ascii=False))
-        if any(s["status"] == "failed" for s in result.get("sources", [])):
+        if any(s["status"] in {"failed", "partial"} for s in result.get("sources", [])):
             raise CommandError("部分来源失败；旧材料仍保留，请查看来源状态。")
         if result.get("blocked"):
             raise CommandError(

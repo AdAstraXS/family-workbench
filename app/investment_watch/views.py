@@ -45,6 +45,7 @@ from .services import (
     associate,
     idempotent,
     candidate_stale,
+    current_evidence,
     save_rule,
     recall,
     check_revision,
@@ -428,15 +429,7 @@ def items(request):
     entries = []
     for candidate in query:
         candidate.stale = candidate_stale(candidate)
-        candidate.current_evidence = (
-            []
-            if candidate.stale
-            else [
-                e
-                for e in candidate.evidence.all()
-                if e.revision_id == candidate.dossier.current_revision_id
-            ]
-        )
+        candidate.current_evidence = current_evidence(candidate)
         for evidence in candidate.current_evidence:
             evidence.assumption_label = targets(candidate.dossier.current_revision).get(
                 evidence.assumption_key, evidence.assumption_key
@@ -534,6 +527,10 @@ def item(request, pk):
     )
     if not candidate:
         raise Http404
+    rows = list(candidate.evidence.select_related("revision", "input_relation__target").prefetch_related("reviews").order_by("-pk"))
+    current_ids = {e.pk for e in current_evidence(candidate, rows)}
+    for evidence in rows:
+        evidence.is_current = evidence.pk in current_ids
     if wants_json(request):
         return JsonResponse(
             {
@@ -546,6 +543,7 @@ def item(request, pk):
                     {
                         "id": e.pk,
                         "revision_id": e.revision_id,
+                        "is_current": e.is_current,
                         "assumption_key": e.assumption_key,
                         "direction": e.direction,
                         "explanation": e.explanation,
@@ -562,7 +560,7 @@ def item(request, pk):
                             )
                         ),
                     }
-                    for e in candidate.evidence.prefetch_related("reviews").all()
+                    for e in rows
                 ],
             }
         )
@@ -580,7 +578,6 @@ def item(request, pk):
         else None
     )
 
-    rows = list(candidate.evidence.prefetch_related("reviews").order_by("-created_at"))
     for evidence in rows:
         evidence.assumption_label = targets(evidence.revision).get(
             evidence.assumption_key, evidence.assumption_key

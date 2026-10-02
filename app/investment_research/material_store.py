@@ -28,6 +28,9 @@ def save_material(security, key, kind, title, *, source_url="", raw=None,
         material.last_error = ""
         material.title, material.source_url = title, source_url
         material.save(update_fields=["checked_at", "last_error", "title", "source_url", "updated_at"])
+        if kind == "sec_document" and latest.text.strip():
+            from .archive_bridge import link_sec_version
+            link_sec_version(latest)
     return latest, changed
 
 

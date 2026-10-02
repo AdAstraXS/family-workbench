@@ -13,6 +13,12 @@ from investment_watch.models import NewsSource, WatchRule
 class Command(BaseCommand):
     help = "Seed isolated local preview; refuses all other settings."
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--enable-source", action="append", default=[],
+            help="Explicit source key to enable in this isolated preview (repeatable).",
+        )
+
     def handle(self, *args, **options):
         if (
             not getattr(settings, "WATCH_LOCAL_PREVIEW", False)
@@ -55,15 +61,24 @@ class Command(BaseCommand):
                 dossier.pk,
                 {
                     "aliases": ["微软", "Microsoft", "MSFT", "Azure", "Copilot"],
-                    "topics": ["数据中心", "资本开支", "美联储", "云计算", "出口管制"],
+                    "topics": ["数据中心", "资本开支", "美联储", "云计算", "出口管制",
+                               "AI", "OpenAI", "HBM", "利率", "美债", "data center",
+                               "cloud", "Federal Reserve", "FOMC", "discount rate",
+                               "Federal Open Market Committee", "存储", "债市", "国债",
+                               "通胀", "加息"],
+                    "exclude": ["房贷"],
                     "enabled": True,
                 },
                 0,
             )
         seed_sources(family)
-        NewsSource.objects.filter(family=family).exclude(adapter="official").update(
-            enabled=True
-        )
+        keys = options["enable_source"]
+        available = set(NewsSource.objects.filter(family=family).exclude(
+            adapter="official"
+        ).values_list("key", flat=True))
+        if set(keys) - available:
+            raise CommandError("未知的本机信源，请核对来源 key。")
+        NewsSource.objects.filter(family=family, key__in=keys).update(enabled=True)
         self.stdout.write(
             f"Local family: {family.pk}. Login: watch-preview / watch-local-preview. No production data or cloud model enabled."
         )

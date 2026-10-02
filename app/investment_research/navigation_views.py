@@ -7,9 +7,10 @@ from ai_analysis.models import AiAnalysisRequest
 from .views import _method
 from .permissions import get_current_member, get_accessible_dossier_or_404, is_writer
 from .company_workspace import workspace_context, research_history
-from .next_day_digest import latest_digest
+from .next_day_digest import latest_digest, display_digest_result
 from .valuation_trial import build_valuation_trial
 from .filing_review import reviewable_filings
+from .research_basis import research_basis, basis_matches
 
 
 @_method(['GET'])
@@ -17,11 +18,17 @@ def follow(request, pk):
     member = get_current_member(request)
     dossier = get_accessible_dossier_or_404(member, pk)
     _, review_items = reviewable_filings(dossier)
+    basis = research_basis(dossier)
+    digest = latest_digest(dossier)
     return render(request, 'investment_research/company_materials.html', {
         'dossier': dossier, 'can_write': is_writer(member), 'tracking_page': True,
         'pending_review_count': sum(item['pending'] for item in review_items),
         'needs_revision_count': sum(item['needs_revision'] for item in review_items),
-        'digest': latest_digest(dossier), **workspace_context(dossier, {'view': 'changes'})})
+        'digest': digest, 'digest_result': display_digest_result(digest.result.result_json) if digest else None,
+        'digest_is_current': not digest or not digest.scope.get('private_comparison') or basis_matches(dossier, digest.scope),
+        'basis': basis,
+        'hypothesis_context': getattr(basis, 'hypothesis_context', []) if basis else [],
+        **workspace_context(dossier, {'view': 'changes'})})
 
 
 @_method(['GET'])
@@ -33,8 +40,10 @@ def history(request, pk):
         analysis_type__in=['thesis_synthesis', 'company_introduction', 'next_day_digest']).order_by('-created_at')
     # Legacy draft views enforce the request type and dossier ownership again.
     drafts = drafts.filter(analysis_type='document_draft')
+    from .preparation import history as introduction_history
     return render(request, 'investment_research/analysis_history.html', {
-        'dossier': dossier, 'reports': research_history(dossier), 'drafts': drafts})
+        'dossier': dossier, 'reports': research_history(dossier), 'drafts': drafts,
+        'introductions': introduction_history(dossier), 'revisions': dossier.revisions.order_by('-revision_number')})
 
 
 @_method(['GET'])

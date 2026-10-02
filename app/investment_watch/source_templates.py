@@ -1,10 +1,13 @@
 """Bounded public RSS, JSON and static HTML source templates."""
 
 import json
+import re
+from datetime import datetime
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 from django import forms
+from django.utils import timezone
 from intelligence.adapters import _clean_text, _parse_datetime, parse_rss_or_atom
 from .services import WatchError
 
@@ -52,12 +55,12 @@ class SourceForm(forms.Form):
         config = data.get("config") or {}
         if not isinstance(config, dict) or len(json.dumps(config)) > 4000:
             raise forms.ValidationError("配置须为不超过 4000 字符的 JSON 对象。")
-        allowed = {"items", "title", "url", "summary", "date"}
+        allowed = {"items", "title", "url", "summary", "date", "status"}
         if set(config) - allowed or any(
             not isinstance(v, str) or len(v) > 200 for v in config.values()
         ):
             raise forms.ValidationError(
-                "仅支持 items、title、url、summary、date 字符串字段。"
+                "仅支持 items、title、url、summary、date、status 字符串字段。"
             )
         if data.get("adapter") in {"json", "html"} and not all(
             config.get(k) for k in ("items", "title", "url")
@@ -75,6 +78,31 @@ def field(value, path):
             return ""
         value = value.get(part, "")
     return value
+
+
+def published_date(raw):
+    """Date-only metadata must not appear as an invented publication time."""
+    raw = str(raw or "").strip()
+    precision = "day" if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw) else "time"
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        value = _parse_datetime(raw)
+    if value and timezone.is_naive(value):
+        value = timezone.make_aware(value)
+    return value, precision if value else "unknown"
+
+
+def deleted_entries(body):
+    """Only explicit Atom tombstones withdraw previously collected entries."""
+    from intelligence.adapters import _safe_xml_root
+
+    root = _safe_xml_root(body)
+    return [
+        node.get("ref")
+        for node in root.findall("{http://purl.org/atompub/tombstones/1.0}deleted-entry")
+        if node.get("ref")
+    ][:50]
 
 
 def parse_source(body, source):
@@ -128,13 +156,16 @@ def parse_source(body, source):
             url = urljoin(source.url, link)
             if not title or not link or urlsplit(url).scheme not in {"http", "https"}:
                 continue
+            published, precision = published_date(extract("date"))
             rows.append(
                 {
                     "external_id": url,
                     "title": title,
                     "summary": _clean_text(extract("summary"), limit=1800),
                     "url": url,
-                    "published_at": _parse_datetime(extract("date")),
+                    "published_at": published,
+                    "published_precision": precision,
+                    "status": extract("status").strip().casefold() or "active",
                 }
             )
         if not rows:

@@ -79,8 +79,8 @@ def reserve(member, provider, key, maximum):
 @transaction.atomic
 def settle(receipt, actual=None, failed=False):
     receipt = BudgetReceipt.objects.select_for_update().get(pk=receipt.pk)
-    # Missing/invalid usage and failures remain reserved; never assume a failed request was free.
-    if not failed and actual is not None:
+    # Unknown usage remains reserved; a failed response with valid usage is still charged.
+    if actual is not None:
         cost = amount(actual)
         receipt.actual_cny = cost.quantize(Decimal(".000001"), rounding=ROUND_UP)
     receipt.status = "failed" if failed else "completed"

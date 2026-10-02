@@ -1660,10 +1660,22 @@ def cash_movement_create(request, account_id):
     )
 
 
+def _visible_stock_research_securities(request):
+    """Public market data also serves the member's own exploration dossiers."""
+    visible = _visible_securities(request)
+    member = FamilyMember.objects.filter(user=request.user, is_active=True).first()
+    if not member:
+        return visible
+    return Security.objects.filter(
+        Q(pk__in=visible) | Q(research_dossiers__owner=member, research_dossiers__family=member.family),
+        is_active=True,
+    ).distinct()
+
+
 @login_required
 def stock_market_detail(request, pk):
-    """Read cached public data only; browser POST starts the initial fetch."""
-    security = get_object_or_404(_visible_securities(request), pk=pk, asset_type=Security.TYPE_STOCK)
+    """Read cached public data only; explicit user POST starts acquisition."""
+    security = get_object_or_404(_visible_stock_research_securities(request), pk=pk, asset_type=Security.TYPE_STOCK)
     snapshot = StockMarketResearchSnapshot.objects.filter(security=security).first()
     member = FamilyMember.objects.filter(user=request.user, is_active=True).first()
     dossier = None
@@ -1681,11 +1693,7 @@ def stock_market_detail(request, pk):
     if selected_period not in {"1y", "3y", "5y"}:
         selected_period = "3y"
     valuation = ((snapshot.valuation or {}).get(selected_metric) or {}).get(selected_period) if snapshot else None
-    now = timezone.now()
-    auto_fetch = not snapshot or (
-        (not snapshot.fetched_at or snapshot.fetched_at < now - timedelta(hours=24))
-        and (not snapshot.last_attempt_at or snapshot.last_attempt_at < now - timedelta(hours=1))
-    )
+    auto_fetch = False
     return render(request, "portfolio/stock_market_detail.html", {
         "security": security,
         "snapshot": snapshot,
@@ -1707,7 +1715,7 @@ def stock_market_detail(request, pk):
 @login_required
 @require_POST
 def stock_market_refresh(request, pk):
-    security = get_object_or_404(_visible_securities(request), pk=pk, asset_type=Security.TYPE_STOCK)
+    security = get_object_or_404(_visible_stock_research_securities(request), pk=pk, asset_type=Security.TYPE_STOCK)
     try:
         snapshot = fetch_stock_research(security)
     except Exception as exc:

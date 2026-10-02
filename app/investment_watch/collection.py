@@ -2,7 +2,7 @@
 
 import re
 from datetime import timedelta, datetime, time
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urldefrag
 from django.conf import settings
 from django.utils import timezone
 from bs4 import BeautifulSoup
@@ -43,6 +43,13 @@ SOURCES = [
         "rss",
         "美国",
     ),
+    (
+        "microsoft-blog",
+        "微软 · 官方博客",
+        "https://blogs.microsoft.com/feed/",
+        "rss",
+        "美国",
+    ),
 ]
 
 
@@ -72,14 +79,26 @@ def parse_list(body, source):
     prefix = prefixes[source.adapter]
     seen = set()
     rows = []
-    for link in soup.select("a[href]"):
+    links = soup.select("a[href]")
+    if source.adapter == "zhitong":
+        # The carousel repeats list articles without their public excerpts.
+        # Parse the complete list cards first, then any carousel-only articles.
+        complete = soup.select(".info-list-item a[href]")
+        links = complete + [link for link in links if link not in complete]
+    for link in links:
         href = link.get("href", "")
         if not href.startswith(prefix):
             continue
-        url = urljoin(source.url, href)
+        url = urldefrag(urljoin(source.url, href))[0]
         if url in seen:
             continue
         title = _clean_text(link.get_text(" ", strip=True), limit=500)
+        if source.adapter == "zhitong":
+            heading = link.select_one(".show-text")
+            if heading:
+                title = _clean_text(heading.get_text(" ", strip=True), limit=500)
+        if re.fullmatch(r"评论\s*\(\s*\d+\s*\)", title):
+            continue
         container = link.parent
         if source.adapter == "wallstreetcn":
             headline = container.select_one("h2, div.text-black")
@@ -100,6 +119,8 @@ def parse_list(body, source):
         precision = "time"
         if source.adapter in {"zhitong", "caixin"}:
             wrapper = link.parent.parent
+            if source.adapter == "zhitong":
+                wrapper = link.find_parent(class_="info-list-item") or wrapper
             excerpt = wrapper.select_one(".info-item-content-desc, p")
             summary = (
                 _clean_text(excerpt.get_text(" ", strip=True), limit=600)
@@ -112,12 +133,18 @@ def parse_list(body, source):
                 wrapper.get_text(" ", strip=True),
             )
             if match:
-                published = timezone.make_aware(datetime(*map(int, match.groups())))
+                try:
+                    published = timezone.make_aware(datetime(*map(int, match.groups())))
+                except ValueError:
+                    published = None
             elif source.adapter == "caixin" and (
                 match := re.search(r"/(20\d{2})-(\d{2})-(\d{2})/", url)
             ):
-                published = timezone.make_aware(datetime(*map(int, match.groups())))
-                precision = "day"
+                try:
+                    published = timezone.make_aware(datetime(*map(int, match.groups())))
+                    precision = "day"
+                except ValueError:
+                    published = None
         rows.append(
             {
                 "external_id": url,
@@ -125,7 +152,7 @@ def parse_list(body, source):
                 "summary": summary,
                 "url": url,
                 "published_at": published,
-                "published_precision": precision,
+                "published_precision": precision if published else "unknown",
             }
         )
         if len(rows) >= min(source.max_items, 50):
@@ -166,18 +193,46 @@ def collect_source(source, fetcher=fetch_public_url, force=False):
             rows = parse_source(response.body, source)
         added = 0
         skipped = 0
+        rejected = 0
         for row in rows:
-            if (
+            known = source.materials.filter(
+                external_id=str(row.get("external_id", ""))[:500]
+            ).exists()
+            if not known and ((
                 row.get("published_at")
                 and row["published_at"] < now - timedelta(days=90)
-            ) or not qualifies(row["title"], row["summary"]):
+            ) or not qualifies(row["title"], row["summary"])):
                 skipped += 1
                 continue
-            _, created = ingest(source, **row)
-            added += created
-        source.last_success_at = now
-        source.last_error = ""
-        if not response.not_modified:
+            try:
+                _, created = ingest(source, **row)
+                added += created
+            except WatchError:
+                rejected += 1
+        if not response.not_modified and source.adapter == "rss":
+            from .source_templates import deleted_entries
+
+            for ref in deleted_entries(response.body):
+                material = source.materials.filter(external_id=ref).select_related(
+                    "current_version"
+                ).first()
+                if material and material.current_version:
+                    old = material.current_version
+                    _, created = ingest(
+                        source, external_id=material.external_id,
+                        title=old.title, summary=old.summary, url=old.url,
+                        published_at=old.published_at,
+                        published_precision=old.published_precision,
+                        occurred_at=old.occurred_at, status="withdrawn",
+                    )
+                    added += created
+        source.last_error = (
+            f"{rejected} 条材料校验失败；有效材料已保留，请核对来源模板。"
+            if rejected else ""
+        )
+        if not rejected:
+            source.last_success_at = now
+        if not response.not_modified and not rejected:
             source.cursor = {
                 "etag": response.etag,
                 "last_modified": response.last_modified,
@@ -185,7 +240,11 @@ def collect_source(source, fetcher=fetch_public_url, force=False):
         source.save(
             update_fields=["last_success_at", "last_error", "cursor", "updated_at"]
         )
-        return {"status": "success", "added": added, "filtered": skipped}
+        return {
+            "status": "partial" if rejected else "success",
+            "added": added, "filtered": skipped, "rejected": rejected,
+            **({"error": source.last_error} if rejected else {}),
+        }
     except Exception as exc:
         source.last_error = (
             exc.safe_message
