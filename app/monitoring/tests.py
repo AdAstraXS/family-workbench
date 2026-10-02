@@ -1,5 +1,5 @@
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
@@ -24,6 +24,51 @@ class MonitorTests(TestCase):
 
     def call(self,reply):
         return tracked_call(lambda:reply,provider=self.provider,module='knowledge',family_id=self.family.pk)
+
+    def test_rolling_30_days_includes_previous_month_and_excludes_boundary(self):
+        now=timezone.make_aware(datetime(2026,10,2,12))
+        start=timezone.make_aware(datetime(2026,9,3))
+        for when,amount in ((start-timedelta(seconds=1),99),(start,2),(now,3)):
+            UsageRecord.objects.create(family=self.family,vendor='deepseek',model_name='example',
+                module='knowledge',started_at=when,status='confirmed',cost_cny=amount)
+            HostSample.objects.create(sampled_at=when,upload_delta=1024,download_delta=2048)
+        with patch('monitoring.views.timezone.now',return_value=now):
+            ctx=overview(self.family)
+            legacy=overview(self.family,period='month')
+        self.assertEqual(ctx['start_date'],start.date())
+        self.assertEqual(ctx['period_label'],'近 30 天')
+        self.assertEqual(ctx['agg']['cost'],Decimal(5))
+        self.assertEqual(len(ctx['bars']),30)
+        self.assertEqual(sum(bar['bytes'] for bar in ctx['traffic']['bars']),6144)
+        self.assertEqual(ctx['traffic']['chart_total'],'6.00 KiB')
+        self.assertEqual(legacy['start_date'],ctx['start_date'])
+
+    def test_traffic_buckets_reconcile_and_do_not_depend_on_vendor(self):
+        now=timezone.make_aware(datetime(2026,10,2,12))
+        for minute,up,down in ((0,1024,2048),(30,0,1024)):
+            HostSample.objects.create(sampled_at=now.replace(hour=8,minute=minute),
+                upload_delta=up,download_delta=down)
+        HostSample.objects.create(sampled_at=now.replace(hour=9),gap=True)
+        with patch('monitoring.views.timezone.now',return_value=now):
+            day=overview(self.family,period='day',vendor='ali')
+            week=overview(self.family,period='week',vendor='deepseek')
+        self.assertEqual(len(day['traffic']['bars']),24)
+        self.assertEqual(day['traffic']['bars'][8]['bytes'],4096)
+        self.assertTrue(day['traffic']['bars'][8]['confirmed'])
+        self.assertFalse(day['traffic']['bars'][9]['confirmed'])
+        self.assertEqual(sum(bar['bytes'] for bar in week['traffic']['bars']),4096)
+        self.assertEqual(day['traffic']['chart_total'],week['traffic']['chart_total'])
+        self.assertEqual(day['traffic']['gaps'],1)
+        self.client.force_login(self.user)
+        response=self.client.get(reverse('monitoring:index'))
+        self.assertContains(response,'流量用量趋势')
+        self.assertContains(response,'period=30days')
+        self.assertNotContains(response,'>本月<')
+
+    def test_traffic_without_valid_samples_has_unknown_total(self):
+        ctx=overview(self.family)
+        self.assertEqual(ctx['traffic']['chart_total'],'—')
+        self.assertFalse(any(bar['confirmed'] for bar in ctx['traffic']['bars']))
 
     def test_cache_is_not_double_counted(self):
         self.call({'usage':{'prompt_tokens':1000,'completion_tokens':200,'prompt_cache_hit_tokens':600}})
