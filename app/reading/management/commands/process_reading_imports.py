@@ -13,7 +13,7 @@ class Command(BaseCommand):
         if not 1 <= options["limit"] <= 20:
             raise CommandError("limit 须在 1 到 20 之间。")
         failed = 0
-        ids = list(BookFile.objects.filter(status="queued").order_by("created_at").values_list("pk", flat=True)[:options["limit"]])
+        ids = list(BookFile.objects.filter(status="queued", book__deleted_at__isnull=True).order_by("created_at").values_list("pk", flat=True)[:options["limit"]])
         for pk in ids:
             process_file(pk)
             status = BookFile.objects.get(pk=pk).status

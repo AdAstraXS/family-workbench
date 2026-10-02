@@ -132,7 +132,12 @@ def request_completion(job):
 
 
 def process_job(job_id):
-    if not ReadingAiJob.objects.filter(pk=job_id,status="queued",confirmed_at__isnull=False).update(status="running",started_at=timezone.now()):return False
+    with transaction.atomic():
+        candidate=ReadingAiJob.objects.filter(pk=job_id).first()
+        if candidate is None:return False
+        book=Book.objects.select_for_update().get(pk=candidate.book_id)
+        if book.deleted_at:return False
+        if not ReadingAiJob.objects.filter(pk=job_id,status="queued",confirmed_at__isnull=False).update(status="running",started_at=timezone.now()):return False
     job=ReadingAiJob.objects.select_related("book__file","member","provider").get(pk=job_id)
     audit=None
     try:

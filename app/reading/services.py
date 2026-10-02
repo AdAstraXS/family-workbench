@@ -12,7 +12,7 @@ from django.utils import timezone
 from family_core.models import FamilyMember
 
 from .importer import ImportFailure, VERSION, normalize_epub, normalize_txt
-from .models import Book, BookFile, ReadingImportRun, ReadingPosition
+from .models import Book, BookFile, BookLifecycleEvent, ReadingAiJob, ReadingImportRun, ReadingPosition
 from .storage import max_upload_bytes, storage
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,22 @@ logger = logging.getLogger(__name__)
 class DuplicateBook(Exception):
     def __init__(self, book):
         self.book = book
+
+
+def change_book_deleted_state(book, member, deleted):
+    with transaction.atomic():
+        book = Book.objects.select_for_update().get(pk=book.pk, owner=member, family=member.family)
+        if bool(book.deleted_at) == deleted:
+            return book
+        if deleted and book.ai_jobs.filter(status="running").exists():
+            raise ValidationError("本书的 AI 任务正在生成，请等待完成后再删除。")
+        book.deleted_at = timezone.now() if deleted else None
+        book.save(update_fields=["deleted_at", "updated_at"])
+        if deleted:
+            ReadingAiJob.objects.filter(book=book, status__in=["draft", "queued"]).update(
+                status="cancelled", finished_at=timezone.now(), error="图书已移入回收站，任务已取消。")
+        BookLifecycleEvent.objects.create(book=book, actor=member, action="delete" if deleted else "restore")
+        return book
 
 
 def upload_book(member, cleaned):
@@ -61,7 +77,7 @@ def process_file(file_id):
     token = uuid.uuid4()
     now = timezone.now()
     with transaction.atomic():
-        claimed = BookFile.objects.filter(pk=file_id, status="queued").update(
+        claimed = BookFile.objects.filter(pk=file_id, status="queued", book__deleted_at__isnull=True).update(
             status="processing", lease=token, processing_started_at=now, error="", updated_at=now)
         if not claimed:
             return False

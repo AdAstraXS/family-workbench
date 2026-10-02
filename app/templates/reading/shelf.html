@@ -1,7 +1,7 @@
 {% extends "reading/base.html" %}
 {% block title %}在线书库 · 家庭工作台{% endblock %}
 {% block hub_content %}
-<nav class="reading-actions"><a class="button" href="{% url 'reading:plans' %}">我的读书计划</a></nav>
+<nav class="reading-actions"><a class="button" href="{% url 'reading:plans' %}">我的读书计划</a><a class="button" href="{% url 'reading:recycle' %}">图书回收站</a></nav>
 <header class="reading-heading"><div><span class="eyebrow">家庭阅读</span><h1>在线书库</h1><p>把一本书留在手边，随时接着读。</p></div>{% if request.family_member.role != 'viewer' %}<a class="button primary" href="{% url 'reading:upload' %}">上传图书</a>{% endif %}</header>
 {% if recent %}<section class="reading-recent"><h2>继续阅读</h2><div class="reading-recent-grid">{% for item in recent %}<a href="{% url 'reading:reader' item.book_id %}"><strong>{{ item.book.title }}</strong><span>约 {{ item.percent }}% · {{ item.updated_at|date:"m月d日 H:i" }}</span><progress value="{{ item.progress }}" max="10000"></progress></a>{% endfor %}</div><p class="muted">进度和续读位置只有你可见。</p></section>{% endif %}
 <form method="get" class="reading-filters" role="search"><label>查找图书<input name="q" value="{{ query }}" placeholder="书名或作者"></label><label>范围<select name="scope"><option value="all">全部可见</option><option value="mine"{% if scope == 'mine' %} selected{% endif %}>我上传的</option><option value="family"{% if scope == 'family' %} selected{% endif %}>家庭共享</option></select></label><label>我的阅读<select name="state"><option value="all">全部状态</option><option value="reading"{% if state == 'reading' %} selected{% endif %}>正在阅读</option><option value="done"{% if state == 'done' %} selected{% endif %}>已确认读完</option></select></label><button type="submit">筛选</button></form>
