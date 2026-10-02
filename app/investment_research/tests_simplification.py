@@ -105,6 +105,13 @@ class SimplificationTests(TestCase):
         self.assertEqual(OfficialResearchContentVersion.objects.count(), count)
         self.assertTrue(type(version).objects.filter(pk=version.pk).exists())
 
+    def test_follow_puts_annual_report_before_later_imported_legal_attachments(self):
+        self.archive()
+        self.archive(attachment="certification.htm", key="legal-appendix")
+        from .company_workspace import workspace_context
+        rows = workspace_context(self.dossier, {"view": "changes"})["official_rows"]
+        self.assertEqual(rows[0]["version"].document.document_type, "10-k")
+
     def test_conditions_freeze_with_judgment_and_modified_claim_loses_old_conditions(self):
         self.dossier.current_revision = None
         self.dossier.initial_thesis = ""
