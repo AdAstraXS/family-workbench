@@ -1011,6 +1011,15 @@ class AccountDashboardTests(TestCase):
         self.assertContains(detail, "变动后现金余额")
         self.assertNotContains(detail, "变动后本位币余额")
 
+    def test_account_tabs_keep_shareable_urls_and_load_in_place_script(self):
+        url = reverse("portfolio:account_detail", args=[self.account.pk])
+        for tab in ("overview", "positions", "individual-profit", "cashflows", "transactions"):
+            page = self.client.get(url, {"tab": tab, "currency": "CNY", "cost_method": "moving_average"})
+            self.assertEqual(page.status_code, 200)
+            self.assertContains(page, 'account_detail_tabs.js')
+            self.assertContains(page, f'?tab={tab}&currency=CNY&cost_method=moving_average')
+            self.assertContains(page, 'aria-current="page"')
+
     def test_holding_rows_offer_price_and_sell_shortcuts_with_prefilled_trade(self):
         security = Security.objects.create(
             symbol="AAPL",
@@ -1182,7 +1191,7 @@ class AccountDashboardTests(TestCase):
         )
         self.assertContains(response, 'class="low-value-account-rows" hidden', count=2)
 
-    def test_balance_is_current_and_not_limited_to_selected_year(self):
+    def test_unknown_snapshot_year_does_not_display_current_balance(self):
         InvestmentCashMovement.objects.create(
             account=self.account,
             movement_date=date(2025, 12, 31),
@@ -1195,7 +1204,8 @@ class AccountDashboardTests(TestCase):
         current_year = self.client.get(reverse("portfolio:account_list"), {"year": "2026"})
 
         self.assertEqual(all_years.context["account_rows"][0]["cash"], Decimal("10500"))
-        self.assertEqual(current_year.context["account_rows"][0]["cash"], Decimal("10500"))
+        self.assertEqual(current_year.context["account_rows"], [])
+        self.assertContains(current_year, "所选年份没有可用快照")
 
     def test_year_filter_only_lists_snapshot_years_and_uses_year_end_snapshot(self):
         for snapshot_date, cash in (

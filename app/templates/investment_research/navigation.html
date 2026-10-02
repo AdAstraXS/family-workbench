@@ -1,0 +1,10 @@
+<nav class="rn-crumbs" aria-label="投研当前位置">{% for crumb in research_nav.crumbs %}{% if not forloop.first %}<span aria-hidden="true">›</span>{% endif %}{% if crumb.url %}<a href="{{ crumb.url }}">{{ crumb.label }}</a>{% else %}<strong aria-current="page">{{ crumb.label }}</strong>{% endif %}{% endfor %}</nav>
+{% if dossier %}
+<header class="rn-company"><div><p>公司研究档案 · 仅自己可见</p><h1>{{ dossier.security.name }} <small>{{ dossier.security.symbol }} · {{ dossier.security.market }}</small></h1><p>研究进度：{{ research_nav.state.label }}{% if research_nav.state.paused %} · 暂不研究{% endif %} · {% if research_nav.state.watching %}已加入观察{% else %}未加入观察{% endif %}</p></div><label>切换公司<select data-research-company aria-label="切换公司">{% for item in research_nav.companies %}<option value="{{ item.url }}"{% if item.selected %} selected{% endif %}>{{ item.label }}</option>{% endfor %}</select></label></header>
+<div class="rn-navigation{% if research_nav.area == 'library' or research_nav.area == 'financial' %} rn-auxiliary-page{% endif %}">
+<p class="rn-caption">研究流程 <span>高亮表示当前浏览位置</span></p>
+<nav class="rn-stages" aria-label="公司研究流程">{% for item in research_nav.stages %}<a href="{{ item.url }}"{% if item.active %} aria-current="step"{% endif %}><b>{{ item.number }}</b><span><strong>{{ item.label }}</strong><small>{{ item.hint }}</small></span></a>{% endfor %}</nav>
+<nav class="rn-aux" aria-label="跨阶段辅助工具"><span>辅助工具 · 各阶段共用</span>{% for item in research_nav.aux %}<a href="{{ item.url }}"{% if item.active %} aria-current="page"{% endif %}>{{ item.label }}</a>{% endfor %}</nav>
+</div>
+<nav class="rn-tabs" aria-label="当前栏目内容">{% for item in research_nav.tabs %}<a href="{{ item.url }}"{% if item.active %} aria-current="page"{% endif %}>{{ item.label }}</a>{% endfor %}</nav>
+{% endif %}

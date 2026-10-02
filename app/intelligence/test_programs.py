@@ -18,7 +18,7 @@ from knowledge.crypto import encrypt_json
 from knowledge.models import KnowledgeDocument
 from ai_analysis.models import AiProvider
 from .program_models import ProgramSubscription, ProgramSettings, ProgramEntry, ProgramRevision, ProgramSummaryChunk
-from .program_processing import save_revision, process_entry, submit_asr, validate_points, make_chunks, store_audio, audio_access_url
+from .program_processing import save_revision, process_entry, submit_asr, validate_points, validate_generated_points, make_chunks, store_audio, audio_access_url
 from .program_sources import ProgramError, parse_catalogue_feed, collect_subscription
 from .program_media import parse_asr_result, asr_request
 from .program_archive import archive_program
@@ -175,7 +175,7 @@ class ProgramTests(TestCase):
             for name, args in [('program_list', []), ('program_settings', []), ('program_detail', [self.entry.pk])]:
                 self.assertEqual(self.client.get(reverse('intelligence:' + name, args=args)).status_code, 200)
         self.assertEqual(ProgramSettings.objects.count(), 0)
-        self.assertEqual(ProgramSubscription.objects.count(), 1)
+        self.assertEqual(ProgramSubscription.objects.filter(family=self.family).count(), 1)
         fetch.assert_not_called()
 
     def test_family_isolation_and_member_settings_permission(self):
@@ -203,10 +203,10 @@ class ProgramTests(TestCase):
         self.assertNotContains(self.client.get(reverse('intelligence:program_settings')), 'secret-value-for-test')
 
     def test_catalogue_selection_and_pause(self):
-        self.client.post(reverse('intelligence:program_settings'), {'action': 'subscriptions', 'sources': ['dwarkesh', 'oaktree'], 'auto': ['oaktree']})
+        self.client.post(reverse('intelligence:program_source_edit', args=[self.sub.pk]), {'action': 'toggle'})
         self.sub.refresh_from_db()
         self.assertFalse(self.sub.enabled)
-        self.assertEqual(ProgramSubscription.objects.filter(enabled=True).count(), 2)
+        self.assertEqual(ProgramSubscription.objects.filter(family=self.family, enabled=True).count(), 0)
 
     def test_rss_excludes_short_versions_and_does_not_treat_description_as_transcript(self):
         body = b'<rss><channel><item><title>HIGHLIGHTS: CEO</title><link>https://example.com/short</link></item><item><title>CEO complete</title><link>https://example.com/full</link><description>Transcript short description</description><enclosure url="https://example.com/audio.mp3"/><duration>25:20</duration></item></channel></rss>'
@@ -340,6 +340,56 @@ class ProgramTests(TestCase):
         new_revision = self.revision('更新后的观点')
         self.assertNotEqual(archive_program(new_revision, self.member).pk, document.pk)
 
+    def test_archive_content_checkboxes_save_only_selected_content(self):
+        revision = self.revision('只应出现在原文中的文字。')
+        revision.summary = {'points': [{'topic': 'MSFT', 'kind': '作者观点', 'text': '只应出现在摘要中的观点。', 'refs': [1]}]}
+        revision.summary_complete = True
+        revision.save(update_fields=['summary', 'summary_complete'])
+        path = reverse('intelligence:program_action', args=[self.entry.pk])
+        form = {'action': 'archive', 'revision_id': revision.pk}
+
+        response = self.client.post(path, {**form, 'include_summary': 'on'})
+        revision.refresh_from_db()
+        document = KnowledgeDocument.objects.get(pk=revision.archived_document_id)
+        self.assertRedirects(response, reverse('knowledge:document_detail', args=[document.pk]), fetch_redirect_response=False)
+        self.assertIn('只应出现在摘要中的观点', document.current_revision.plain_text)
+        self.assertNotIn('只应出现在原文中的文字', document.current_revision.plain_text)
+        with document.current_revision.raw_file.open('rb') as stored:
+            payload = json.load(stored)
+        self.assertEqual(payload['included'], ['summary'])
+        self.assertNotIn('segments', payload)
+        self.assertIn('program_detail_url', payload)
+        self.assertIn('在 AI 情报中查看原文及引用', document.current_revision.normalized_html)
+        detail = self.client.get(reverse('intelligence:program_detail', args=[self.entry.pk]))
+        self.assertEqual(detail.context['archive_included'], ['summary'])
+        self.assertContains(detail, 'name="include_summary"')
+        self.assertContains(detail, 'name="include_transcript"')
+        archive_program(revision, self.member, include_summary=True, include_transcript=False)
+        self.assertEqual(document.revisions.count(), 1)
+
+        self.client.post(path, {**form, 'include_summary': 'on', 'include_transcript': 'on'})
+        document.refresh_from_db()
+        self.assertEqual(document.revisions.count(), 2)
+        self.assertIn('只应出现在原文中的文字', document.current_revision.plain_text)
+        self.client.post(path, {**form, 'include_transcript': 'on'})
+        document.refresh_from_db()
+        self.assertEqual(document.revisions.count(), 3)
+        self.assertNotIn('只应出现在摘要中的观点', document.current_revision.plain_text)
+        with document.current_revision.raw_file.open('rb') as stored:
+            payload = json.load(stored)
+        self.assertNotIn('summary', payload)
+        self.assertIn('segments', payload)
+
+    def test_archive_requires_a_selection_and_completed_summary(self):
+        revision = self.revision()
+        path = reverse('intelligence:program_action', args=[self.entry.pk])
+        form = {'action': 'archive', 'revision_id': revision.pk}
+        self.client.post(path, form)
+        self.client.post(path, {**form, 'include_summary': 'on'})
+        self.assertFalse(KnowledgeDocument.objects.exists())
+        revision.refresh_from_db()
+        self.assertIsNone(revision.archived_document_id)
+
     def test_audio_encrypted_expiring_capability(self):
         store_audio(self.entry, b'test-audio-bytes', 'audio/mp4')
         with self.entry.audio_file.open('rb') as file:
@@ -380,7 +430,8 @@ class ProgramTests(TestCase):
             self.assertEqual(payload['max_tokens'], 512)
             data = json.loads(payload['messages'][1]['content'])
             point = {'topic': 'MSFT', 'kind': '作者观点', 'text': '仅用于验证的摘要', 'refs': [data['paragraphs'][0]['id']]}
-            return {'choices': [{'message': {'content': json.dumps({'points': [point]})}, 'finish_reason': 'stop'}], 'usage': {'total_tokens': 100}}
+            invented = {'topic': '利率', 'kind': '事实', 'text': '2026年利率上升。', 'refs': point['refs']}
+            return {'choices': [{'message': {'content': json.dumps({'points': [point, invented]})}, 'finish_reason': 'stop'}], 'usage': {'total_tokens': 100}}
         with patch('intelligence.ai_enrichment._chat_url', return_value='https://example.com/v1/chat/completions'), patch('intelligence.program_processing.private_json_request', side_effect=response) as remote:
             for _ in range(12):
                 process_entry(self.entry.pk)
@@ -392,6 +443,9 @@ class ProgramTests(TestCase):
             self.assertEqual(remote.call_count, calls)
         revision.refresh_from_db()
         self.assertTrue(revision.summary_complete)
+        self.assertEqual(revision.summary['omitted_year_points'], calls)
+        self.assertEqual(len(revision.summary['points']), calls)
+        self.assertContains(self.client.get(reverse('intelligence:program_detail', args=[self.entry.pk])), '年份无法从引用段落核实')
         self.assertTrue(all(c.reserved_usd > 0 and c.model_name == 'test-model' for c in revision.chunks.all()))
         self.assertTrue(all(c.prompt_version == 'program-summary-v3' for c in revision.chunks.all()))
 
@@ -418,6 +472,14 @@ class ProgramTests(TestCase):
         self.assertEqual(chunk.status, 'pending')
         self.assertEqual(chunk.reserved_usd, Decimal('.001'))
         self.assertEqual(revision.summary['batches'], [[1]])
+
+    def test_generated_points_reject_all_unsupported_years_and_malformed_refs(self):
+        unsupported = {'topic': '利率', 'kind': '事实', 'text': '2026年利率上升。', 'refs': [1]}
+        with self.assertRaises(ProgramError):
+            validate_generated_points({'points': [unsupported]}, {1}, {1: '利率上升。'})
+        valid = {'topic': '利率', 'kind': '作者观点', 'text': '作者认为利率将上升。', 'refs': [1]}
+        with self.assertRaises(ProgramError):
+            validate_generated_points({'points': [valid, {**valid, 'refs': [99]}]}, {1}, {1: '利率上升。'})
 
     def test_paused_subscription_does_not_run(self):
         self.sub.enabled = False

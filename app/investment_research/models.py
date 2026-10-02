@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 from family_core.models import Family, FamilyMember, TimestampedModel
 from portfolio.models import Security
@@ -27,6 +28,9 @@ DOCUMENT_TYPE_CHOICES = [
     (DOC_TYPE_10K, "10-K 年报"),
     (DOC_TYPE_10Q, "10-Q 季报"),
     (DOC_TYPE_8K, "8-K 重大事件"),
+    ("20-f", "20-F 外国公司年报"),
+    ("40-f", "40-F 加拿大公司年报"),
+    ("6-k", "6-K 外国公司公告"),
     (DOC_TYPE_ANNUAL_REPORT, "年度报告"),
     (DOC_TYPE_EARNINGS_RELEASE, "财报新闻稿"),
     (DOC_TYPE_EARNINGS_CALL, "财报电话会/网络直播"),
@@ -38,6 +42,85 @@ DOCUMENT_TYPE_CHOICES = [
     ("shareholder_letter", "股东信"),
     (DOC_TYPE_OTHER, "其他"),
 ]
+
+
+class CompanyIdentity(TimestampedModel):
+    security = models.OneToOneField(Security, on_delete=models.PROTECT, related_name="research_identity")
+    name = models.CharField(max_length=200)
+    aliases = models.JSONField(default=list)
+    listings = models.JSONField(default=list)
+    sec_ticker = models.CharField(max_length=30, blank=True)
+    cik = models.CharField(max_length=10, blank=True)
+    provenance = models.JSONField(default=dict)
+
+    class Meta:
+        verbose_name = "公司资料身份"
+        verbose_name_plural = verbose_name
+
+
+class ResearchPreparation(TimestampedModel):
+    """Owner-confirmed preparation; never replaces a formal thesis revision."""
+    dossier = models.ForeignKey("ResearchDossier", on_delete=models.CASCADE, related_name="preparations")
+    analysis = models.OneToOneField("ai_analysis.AiAnalysisRequest", on_delete=models.PROTECT,
+                                   related_name="preparation")
+    questions = models.JSONField(default=list)
+    hypotheses = models.JSONField(default=list)
+    decision = models.CharField(max_length=20, choices=[("research", "继续研究"),
+        ("watch", "加入观察"), ("pause", "暂不研究")])
+    reason = models.TextField(blank=True)
+    revision = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        ordering = ["updated_at", "pk"]
+
+
+class CompanyMaterial(TimestampedModel):
+    """Public source item. Private judgments remain in their original dossier."""
+    security = models.ForeignKey(Security, on_delete=models.PROTECT, related_name="company_materials")
+    key = models.CharField(max_length=180)
+    kind = models.CharField(max_length=40)
+    title = models.CharField(max_length=500)
+    source_url = models.URLField(max_length=1500, blank=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["security", "key"], name="unique_company_material")]
+        verbose_name = "公司基础资料"
+        verbose_name_plural = verbose_name
+
+
+class CompanyMaterialVersion(models.Model):
+    material = models.ForeignKey(CompanyMaterial, on_delete=models.PROTECT, related_name="versions")
+    number = models.PositiveIntegerField()
+    raw_gzip = models.BinaryField()
+    sha256 = models.CharField(max_length=64)
+    source_url = models.URLField(max_length=1500, blank=True)
+    media_type = models.CharField(max_length=80, default="application/json")
+    data = models.JSONField(default=dict)
+    text = models.TextField(blank=True)
+    report_date = models.CharField(max_length=80, blank=True)
+    fetched_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-number"]
+        constraints = [models.UniqueConstraint(fields=["material", "number"], name="unique_company_material_version")]
+        verbose_name = "公司基础资料历史版本"
+        verbose_name_plural = verbose_name
+
+
+class CompanyAcquisitionJob(TimestampedModel):
+    dossier = models.ForeignKey("ResearchDossier", on_delete=models.PROTECT, related_name="acquisition_jobs")
+    status = models.CharField(max_length=20, default="queued")
+    selection = models.JSONField(default=list)
+    items = models.JSONField(default=list)
+    expires_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "公司资料获取任务"
+        verbose_name_plural = verbose_name
 
 
 class ResearchDossier(TimestampedModel):
@@ -67,6 +150,7 @@ class ResearchDossier(TimestampedModel):
         related_name="research_dossiers",
     )
     initial_thesis = models.TextField("原始持有理由", blank=True)
+    is_watched = models.BooleanField("加入观察", default=False, db_default=False)
     selected_metric_codes = models.JSONField("已确认追踪指标", default=list, blank=True)
     current_revision = models.ForeignKey(
         "ResearchThesisRevision",
@@ -89,6 +173,26 @@ class ResearchDossier(TimestampedModel):
 
     def __str__(self):
         return f"{self.owner} - {self.security}"
+
+
+class ResearchAutoDigestConsent(TimestampedModel):
+    """Explicit, provider-bound permission for automatic thesis comparison."""
+
+    dossier = models.OneToOneField(
+        ResearchDossier, on_delete=models.CASCADE, related_name="auto_digest_consent",
+        verbose_name="研究档案")
+    provider = models.ForeignKey(
+        "ai_analysis.AiProvider", on_delete=models.PROTECT,
+        related_name="research_auto_digest_consents", verbose_name="授权的文本模型")
+    authorized_by = models.ForeignKey(
+        FamilyMember, on_delete=models.PROTECT,
+        related_name="research_auto_digest_consents", verbose_name="授权成员")
+    authorized_at = models.DateTimeField("授权时间", default=timezone.now)
+    revoked_at = models.DateTimeField("关闭时间", null=True, blank=True)
+
+    class Meta:
+        verbose_name = "次日跟踪自动对照授权"
+        verbose_name_plural = "次日跟踪自动对照授权"
 
 
 class ResearchThesisRevision(models.Model):

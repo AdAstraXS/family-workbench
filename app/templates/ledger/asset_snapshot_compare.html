@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% load money %}
+{% block title %}资产快照对比{% endblock %}
+{% block extra_head %}
+<style>
+  .snapshot-compare-filters { display:grid; grid-template-columns:2fr 1fr; gap:20px; }
+  .snapshot-compare-filters fieldset { min-width:0; border:1px solid #e1e7ef; border-radius:10px; padding:16px; }
+  .snapshot-compare-filters legend { padding:0 8px; font-weight:600; }
+  .snapshot-compare-periods { max-height:240px; overflow:auto; }
+  .snapshot-compare-filters label { display:block; padding:5px 0; }
+  .snapshot-compare-filters input[type=checkbox] { width:auto; margin-right:8px; }
+  .snapshot-compare-filters select { margin:8px 0 14px; }
+  .snapshot-compare-table { width:max-content; min-width:100%; border-collapse:separate; border-spacing:0; }
+  .snapshot-compare-table th, .snapshot-compare-table td { white-space:nowrap; min-width:110px; }
+  .snapshot-compare-table thead th { position:sticky; top:0; z-index:3; background:#f5f5f7; }
+  .snapshot-compare-table thead tr:nth-child(2) th { top:var(--compare-header-height, 60px); }
+  .snapshot-compare-table .frozen-column { position:sticky; left:var(--frozen-left, 0px); z-index:2; background:#fff; }
+  .snapshot-compare-table thead .frozen-column { z-index:4; background:#f5f5f7; }
+  .snapshot-compare-table .frozen-edge { border-right:1px solid #cbd5e1; box-shadow:3px 0 4px -3px #94a3b8; }
+  .snapshot-compare-table .frozen-summary { position:sticky; left:0; z-index:2; background:#f5f5f7; }
+  .snapshot-compare-table .period-title { text-align:center; }
+  .snapshot-compare-table .increase { color:#b73a49; }
+  .snapshot-compare-table .decrease { color:#198267; }
+  .snapshot-compare-notes { color:#64748b; line-height:1.7; }
+  @media (max-width:700px) { .snapshot-compare-filters { grid-template-columns:1fr; } }
+</style>
+{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="section-head"><h1>资产快照对比</h1><a class="button ghost" href="{% url 'ledger:asset_snapshot_list' %}">返回资产快照</a></div>
+  <form method="get">
+    <div class="snapshot-compare-filters">
+      <fieldset><legend>{{ form.snapshots.label }}</legend>
+        <div class="snapshot-compare-periods">{{ form.snapshots }}</div>
+        {{ form.snapshots.errors }}
+      </fieldset>
+      <fieldset><legend>显示设置</legend>
+        <strong>{{ form.members.label }}</strong>{{ form.members }}{{ form.members.errors }}
+        <label for="{{ form.amount_mode.id_for_label }}">{{ form.amount_mode.label }}</label>
+        {{ form.amount_mode }}{{ form.amount_mode.errors }}
+      </fieldset>
+    </div>
+    {{ form.non_field_errors }}
+    <div class="form-actions"><button type="submit">生成对比表</button></div>
+  </form>
+</section>
+{% if report %}
+<section class="panel snapshot-detail-panel">
+  <div class="section-head"><h1>明细对比 · {% if amount_mode == 'base' %}本位币 {{ report.snapshots.0.base_currency }}{% else %}原币{% endif %}</h1></div>
+  <p class="snapshot-compare-notes">按日期从早到晚排列；余额变动 = 本期余额 − 前一个所选期余额。第一期为对比起点。没有记录的明细显示“—”，相邻两期均有记录才计算明细变动；明确记录的零余额显示 0.00。</p>
+  <p class="snapshot-compare-notes">{% if amount_mode == 'base' %}使用各期快照保存的本位币金额，余额变动包含汇率影响，不代表投资收益。{% else %}不同币种分别汇总，不合并为一个原币总额。{% endif %}合计为每期所选成员的已记录余额。</p>
+  {% for warning in report.warnings %}<p class="form-errors">{{ warning }}</p>{% endfor %}
+  <div class="snapshot-table-wrap">
+    <table class="snapshot-table snapshot-compare-table">
+      <thead>
+        <tr><th rowspan="2" class="frozen-column">成员</th><th rowspan="2" class="frozen-column">账户</th><th rowspan="2" class="frozen-column">资产类别</th><th rowspan="2" class="frozen-column frozen-edge">原币币种</th>
+        {% for snapshot in report.snapshots %}<th colspan="2" class="period-title"><a href="{% url 'ledger:asset_snapshot_detail' snapshot.pk %}">{{ snapshot.snapshot_date|date:'Y-m-d' }}</a>{% if snapshot.title %}<br><small>{{ snapshot.title }}</small>{% endif %}</th>{% endfor %}</tr>
+        <tr>{% for snapshot in report.snapshots %}<th>余额</th><th>较前期变动</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in report.rows %}<tr>
+          <td class="frozen-column">{{ row.member }}</td><td class="frozen-column">{{ row.account }}</td><td class="frozen-column">{{ row.category }}</td><td class="frozen-column frozen-edge">{{ row.currency }}</td>
+          {% for cell in row.cells %}<td class="number">{{ cell.amount|money2 }}</td><td class="number {% if cell.change > 0 %}increase{% elif cell.change < 0 %}decrease{% endif %}">{% if amount_mode == 'base' %}{{ cell.change|signed_currency2:report.snapshots.0.base_currency }}{% else %}{{ cell.change|signed_currency2:row.currency }}{% endif %}</td>{% endfor %}
+        </tr>{% empty %}<tr><td colspan="4">所选成员在这些快照中暂无明细。</td></tr>{% endfor %}
+      </tbody>
+      <tfoot>
+        {% for total in report.totals %}<tr><td colspan="4" class="frozen-summary frozen-edge">已记录余额合计 · {{ total.currency }}</td>
+          {% for cell in total.cells %}<td class="number">{{ cell.amount|money2 }}</td><td class="number">{{ cell.change|signed_currency2:total.currency }}</td>{% endfor %}
+        </tr>{% endfor %}
+      </tfoot>
+    </table>
+  </div>
+</section>
+{% else %}<section class="panel"><p class="muted">选择至少两期快照和成员，点击“生成对比表”。默认勾选最近两期和全部成员。</p></section>{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const table = document.querySelector('.snapshot-compare-table');
+  if (!table) return;
+  const headerRow = table.tHead.rows[0];
+  const frozenHeaders = Array.from(headerRow.querySelectorAll('.frozen-column'));
+  const updateStickyOffsets = () => {
+    table.style.setProperty('--compare-header-height', `${headerRow.getBoundingClientRect().height}px`);
+    let left = 0;
+    frozenHeaders.forEach((header, index) => {
+      table.querySelectorAll('tr').forEach(row => {
+        const cell = row.children[index];
+        if (cell && cell.classList.contains('frozen-column')) {
+          cell.style.setProperty('--frozen-left', `${left}px`);
+        }
+      });
+      left += header.getBoundingClientRect().width;
+    });
+  };
+  updateStickyOffsets();
+  if ('ResizeObserver' in window) new ResizeObserver(updateStickyOffsets).observe(table);
+  window.addEventListener('resize', updateStickyOffsets);
+  if (document.fonts) document.fonts.ready.then(updateStickyOffsets);
+})();
+</script>
+{% endblock %}

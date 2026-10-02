@@ -6,6 +6,7 @@ MODULES = (
     ("portfolio", "overview", "投资组合", "briefcase-2", "账户、持仓与资产变化", "财富管理"),
     ("ledger", "overview", "家庭账本", "wallet", "收支、预算与家庭资产", "财富管理"),
     ("investment_research", "index", "投研", "chart-line", "公司研究与投资判断", "财富管理"),
+    ("investment_watch", "news", "投资动态", "chart-line", "新闻浏览、主题与投资逻辑跟踪", "财富管理"),
     ("option_wheel", "index", "期权车轮", "chart-donut", "策略、合约与交易管理", "财富管理"),
     ("ipo", "index", "港股打新", "building-bank", "新股、申购与收益记录", "财富管理"),
     ("notes", "index", "投资笔记", "notes", "记录观点，回顾思考", "阅读与积累"),
@@ -15,6 +16,7 @@ MODULES = (
     ("intelligence", "index", "AI 情报", "sparkles", "动态、人物与资讯线索", "观察与分析"),
     ("macro", "index", "宏观数据", "chart-line", "观察宏观指标与变化", "观察与分析"),
     ("ai_analysis", "index", "AI 检索与问答", "sparkles", "在知识库和已授权资料中查找答案", "观察与分析"),
+    ("monitoring", "index", "运行监控", "chart-line", "AI 用量、账户余额与 NAS 流量", "工作台管理"),
 )
 
 

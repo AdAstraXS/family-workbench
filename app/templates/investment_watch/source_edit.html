@@ -1,0 +1,5 @@
+{% extends "investment_watch/base.html" %}{% block watch_content %}
+<h1>配置信源</h1><p>可接入媒体、公司新闻室、行业协会、技术博客或研究机构的公开资料。测试只读取列表，不入新闻池、不调用模型。</p>
+<details class="iw-card"><summary>模板填写示例</summary><p>RSS / Atom 无需字段配置。</p><p>JSON：点号表示对象层级，日期应为带时区的 ISO 时间或来源可识别的日期。</p><pre>{"items":"data.items","title":"title","url":"url","summary":"summary","date":"published_at"}</pre><p>网页：CSS 选择文章行，@ 读取属性；空选择器表示当前行。</p><pre>{"items":"article","title":"h2","url":"a@href","summary":"p","date":"time@datetime"}</pre><p>未知日期会保留未知。登录、付费正文和动态渲染页面可能需要专用适配。</p></details>
+<form method="post" class="iw-card">{% csrf_token %}{{ form.as_p }}<button name="action" value="test">测试读取</button>{% if tested %}<input type="hidden" name="tested" value="{{ tested }}"><button name="action" value="save">保存为暂停来源</button>{% endif %}</form>
+{% if rows %}<h2>读取预览（前 5 条）</h2>{% for row in rows|slice:':5' %}<article class="iw-card"><h3>{{ row.title }}</h3><p>{{ row.summary }}</p><p>发布时间：{{ row.published_at|default:'未知' }}</p><a href="{{ row.url }}" target="_blank" rel="noopener noreferrer">原文入口</a></article>{% endfor %}{% endif %}{% endblock %}

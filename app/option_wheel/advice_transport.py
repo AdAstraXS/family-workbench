@@ -33,8 +33,9 @@ def call_deepseek(request):
             {"role": "user", "content": json.dumps(request.sanitized_input, ensure_ascii=False)}]}
     http = Request("https://api.deepseek.com/chat/completions", data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", "Authorization": "Bearer " + os.environ[config["api_key_env_var"]]}, method="POST")
-    with build_opener(NoRedirect()).open(http, timeout=45) as response:
-        raw = response.read(262145)
+    from monitoring.metering import tracked_call, read_response
+    raw = tracked_call(lambda: read_response(build_opener(NoRedirect()).open, http, 45, 262145),
+        provider=request.provider, module="option_wheel", family_id=request.family_id, source=request.pk)
     if len(raw) > 262144:
         raise ValueError("response too large")
     decoded = json.loads(raw)

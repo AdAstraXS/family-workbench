@@ -1,15 +1,74 @@
 {% extends "investment_research/base.html" %}
-{% block title %}富途财务对照 · {{ dossier.security.name }}{% endblock %}
+{% block title %}富途财务数据 · {{ dossier.security.name }}{% endblock %}
 {% block research_content %}
 <div class="research-page">
-  <header class="research-header"><div><p class="research-eyebrow">公司研究 / {{ dossier.security.symbol }}</p><h1>富途财务对照</h1><p class="research-private-note">查看富途整理的年度报表与主营构成，再对照 SEC 年报原文。富途是独立数据源，口径和更新时点可能不同。</p></div><a class="button" href="{% url 'investment_research:financials' dossier.pk %}">返回 SEC 财务概览</a></header>
-  <nav class="research-workflow" aria-label="公司研究步骤"><a href="{% url 'investment_research:detail' dossier.pk %}">当前判断</a><a href="{% url 'investment_research:financials' dossier.pk %}">SEC 财务概览</a><span aria-current="page">富途财务对照</span><a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">AI 综合分析</a></nav>
-  <section class="research-source-summary"><div><h2>数据状态</h2><p>查询代码：{{ code|default:"不可用" }}{% if snapshot %} · 上次成功获取 {{ snapshot.fetched_at|date:"Y-m-d H:i" }}{% else %} · 尚未获取{% endif %}</p><p>本页只显示上次主动更新时保存的快照，打开页面不会联网。</p>{% if snapshot.last_error %}<p class="research-source-error">最近更新失败：{{ snapshot.last_error }}。下方仍显示上次成功的数据。</p>{% endif %}{% if code_problem %}<p class="research-source-error">{{ code_problem }}</p>{% endif %}</div>{% if can_write and code %}<form method="post" class="research-inline-form">{% csrf_token %}<button type="submit">更新富途财务数据</button></form>{% endif %}</section>
+  <header class="research-header">
+    <div>
+      <p class="research-eyebrow">公司研究 / {{ dossier.security.symbol }}</p>
+      <h1>富途财务数据</h1>
+      <p class="research-private-note">按年度并排阅读利润表、资产负债表、现金流量表和主要指标。下方数据来自富途，不会混入 SEC 财务概览。</p>
+    </div>
+    <a class="button" href="{% url 'investment_research:financials' dossier.pk %}">查看 SEC 财务概览</a>
+  </header>
+
+
+  <section class="research-source-summary">
+    <div>
+      <h2>数据状态</h2>
+      <p>{{ code|default:"代码不可用" }}{% if snapshot %} · 上次更新 {{ snapshot.fetched_at|date:"Y-m-d H:i" }}{% else %} · 尚未获取{% endif %}</p>
+      <p class="research-private-note">打开页面只读取已保存的数据。点击更新后，才会向富途 OpenD 查询。</p>
+      {% if snapshot.last_error %}<p class="research-source-error">最近一次更新失败：{{ snapshot.last_error }}；以下仍是上次成功的数据。</p>{% endif %}
+      {% if code_problem %}<p class="research-source-error">{{ code_problem }}</p>{% endif %}
+    </div>
+    {% if can_write and code %}<form method="post" class="research-inline-form">{% csrf_token %}<button type="submit">更新富途财务数据</button></form>{% endif %}
+  </section>
+
   {% if snapshot %}
-    {% if comparisons %}<section class="research-financial-group"><h2>与 SEC 年报对照</h2><p class="research-private-note">仅在报告期截止日及币种一致时并列显示。富途净利润采用归属母公司口径，若与 SEC 净利润定义不同，差异需要再查原文。</p><div class="research-metric-scroll"><table class="research-metric-table"><thead><tr><th>期间</th><th>指标</th><th>SEC 年报</th><th>富途</th></tr></thead><tbody>{% for row in comparisons %}<tr><td>{{ row.period|date:"Y-m-d" }}</td><th scope="row">{{ row.label }}</th><td>{% if row.sec.amount is not None %}{{ row.sec.amount|floatformat:2 }}{% if row.unit == "per_share" %} 美元/股{% else %} 亿美元{% endif %}{% if row.sec.citation %}<small class="research-metric-links"><a href="{% url 'investment_research:document_detail' dossier.pk row.sec.document_id %}?version={{ row.sec.version_id }}&amp;start={{ row.sec.citation.start }}&amp;end={{ row.sec.citation.end }}&amp;hash={{ row.sec.citation.hash }}#research-citation">SEC 原文</a></small>{% endif %}{% else %}— · {{ row.sec.status }}{% endif %}</td><td>{{ row.futu|floatformat:2 }}{% if row.unit == "per_share" %} 美元/股{% else %} 亿美元{% endif %}<small class="research-metric-source">富途字段：{{ row.futu_name }}</small></td></tr>{% endfor %}</tbody></table></div></section>{% else %}<p class="research-private-note">{{ sec_problem|default:"暂无相同报告期和币种的 SEC 年报数字；可在下方单独查看富途报表。" }}</p>{% endif %}
-    {% if breakdown and breakdown.groups %}<section class="research-financial-group"><h2>主营收入构成 · {{ breakdown.period }}</h2><p class="research-private-note">原始币种 {{ breakdown.currency }}。不同维度可能重叠，不能把产品、地区和业务收入相加。</p>{% for group in breakdown.groups %}<h3>按{{ group.type }}划分</h3><div class="research-metric-scroll"><table class="research-metric-table"><thead><tr><th>项目</th><th>收入（{{ breakdown.currency }}）</th><th>占比</th></tr></thead><tbody>{% for item in group.items %}<tr><th scope="row">{{ item.name }}</th><td>{{ item.amount|default:"—" }}</td><td>{% if item.ratio %}{{ item.ratio }}%{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% endfor %}</section>{% elif snapshot.data.breakdown_error %}<p class="research-source-error">主营收入构成暂不可用：{{ snapshot.data.breakdown_error }}</p>{% endif %}
-    {% for statement in statements %}<details class="research-financial-group"{% if forloop.first %} open{% endif %}><summary>{{ statement.title }} · 近三年</summary>{% for report in statement.reports %}<h3>{{ report.period }} · {{ report.period_end }}</h3><p class="research-private-note">币种 {{ report.currency|default:"未标注" }} · {{ report.standards|default:"会计准则未标注" }}{% if report.auditor %} · 审计意见：{{ report.auditor }}{% endif %}</p><div class="research-metric-scroll"><table class="research-metric-table"><thead><tr><th>富途字段</th><th>原始数值</th><th>同比</th></tr></thead><tbody>{% for item in report.items %}<tr><th scope="row">{{ item.name }} <small class="research-metric-source">#{{ item.field_id }}</small></th><td>{{ item.amount }}</td><td>{% if item.yoy %}{{ item.yoy }}%{% else %}—{% endif %}</td></tr>{% empty %}<tr><td colspan="3">该期无可用字段。</td></tr>{% endfor %}</tbody></table></div>{% empty %}<p>富途未返回完整财年记录。</p>{% endfor %}</details>{% endfor %}
-    <details class="research-method-note"><summary>数据口径与限制</summary><p>富途 OpenAPI 返回其整理后的财务字段，原始接口以浮点数传输；入库时转为十进制字符串以避免后续二进制浮点运算。表格保留富途字段 ID 和名称，原始数值按其接口返回展示。SEC 一栏来自独立归档的官方年报原文；并列仅帮助发现差异，不能证明两个字段口径相同。</p></details>
-  {% else %}<div class="research-document-empty"><strong>还没有富途财务数据</strong><p>点击“更新富途财务数据”会通过 OpenD 查询这只股票最近三个完整财年的四类报表及最新主营构成。需要 OpenD 可用且账户具有对应权限。</p></div>{% endif %}
+    {% if highlights %}<section class="research-financial-group">
+      <h2>先看关键数字</h2>
+      <p class="research-private-note">以下指标采用富途年度数值和已核对的字段名称；完整报表在下方展开。</p>
+      <div class="research-metric-scroll"><table class="research-metric-table">
+        <thead><tr><th scope="col">指标</th>{% for report in highlights.0.reports %}<th scope="col">{{ report.period }}</th>{% endfor %}</tr></thead>
+        <tbody>{% for row in highlights %}<tr><th scope="row">{{ row.label }}{% if row.provider_name != row.label %}<small class="research-metric-source">{{ row.provider_name }}</small>{% endif %}</th>{% for cell in row.cells %}<td><strong>{{ cell.amount }}</strong>{% if cell.yoy %}<small class="research-metric-source">同比 {{ cell.yoy }}</small>{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody>
+      </table></div>
+    </section>{% endif %}
+
+    {% if has_missing_names %}<p class="research-private-note">部分项目的名称尚未从数据源核对。原始记录已保留；更新时会尝试从同一家公司的富途财报页面核对。未确认名称的数字不作为可读指标展示。</p>{% endif %}
+
+    {% if breakdown_groups %}
+      <section class="research-financial-group">
+        <h2>主营收入构成 · {{ breakdown.period }}</h2>
+        <p class="research-private-note">币种 {{ breakdown.currency }}。产品、地区、业务等不同划分会重叠，请分别阅读，不能相加。</p>
+        {% for group in breakdown_groups %}
+          <h3>按{{ group.type }}划分</h3>
+          <div class="research-metric-scroll"><table class="research-metric-table">
+            <thead><tr><th scope="col">项目</th><th scope="col">营业收入</th><th scope="col">占比</th></tr></thead>
+            <tbody>{% for item in group.rows %}<tr><th scope="row">{{ item.name }}</th><td>{{ item.amount }}</td><td>{{ item.ratio }}</td></tr>{% endfor %}</tbody>
+          </table></div>
+        {% endfor %}
+      </section>
+    {% elif snapshot.data.breakdown_error %}<p class="research-source-error">主营收入构成暂不可用：{{ snapshot.data.breakdown_error }}</p>{% endif %}
+
+    {% for table in tables %}
+      <details class="research-financial-group"{% if forloop.first %} open{% endif %}>
+        <summary>{{ table.title }} · 近三年</summary>
+        <p class="research-private-note">金额保留原币种，按大小使用万、亿单位；每股项目单独标注，同比保留两位小数。</p>
+        <div class="research-metric-scroll"><table class="research-metric-table">
+          <thead><tr><th scope="col">指标</th>{% for report in table.reports %}<th scope="col">{{ report.period }}<small>{{ report.period_end }} · {{ report.currency }}</small><small>{{ report.standards_display|default:"会计准则未标注" }}{% if report.auditor %} · {{ report.auditor }}{% endif %}</small></th>{% endfor %}</tr></thead>
+          <tbody>
+            {% for row in table.rows %}
+              <tr><th scope="row">{{ row.name|default:"名称待更新" }}</th>
+                {% for cell in row.cells %}<td><strong>{{ cell.amount }}</strong>{% if cell.yoy %}<small class="research-metric-source">同比 {{ cell.yoy }}</small>{% endif %}</td>{% endfor %}
+              </tr>
+            {% empty %}<tr><td colspan="4">此报表暂没有已核对名称的字段，请更新资料后再查看。</td></tr>{% endfor %}
+          </tbody>
+        </table></div>
+        {% if table.raw_rows %}<p class="research-private-note">{{ table.missing_names }} 项名称待核对。新获取的原始记录和历史版本可在<a href="{% url 'investment_research:materials' dossier.pk %}">公司资料</a>中下载。</p>{% endif %}
+      </details>
+    {% endfor %}
+    <details class="research-method-note"><summary>数据来源与口径</summary><p>财务数值来自富途 OpenD 年度报表。接口缺少字段名称时，仅采用经过同源核对的名称；未核对项目保留在原始记录中。页面保留报告期、币种、会计准则和审计意见，不做货币换算。查看官方披露可进入 SEC 财务概览。</p></details>
+  {% else %}
+    <div class="research-document-empty"><strong>还没有富途财务数据</strong><p>点击“更新富途财务数据”会通过 OpenD 获取最近三个完整财年的年度报表和主营构成。</p></div>
+  {% endif %}
 </div>
 {% endblock %}

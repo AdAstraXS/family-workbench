@@ -23,8 +23,8 @@ TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL_TEMPLATE = "https://data.sec.gov/submissions/CIK{cik}.json"
 ARCHIVES_BASE = "https://www.sec.gov/Archives/edgar/data"
 
-ALLOWED_FORMS = frozenset({"10-K", "10-Q", "8-K"})
-FORM_TO_DOCUMENT_TYPE = {"10-K": "10-k", "10-Q": "10-q", "8-K": "8-k"}
+ALLOWED_FORMS = frozenset({"10-K", "10-Q", "8-K", "20-F", "40-F", "6-K"})
+FORM_TO_DOCUMENT_TYPE = {form: form.lower() for form in ALLOWED_FORMS}
 REQUIRED_FILING_COLUMNS = (
     "accessionNumber",
     "filingDate",
@@ -187,7 +187,7 @@ def _build_title(company_name, form, filing_date):
 def parse_recent_filings(data, *, company_name=""):
     """解析 data.sec.gov submissions 的 filings.recent 列式结构。
 
-    只保留 10-K / 10-Q / 8-K（含 /A 修正案，按基础表类型归类）。
+    保留美国及外国发行人的常用报告（含 /A 修正案，按基础表类型归类）。
     返回按接口原始顺序（最新在前）的记录列表。
     """
     if not isinstance(data, dict):

@@ -1875,6 +1875,10 @@ button {
   border-top-left-radius: 0;
 }
 
+.account-tab-content[aria-busy="true"] {
+  opacity: .65;
+}
+
 .account-overview-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

@@ -1,0 +1,7 @@
+{% extends "investment_watch/base.html" %}
+{% block watch_content %}<h1>{{ dossier.security.name }} · 关注预览</h1>
+<p>检查最近 {{ preview.total }} 份材料，命中 {{ preview.matched }} 份；显示前 30 份。未保存规则，未创建候选，也未调用模型。</p>
+{% for row in preview.rows %}<article class="iw-card"><h2><a href="{% url 'investment_watch:news_detail' row.version.material_id %}">{{ row.version.title }}</a></h2><p>{{ row.reason }}</p></article>{% empty %}<p>当前窗口没有命中，可尝试公司别名或相关行业词。</p>{% endfor %}
+<form method="post" action="{% url 'investment_watch:rules' %}" class="iw-card">{% csrf_token %}
+{% for key, value in submitted.items %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+<button>确认保存并匹配</button> <a href="{% url 'investment_watch:rules' %}">返回设置</a></form>{% endblock %}

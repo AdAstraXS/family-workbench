@@ -5,7 +5,7 @@
 {% block research_content %}
 <section class="research-page">
   <h1>编辑判断：{{ dossier.security.name }}（{{ dossier.security.symbol }}）</h1>
-  <p class="research-private-note">本档案仅自己可见。保存会追加一个新版本，不改动原始理由与旧版本。</p>
+  <p class="research-private-note">本档案仅自己可见。下方 AI 内容仅供核对；以后分析以你保存的最新正式判断为准。保存会追加一个新版本，不改动原始理由与旧版本。</p>
 
   {% if conflict %}
     <div class="app-message warning">
@@ -14,10 +14,35 @@
     </div>
   {% endif %}
 
-  <form method="post" class="research-form">
-    {% csrf_token %}
-    {{ form.as_p }}
-    <button type="submit">保存新版本</button>
-  </form>
+  <div class="research-edit-layout">
+    <form method="post" class="research-form">
+      {% csrf_token %}
+      <h2>我的正式判断</h2>
+      <p class="research-private-note">表单保留当前已保存的内容。按你的判断修改，再填写修改原因。</p>
+      {{ form.as_p }}
+      <button type="submit">保存新版本</button>
+    </form>
+    <aside class="research-edit-reference" aria-label="AI 参考建议">
+      <section class="research-brief-card">
+        <h2>公司研究 · AI 措辞建议</h2>
+        {% if suggestion %}
+          <p class="research-private-note">生成于 {{ analysis.created_at|date:"Y-m-d H:i" }} · 对照第 {{ analysis.scope.thesis_revision_number }} 版判断。{% if not suggestion_is_current %}<strong>这条建议基于旧版判断，请谨慎参考。</strong>{% endif %}</p>
+          <blockquote>{{ suggestion|linebreaksbr }}</blockquote>
+          <a href="{% url 'investment_research:thesis_analysis_detail' dossier.pk analysis.pk %}">查看完整分析与证据</a>
+        {% else %}
+          <p>暂无措辞建议。你可以直接修改自己的判断。</p>
+          <a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">查看公司研究</a>
+        {% endif %}
+      </section>
+      {% if digest and digest_result %}
+        <section class="research-brief-card">
+          <h2>次日跟踪 · 待核查变化</h2>
+          <p class="research-private-note">{{ digest.created_at|date:"Y-m-d H:i" }} 生成。{% if not digest_is_current %}这份简报对照的是旧版判断。{% endif %}下列内容是 AI 核查线索，不是必须采纳的修改。</p>
+          <ul>{% for event in digest_result.events %}<li><strong>{{ event.title }}</strong>{% if event.impact %}<br>{{ event.impact }}{% endif %}</li>{% empty %}<li>暂无可核查事件。</li>{% endfor %}</ul>
+          <a href="{% url 'investment_research:next_day_tracking' dossier.pk %}">查看事件原文与证据</a>
+        </section>
+      {% endif %}
+    </aside>
+  </div>
 </section>
 {% endblock %}

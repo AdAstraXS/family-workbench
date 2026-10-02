@@ -272,21 +272,24 @@ def _microsoft_uncommenced_cell(parser, version, item8, spec, end):
     return operating
 
 
-def tenk_metric_grid(version, historical_documents=()):
+def tenk_metric_grid(version, historical_documents=(), *, _parser=None, _item8=None):
     """以当前 10-K 为基准；仅缺失的租赁历史列回查同年已保存原件。"""
     period_end = version.document.period_end
     if not period_end:
         return [], [], "这份资料缺少报告期截止日，无法核对完整财年。"
-    try:
-        raw = gzip.decompress(version.raw_gzip)
-    except (OSError, EOFError):
-        return [], [], "保存的 SEC 原件无法读取，暂不展示指标。"
-    parser = _IXBRL()
-    parser.feed(raw.decode("utf-8", errors="replace"))
-    parser.close()
+    parser = _parser
+    if parser is None:
+        try:
+            raw = gzip.decompress(version.raw_gzip)
+        except (OSError, EOFError):
+            return [], [], "保存的 SEC 原件无法读取，暂不展示指标。"
+        parser = _IXBRL()
+        parser.feed(raw.decode("utf-8", errors="replace"))
+        parser.close()
     if not parser.facts:
         return [], [], "这份原件没有可核对的 iXBRL 数字。"
-    item8 = next((x for x in tenk_chapter_coverage(version) if x["code"] == "8" and x["located"]), None)
+    item8 = _item8 or next((x for x in tenk_chapter_coverage(version)
+                            if x["code"] == "8" and x["located"]), None)
     if item8 is None:
         return [], [], "未定位到 Item 8 财务报表，暂不展示指标。"
     periods = _full_year_end_dates(parser, period_end)

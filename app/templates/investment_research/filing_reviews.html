@@ -4,7 +4,7 @@
 
 {% block research_content %}
 <section class="research-page">
-  <div class="research-header"><div><p class="research-private-note">{{ dossier.security.name }}（{{ dossier.security.symbol }}）· 仅自己可见</p><h1>新财报复核</h1></div><a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a></div>
+  <div class="research-header"><div><p class="research-private-note">{{ dossier.security.name }}（{{ dossier.security.symbol }}）· 仅自己可见</p><h1>新财报复核</h1></div></div>
   {% if not start_date %}
     <p class="research-document-empty">这份档案还没有正式判断。先了解公司，再由你记录第一版判断，之后发布的 10-Q/10-K 才会进入复核清单。</p>
     {% if can_write %}<a class="button" href="{% url 'investment_research:first_thesis' dossier.pk %}">记录第一版判断</a>{% endif %}

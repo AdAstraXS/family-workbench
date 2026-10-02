@@ -1,0 +1,6 @@
+{
+  "collect_enabled": false,
+  "model_enabled": false,
+  "monthly_model_budget_cny": "30",
+  "daily_model_budget_cny": "1"
+}

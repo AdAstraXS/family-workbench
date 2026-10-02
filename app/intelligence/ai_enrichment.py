@@ -691,7 +691,9 @@ def analyze_event(event, *, member, user, provider_id=None, force=False):
         method="POST",
     )
     try:
-        response_body = _read_ai_response(request, timeout=60)
+        from monitoring.metering import tracked_call
+        response_body = tracked_call(lambda: _read_ai_response(request, timeout=60),
+            provider=provider, module="intelligence", family_id=analysis_request.family_id, source=analysis_request.pk)
         if len(response_body) > MAX_RESPONSE_BYTES:
             raise IntelligenceAiError("AI 返回内容超过大小限制。")
         response_payload = json.loads(response_body.decode("utf-8"))

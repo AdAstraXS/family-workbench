@@ -13,6 +13,7 @@ urlpatterns = [
     path("family/", include("family_core.urls")),
     path("portfolio/", include("portfolio.urls")),
     path("research/", include("investment_research.urls")),
+    path("research/watch/", include("investment_watch.urls")),
     path("option-wheel/", include("option_wheel.urls")),
     path("ledger/", include("ledger.urls")),
     path("ipo/", include("ipo.urls")),
@@ -22,6 +23,7 @@ urlpatterns = [
     path("trading-journal/", include("trading_journal.urls")),
     path("macro/", include("macro.urls")),
     path("ai/", include("ai_analysis.urls")),
+    path("monitoring/", include("monitoring.urls")),
     path("intelligence/", include("intelligence.urls")),
 ]
 

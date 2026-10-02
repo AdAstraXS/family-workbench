@@ -1,12 +1,12 @@
 {% extends "investment_research/base.html" %}
-{% block title %}{{ dossier.security.name }} 研究{% endblock %}
+{% block title %}个人判断 · {{ dossier.security.name }}{% endblock %}
 {% block research_content %}
 <div class="research-page">
   <header class="research-header">
-    <div><p class="research-eyebrow">公司研究 · {{ dossier.security.symbol }} / {{ dossier.security.market }}</p><h1>{{ dossier.security.name }}</h1><p class="research-private-note">本档案仅自己可见。正式判断只在你保存时更新。</p></div>
+    <div><p class="research-eyebrow">公司研究 · {{ dossier.security.symbol }} / {{ dossier.security.market }}</p><h1>个人判断</h1><p class="research-private-note">本档案仅自己可见。正式判断只在你保存时更新。</p></div>
     <div class="research-actions">{% if can_write and revision %}<a class="button" href="{% url 'investment_research:edit' dossier.pk %}">修改我的判断</a>{% elif can_write %}<a class="button" href="{% url 'investment_research:first_thesis' dossier.pk %}">保存我的第一版判断</a>{% endif %}<a class="button" href="{% url 'investment_research:history' dossier.pk %}">判断历史</a></div>
   </header>
-  <nav class="research-workflow" aria-label="公司研究步骤"><span aria-current="step">1 · 当前判断</span><a href="{% url 'investment_research:financials' dossier.pk %}">2 · 财务概览</a><a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">3 · AI 综合分析</a><a href="{% url 'investment_research:documents' dossier.pk %}">官方资料</a></nav>
+
   {% if dossier.initial_thesis %}<details class="research-initial"><summary>最初记录（不会随当前判断修改）</summary><p>{{ dossier.initial_thesis|linebreaksbr }}</p></details>{% endif %}
   {% if revision %}
     <section class="research-current research-hero"><p class="research-eyebrow">我的正式判断 · 第 {{ revision.revision_number }} 版 · {{ revision.created_at|date:"Y-m-d H:i" }}</p><h2>{{ revision.thesis|linebreaksbr }}</h2>
@@ -14,29 +14,8 @@
       <div class="research-context-columns"><div><h3>关键假设</h3><ol>{% for item in revision.pillars %}<li>{{ item }}</li>{% empty %}<li>尚未记录</li>{% endfor %}</ol></div><div><h3>待验证问题</h3><ol>{% for item in revision.questions %}<li>{{ item }}</li>{% empty %}<li>尚未记录</li>{% endfor %}</ol></div></div>
     </section>
   {% else %}
-    <section class="research-current research-hero"><p class="research-eyebrow">1 · 了解公司 · 探索阶段</p><h2>正在了解这家公司</h2><p>从官方资料和财务概览入手，记录最重要的假设与问题。AI 草稿不会自动变成你的观点。</p>{% if can_write %}<a class="button" href="{% url 'investment_research:first_thesis' dossier.pk %}">记录第一版判断</a>{% endif %}</section>
+    <section class="research-current research-hero"><p class="research-eyebrow">尚无个人判断</p><h2>正在了解这家公司</h2><p>从官方资料和财务概览入手，记录最重要的假设与问题。AI 草稿不会自动变成你的观点。</p>{% if can_write %}<a class="button" href="{% url 'investment_research:first_thesis' dossier.pk %}">记录第一版判断</a>{% endif %}</section>
   {% endif %}
-  <div class="research-main-actions">
-    <a class="research-action-card" href="{% url 'investment_research:financials' dossier.pk %}"><span class="research-action-number">01</span><h2>看财务概览</h2><p>近三个完整财年的增长、利润、现金和财务承受力。每个数字可回到年报原文；页内也有富途财务对照入口。</p><strong>打开财务概览 →</strong></a>
-    <a class="research-action-card" href="{% url 'investment_research:thesis_analysis' dossier.pk %}"><span class="research-action-number">02</span><h2>检查我的判断</h2><p>选定官方资料，让 AI 逐项整理支持、反证与缺口；由你决定是否修改判断。</p><strong>打开综合分析 →</strong></a>
-    <a class="research-action-card" href="{% url 'investment_research:documents' dossier.pk %}"><span class="research-action-number">03</span><h2>查看官方资料</h2><p>阅读 SEC 年报、季报和公司 IR 新闻稿，核对财务数字与引文。</p><strong>已归档 {{ document_count }} 份 · 查看资料 →</strong></a>
-  </div>
-  {% if revision %}<section class="research-source-summary"><div><h2>下期财报复核</h2><p>{% if pending_review_count %}{{ pending_review_count }} 份新财报待复核，可逐项核查。{% elif needs_revision_count %}{{ needs_revision_count }} 份复核提示修订判断 · 待修订判断。{% else %}暂无待复核的新财报。{% endif %}</p>{% for item in review_items %}<p><a href="{% url 'investment_research:filing_review' dossier.pk item.document.pk %}">{{ item.document.title }}</a> · {{ item.document.published_at|date:"Y-m-d" }}</p>{% endfor %}</div><div class="research-actions"><a class="button" href="{% url 'investment_research:review_plan' dossier.pk %}">{% if current_plan %}查看已确认的下期计划{% else %}制定下期复核计划{% endif %}</a><a class="button" href="{% url 'investment_research:filing_reviews' dossier.pk %}">复核记录</a></div></section>{% endif %}
-  {% if recent_syntheses %}<section class="research-source-summary"><div><h2>最近的综合分析</h2><p>{% for item in recent_syntheses %}<a href="{% url 'investment_research:thesis_analysis_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }}（{{ item.get_status_display }}）</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p></div></section>{% endif %}
-  <details class="research-secondary"><summary>资料获取与管理 <small>最近成功 {{ latest_source_success_at|date:"Y-m-d H:i"|default:"尚无记录" }}{% if source_error_count %} · {{ source_error_count }} 个来源需要关注{% endif %}</small></summary>
-    <p>目录更新只查询官方站点有没有新文件；保存文件正文需要在资料页按需操作。浏览本页不会联网。</p><a class="button" href="{% url 'investment_research:documents' dossier.pk %}">查看资料与来源状态</a>
-    {% if can_write %}<div class="research-admin-actions"><form class="research-inline-form" method="post" action="{% url 'investment_research:sync_documents' dossier.pk %}">{% csrf_token %}<button class="button" type="submit">更新 SEC 文件目录</button></form><span class="research-help" tabindex="0" aria-label="更新 SEC 文件目录说明">?<span class="research-help-popover" role="tooltip">连接 SEC 查询这家公司是否有新的 10-K、10-Q 或 8-K，并保存目录和检查结果。此操作不会下载全部正文，也不会修改你的判断。</span></span>
-      {% if ir_company %}<form class="research-inline-form" method="post" action="{% url 'investment_research:sync_ir' dossier.pk %}">{% csrf_token %}<button class="button" type="submit">更新公司 IR 材料目录</button></form><span class="research-help" tabindex="0" aria-label="检查官方 IR 材料说明">?<span class="research-help-popover" role="tooltip">“检查官方 IR 材料”会查询公司投资者关系网站上的财报新闻稿、演示和电话会资料，并保存新材料的目录。部分官网可能限制实时访问；旧目录可阅读，但不能证明已发现最新文件。</span></span>{% endif %}</div>{% endif %}
-  </details>
-  <details class="research-secondary"><summary>追踪指标与逐段资料草稿</summary>
-    <div class="research-source-summary"><div><h2>重点追踪指标</h2><p>已选 {{ selected_metric_count }} 项公司指标。你可以调整需要长期跟踪的业务事实。</p></div><a class="button" href="{% url 'investment_research:metric_focus' dossier.pk %}">选择追踪指标</a></div>
-    <h2>逐段阅读和 AI 资料草稿</h2><p>用于深入阅读单个正文区段；综合分析入口会把选定片段对照当前判断逐项核查。</p>
-    {% if recent_drafts %}<p>最近请求：{% for item in recent_drafts %}<a href="{% url 'investment_research:draft_detail' dossier.pk item.pk %}">{{ item.created_at|date:"Y-m-d H:i" }}（{{ item.get_status_display }}）</a>{% if not forloop.last %} · {% endif %}{% endfor %}</p>{% endif %}
-    {% if can_write and available_versions and research_providers %}<details class="research-initial"><summary>生成一份带原文引用的草稿</summary><form method="post" action="{% url 'investment_research:generate_draft' dossier.pk %}" class="research-form">{% csrf_token %}
-      <label for="research-selection">选择官方资料正文版本与阅读区段</label><select id="research-selection" name="selection" required>{% for group in research_groups %}<optgroup label="{{ group.version.document.title }} · 正文第 {{ group.version.version_number }} 版 · {{ group.version.content_text|length }} 字">{% for segment in group.segments %}<option value="{{ group.version.pk }}:{{ segment.index }}"{% if segment.selected %} selected{% endif %}>第 {{ forloop.counter }}/{{ group.segments|length }} 区段 · 字符 {{ segment.start }}–{{ segment.end }}{% if segment.chapter_codes %} · Item {{ segment.chapter_codes }}{% endif %}{% if segment.completed %} · 已生成草稿{% else %} · 尚未生成草稿{% endif %}</option>{% endfor %}</optgroup>{% endfor %}</select>
-      <label for="research-provider">选择文本模型</label><select id="research-provider" name="provider" required>{% for provider in research_providers %}<option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }} · 单次费用上限 ${{ provider.extra_data.research_max_estimated_usd|default:"待核对" }}</option>{% endfor %}</select>
-      <p class="research-private-note">每次只发送所选区段（最多 {{ research_document_limit }} 字）以及当前判断，其他区段未被分析。已生成草稿不代表内容已由你核实。</p><label><input type="checkbox" name="one_time_consent" value="yes" required> 我确认本次将所选正文区段及我的当前判断发送给所选云端模型；仅授权这一次。</label><button type="submit">生成私密草稿</button></form></details>
-    {% elif can_write %}<p class="research-none">{% if not available_versions %}请先在官方资料中保存可读正文。{% else %}尚未配置获准处理投研资料的云端文本模型。{% endif %}</p>{% endif %}
-  </details>
+
 </div>
 {% endblock %}

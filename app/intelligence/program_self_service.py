@@ -15,7 +15,7 @@ from .program_custom_sources import check_reference_url
 from .program_media import MAX_AUDIO_BYTES, media_duration
 from .program_models import ProgramEntry, ProgramSubscription
 from .program_processing import save_revision, store_audio
-from .program_sources import ProgramError
+from .program_sources import CATALOGUE, CATALOGUE_FORM_KINDS, ProgramError
 
 
 SOURCE_CHOICES = [('youtube', 'YouTube 公开频道 / 播放列表'),
@@ -28,16 +28,20 @@ class ProgramSourceForm(forms.Form):
     kind = forms.ChoiceField(label='来源类型', choices=SOURCE_CHOICES)
     url = forms.URLField(label='频道、播放列表或 RSS 地址', max_length=2000)
     name = forms.CharField(label='显示名称', max_length=160, required=False)
-    include_terms = forms.CharField(label='标题包含任一关键词 / 短语', max_length=500,
-        required=False, help_text='逗号分隔。例如：大摩宏观策略谈, 摩根士丹利宏观')
+    include_terms = forms.CharField(label='标题包含', max_length=500, required=False,
+                                    widget=forms.TextInput(attrs={'placeholder': '多个词用逗号分开'}))
     include_mode = forms.ChoiceField(label='关键词关系', choices=[('any', '命中任一'), ('all', '同时命中全部')])
-    exclude_terms = forms.CharField(label='标题排除词', max_length=500, required=False,
-                                    help_text='逗号分隔。例如：预告, 精华')
+    exclude_terms = forms.CharField(label='标题排除', max_length=500, required=False,
+                                    widget=forms.TextInput(attrs={'placeholder': '预告, 精华'}))
     publish_weekday = forms.ChoiceField(label='发布星期', choices=WEEKDAYS, required=False,
                                         help_text='按北京时间计算；节目延期发布时可能被排除。')
     min_duration_minutes = forms.IntegerField(label='最短时长（分钟）', required=False, min_value=0,
                                               max_value=240, initial=0)
-    auto_process = forms.BooleanField(label='新内容自动获取原文并整理（可能产生模型费用）', required=False)
+    auto_process = forms.BooleanField(label='发现新内容后自动生成摘要', required=False)
+
+    def __init__(self, *args, source=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.source = source
 
     def clean(self):
         values = super().clean()
@@ -45,6 +49,11 @@ class ProgramSourceForm(forms.Form):
             terms = [x.strip() for x in re.split(r'[,，\n]', values.get(field, '')) if x.strip()]
             if len(terms) > 12 or any(len(term) > 60 for term in terms):
                 self.add_error(field, '最多 12 个词或短语，每项不超过 60 字。')
+        if values.get('min_duration_minutes') and values.get('kind') == 'article':
+            self.add_error('min_duration_minutes', '文章没有节目时长，请清空这个条件。')
+        if values.get('min_duration_minutes') and self.source and self.source.code == 'rhino' and \
+                values.get('url', '').strip() == source_form_initial(self.source)['url']:
+            self.add_error('min_duration_minutes', '这个频道的官方列表没有时长，暂不能按时长筛选。')
         return values
 
 
@@ -58,8 +67,10 @@ def source_filter_fields(values):
 
 
 def source_form_initial(subscription):
-    return {'kind': subscription.kind, 'url': subscription.source_url,
-            'name': subscription.custom_name, 'include_terms': subscription.include_terms,
+    catalogue = CATALOGUE.get(subscription.code, {})
+    return {'kind': CATALOGUE_FORM_KINDS.get(subscription.code, subscription.kind),
+            'url': subscription.source_url or catalogue.get('url', ''),
+            'name': subscription.custom_name or catalogue.get('name', ''), 'include_terms': subscription.include_terms,
             'include_mode': subscription.include_mode, 'exclude_terms': subscription.exclude_terms,
             'publish_weekday': str(subscription.publish_weekday) if subscription.publish_weekday is not None else '',
             'min_duration_minutes': subscription.min_duration_seconds // 60,

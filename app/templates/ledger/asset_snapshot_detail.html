@@ -11,6 +11,7 @@
       {% if snapshot.is_draft %}<span class="record-badge">草稿</span>{% endif %}
     </h1>
     <div class="inline-actions">
+      <a class="button ghost" href="{% url 'ledger:asset_snapshot_compare' %}?snapshots={{ snapshot.pk }}&members={% for member in members %}{{ member.pk }}{% if not forloop.last %}&members={% endif %}{% endfor %}&amount_mode=base">对比其他期</a>
       <a class="button" href="{% url 'ledger:asset_snapshot_edit' snapshot.id %}">编辑</a>
     </div>
   </div>

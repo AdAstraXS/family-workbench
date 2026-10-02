@@ -1,0 +1,37 @@
+<section id="monthly-income-category-pies" class="panel asset-trend-panel expense-category-pie-section">
+  <div class="asset-trend-head">
+    <div>
+      <span class="asset-trend-eyebrow">MONTHLY INCOME CATEGORY MIX</span>
+      <h1>收入分类构成</h1>
+      <p>{{ year }}年{% if selected_income_category_month == "all" %}全年{% else %}{{ selected_income_category_month }}月{% endif %} · {{ income_category_scope }}收入分类占比
+        · 单位：元 · 未细分金额自动补齐 · 点击扇区可联动下级分类</p>
+    </div>
+    <form method="get" action="{{ request.path }}#monthly-income-category-pies" class="cashflow-trend-filter">
+      <input type="hidden" name="category_month" value="{{ selected_category_month }}">
+      <input type="hidden" name="category_member" value="{{ selected_category_member }}">
+      <label for="income-category-member">查看对象</label>
+      <select id="income-category-member" name="income_category_member">
+        <option value="all" {% if selected_income_category_member == "all" %}selected{% endif %}>整个家庭</option>
+        {% for member in chart_members %}<option value="{{ member.pk }}" {% if selected_income_category_member == member.pk %}selected{% endif %}>{{ member.display_name }}</option>{% endfor %}
+      </select>
+      <label for="income-category-month">统计范围</label>
+      <select id="income-category-month" name="income_category_month">
+        <option value="all" {% if selected_income_category_month == "all" %}selected{% endif %}>全年</option>
+        {% for month in category_months %}<option value="{{ month }}" {% if selected_income_category_month == month %}selected{% endif %}>{{ month }}月</option>{% endfor %}
+      </select>
+    </form>
+  </div>
+  <div class="expense-pie-grid">
+    {% for level, label in income_chart_levels %}
+    <article class="expense-pie-card">
+      <div class="expense-pie-card-head">
+        <h2>{{ label }}收入分类</h2>
+        <span id="{{ level }}-income-pie-scope">全部{{ label }}分类</span>
+      </div>
+      <svg id="{{ level }}-income-pie" class="expense-pie-chart" viewBox="0 0 320 250" role="img" aria-label="{{ label }}收入分类饼图"></svg>
+      <div id="{{ level }}-income-pie-empty" class="expense-pie-empty" hidden>暂无{{ label }}分类收入</div>
+      <div id="{{ level }}-income-pie-legend" class="expense-pie-legend"></div>
+    </article>
+    {% endfor %}
+  </div>
+</section>

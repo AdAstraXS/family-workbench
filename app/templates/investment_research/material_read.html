@@ -1,0 +1,32 @@
+{% extends "investment_research/base.html" %}
+{% block title %}{{ version.material.title }} · {{ dossier.security.name }}{% endblock %}
+{% block extra_head %}{{ block.super }}
+<style>.sec-table-heading{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap}.sec-table-heading span{color:#58675d;font-size:.9rem}.sec-comparison{min-width:600px;table-layout:fixed}.sec-comparison th:first-child{width:31%;position:sticky;left:0;z-index:1;background:var(--surface,#fff)}.sec-scroll-hint{display:none}.sec-comparison td,.sec-comparison thead th:not(:first-child){text-align:right;font-variant-numeric:tabular-nums}.sec-comparison small{font-weight:normal;line-height:1.55;margin-top:5px}.sec-provenance{margin-top:18px}.sec-provenance li{overflow-wrap:anywhere}.material-paragraph{white-space:pre-wrap;line-height:1.85}.profile-facts{margin:12px 0}.profile-facts>div{display:grid;grid-template-columns:150px minmax(0,1fr);gap:20px;padding:12px 0;border-bottom:1px solid #e3e8df}.profile-facts dt{color:#617064}.profile-facts dd{margin:0;overflow-wrap:anywhere}@media(max-width:600px){.sec-scroll-hint{display:block}.profile-facts>div{grid-template-columns:100px minmax(0,1fr);gap:12px}}</style>
+{% endblock %}
+{% block research_content %}
+<section class="research-page">
+  <header class="research-header"><div><h1>{{ version.material.title }}</h1><p class="research-private-note">{% if version.material.kind == 'facts' %}财务期间见各表 · {% elif version.material.kind != 'profile' %}报告期 {{ version.report_date|default:"来源未标注" }} · {% endif %}获取于 {{ version.fetched_at|date:"Y-m-d H:i" }} · 第 {{ version.number }} 版</p></div><a class="button" href="?download=1">下载原始资料</a></header>
+  {% if version.source_url %}<p class="research-private-note">来源：<a href="{{ version.source_url }}" rel="noopener noreferrer" target="_blank">查看来源页面</a></p>{% endif %}
+  {% if version.material.kind == 'facts' or version.material.kind == 'financials' %}<p class="research-private-note">保留原币种和统计口径；金额仅缩写单位以便阅读。</p>{% endif %}
+  {% if version.data.warning %}<p class="research-source-error">{{ version.data.warning }}</p>{% endif %}
+  {% for warning in version.data.warnings %}<p class="research-source-error">{{ warning }}</p>{% endfor %}
+  {% if retired %}<p class="research-source-error">历史存档：此类汇总已停止采集，不计入五步研究资料。AI 也不能据此推断具体客户、供应商关系或分析师的理由。</p>{% endif %}
+  {% if profile %}{% include "investment_research/company_profile_reading.html" %}{% else %}
+  {% for section in sections %}<article class="research-current"><h2>{{ section.title }}</h2>{% if section.date %}<p class="research-private-note">来源更新时间 {{ section.date }}</p>{% endif %}<div style="white-space:pre-wrap;line-height:1.85">{{ section.text }}</div></article>{% endfor %}{% endif %}
+  {% for group in groups %}<section class="research-current"><h2>主营构成 · {{ group.type }}</h2><p>不同划分可能重叠，不能相加；百分比保留来源口径。</p><div class="research-metric-scroll"><table class="research-metric-table"><thead><tr><th>项目</th><th>营业收入</th><th>占比</th></tr></thead><tbody>{% for row in group.rows %}<tr><th>{{ row.name }}</th><td>{{ row.amount }}</td><td>{{ row.ratio }}</td></tr>{% endfor %}</tbody></table></div></section>{% endfor %}
+  {% for table in tables %}<section class="research-current"><h2>{{ table.title }}</h2>{% if table.missing_names %}<p class="research-private-note">{{ table.missing_names }} 项字段名称尚未核对，已保存原始记录，未作为可读指标展示。</p>{% endif %}
+    <div class="research-metric-scroll"><table class="research-metric-table"><thead><tr><th>指标</th>{% for report in table.reports %}<th>{{ report.period }}<small>{{ report.currency }} · {{ report.standards_display }}</small></th>{% endfor %}</tr></thead><tbody>{% for row in table.rows %}<tr><th>{{ row.name }}</th>{% for cell in row.cells %}<td>{{ cell.amount }}{% if cell.yoy %}<small>同比 {{ cell.yoy }}</small>{% endif %}</td>{% endfor %}</tr>{% empty %}<tr><td>暂无已确认名称的项目。</td></tr>{% endfor %}</tbody></table></div></section>{% endfor %}
+  {% if version.material.kind == 'facts' %}
+    {% include "investment_research/sec_financial_overview.html" %}
+    <section id="sec-annual"><h2>年度财务</h2><p>正式年报尚未更新时，补充已核对的全年业绩公告指标，并逐列标明来源状态。正式年报发布且指标更新后优先采用正式年报值，公告及历史版本继续保留。</p>
+    {% for notice in annual_notices %}<p class="research-method-note"><a href="{% url 'investment_research:material_read' dossier.pk notice.report.version.pk %}">{{ notice.report.period }} 全年业绩公告</a> · {% if notice.count %}已核对 {{ notice.count }} 项指标；未确认的指标留空，不推算。{% endif %}{% for warning in notice.warnings %}{{ warning }}{% endfor %}</p>{% endfor %}
+    {% if fact_tables %}{% include "investment_research/sec_fact_tables.html" %}{% else %}<p>当前存档尚无可展示的年度指标。</p>{% endif %}</section>
+    <section id="sec-quarterly"><h2>季度财务</h2><p>采用 10-Q 季报披露值。单季、半年累计、九个月累计和期末余额分别展示，不相减推算；审计或审阅说明见季报原文。</p>
+    {% if quarterly_tables %}{% include "investment_research/sec_fact_tables.html" with fact_tables=quarterly_tables %}{% else %}<p>当前存档没有可展示的 10-Q 指标。外国发行人的 6-K 中期报告请从报告正文阅读。</p>{% endif %}</section>
+  {% endif %}
+  {% if sec_report %}<p class="research-private-note">{% if sec_report.earnings %}{{ sec_report.title }} · 报告期截至 {{ sec_report.period }} · {% endif %}SEC 申报日期 {{ sec_report.filed|default:"未标注" }} · {{ sec_report.audit }}</p>{% endif %}
+  {% if version.text %}<article class="research-current"><h2>报告正文</h2><div style="white-space:pre-wrap;line-height:1.85">{{ version.text }}</div></article>{% endif %}
+  {% if not sections and not tables and not fact_tables and not profile and not version.text %}<p>原始资料已保存，尚未整理出可读内容。可以下载原件核查。</p>{% endif %}
+  <details class="research-current"><summary>历史版本与核对信息</summary><p>原件 SHA-256：{{ version.sha256 }}</p>{% for item in versions %}<p><a href="{% url 'investment_research:material_read' dossier.pk item.pk %}">第 {{ item.number }} 版 · {{ item.fetched_at|date:"Y-m-d H:i" }}</a></p>{% endfor %}</details>
+</section>
+{% endblock %}

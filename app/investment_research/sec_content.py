@@ -121,8 +121,8 @@ def fetch_sec_document_content(*, actor, dossier_id, document_id, client=None):
     ).first()
     if document is None:
         raise DossierNotFound("资料不存在。")
-    if document.source != SOURCE_SEC or document.document_type not in {DOC_TYPE_10K, DOC_TYPE_10Q, DOC_TYPE_8K}:
-        raise ResearchValidationError("仅支持已归档的 SEC 10-K、10-Q 和 8-K。")
+    if document.source != SOURCE_SEC or document.document_type not in {DOC_TYPE_10K, DOC_TYPE_10Q, DOC_TYPE_8K, "20-f", "40-f", "6-k"}:
+        raise ResearchValidationError("仅支持已归档的 SEC 年报、季报和公告。")
     url = _verified_url(document)
     client = client or _default_sec_client(dossier.security)
     raw = client.get_document_html(url, max_bytes=settings.RESEARCH_SEC_DOCUMENT_MAX_BYTES)

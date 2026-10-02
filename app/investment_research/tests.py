@@ -1057,6 +1057,9 @@ class OfficialResearchDocumentModelTests(TestCase):
                 "10-k",
                 "10-q",
                 "8-k",
+                "20-f",
+                "40-f",
+                "6-k",
                 "annual_report",
                 "earnings_release",
                 "earnings_call",
@@ -3332,12 +3335,12 @@ class OfficialDocumentsViewTests(ResearchViewTestBase):
             last_error="temporary failure",
         )
         self.login(self.alice)
-        response = self.client.get(detail_url(self.dossier))
-        self.assertContains(response, "已归档 2 份")
+        response = self.client.get(documents_url(self.dossier))
+        self.assertEqual(response.context["page"].paginator.count, 2)
         self.assertContains(
             response, timezone.localtime(success_at).strftime("%Y-%m-%d %H:%M")
         )
-        self.assertContains(response, "1 个来源需要关注")
+        self.assertContains(response, "temporary failure")
         self.assertContains(response, documents_url(self.dossier))
 
     @mock.patch("investment_research.views.sync_research_sources")

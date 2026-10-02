@@ -2,6 +2,14 @@
 {% load money %}
 
 {% block title %}{{ report_title }}{% endblock %}
+{% block extra_head %}
+<style>
+  .expense-record-window { max-height:850px; overflow:auto; scrollbar-gutter:stable; }
+  .expense-record-window .expense-detail-table { border-collapse:separate; border-spacing:0; }
+  .expense-record-window thead th { position:sticky; top:0; z-index:3; background:#f5f7fa; }
+  .expense-record-window thead .expense-filter-row th { top:var(--expense-heading-height, 42px); }
+</style>
+{% endblock %}
 
 {% block content %}
 {% for error in cashflow_errors %}<p class="app-message warning" role="alert">{{ error }} 对应汇总暂不显示；下方原币明细可正常查看和编辑。</p>{% endfor %}
@@ -82,7 +90,7 @@
     {% endif %}
   </div>
   <form id="expense-filter-form" method="get" action="{{ request.path }}"></form>
-  <div class="record-table-wrap">
+  <div class="record-table-wrap expense-record-window" tabindex="0" role="region" aria-label="支出记录，可在表格内滚动查看全部记录">
     <table class="record-table year-detail-table expense-detail-table">
       <thead>
         <tr>
@@ -152,7 +160,7 @@
       </thead>
       <tbody>
         {% for row in expense_rows %}
-          <tr>
+          <tr class="expense-record-row">
             <td>{{ row.period_label }}</td>
             <td>{{ row.member }}</td>
             <td>{{ row.record.bank_account.account_name|default:"-" }}</td>
@@ -197,6 +205,23 @@
 {% block scripts %}
 <script>
   (() => {
+    const expenseWindow = document.querySelector(".expense-record-window");
+    const expenseTable = expenseWindow.querySelector("table");
+    const updateExpenseWindow = () => {
+      const rows = expenseTable.querySelectorAll(".expense-record-row");
+      expenseTable.style.setProperty("--expense-heading-height", `${expenseTable.tHead.rows[0].getBoundingClientRect().height}px`);
+      if (rows.length > 15) {
+        const height = rows[14].getBoundingClientRect().bottom - expenseTable.getBoundingClientRect().top;
+        expenseWindow.style.maxHeight = `${Math.ceil(height + 1)}px`;
+      } else {
+        expenseWindow.style.maxHeight = "none";
+      }
+    };
+    updateExpenseWindow();
+    window.addEventListener("resize", updateExpenseWindow);
+    if ("ResizeObserver" in window) new ResizeObserver(updateExpenseWindow).observe(expenseTable);
+    if (document.fonts) document.fonts.ready.then(updateExpenseWindow);
+
     const filterForm = document.getElementById("expense-filter-form");
     const resetLink = document.getElementById("expense-filter-reset");
     const memberSelect = document.getElementById("expense-filter-member");

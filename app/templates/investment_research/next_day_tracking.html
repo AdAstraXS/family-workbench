@@ -1,0 +1,61 @@
+{% extends "investment_research/base.html" %}
+{% block title %}{% if request.GET.tab == "settings" %}次日跟踪设置{% else %}次日跟踪摘要{% endif %} · {{ dossier.security.name }}{% endblock %}
+{% block research_content %}
+<div class="research-page research-brief-page">
+  <header class="research-brief-top">
+    <div><p class="research-eyebrow">公司研究 / 次日跟踪 · 仅自己可见</p>
+      <h1>{{ dossier.security.name }} <small>{{ dossier.security.symbol }} · {% if dossier.security.market == 'US' %}美股{% elif dossier.security.market == 'HK' %}港股{% else %}{{ dossier.security.market }}{% endif %}</small></h1>
+      <p class="research-private-note">{% if digest %}{{ digest.created_at|date:"Y-m-d H:i" }} 整理 · 基于 {{ digest.scope.sources|length }} 份{% if digest.scope.initial_digest %}最近已保存{% else %}新增{% endif %}官方资料{% else %}等待官方资料 · 尚无次日跟踪简报{% endif %}</p>
+    </div>
+    <div class="research-brief-quote">{% if quote.price %}<strong>{% if quote.currency == 'USD' %}${% elif quote.currency == 'HKD' %}HK${% else %}{{ quote.currency }} {% endif %}{{ quote.price }}</strong><span>{{ quote.price_as_of|date:"m 月 d 日 H:i" }} 行情 · {{ quote.price_source }} · {{ quote.pricing_status }}{% if quote.is_delayed %} · 延迟{% endif %}</span>{% else %}<strong>暂无股价</strong><span>需先更新已保存行情</span>{% endif %}</div>
+  </header>
+
+  {% if not dossier.current_revision_id %}<p class="research-document-empty">可以阅读公司动态并手动观察。次日跟踪自动摘要需要先保存个人判断，再生成一次公司研究以选定模型。</p>{% endif %}
+  {% if request.GET.tab == "settings" %}<details class="research-brief-card research-brief-expand research-brief-consent"{% if not consent_active %} open{% endif %}>
+    <summary>次日跟踪设置 · {% if consent_active %}已开启个人判断对照{% elif latest_analysis %}仅分析公开资料{% else %}待选定模型{% endif %}</summary>
+    <p>每批新保存的 SEC / 公司 IR 正文最多生成一次事件简报；仅有资料目录时不会生成。你可以选择让简报同时对照自己的正式判断。</p>
+    {% if consent_active %}
+      <p><strong>已开启个人判断对照</strong> · {{ consent.provider.name }}（{{ consent.provider.model_name }}） · {{ consent.authorized_at|date:"Y-m-d H:i" }} 授权</p>
+      <p class="research-private-note">自动发送最新版正式判断、关键假设、待验证问题及本批公开资料短摘录。不会发送账户、持仓或其他知识库内容；同一批最多调用一次，并遵守模型单次费用上限。</p>
+      {% if can_write %}<form method="post" action="{% url 'investment_research:next_day_consent' dossier.pk %}">{% csrf_token %}<input type="hidden" name="action" value="disable"><button type="submit">关闭个人判断自动对照</button></form>{% endif %}
+    {% elif latest_analysis %}
+      {% if consent %}<p>最近一次公司研究使用的模型已改变。请重新授权后，才会向新模型发送你的个人判断。</p>{% endif %}
+      <p>当前可选模型：<strong>{{ latest_analysis.provider.name }}（{{ latest_analysis.provider.model_name }}）</strong>。开启后，新资料简报会把最新版正式判断、关键假设、待验证问题与本批 SEC / IR 短摘录发送给它，分析“对我的判断”有什么影响；每批最多一次，并遵守该模型单次费用上限。</p>
+      {% if can_write %}<form method="post" action="{% url 'investment_research:next_day_consent' dossier.pk %}">{% csrf_token %}<input type="hidden" name="action" value="enable"><button class="button" type="submit">开启个人判断自动对照</button></form>{% endif %}
+    {% else %}<p>先生成一次公司研究简报并选定文本模型，之后可开启个人判断自动对照。</p>{% endif %}
+  </details>
+  {% else %}<p><a href="?tab=settings">管理次日跟踪设置</a></p>
+  {% if pending %}<div class="research-document-empty">有 {{ pending|length }} 份新官方资料已保存。{% if latest_analysis or digest %}正在等待下一次自动生成简报。{% else %}请先生成一次公司研究简报并选定文本模型，之后才会自动跟踪新资料。{% endif %}
+    {% if latest_analysis and can_write %}<form method="post" action="{% url 'investment_research:next_day_generate' dossier.pk %}" class="research-digest-generate">{% csrf_token %}<button class="button" type="submit">现在生成事件简报</button><span class="research-digest-wait" role="status" hidden>正在整理官方资料并分析，请稍候…</span></form>{% endif %}
+  </div>{% endif %}
+  {% if digest and result %}
+    {% if digest.scope.thesis_revision_id != dossier.current_revision_id %}<div class="research-document-empty">这份简报生成时，你的正式判断还是第 {{ digest.scope.thesis_revision_number }} 版。请结合当前判断重新阅读。</div>{% endif %}
+    <section class="research-brief-card research-brief-summary"><p class="research-eyebrow">{% if digest.scope.initial_digest %}最近材料回顾{% else %}公开资料变化{% endif %} · {% if digest.scope.private_comparison %}围绕我的判断{% else %}公开资料{% endif %} AI 事件简报</p><h2>{{ result.headline }}</h2><p>{{ result.intro|default:"这次只保留值得回到原文核对的变化。" }}</p><p class="research-private-note">{% if digest.scope.private_comparison %}本次模型读取了授权的正式判断、关键假设、待验证问题和本批官方短摘录；不会自动改写正式判断。{% else %}本次模型只读取 SEC / 公司 IR 公开摘录；个人核查问题仅在本地并列展示。{% endif %}</p></section>
+    <section class="research-brief-card research-brief-assessments"><h2>AI 提醒：新资料里值得核查的变化</h2><p class="research-private-note">这些是核查线索和影响分析，不会改写你的判断；请核对原文后再决定是否修改。</p>
+      {% for item in result.events %}
+        <article><header><h3>{{ forloop.counter|stringformat:"02d" }} · {{ item.title }}</h3><span class="research-verdict">待核查</span></header>
+          <p class="research-brief-finding">{{ item.summary }}</p>
+          {% if item.evidence %}<p class="research-brief-evidence-lead">官方资料：{{ item.evidence.0.text|truncatechars:190 }}</p>{% endif %}
+          <p><strong>{% if digest.scope.private_comparison %}对我的判断：{% else %}对基本面研究的影响：{% endif %}</strong>{{ item.impact }}</p>
+          {% if item.boundary %}<p><strong>证据边界：</strong>{{ item.boundary }}</p>{% endif %}
+          <details><summary>查看新资料摘录与原文</summary><ul>{% for fact in item.evidence %}<li>{{ fact.text }}<div class="research-metric-links"><a href="{% url 'investment_research:document_detail' dossier.pk fact.citation.document_id %}?version={{ fact.citation.version_id }}&amp;start={{ fact.citation.start }}&amp;end={{ fact.citation.end }}&amp;hash={{ fact.citation.hash }}#research-citation">查看原文 {{ fact.id }}</a></div></li>{% endfor %}</ul></details>
+        </article>
+      {% empty %}<p>本次摘录不足以形成有引文的事件结论。{% if result.gap %}{{ result.gap }}{% endif %}</p>{% endfor %}
+    </section>
+    <section class="research-brief-card"><h2>本次采用的官方资料</h2><ul>{% for source in digest.scope.sources %}<li><a href="{% url 'investment_research:document_detail' dossier.pk source.document_id %}?version={{ source.version_id }}">{{ source.title }}</a>{% if source.period_end %} · 报告期截至 {{ source.period_end }}{% endif %}</li>{% endfor %}</ul>{% if result.invalid_event_count %}<p class="research-private-note">有 {{ result.invalid_event_count }} 条模型事件缺少有效引文，未展示。</p>{% endif %}</section>
+  {% else %}
+    <section class="research-brief-card research-brief-summary"><p class="research-eyebrow">次日跟踪</p><h2>新官方资料保存后，这里自动出现事件简报</h2><p>系统只在取得新 SEC 或公司 IR 正文后生成；同一批资料不会重复生成。仅有目录、尚无正文时不会假装已读过材料。{% if not latest_analysis %}首次使用请先生成一次公司研究简报，以确认所选文本模型。{% endif %}</p><a href="{% url 'investment_research:documents' dossier.pk %}">查看官方资料状态</a></section>
+  {% endif %}
+  <section class="research-brief-card"><h2>我下次要核查什么？</h2><p class="research-private-note">下面来自上一次公司研究简报。{% if not digest.scope.private_comparison %}本次公开资料事件简报没有替你判断这些问题是否得到证实。{% else %}逐项结论仍需回到官方原文核对。{% endif %}</p><ul>{% for item in checks %}<li>{{ item }}</li>{% empty %}<li>尚未记录下一次核查项。可先生成一份围绕个人判断的公司研究简报。</li>{% endfor %}</ul>{% if latest_analysis %}<a href="{% url 'investment_research:thesis_analysis_detail' dossier.pk latest_analysis.pk %}">查看公司研究简报</a>{% endif %}</section>
+  <section class="research-brief-card"><h2>我可以怎样更新判断？</h2><p>上方是 AI 提醒，编辑页会同时展示最近一次公司研究的措辞建议。请先核对原文，再由你决定如何写入新版本。以后分析以你保存的最新正式判断为准。</p><a class="button" href="{% url 'investment_research:edit' dossier.pk %}">查看建议并修改我的判断</a></section>
+  <footer class="research-private-note">波段价格与技术信号将放在投资组合模块完善；本页只跟踪已保存的官方基本面资料。</footer>
+{% endif %}</div>
+<script>
+  document.querySelectorAll('.research-digest-generate').forEach(form => form.addEventListener('submit', () => {
+    const button = form.querySelector('button');
+    button.disabled = true;
+    button.textContent = '正在生成…';
+    form.querySelector('.research-digest-wait').hidden = false;
+  }));
+</script>
+{% endblock %}

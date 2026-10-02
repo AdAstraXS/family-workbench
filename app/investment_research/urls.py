@@ -1,10 +1,19 @@
 from django.urls import path
 
-from . import views, ir_views
+from . import views, ir_views, material_views, preparation_views, navigation_views
 
 app_name = "investment_research"
 
 urlpatterns = [
+    path('<int:pk>/follow/', navigation_views.follow, name='follow'),
+    path('<int:pk>/follow/observation/', navigation_views.observation, name='observation'),
+    path('<int:pk>/company/history/', navigation_views.history, name='research_history'),
+    path('<int:pk>/materials/news/', navigation_views.library_news, name='library_news'),
+    path('<int:pk>/valuation/', navigation_views.valuation, name='valuation'),
+    path('<int:pk>/prepare/', preparation_views.prepare, name='prepare'),
+    path('materials/start/', material_views.start, name='material_start'),
+    path('<int:pk>/materials/', material_views.library, name='materials'),
+    path('<int:pk>/materials/version/<int:version_pk>/', material_views.read, name='material_read'),
     path('ir/', ir_views.catalogue, name='ir_catalogue'),
     path('ir/<slug:company_key>/sync/', ir_views.sync_company, name='sync_ir_company'),
     path('ir/<slug:company_key>/import/', ir_views.import_originals, name='import_ir_originals'),
@@ -15,6 +24,7 @@ urlpatterns = [
     path("new/", views.create, name="create"),
     path("explore/new/", views.explore, name="explore"),
     path("<int:pk>/", views.detail, name="detail"),
+    path("<int:pk>/company/", views.company_research, name="company_research"),
     path("<int:pk>/metric-focus/", views.metric_focus, name="metric_focus"),
     path("<int:pk>/review-plan/", views.review_plan, name="review_plan"),
     path("<int:pk>/financials/", views.financials, name="financials"),
@@ -22,6 +32,12 @@ urlpatterns = [
     path("<int:pk>/analysis/", views.thesis_analysis, name="thesis_analysis"),
     path("<int:pk>/analysis/<int:analysis_pk>/", views.thesis_analysis_detail,
          name="thesis_analysis_detail"),
+    path("<int:pk>/analysis/next-day/", views.next_day_tracking,
+         name="next_day_tracking"),
+    path("<int:pk>/analysis/next-day/consent/", views.next_day_consent,
+         name="next_day_consent"),
+    path("<int:pk>/analysis/next-day/generate/", views.next_day_generate,
+         name="next_day_generate"),
     path("<int:pk>/first/", views.first_thesis, name="first_thesis"),
     path("<int:pk>/reviews/", views.filing_reviews, name="filing_reviews"),
     path("<int:pk>/reviews/<int:document_pk>/", views.filing_review, name="filing_review"),

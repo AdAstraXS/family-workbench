@@ -7,7 +7,8 @@
 {% if revision %}
 <div class="program-reading"><main><section class="intel-section"><div class="intel-section-head"><h2>AI 阅读要点</h2>{% if revision.summary_complete %}<span>未经人工复核</span>{% endif %}</div>
 {% if summary_warning %}<p class="program-error">部分要点未展示：{{ summary_warning }} 管理员可在下方点击“获取 / 继续处理”。</p>{% endif %}
-{% if groups %}{% for topic,points in groups.items %}<h3>{{ topic }}</h3>{% for point in points %}<p><span class="program-kind">{{ point.kind }}</span> {{ point.text }} <small>{% for ref in point.refs %}<a href="#segment-{{ ref }}">原文 {{ ref }}</a> {% endfor %}</small></p>{% endfor %}{% endfor %}{% else %}<p>{% if entry.private_owner_id and not entry.allow_cloud_summary %}本次未授权云端 AI 整理，原文可直接阅读和保存。{% else %}原文已可阅读。AI 整理将在服务配置完成并处理后显示。{% endif %}</p>{% endif %}</section>
+{% if revision.summary.omitted_year_points %}<p class="intel-muted">有 {{ revision.summary.omitted_year_points }} 条要点的年份无法从引用段落核实，已跳过；请结合原文阅读。</p>{% endif %}
+{% if groups %}{% for topic,points in groups.items %}<h3>{{ topic }}</h3>{% for point in points %}<p><span class="program-kind">{{ point.kind }}</span> {{ point.text }} <small>{% for ref in point.refs %}<a href="#segment-{{ ref }}">原文 {{ ref }}</a> {% endfor %}</small></p>{% endfor %}{% endfor %}{% else %}<p>{% if entry.private_owner_id and not entry.allow_cloud_summary %}本次未授权云端 AI 整理，原文可直接阅读和保存。{% elif entry.state == 'failed' %}AI 整理未完成，请查看上方失败原因。原文可正常阅读。{% elif entry.state == 'waiting_config' %}AI 整理正在等待服务配置；原文可正常阅读。{% else %}原文已可阅读。若已启用 AI 摘要服务，系统会逐段整理；完成后刷新页面查看。{% endif %}</p>{% endif %}</section>
 <section class="intel-section">
   <h2>完整原文 / 文字稿</h2>
   <p class="intel-muted">{{ revision.origin_label }} · 保存于 {{ revision.created_at|date:'Y-m-d H:i' }}。{% if revision.origin == 'fun-asr' or revision.origin == 'youtube_caption' %}语音识别可能有误，请按时间戳核对关键数字。{% endif %}</p>
@@ -22,9 +23,13 @@
   {% if can_write %}
     <form method="post" action="{% url 'intelligence:program_action' entry.pk %}">
       {% csrf_token %}<input type="hidden" name="action" value="archive"><input type="hidden" name="revision_id" value="{{ revision.pk }}">
+      <fieldset class="program-archive-options"><legend>保存内容</legend>
+        <label><input type="checkbox" name="include_summary" value="on" {% if 'summary' in archive_included and archive_summary_available %}checked{% endif %} {% if not archive_summary_available %}disabled{% endif %}>AI 摘要{% if not archive_summary_available %}（尚未完成）{% endif %}</label>
+        <label><input type="checkbox" name="include_transcript" value="on" {% if 'transcript' in archive_included %}checked{% endif %}>完整原文 / 文字稿</label>
+      </fieldset>
       <button class="button" type="submit">{% if revision.archived_document_id %}保存并打开知识资料{% else %}保存为知识{% endif %}</button>
     </form>
-    <p class="intel-muted">保存原文及本次整理结果到知识待整理。</p>
+    <p class="intel-muted">至少选择一项，保存后进入知识待整理。仅保存摘要时，可通过来源链接返回此页核对原文。{% if revision.archived_document_id %}再次保存会创建新版本，历史版本仍保留。{% endif %}</p>
   {% endif %}
   <details><summary>原文版本信息</summary>
     {% for version in versions %}<p><a href="?version={{ version.pk }}">{{ version.created_at|date:'m-d H:i' }} · {{ version.origin_label }}</a>{% if version.pk == revision.pk %} · 当前阅读{% endif %}</p>{% endfor %}

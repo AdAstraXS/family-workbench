@@ -1,0 +1,1517 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "投资动态可用版接口",
+    "version": "0.4.0",
+    "description": "Django session + CSRF. Public news is family-scoped; dossiers, candidates, reviews and notes are owner-scoped with no admin bypass. GET does not collect or call models. Cursors expire after 24h and bind to member, route and filters; live results are not frozen snapshots."
+  },
+  "security": [
+    {
+      "Session": []
+    }
+  ],
+  "paths": {
+    "/research/watch/news/": {
+      "get": {
+        "summary": "公共新闻池",
+        "parameters": [
+          {
+            "name": "topic",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "const": "json"
+            },
+            "description": "Omit for HTML; alternatively Accept: application/json."
+          },
+          {
+            "name": "dossier",
+            "in": "query",
+            "description": "仅限本人公司规则；暂停关注仍可阅读",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/News"
+                      }
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "total",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        }
+      }
+    },
+    "/research/watch/topics/": {
+      "get": {
+        "summary": "主题与可见事件计数",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "const": "json"
+            },
+            "description": "Omit for HTML; alternatively Accept: application/json."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "topics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "group": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "total": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": []
+                      }
+                    }
+                  },
+                  "required": [
+                    "topics"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        }
+      }
+    },
+    "/research/watch/news/{id}/": {
+      "get": {
+        "summary": "当前或指定材料版本",
+        "parameters": [
+          {
+            "name": "version",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "const": "json"
+            },
+            "description": "Omit for HTML; alternatively Accept: application/json."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/News"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        }
+      }
+    },
+    "/research/watch/news/{id}/associate/": {
+      "post": {
+        "summary": "关联到本人研究档案",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Candidate"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Associate"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/research/watch/items/": {
+      "get": {
+        "summary": "私密研究候选与有效证据",
+        "parameters": [
+          {
+            "name": "dossier",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "assumption",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "saved",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "const": "json"
+            },
+            "description": "Omit for HTML; alternatively Accept: application/json."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        }
+      }
+    },
+    "/research/watch/items/{id}/": {
+      "get": {
+        "summary": "私密候选、版本证据及追加复核",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "const": "json"
+            },
+            "description": "Omit for HTML; alternatively Accept: application/json."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "stale",
+                    "reason",
+                    "material",
+                    "dossier_id",
+                    "evidence"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        }
+      }
+    },
+    "/research/watch/rules/": {
+      "get": {
+        "summary": "本人的关注规则",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "const": "json"
+            },
+            "description": "Omit for HTML; alternatively Accept: application/json."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "rules"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        }
+      },
+      "post": {
+        "summary": "创建或乐观更新关注规则",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "version": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "version"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/research/watch/events/{id}/annotation/": {
+      "post": {
+        "summary": "保存本人收藏与备注",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "version": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "version"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Annotation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/research/watch/evidence/{id}/review/": {
+      "post": {
+        "summary": "追加证据复核，不覆盖原结论",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "id"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Review"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/research/watch/runs/": {
+      "post": {
+        "summary": "幂等排队，202 不代表完成",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "status"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Run"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/research/watch/research-context/": {
+      "get": {
+        "summary": "唯一公司研究入口与新增候选数",
+        "parameters": [
+          {
+            "name": "dossier_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "const": "json"
+            },
+            "description": "Omit for HTML; alternatively Accept: application/json."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "dossier_id": {
+                      "type": "integer"
+                    },
+                    "revision_id": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "research_url": {
+                      "type": "string"
+                    },
+                    "latest_analysis_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "new_candidate_count": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": []
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        }
+      }
+    },
+    "/research/watch/coverage/": {
+      "get": {
+        "summary": "来源检查、本人任务、共享模型预算与已知缺口",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "const": "json"
+            },
+            "description": "Omit for HTML; alternatively Accept: application/json."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "budget",
+                    "sources",
+                    "runs",
+                    "limitations"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        }
+      },
+      "post": {
+        "summary": "管理员启停家庭来源",
+        "parameters": [],
+        "responses": {
+          "302": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "source_id": {
+                    "type": "integer"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "source_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/research/watch/consent/{id}/": {
+      "post": {
+        "summary": "本人授予或撤回指定模型的个人假设处理授权",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "provider": {
+                    "type": "integer"
+                  },
+                  "allow_personal_thesis": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "provider"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/research/watch/items/{id}/select/": {
+      "post": {
+        "summary": "选择下一次研究材料",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "selected": {
+                    "type": "boolean"
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        }
+      }
+    },
+    "/research/watch/events/{id}/organize/": {
+      "post": {
+        "summary": "管理员追加事件合并、撤销或后续关系",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "403": {
+            "description": "Inactive/read-only member or CSRF failure"
+          },
+          "404": {
+            "description": "Outside authorized scope"
+          },
+          "409": {
+            "description": "Version or idempotency conflict"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "target": {
+                    "type": "integer"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "merge",
+                      "unmerge",
+                      "followup"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "expected_updated": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action",
+                  "reason",
+                  "expected_updated"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/research/watch/saved/": {
+      "get": {
+        "summary": "本人收藏页面（HTML）",
+        "responses": {
+          "200": {
+            "description": "HTML"
+          }
+        }
+      }
+    },
+    "/research/watch/companies/add/": {
+      "get": {
+        "summary": "搜索并添加本人关注公司；POST 建立或复用探索档案",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          }
+        }
+      },
+      "post": {
+        "summary": "搜索并添加本人关注公司；POST 建立或复用探索档案",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          },
+          "302": {
+            "description": "保存后跳转"
+          },
+          "409": {
+            "description": "并发版本冲突"
+          }
+        }
+      }
+    },
+    "/research/watch/companies/{id}/": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      ],
+      "get": {
+        "summary": "本人公司研究总览：投研、新闻、综合分析",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          }
+        }
+      }
+    },
+    "/research/watch/sources/add/": {
+      "get": {
+        "summary": "管理员测试及保存来源模板",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          }
+        }
+      },
+      "post": {
+        "summary": "管理员测试及保存来源模板",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          },
+          "302": {
+            "description": "保存后跳转"
+          },
+          "409": {
+            "description": "并发版本冲突"
+          }
+        }
+      }
+    },
+    "/research/watch/sources/{id}/edit/": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      ],
+      "get": {
+        "summary": "管理员编辑来源，修改配置须重新测试",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          }
+        }
+      },
+      "post": {
+        "summary": "管理员编辑来源，修改配置须重新测试",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          },
+          "302": {
+            "description": "保存后跳转"
+          },
+          "409": {
+            "description": "并发版本冲突"
+          }
+        }
+      }
+    },
+    "/research/watch/versions/{id}/relation/": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      ],
+      "post": {
+        "summary": "管理员追加版本关系复核；expected 冲突返回 409",
+        "description": "HTML 表单接口，字段及权限见 03-contracts.md。GET 无副作用；来源 action=test 才发起安全网络读取。",
+        "responses": {
+          "200": {
+            "description": "HTML 页面、预览或表单错误"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "对象不可访问"
+          },
+          "302": {
+            "description": "保存后跳转"
+          },
+          "409": {
+            "description": "并发版本冲突"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "Session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "sessionid"
+      }
+    },
+    "schemas": {
+      "RuleInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dossier_id": {
+            "type": "integer"
+          },
+          "expected_version": {
+            "type": "integer"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exclude": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dossier_id",
+          "expected_version",
+          "enabled"
+        ]
+      },
+      "Annotation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "type": "integer"
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "read": {
+            "type": "boolean"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_version",
+          "saved",
+          "read"
+        ]
+      },
+      "Review": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "support",
+              "weaken",
+              "mixed",
+              "unknown"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "direction",
+          "reason"
+        ]
+      },
+      "Run": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dossier_id": {
+            "type": "integer"
+          },
+          "expected_revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dossier_id",
+          "expected_revision"
+        ]
+      },
+      "Associate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "dossier_id": {
+            "type": "integer"
+          },
+          "material_version": {
+            "type": "integer"
+          },
+          "expected_revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dossier_id",
+          "material_version",
+          "expected_revision"
+        ]
+      },
+      "News": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "material_version": {
+            "type": "integer"
+          },
+          "version_number": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "published_precision": {
+            "type": "string",
+            "enum": [
+              "time",
+              "day",
+              "unknown"
+            ]
+          },
+          "found_at": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "corrected",
+              "withdrawn"
+            ]
+          },
+          "market": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "topics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": "integer"
+          },
+          "original_chain": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "material_version",
+          "title",
+          "status"
+        ]
+      },
+      "Candidate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "direction": {
+            "type": "string"
+          },
+          "material_version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "direction",
+          "material_version"
+        ]
+      }
+    }
+  }
+}

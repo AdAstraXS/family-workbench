@@ -5,10 +5,11 @@
 {% block research_content %}
 <section class="research-page">
   <div class="research-header">
-    <div><p class="research-private-note">{{ dossier.security.name }}（{{ dossier.security.symbol }}）· 仅自己可见</p><h1>重点追踪指标</h1></div>
-    <a class="button" href="{% url 'investment_research:detail' dossier.pk %}">返回档案</a>
+    <div><p class="research-private-note">{{ dossier.security.name }}（{{ dossier.security.symbol }}）· 仅自己可见</p><h1>跟踪计划</h1></div>
+
   </div>
   <p class="research-private-note">经营现金流、固定资产现金支出和简化自由现金流始终作为基础背景。下面只列目前能从 10-K 核对的其他指标；选择或取消选择均由你决定，不改变正式投资判断。</p>
+<section class="research-current"><h2>财报复核计划</h2><p>提前确定下一份财报要核查什么、出现哪些变化时需要重新研究。</p><a class="button" href="{% url 'investment_research:review_plan' dossier.pk %}">制定或查看财报复核计划</a></section><h2>重点追踪指标</h2>
   {% if version %}
     <p>依据：<a href="{% url 'investment_research:document_detail' dossier.pk version.document_id %}?version={{ version.pk }}">{{ version.document.title }} · 正文第 {{ version.version_number }} 版</a></p>
     {% if suggestions %}

@@ -1,0 +1,20 @@
+<section class="research-current" aria-label="SEC 财务资料">
+  <h2>SEC 财务资料</h2>
+  <p>业绩公告可能早于正式年报发布。这里显示已保存的资料；获取时间与报告期分别标注。</p>
+  <div class="research-method-note"><h3>公司财年</h3>{% if fiscal_calendar %}<p>最新已披露全年：{{ fiscal_calendar.start|default:"起始日待确认" }} 至 {{ fiscal_calendar.end }}{% if fiscal_calendar.days %}（{{ fiscal_calendar.days }} 天）{% endif %}</p><p class="research-private-note">{{ fiscal_calendar.basis }}。财年不一定等于自然年，采用 52 / 53 周财年的公司，结束日期会在相邻年份小幅移动；请以每份报告的实际日期为准。</p>{% else %}<p>尚无可确认的财年起止日期；补充年报或全年业绩公告后显示，不默认采用 1 月至 12 月。</p>{% endif %}</div>
+  <nav class="material-tabs" aria-label="SEC 财务导航" style="display:flex;flex-wrap:wrap;gap:20px;padding:16px 0">
+    <a href="#sec-releases">最新业绩公告</a>
+    {% if facts_version %}<a href="{% url 'investment_research:material_read' dossier.pk facts_version.pk %}#sec-annual">年度财务</a><a href="{% url 'investment_research:material_read' dossier.pk facts_version.pk %}#sec-quarterly">季度财务</a>{% endif %}
+  </nav>
+  <section id="sec-releases"><h3>最新业绩公告</h3>
+    {% for report in sec_overview.releases %}<article class="research-method-note">
+      <h4><a href="{% url 'investment_research:material_read' dossier.pk report.version.pk %}">{{ dossier.security.name }} · {{ report.title }}</a></h4>
+      <p>报告期截至 {{ report.period }} · SEC 申报日期 {{ report.filed|default:"未标注" }} · {{ report.audit }}</p>
+      <p class="research-private-note">{{ report.form }} 业绩资料 · 保存于 {{ report.version.fetched_at|date:"Y-m-d H:i" }}。公告中的 GAAP 与非 GAAP 指标请按原文分别阅读。</p>
+    </article>{% empty %}<p>尚未从已保存正文中识别出业绩公告，不能据此判断公司尚未发布。可在下方 SEC 报告与附件中核对，或更新 SEC 官方文件。</p>{% endfor %}
+  </section>
+  <div class="material-grid">
+    <section><h3>年度财务</h3>{% for report in sec_overview.annual %}<p>最新已保存年报：{{ report.form }} · 报告期截至 {{ report.period }}<br>SEC 申报日期 {{ report.filed|default:"未标注" }} · 审计意见见年报原文</p><a href="{% url 'investment_research:material_read' dossier.pk report.version.pk %}">阅读正式年报</a>{% empty %}<p>尚未保存正式年报正文。</p>{% endfor %}</section>
+    <section><h3>季度财务</h3>{% for report in sec_overview.quarterly %}<p>最新已保存季报：{{ report.form }} · 报告期截至 {{ report.period }}<br>SEC 申报日期 {{ report.filed|default:"未标注" }} · 审计或审阅说明见原文</p><a href="{% url 'investment_research:material_read' dossier.pk report.version.pk %}">阅读季报</a>{% empty %}<p>尚未保存 10-Q 季报。外国发行人的中期报告可能位于 6-K 附件中，需按正文核对。</p>{% endfor %}</section>
+  </div>
+</section>

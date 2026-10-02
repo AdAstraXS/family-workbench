@@ -33,7 +33,9 @@ INSTALLED_APPS = [
     "ai_analysis",
     "intelligence",
     "dashboard",
+    "monitoring",
     "investment_research",
+    "investment_watch",
 ]
 
 MIDDLEWARE = [

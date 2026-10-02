@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% load static %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/investment-watch.css' %}?v=1">{% endblock %}
+{% block title %}投资动态{% endblock %}
+{% block content %}
+<div class="iw">{% if local_preview %}<p class="iw-warning">本机可用版预览 · 新闻来自公开来源；研究判断为演示数据 · 云端模型关闭 · 不连接生产数据</p>{% endif %}<nav class="iw-nav" aria-label="投资新闻导航">
+<a href="{% url 'investment_watch:news' %}">新闻浏览</a><a href="{% url 'investment_watch:topics' %}">主题</a><a href="{% url 'investment_watch:items' %}">投资动态</a><a href="{% url 'investment_research:index' %}">公司研究</a><a href="{% url 'investment_watch:rules' %}">关注设置</a><a href="{% url 'investment_watch:saved' %}">我的收藏</a><a href="{% url 'investment_watch:coverage' %}">来源与运行</a>
+</nav>{% block watch_content %}{% endblock %}</div>
+{% endblock %}

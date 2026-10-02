@@ -26,3 +26,6 @@ import_asset_snapshot_*.json
 /opend/runtime/*
 !/opend/runtime/.gitkeep
 /opend/state/
+.venv/
+.uv-cache/
+.watch-local/

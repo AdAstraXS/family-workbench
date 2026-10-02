@@ -13,7 +13,9 @@ from decimal import Decimal, InvalidOperation
 from django.conf import settings
 from django.utils import timezone
 
+from .futu_field_labels import reviewed_label
 from .models import FutuFinancialSnapshot
+from .number_display import money as display_money, number
 
 
 class FutuFinancialError(Exception):
@@ -22,6 +24,9 @@ class FutuFinancialError(Exception):
 
 STATEMENTS = ((1, "利润表"), (2, "资产负债表"), (3, "现金流量表"), (4, "主要指标"))
 BREAKDOWN_TYPES = {1: "产品", 2: "行业", 4: "地区", 8: "业务"}
+BREAKDOWN_TYPE_NAMES = {
+    "PRODUCT": "产品", "INDUSTRY": "行业", "REGION": "地区", "BUSINESS": "业务",
+}
 
 
 def provider_code(security):
@@ -50,15 +55,19 @@ def _decimal_string(value):
     return str(number) if number.is_finite() else None
 
 
-def _statement_data(payload):
+def _statement_data(payload, *, annual_only=True):
     if not isinstance(payload, dict):
         raise FutuFinancialError("富途返回的财务报表格式不正确。")
+    names = {}
+    for field in payload.get("structure_list") or []:
+        if isinstance(field, dict) and field.get("field_id") is not None:
+            names[str(field["field_id"])] = str(field.get("display_name") or "")[:120]
     reports = []
     for report in (payload.get("report_list") or [])[:3]:
         if not isinstance(report, dict):
             continue
         period = str(report.get("period_text") or "")[:32]
-        if not period.endswith("/FY"):
+        if annual_only and not period.endswith("/FY"):
             continue
         items = []
         for item in (report.get("item_list") or [])[:250]:
@@ -69,7 +78,8 @@ def _statement_data(payload):
                 continue
             items.append({
                 "field_id": item.get("field_id"),
-                "name": str(item.get("display_name") or "")[:120],
+                "name": str(item.get("display_name") or
+                            names.get(str(item.get("field_id"))) or "")[:120],
                 "amount": amount,
                 "yoy": _decimal_string(item.get("yoy")),
             })
@@ -98,7 +108,11 @@ def _breakdown_data(payload):
             items.append({"name": str(item.get("name") or "")[:150],
                           "amount": _decimal_string(item.get("main_oper_income")),
                           "ratio": _decimal_string(item.get("ratio"))})
-        groups.append({"type": BREAKDOWN_TYPES.get(group.get("type"), "其他"), "items": items})
+        raw_type = group.get("type")
+        label = BREAKDOWN_TYPES.get(raw_type)
+        if label is None and isinstance(raw_type, str):
+            label = BREAKDOWN_TYPE_NAMES.get(raw_type.rsplit("_", 1)[-1].upper())
+        groups.append({"type": label or "未标注维度", "items": items})
     return {"period": str(payload.get("period") or "")[:32],
             "currency": str(payload.get("currency_code") or "")[:8].upper(),
             "groups": groups}
@@ -153,6 +167,116 @@ def refresh_futu_financials(security, *, fetcher=fetch_futu_financials):
                                      "fetched_at": timezone.now(), "last_error": ""},
     )
     return snapshot
+
+
+_CURRENCY_NAMES = {"USD": "美元", "CNY": "元", "HKD": "港元"}
+
+
+def _display_number(value, places=2):
+    try:
+        parsed = number(value)
+        return f"{parsed:,.{places}f}" if parsed is not None else "—"
+    except (InvalidOperation, TypeError, ValueError):
+        return "—"
+
+
+def _display_item(item, statement_type, currency):
+    amount = item.get("amount")
+    if amount is None:
+        return "—"
+    name = (item.get("name") or "").lower()
+    if statement_type == 4 and name in {"毛利率", "营业利润率", "净利率"}:
+        return f"{_display_number(amount)}%"
+    if statement_type in {1, 2, 3} and name:
+        if re.search(r"每股|per share|\beps\b", name):
+            return display_money(amount, currency, per_share=True)
+        if re.search(r"股份数|股数|shares? outstanding", name):
+            shares = Decimal(str(amount)) / Decimal("100000000")
+            return f"{_display_number(shares)} 亿股"
+        return display_money(amount, currency)
+    # Older snapshots lack structure_list names. Their unit cannot be inferred
+    # safely, so retain the raw magnitude with separators until refreshed.
+    return _display_number(amount)
+
+
+def statement_tables(statements, provider_code=""):
+    """Align a provider's named fields across annual reports for scanning."""
+    tables = []
+    for statement in statements:
+        reports = [{**report, "standards_display":
+                    "US GAAP" if report.get("standards") == "US_GAAP"
+                    else report.get("standards") or ""}
+                   for report in statement.get("reports") or []]
+        field_ids = list(dict.fromkeys(
+            str(item.get("field_id"))
+            for report in reports for item in report.get("items") or []
+            if item.get("field_id") is not None
+        ))
+        rows = []
+        for field_id in field_ids:
+            matches = [next((item for item in report.get("items") or []
+                             if str(item.get("field_id")) == field_id), None)
+                       for report in reports]
+            name = next((item.get("name") for item in matches
+                         if item and item.get("name")), "") or reviewed_label(
+                             provider_code, statement["type"], field_id)
+            cells = []
+            for report, item in zip(reports, matches):
+                cells.append({
+                    "amount": _display_item({**item, "name": name}, statement["type"],
+                                            report.get("currency") or "")
+                    if item else "—",
+                    "yoy": f"{_display_number(item['yoy'])}%"
+                    if item and item.get("yoy") is not None else "",
+                })
+            rows.append({"field_id": field_id, "name": name, "cells": cells})
+        tables.append({"title": statement["title"], "type": statement["type"],
+                       "reports": reports, "rows": [row for row in rows if row["name"]],
+                       "raw_rows": [row for row in rows if not row["name"]],
+                       "missing_names": sum(not row["name"] for row in rows)})
+    return tables
+
+
+_HIGHLIGHTS = (
+    (1, "营业收入", r"^(?:营业总收入|营业收入|total revenue|revenue)$"),
+    (1, "毛利", r"^(?:毛利|gross profit|gross margin)$"),
+    (1, "营业利润", r"^(?:营业利润|经营利润|operating income|operating profit)$"),
+    (1, "净利润", r"^(?:净利润|net income)$"),
+    (1, "稀释 EPS", r"^(?:稀释每股收益|稀释每股盈利|diluted earnings per share|diluted eps)$"),
+    (3, "经营活动现金流", r"^(?:经营活动现金流量净额|经营活动现金流|operating cash flow)$"),
+    (3, "资本开支", r"^(?:资本开支|购建固定资产支出|capital expenditure|capital expenditures)$"),
+)
+
+
+def highlight_rows(tables):
+    result = []
+    for statement_type, label, pattern in _HIGHLIGHTS:
+        table = next((entry for entry in tables if entry["type"] == statement_type), None)
+        if not table:
+            continue
+        matches = [row for row in table["rows"]
+                   if row["name"] and re.fullmatch(pattern, row["name"].strip(), re.I)]
+        if len(matches) == 1:
+            result.append({"label": label, "provider_name": matches[0]["name"],
+                           "cells": matches[0]["cells"], "reports": table["reports"]})
+    return result
+
+
+def breakdown_tables(breakdown):
+    if not breakdown:
+        return []
+    currency = breakdown.get("currency") or ""
+    groups = []
+    for group in breakdown.get("groups") or []:
+        rows = []
+        for item in group.get("items") or []:
+            amount = item.get("amount")
+            rows.append({"name": item.get("name") or "未命名项目",
+                         "amount": display_money(amount, currency),
+                         "ratio": f"{_display_number(item['ratio'])}%"
+                         if item.get("ratio") is not None else "—"})
+        groups.append({"type": group.get("type") or "未标注维度", "rows": rows})
+    return groups
 
 
 def comparison_rows(snapshot, sec_periods, sec_rows):

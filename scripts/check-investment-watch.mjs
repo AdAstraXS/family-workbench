@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {match,select,selectNews,chains,stale,contains} from '../docs/investment-watch/demo/engine.mjs';
+import {createPreviewServer} from './preview-investment-watch.mjs';
+const base=new URL('../docs/investment-watch/',import.meta.url);
+const data=JSON.parse(await readFile(new URL('demo/data.json',base),'utf8'));
+const spec=JSON.parse(await readFile(new URL('openapi.json',base),'utf8'));
+const ids=new Set(data.thesis.assumptions.map(a=>a.id));
+for(const a of data.articles){assert.ok(['historical','synthetic'].includes(a.kind));if(a.kind==='historical'){assert.match(a.published,/^2025-/);assert.ok(a.sources.every(s=>s.url.startsWith('https://')));}else{assert.equal(a.published,null);assert.ok(a.sources.every(s=>s.url===null));}for(const l of a.links){assert.ok(ids.has(l.assumption));if(l.direction!=='unknown'){assert.ok(l.quote);assert.ok(l.locator);}}}
+assert.equal(chains(data.articles[0]),1,'same announcement remains one evidence chain');
+assert.equal(contains('XMSFTX','MSFT'),false);
+assert.equal(contains('（ＭＳＦＴ）','MSFT'),true);
+assert.equal(match(data.rule,data.articles[2]).eligible,false);
+assert.equal(match({...data.rule,topics:['数据中心']},data.articles[2]).eligible,true);
+assert.equal(match({...data.rule,exclude:['Azure']},data.articles[0]).eligible,false);
+const state={rule:{...data.rule,topics:['Azure','Copilot','数据中心','利率']},view:'reading',assumption:'all',direction:'all',search:'',showSynthetic:true,members:{},thesis:data.thesis};
+assert.equal(select(data,state).length,4);
+assert.equal(selectNews(data,{...state,rule:{...state.rule,enabled:false}}).length,5,'public news must not depend on personal watch');
+assert.equal(selectNews(data,{...state,dateFrom:'2025-07-01',dateTo:'2025-07-31'}).length,1,'date range excludes unknown timestamps');
+assert.equal(selectNews(data,{...state,newsMarket:'中国'}).length,1);
+assert.equal(new Set(data.topics.map(t=>t.id)).size,data.topics.length);
+for(const t of data.topics)for(const id of t.articles)assert.ok(data.articles.some(a=>a.id===id),'topic references existing material');
+assert.equal(selectNews(data,{...state,newsTopic:'microsoft'}).length,2);
+assert.equal(selectNews(data,{...state,newsTopic:'microsoft',newsMarket:'中国'}).length,0,'topic and market filters intersect');
+assert.equal(selectNews(data,{...state,newsTopic:'geopolitics'}).length,0,'empty topic must not fall back to all news');
+assert.equal(selectNews(data,{...state,newsTopic:'capex',showSynthetic:false}).length,0,'topic honors synthetic visibility');
+assert.equal(selectNews(data,{...state,newsCategory:'商品与供需',newsSource:'Microsoft Investor Relations'}).length,0);
+assert.equal(select(data,{...state,members:{'commodity-demo':{researchCandidate:true}}}).length,5,'manual association supplies a pending candidate');
+assert.equal(select(data,{...state,direction:'support',members:{'commodity-demo':{researchCandidate:true}}}).some(a=>a.id==='commodity-demo'),false,'manual association does not assert support');
+assert.equal(select(data,{...state,rule:{...state.rule,enabled:false},members:{'commodity-demo':{researchCandidate:true}}}).length,1,'manual candidate remains when automatic watch is paused');
+assert.equal(select(data,{...state,rule:{...state.rule,enabled:false}}).length,0);
+assert.equal(select(data,{...state,showSynthetic:false}).length,2);
+assert.equal(select(data,{...state,assumption:'returns',direction:'support'}).length,0,'directions must match the selected assumption, not another relation');
+assert.equal(select(data,{...state,view:'saved',rule:{...state.rule,enabled:false},members:{earnings:{saved:true}}}).length,1);
+assert.equal(stale(data.articles[0],{...state,thesis:{...data.thesis,version:2}}),true);
+const refs=o=>{if(!o||typeof o!=='object')return;if(o.$ref)assert.ok(o.$ref.slice(2).split('/').reduce((x,k)=>x?.[k],spec),o.$ref);Object.values(o).forEach(refs);};refs(spec);
+assert.deepEqual(spec.security,[{Session:[]}]);
+for(const schema of ['RuleInput','Annotation','Review','Run','Associate']){assert.equal(spec.components.schemas[schema].additionalProperties,false);assert.ok(!('owner_id' in spec.components.schemas[schema].properties));}
+assert.equal(spec.info.version,'0.4.0');
+assert.ok(spec.paths['/research/watch/news/']);
+assert.ok(spec.paths['/research/watch/news/{id}/associate/']);
+const demoApp=await readFile(new URL('demo/app.js',base),'utf8');
+const demoHtml=await readFile(new URL('demo/index.html',base),'utf8');
+assert.ok(!demoApp.includes('thesis-form')&&!demoApp.includes('function thesis('),'no duplicate thesis editor');
+assert.ok(!demoHtml.includes('data-view="thesis"')&&demoHtml.includes('data-view="news"'));
+for(const f of ['demo/app.js','demo/engine.mjs','demo/company.js']){const result=spawnSync(process.execPath,['--check',fileURLToPath(new URL(f,base))],{encoding:'utf8'});assert.equal(result.status,0,result.stderr);}
+const server=createPreviewServer();await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+try{const url=`http://127.0.0.1:${server.address().port}`;for(const path of ['/','/app.js','/engine.mjs','/data.json','/base.css','/styles.css','/company.html','/company.js','/company.css'])assert.equal((await fetch(url+path)).status,200);assert.equal((await fetch(url+'/.env')).status,404);assert.equal((await fetch(url+'/openapi.json')).status,404);assert.equal((await fetch(url+'/',{method:'POST'})).status,405);}finally{await new Promise(resolve=>server.close(resolve));}
+console.log('PASS: fixture provenance, evidence links, matching, filters, version invalidation, private contracts, syntax and preview isolation.');

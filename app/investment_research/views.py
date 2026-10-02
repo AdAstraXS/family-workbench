@@ -8,6 +8,7 @@ ResearchValidationError；DossierNotFound 转 404。
 """
 import logging
 import traceback
+from hashlib import sha256
 from datetime import timedelta
 from decimal import Decimal
 from urllib.parse import urlencode
@@ -15,8 +16,10 @@ from urllib.parse import urlencode
 from ai_analysis.models import AiAnalysisRequest
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.conf import settings
+from django.core.cache import cache
 from django.core.paginator import Paginator
-from django.db.models import F, Q, OuterRef, Subquery
+from django.db.models import F, Q
 from django.http import Http404, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -58,8 +61,8 @@ from .services import (
 )
 from .providers.sec import SecClientError
 from .research_ai import (
-    MAX_DOCUMENT_CHARS, PROMPT_TEMPLATE_VERSION, ResearchAiError, available_research_providers,
-    document_segments, generate_research_draft,
+    PROMPT_TEMPLATE_VERSION, ResearchAiError, available_research_providers,
+    generate_research_draft,
 )
 from .sec_content import fetch_sec_document_content
 from .source_sync import sync_research_sources
@@ -69,9 +72,15 @@ from .tenk_history import fill_tenk_history
 from .tenk_metrics import BUSINESS_CALC_CODES, HISTORICAL_LEASE_CODES, tenk_metric_grid
 from .financial_overview import build_financial_overview
 from .futu_financials import (
-    FutuFinancialError, comparison_rows, provider_code, refresh_futu_financials,
+    FutuFinancialError, breakdown_tables, provider_code, refresh_futu_financials,
+    highlight_rows, statement_tables,
 )
-from .thesis_analysis import analysis_sections, generate_thesis_analysis
+from .analysis_materials import source_preview
+from .thesis_analysis import generate_thesis_analysis, enforce_market_expectation_boundary
+from .valuation_trial import build_valuation_trial
+from .next_day_digest import (active_consent, latest_digest, latest_manual_analysis,
+                              display_digest_result, pending_sources, set_auto_digest_consent,
+                              generate_next_day_digest)
 from .metric_focus import CORE_CODES, generate_metric_suggestions, save_metric_focus
 from .review_plan import (
     confirm_review_plan, generate_review_plan, latest_plan_source, plan_context,
@@ -129,7 +138,30 @@ def index(request):
     member = _get_member_or_403(request)
     if member is None:
         return _forbidden()
-    dossiers = accessible_dossiers(member).order_by("-updated_at", "-pk")
+    from .navigation import company_state
+    from portfolio.models import InvestmentPosition
+    search = request.GET.get('q', '').strip()[:100]
+    selected_filter = request.GET.get('filter', 'all')
+    dossiers = accessible_dossiers(member).order_by("-updated_at", "-pk").prefetch_related('preparations')
+    if search:
+        dossiers = dossiers.filter(Q(security__name__icontains=search) | Q(security__symbol__icontains=search))
+    held = set(InvestmentPosition.objects.filter(account__bank_account__member=member,
+        account__bank_account__family=member.family, quantity__gt=0).values_list('security_id', flat=True))
+    items = []
+    for dossier in dossiers:
+        dossier.navigation_state = company_state(dossier)
+        dossier.has_holding = dossier.security_id in held
+        state = dossier.navigation_state
+        if selected_filter == 'held' and not (dossier.has_holding and dossier.current_revision_id):
+            continue
+        if selected_filter == 'watch' and not state['watching']:
+            continue
+        if selected_filter == 'pause' and not state['paused']:
+            continue
+        if selected_filter in {'initial', 'research', 'judgment'} and (state['stage'] != selected_filter or state['paused']):
+            continue
+        items.append(dossier)
+    dossiers = items
     paginator = Paginator(dossiers, PAGE_SIZE)
     page = paginator.get_page(request.GET.get("page"))
     for dossier in page.object_list:
@@ -139,7 +171,9 @@ def index(request):
     return render(
         request,
         "investment_research/index.html",
-        {"page": page, "can_write": is_writer(member)},
+        {"page": page, "can_write": is_writer(member), 'search': search, 'selected_filter': selected_filter,
+         'filters': [('all', '全部'), ('initial', '初识中'), ('research', '深入研究'), ('judgment', '已有判断'),
+                     ('held', '已持仓且有判断'), ('watch', '已加入观察'), ('pause', '暂不研究')]},
     )
 
 
@@ -217,7 +251,10 @@ def first_thesis(request, pk):
         return HttpResponseForbidden("查看者角色不能保存判断。")
     if dossier.current_revision_id and request.method == "GET":
         return redirect("investment_research:edit", pk=pk)
-    form = FirstThesisForm(request.POST if request.method == "POST" else None)
+    preparation = dossier.preparations.last()
+    initial = {"pillars": "\n".join(h["claim"] for h in preparation.hypotheses),
+               "questions": "\n".join(preparation.questions)} if preparation else {}
+    form = FirstThesisForm(request.POST if request.method == "POST" else None, initial=initial)
     if request.method == "POST" and form.is_valid():
         try:
             save_first_thesis(
@@ -252,56 +289,7 @@ def detail(request, pk):
     latest_success_at = max(
         (state.last_success_at for state in successful_states), default=None
     )
-    available_versions = list(
-        OfficialResearchContentVersion.objects.filter(document__in=documents)
-        .filter(pk=Subquery(OfficialResearchContentVersion.objects.filter(document_id=OuterRef('document_id')).order_by('-version_number').values('pk')[:1]))
-        .exclude(content_text='')
-        .select_related("document").order_by("-fetched_at", "-pk")[:20]
-    )
-    completed_segments = set()
-    if is_writer(member) and available_versions:
-        for analysis in AiAnalysisRequest.objects.filter(
-            member=member, family=member.family, module="investment_research",
-            analysis_type="document_draft", status=AiAnalysisRequest.STATUS_SUCCESS,
-        ).only("scope"):
-            scope = analysis.scope or {}
-            if scope.get("dossier_id") == dossier.pk and scope.get("version_id"):
-                # 旧草稿只读取开头 16,000 字，没有 segment_index。
-                completed_segments.add((scope["version_id"], scope.get("segment_index", 0)))
-    research_groups = []
-    for version in available_versions:
-        segments = document_segments(version)
-        chapters = tenk_chapter_coverage(
-            version, (index for version_id, index in completed_segments if version_id == version.pk),
-        )
-        for segment in segments:
-            segment["completed"] = (version.pk, segment["index"]) in completed_segments
-            segment["chapter_codes"] = "、".join(
-                chapter["code"] for chapter in chapters
-                if chapter["located"] and chapter["start"] < segment["end"]
-                and chapter["end"] > segment["start"]
-            )
-        research_groups.append({"version": version, "segments": segments})
-    first_pending = next(
-        (segment for group in research_groups for segment in group["segments"] if not segment["completed"]),
-        None,
-    )
-    if first_pending is not None:
-        first_pending["selected"] = True
-    providers = available_research_providers() if is_writer(member) else []
-    recent_drafts = [
-        analysis for analysis in AiAnalysisRequest.objects.filter(
-            member=member, module="investment_research", analysis_type="document_draft",
-        ).select_related("provider").order_by("-created_at")[:30]
-        if (analysis.scope or {}).get("dossier_id") == dossier.pk
-    ][:5]
-    recent_syntheses = [
-        analysis for analysis in AiAnalysisRequest.objects.filter(
-            member=member, family=member.family, module="investment_research",
-            analysis_type="thesis_synthesis",
-        ).order_by("-created_at")[:30]
-        if (analysis.scope or {}).get("dossier_id") == dossier.pk
-    ][:3]
+    latest_analysis = latest_manual_analysis(dossier)
     review_start_date, review_items = reviewable_filings(dossier)
     current_plan = (ResearchReviewPlan.objects.filter(
         dossier=dossier, thesis_revision_id=dossier.current_revision_id,
@@ -317,12 +305,7 @@ def detail(request, pk):
             "ir_company": company_for_security(dossier.security),
             "latest_source_success_at": latest_success_at,
             "source_error_count": sum(bool(state.last_error) for state in source_states),
-            "available_versions": available_versions,
-            "research_groups": research_groups,
-            "research_providers": providers,
-            "research_document_limit": MAX_DOCUMENT_CHARS,
-            "recent_drafts": recent_drafts,
-            "recent_syntheses": recent_syntheses,
+            "latest_analysis": latest_analysis,
             "selected_metric_count": len(dossier.selected_metric_codes or []),
             "review_start_date": review_start_date,
             "review_items": [item for item in review_items
@@ -343,7 +326,7 @@ def financials(request, pk):
     versions = list(OfficialResearchContentVersion.objects.filter(
         document__security=dossier.security, document__source="sec",
         document__document_type="10-k",
-    ).select_related("document", "document__security")
+    ).select_related("document", "document__security").defer("raw_gzip", "content_text")
         .order_by("-document__period_end", "-fetched_at", "-pk")[:8])
     version = versions[0] if versions else None
     if request.GET.get("version"):
@@ -356,9 +339,25 @@ def financials(request, pk):
         document__document_type="10-k",
         document__period_end__lt=version.document.period_end,
         document__period_end__gte=version.document.period_end - timedelta(days=900),
-    ).select_related("document", "document__security").order_by("-version_number", "-pk"))
+    ).select_related("document", "document__security").defer(
+        "raw_gzip", "content_text").order_by("-version_number", "-pk"))
         if version and version.document.period_end else [])
-    periods, rows, problem = build_financial_overview(version, historical_versions)
+    cache_key = None
+    if version and not settings.DEBUG and version.raw_sha256 and version.content_sha256:
+        identity = [(item.pk, item.raw_sha256, item.content_sha256)
+                    for item in historical_versions]
+        cache_key = "research-financial-v3:" + sha256(repr((
+            version.pk, version.raw_sha256, version.content_sha256, identity,
+        )).encode()).hexdigest()
+    result = cache.get(cache_key) if cache_key else None
+    if result is None:
+        if version is not None:
+            version = OfficialResearchContentVersion.objects.select_related(
+                "document", "document__security").get(pk=version.pk)
+        result = build_financial_overview(version, historical_versions)
+        if cache_key:
+            cache.set(cache_key, result, timeout=3600)
+    periods, rows, problem = result
     by_code = {row["code"]: row for row in rows}
     groups = []
     for title, codes in (
@@ -415,27 +414,24 @@ def futu_financials(request, pk):
             messages.error(request, code_problem)
         else:
             try:
-                refresh_futu_financials(dossier.security)
-            except FutuFinancialError as exc:
+                from .company_jobs import enqueue
+                enqueue(member, dossier, ["financials"])
+            except (FutuFinancialError, ResearchValidationError) as exc:
                 messages.error(request, str(exc))
             else:
-                messages.success(request, "富途年度财务资料已更新。")
-        return redirect("investment_research:futu_financials", pk=pk)
+                messages.success(request, "正在获取富途财务资料并核对字段名称，请在公司资料页查看进度。")
+        return redirect("investment_research:materials", pk=pk)
     snapshot = FutuFinancialSnapshot.objects.filter(security=dossier.security).first()
-    latest_sec = (OfficialResearchContentVersion.objects.filter(
-        document__security=dossier.security, document__source="sec",
-        document__document_type="10-k",
-    ).select_related("document").order_by("-document__period_end", "-fetched_at", "-pk").first())
-    periods, rows, sec_problem = (build_financial_overview(latest_sec)
-                                  if snapshot else ([], [], "尚未获取富途数据。"))
-    comparisons = comparison_rows(snapshot, periods, rows)
     statements = snapshot.data.get("statements", []) if snapshot else []
     breakdown = snapshot.data.get("breakdown") if snapshot else None
+    tables = statement_tables(statements, snapshot.provider_code if snapshot else "")
     return render(request, "investment_research/futu_financials.html", {
         "dossier": dossier, "snapshot": snapshot, "code": code,
-        "code_problem": code_problem, "statements": statements,
-        "breakdown": breakdown, "comparisons": comparisons,
-        "sec_problem": sec_problem, "can_write": is_writer(member),
+        "code_problem": code_problem, "tables": tables,
+        "has_missing_names": any(table["missing_names"] for table in tables),
+        "highlights": highlight_rows(tables),
+        "breakdown": breakdown, "breakdown_groups": breakdown_tables(breakdown),
+        "can_write": is_writer(member),
     })
 
 
@@ -445,6 +441,8 @@ def thesis_analysis(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    from .research_basis import research_basis
+    basis = research_basis(dossier)
     can_write = is_writer(member)
     if request.method == "POST":
         if not can_write:
@@ -456,32 +454,38 @@ def thesis_analysis(request, pk):
         try:
             analysis = generate_thesis_analysis(
                 actor=member, dossier_id=dossier.pk,
-                section_keys=request.POST.getlist("sections"),
                 provider_id=provider_id,
                 consent=request.POST.get("one_time_consent") == "yes",
+                include_news=request.POST.get("include_news") == "yes",
+                review_mode=request.POST.get("review_mode", "full"),
             )
         except (ResearchAiError, ResearchValidationError) as exc:
             messages.error(request, str(exc))
         else:
-            messages.success(request, "AI 综合分析草稿已生成，请逐项核对引用。")
+            messages.success(request, "公司研究简报已生成；关键结论可展开核对原文。")
             return redirect("investment_research:thesis_analysis_detail", pk=pk,
                             analysis_pk=analysis.pk)
         return redirect("investment_research:thesis_analysis", pk=pk)
-    sections = analysis_sections(dossier)
-    chosen = 0
-    for section in sections:
-        if chosen < 2 and section["label"] in {"管理层讨论与分析", "财务报表与附注", "正文开头"}:
-            section["suggested"] = True
-            chosen += 1
+    sources = source_preview(dossier)
+    from investment_watch.research_bridge import selected_candidates
+    selected_news = list(selected_candidates(dossier).order_by("-pk")[:10])
+    from .company_workspace import research_history
+    baseline = research_history(dossier).filter(
+        status=AiAnalysisRequest.STATUS_SUCCESS,
+        scope__thesis_revision_id=dossier.current_revision_id,
+    ).first()
     histories = [analysis for analysis in AiAnalysisRequest.objects.filter(
         member=member, family=member.family, module="investment_research",
         analysis_type="thesis_synthesis",
     ).select_related("provider").order_by("-created_at")[:40]
         if (analysis.scope or {}).get("dossier_id") == dossier.pk][:10]
     return render(request, "investment_research/thesis_analysis.html", {
-        "dossier": dossier, "revision": dossier.current_revision,
-        "sections": sections, "providers": available_research_providers() if can_write else [],
+        "dossier": dossier, "revision": basis,
+        "sources": sources, "providers": available_research_providers() if can_write else [],
         "can_write": can_write, "histories": histories,
+        "selected_news": selected_news, "has_analysis_material": bool(sources or selected_news),
+        "baseline_analysis": baseline if dossier.current_revision_id else None,
+        "review_mode": request.GET.get("mode", "full") if baseline else "full",
     })
 
 
@@ -500,15 +504,101 @@ def thesis_analysis_detail(request, pk, analysis_pk):
         raise Http404("分析记录不属于此档案。")
     result = analysis.result.result_json if analysis.status == AiAnalysisRequest.STATUS_SUCCESS else None
     if result:
-        for item in result.get("assessments", []):
-            item["verdict_label"] = {
-                "supports": "有支持", "weakens": "有反证", "mixed": "证据混合",
-                "unknown": "证据不足",
-            }.get(item.get("verdict"), "待核对")
-    return render(request, "investment_research/thesis_analysis_detail.html", {
+        from .report_sections import source_sections
+        result = source_sections(result, analysis.scope or {})
+    valuation = build_valuation_trial(dossier.security, analysis.scope, request.GET)
+    from .research_basis import basis_matches
+    return render(request, "investment_research/thesis_analysis_brief.html", {
         "dossier": dossier, "analysis": analysis, "result": result,
-        "is_current_revision": (analysis.scope or {}).get("thesis_revision_id") == dossier.current_revision_id,
+        "valuation": valuation,
+        "new_candidate_count": dossier.news_candidates.filter(created_at__gt=analysis.created_at).count(),
+        "is_current_revision": basis_matches(dossier, analysis.scope or {}),
     })
+
+
+@_method(["GET"])
+def company_research(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if request.GET.get('view') == 'changes':
+        return redirect('investment_research:follow', pk=pk)
+    from .company_workspace import workspace_context, research_history
+    report = research_history(dossier).filter(status=AiAnalysisRequest.STATUS_SUCCESS).first()
+    view = request.GET.get("view", "conclusion")
+    if view not in {"changes", "evidence"} and report:
+        return thesis_analysis_detail(request, pk, report.pk)
+    context = workspace_context(dossier, request.GET)
+    return render(request, "investment_research/company_materials.html", {
+        "dossier": dossier, "revision": dossier.current_revision,
+        "can_write": is_writer(member), **context,
+    })
+
+
+@_method(["GET"])
+def next_day_tracking(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    digest = latest_digest(dossier)
+    pending = pending_sources(dossier)
+    latest_analysis = latest_manual_analysis(dossier)
+    consent = active_consent(dossier)
+    consent_active = bool(consent and latest_analysis and
+                          consent.provider_id == latest_analysis.provider_id)
+    checks = (latest_analysis.result.result_json or {}).get("next_checks", []) if latest_analysis else []
+    quote = build_valuation_trial(dossier.security, {}, {})
+    return render(request, "investment_research/next_day_tracking.html", {
+        "dossier": dossier, "digest": digest,
+        "result": display_digest_result(digest.result.result_json) if digest else None,
+        "pending": pending, "checks": checks,
+        "latest_analysis": latest_analysis, "quote": quote,
+        "consent": consent, "consent_active": consent_active,
+        "can_write": is_writer(member),
+    })
+
+
+@_method(["POST"])
+def next_day_consent(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能修改自动分析授权。")
+    action = request.POST.get("action")
+    if action not in {"enable", "disable"}:
+        messages.error(request, "请选择开启或关闭自动对照。")
+    else:
+        try:
+            set_auto_digest_consent(actor=member, dossier_id=dossier.pk,
+                                    enabled=action == "enable")
+        except ResearchValidationError as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, "已开启新资料的个人判断自动对照。" if action == "enable"
+                             else "已关闭个人判断自动对照；公开资料事件简报仍可生成。")
+    return redirect("investment_research:next_day_tracking", pk=pk)
+
+
+@_method(["POST"])
+def next_day_generate(request, pk):
+    member = _get_member_or_403(request)
+    if member is None:
+        return _forbidden()
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if not is_writer(member):
+        return HttpResponseForbidden("查看者角色不能生成自动事件简报。")
+    try:
+        digest = generate_next_day_digest(dossier.pk)
+    except ResearchAiError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "新资料事件简报已生成，可展开核对原文。" if digest
+                         else "当前没有待处理的官方正文，或尚未生成公司研究简报。")
+    return redirect("investment_research:next_day_tracking", pk=pk)
 
 
 @_method(["POST"])
@@ -558,6 +648,18 @@ def edit(request, pk):
         return redirect("investment_research:first_thesis", pk=pk)
 
     current = dossier.current_revision
+    analysis = latest_manual_analysis(dossier)
+    digest = latest_digest(dossier)
+    reference = {
+        "analysis": analysis,
+        "suggestion": (analysis.result.result_json or {}).get("suggested_revision") if analysis else "",
+        "suggestion_is_current": bool(analysis and
+            (analysis.scope or {}).get("thesis_revision_id") == current.pk),
+        "digest": digest,
+        "digest_result": display_digest_result(digest.result.result_json) if digest else None,
+        "digest_is_current": bool(digest and
+            (digest.scope or {}).get("thesis_revision_id") == current.pk),
+    }
     if request.method == "POST":
         form = EditThesisForm(request.POST)
         if form.is_valid():
@@ -581,6 +683,7 @@ def edit(request, pk):
                         "dossier": dossier,
                         "form": form,
                         "conflict": True,
+                        **reference,
                     },
                     status=409,
                 )
@@ -610,7 +713,7 @@ def edit(request, pk):
     return render(
         request,
         "investment_research/edit.html",
-        {"dossier": dossier, "form": form, "conflict": False},
+        {"dossier": dossier, "form": form, "conflict": False, **reference},
     )
 
 
@@ -892,7 +995,7 @@ def document_detail(request, pk, document_pk):
         {
             "dossier": dossier, "document": document,
             "can_write": is_writer(member),
-            "can_fetch_sec": document.source == "sec" and document.document_type in {"10-k", "10-q", "8-k"},
+            "can_fetch_sec": document.source == "sec" and document.document_type in {"10-k", "10-q", "8-k", "20-f", "40-f", "6-k"},
             "can_fetch_ir": document.source in ('official_ir', 'microsoft_ir') and bool(company_for_security(document.security)),
             "current_content_version": current_version,
             "selected_version": selected_version,

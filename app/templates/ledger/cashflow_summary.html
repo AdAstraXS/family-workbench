@@ -3,6 +3,18 @@
 {% load money %}
 
 {% block title %}月度收支汇总{% endblock %}
+{% block extra_head %}
+<style>
+  .expense-category-pie-section .cashflow-trend-filter { display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; align-self:center; gap:8px; width:auto; max-width:100%; margin:0; padding:6px 9px; }
+  .expense-category-pie-section .cashflow-trend-filter label { display:inline; width:auto; margin:0; white-space:nowrap; }
+  .expense-category-pie-section .cashflow-trend-filter select { width:auto; min-width:85px; max-width:160px; height:32px; min-height:32px; margin:0; padding:0 26px 0 8px; font-size:13px; }
+  @media (max-width:500px) {
+    .expense-category-pie-section .cashflow-trend-filter { gap:5px; padding:5px; }
+    .expense-category-pie-section .cashflow-trend-filter label { font-size:11px; }
+    .expense-category-pie-section .cashflow-trend-filter select { min-width:65px; max-width:105px; font-size:12px; }
+  }
+</style>
+{% endblock %}
 
 {% block content %}
 <section class="cashflow-hero">
@@ -98,13 +110,20 @@
       <span class="asset-trend-eyebrow">MONTHLY EXPENSE CATEGORY MIX</span>
       <h1>支出分类构成</h1>
       <p>
-        {{ year }}年{% if selected_category_month == "all" %}全年{% else %}{{ selected_category_month }}月{% endif %}家庭支出分类占比
+        {{ year }}年{% if selected_category_month == "all" %}全年{% else %}{{ selected_category_month }}月{% endif %} · {{ expense_category_scope }}支出分类占比
         · 单位：元 · 未细分金额自动补齐 · 点击扇区可联动下级分类
       </p>
     </div>
     <form method="get" action="{{ request.path }}#monthly-expense-category-pies" class="cashflow-trend-filter">
+      <input type="hidden" name="income_category_month" value="{{ selected_income_category_month }}">
+      <input type="hidden" name="income_category_member" value="{{ selected_income_category_member }}">
+      <label for="expense-category-member">查看对象</label>
+      <select id="expense-category-member" name="category_member">
+        <option value="all" {% if selected_category_member == "all" %}selected{% endif %}>整个家庭</option>
+        {% for member in chart_members %}<option value="{{ member.pk }}" {% if selected_category_member == member.pk %}selected{% endif %}>{{ member.display_name }}</option>{% endfor %}
+      </select>
       <label for="category-month">统计范围</label>
-      <select id="category-month" name="category_month" onchange="this.form.submit()">
+      <select id="category-month" name="category_month">
         <option value="all" {% if selected_category_month == "all" %}selected{% endif %}>全年</option>
         <option value="1" {% if selected_category_month == 1 %}selected{% endif %}>1月</option>
         <option value="2" {% if selected_category_month == 2 %}selected{% endif %}>2月</option>
@@ -152,11 +171,14 @@
   </div>
 </section>
 {{ expense_category_pie_data|json_script:"expense-category-pie-data" }}
+{% include "ledger/_income_category_pies.html" %}
+{{ income_category_pie_data|json_script:"income-category-pie-data" }}
 {% endif %}
 {% endblock %}
 
 {% block scripts %}
   {% if year %}
-    <script src="{% static 'js/expense_category_pies.js' %}?v=20260628-0645"></script>
+    <script src="{% static 'js/expense_category_pies.js' %}?v=20261001-income"></script>
+    <script src="{% static 'js/category_composition_filters.js' %}?v=20261001-compact"></script>
   {% endif %}
 {% endblock %}

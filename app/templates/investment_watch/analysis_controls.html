@@ -1,0 +1,8 @@
+<details class="iw-card"><summary>个人假设分析与授权</summary>
+<p>授权后，后台可将这份档案的当前判断、假设、问题与候选新闻摘录发送给所选模型。不会发送持仓、财务账本或其他成员内容。受日/月模型额度限制，授权可随时关闭。</p>
+<p>当前：{% if d.consent.active %}已授权 {{ d.consent.provider.name }}{% else %}未授权{% endif %}</p>
+{% if providers %}<form method="post" action="{% url 'investment_watch:consent' d.pk %}">{% csrf_token %}
+<label>文字模型<select name="provider">{% for p in providers %}<option value="{{ p.pk }}"{% if d.consent.provider_id == p.pk %} selected{% endif %}>{{ p.name }} · {{ p.model_name }}</option>{% endfor %}</select></label>
+<label class="iw-check"><input type="checkbox" name="allow_personal_thesis"{% if d.consent.active %} checked{% endif %}>允许向所选模型发送上述个人研究内容</label><button>保存授权</button></form>{% else %}<p>尚未配置可用的投研文字模型，可继续阅读和手工研究。</p>{% endif %}
+{% if d.consent.active %}<form method="post" action="{% url 'investment_watch:consent' d.pk %}">{% csrf_token %}<input type="hidden" name="provider" value="{{ d.consent.provider_id }}"><button>关闭授权</button></form>{% endif %}
+<form method="post" action="{% url 'investment_watch:runs' %}">{% csrf_token %}<input type="hidden" name="dossier_id" value="{{ d.pk }}"><input type="hidden" name="expected_revision" value="{{ d.current_revision_id|default:0 }}"><input type="hidden" name="idempotency_key" value="{{ operation_key }}-run-{{ d.pk }}"><button>提交候选检查</button></form><p class="iw-muted">每批最多分析三份候选。模型关闭或额度不足时保留材料并提示原因。</p></details>
