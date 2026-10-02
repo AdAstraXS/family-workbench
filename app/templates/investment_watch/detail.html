@@ -2,8 +2,9 @@
 {% block watch_content %}<header class="iw-header"><div><p>{{ version.material.source.name }} · 第 {{ version.number }} 版</p><h1>{{ version.title }}</h1></div></header>
 {% if stale or version.status == 'withdrawn' %}<p class="iw-warning">这份材料已更新或撤回。此处保留历史版本，不能作为新的有效证据。</p>{% endif %}
 {% if not stale and version.status == 'corrected' %}<p class="iw-warning">来源已更正这份材料。请核对本版内容；旧版本和此前引文仍可在版本记录中查看。</p>{% endif %}
-<article class="iw-card"><p>{{ version.summary|linebreaksbr }}</p><p class="iw-muted">发布时间：{% if version.published_precision == 'day' %}{{ version.published_at|date:"Y-m-d" }}（来源仅提供日期）{% else %}{{ version.published_at|date:"Y-m-d H:i"|default:"未知" }}{% endif %} · 发现时间：{{ version.found_at|date:"Y-m-d H:i" }}</p><a href="{{ version.url }}" target="_blank" rel="noopener noreferrer">阅读来源原文 ↗</a><p class="iw-muted">仅展示可用简介与摘录，不代表已核验事实或读过全文。部分来源阅读全文需订阅。</p></article>
+<article class="iw-card"><p>{{ version.summary|linebreaksbr }}</p><p class="iw-muted">发布时间：{% if version.published_precision == 'day' %}{{ version.published_at|date:"Y-m-d" }}（来源仅提供日期）{% else %}{{ version.published_at|date:"Y-m-d H:i"|default:"未知" }}{% endif %} · 发现时间：{{ version.found_at|date:"Y-m-d H:i" }}</p><a href="{{ version.url }}" target="_blank" rel="noopener noreferrer">阅读来源原文 ↗</a><p class="iw-muted">{% if body_snapshot %}上方为目录简介，下方可展开已保存的网页正文。{% else %}目前只有可用简介与摘录。{% endif %}来源陈述仍需核查，部分来源阅读全文需订阅。</p></article>
 <details class="iw-card"><summary>来源与版本</summary>{% for v in versions %}<p><a href="?version={{ v.pk }}">第 {{ v.number }} 版 · {{ v.found_at|date:"Y-m-d H:i" }} · {{ v.get_status_display }}</a></p>{% endfor %}{% for v in sources %}<p>{{ v.material.source.name }} · <a href="{{ v.url }}" target="_blank" rel="noopener noreferrer">来源入口</a></p>{% endfor %}</details>
+{% include 'investment_watch/body_snapshot.html' %}
 {% include 'investment_watch/material_relations.html' %}
 {% if can_write %}
 {% include 'investment_watch/associate_form.html' %}

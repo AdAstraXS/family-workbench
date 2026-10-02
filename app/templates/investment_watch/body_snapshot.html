@@ -1,0 +1,6 @@
+{% if body_snapshot %}
+<details class="iw-card iw-body"><summary>已保存的网页正文 · {{ body_snapshot.fetched_at|date:"Y-m-d H:i" }}</summary>
+<p class="iw-muted">采集方式：{{ body_snapshot.method }} · 正文 #{{ body_snapshot.pk }} · SHA256 {{ body_snapshot.content_hash }}。网页抽取可能不完整，来源陈述仍需核实。</p>
+<a href="{{ body_snapshot.source_url }}" target="_blank" rel="noopener noreferrer">核对来源网页 ↗</a>
+<pre>{{ body_snapshot.text }}</pre></details>
+{% endif %}

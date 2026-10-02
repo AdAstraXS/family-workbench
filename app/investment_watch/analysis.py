@@ -17,11 +17,11 @@ from investment_research.research_ai import (
     _default_transport,
 )
 from monitoring.metering import tracked_call
-from .models import WatchConsent, ResearchCandidate, ThesisEvidence
+from .models import WatchConsent, ResearchCandidate, ThesisEvidence, BodySnapshot
 from .services import writer, dossier_for, digest, WatchError, candidate_stale
 from .budget import amount, reserve, settle
 
-PROMPT_VERSION = "watch-evidence-v7"
+PROMPT_VERSION = "watch-evidence-v8-body"
 _UNSET = object()
 
 
@@ -40,6 +40,7 @@ def analysis_key(candidate, provider, relation=_UNSET):
             provider_signature(provider),
             PROMPT_VERSION,
             relation.pk if relation else None,
+            list(BodySnapshot.objects.filter(material_version=candidate.material_version).values_list("pk", "content_hash").first() or []),
         ]
     )
 
@@ -84,7 +85,11 @@ def set_consent(member, dossier_id, provider, active):
     )[0]
 
 
-def validate_result(raw, candidate):
+def analysis_text(candidate, body=None):
+    return candidate.material_version.title + "\n" + (body.text if body else candidate.material_version.summary)
+
+
+def validate_result(raw, candidate, body=None):
     if not isinstance(raw, str):
         raise WatchError("模型未返回完整的 JSON 文本。")
     raw = raw.strip()
@@ -99,7 +104,7 @@ def validate_result(raw, candidate):
     if not isinstance(value, dict) or not isinstance(value.get("assessments"), list):
         raise WatchError("模型输出结构不正确。")
     allowed = targets(candidate.dossier.current_revision)
-    text = candidate.material_version.title + "\n" + candidate.material_version.summary
+    text = analysis_text(candidate, body)
     rows = []
     seen = set()
     for item in value["assessments"]:
@@ -173,6 +178,12 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
         return analyze_candidate(
             canonical.pk, transport=transport, url_validator=url_validator
         )
+    snapshot = BodySnapshot.objects.filter(material_version=candidate.material_version).first()
+    if getattr(settings, "INVESTMENT_WATCH_BODY_ENABLED", False):
+        from .screening import authorized_provider, latest_screening
+        screening = latest_screening(candidate, authorized_provider(candidate.dossier))
+        if not snapshot or not screening or not screening.selected or screening.batch.status != "completed":
+            raise WatchError("候选需通过初筛并取得可用正文后再分析。")
     consent = (
         WatchConsent.objects.select_related("provider")
         .filter(dossier=candidate.dossier, active=True)
@@ -220,7 +231,9 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
             "thesis": revision.thesis[:3000],
             "targets": targets(revision),
             "title": candidate.material_version.title,
-            "excerpt": candidate.material_version.summary,
+            "excerpt": snapshot.text if snapshot else candidate.material_version.summary,
+            "input_kind": "captured_body" if snapshot else "source_summary",
+            "body_version": {"id": snapshot.pk, "sha256": snapshot.content_hash, "source_url": snapshot.source_url} if snapshot else None,
             "published_at": str(candidate.material_version.published_at),
             "previous_material": previous,
             "status": candidate.material_version.status,
@@ -228,7 +241,7 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
         ensure_ascii=False,
     )
     if len(prompt) + len(user) > policy["max_input_chars"]:
-        raise WatchError("输入超出模型上限。")
+        raise WatchError("正文已保存，但输入超出模型上限；可先阅读全文，尚未生成分析。" if snapshot else "输入超出模型上限。")
     is_glm53 = (
         urlsplit(provider.base_url).hostname == "open.bigmodel.cn"
         and provider.model_name.casefold() in {"glm-5.3", "glm-5.3-flash", "glm-5.3-flashx"}
@@ -282,7 +295,7 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
         choice = result["choices"][0]
         if choice.get("finish_reason") not in (None, "stop"):
             raise WatchError("模型未完整返回结果。")
-        rows = validate_result(choice["message"]["content"], candidate)
+        rows = validate_result(choice["message"]["content"], candidate, snapshot)
         with transaction.atomic():
             locked = dossier_for(member, candidate.dossier_id, lock=True)
             # Freeze against the input revision; changed inputs are retained as stale history.
@@ -292,6 +305,7 @@ def analyze_candidate(candidate_id, transport=None, url_validator=None):
                     revision=revision,
                     input_key=key,
                     input_relation=relation,
+                    input_body=snapshot,
                     **row,
                 )
             candidate.status = (

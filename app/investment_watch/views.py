@@ -32,6 +32,9 @@ from .models import (
     WatchConsent,
     WatchRun,
     MemberAnnotation,
+    BodySnapshot,
+    BodyAttempt,
+    ScreeningBatch,
 )
 from .services import (
     WatchError,
@@ -313,6 +316,7 @@ def news_detail(request, pk):
         context(
             request,
             version=version,
+            body_snapshot=BodySnapshot.objects.filter(material_version=version).first(),
             dossiers=accessible_dossiers(member),
             annotation=MemberAnnotation.objects.filter(
                 member=member, event=material.event
@@ -412,7 +416,7 @@ def items(request):
             "material_version__material__source",
             "material_version__material__event",
         )
-        .prefetch_related("evidence__reviews")
+        .prefetch_related("evidence__reviews", "screenings__batch")
         .order_by("-created_at", "-pk")
     )
     if request.GET.get("dossier"):
@@ -455,6 +459,10 @@ def items(request):
                     and not candidate.current_evidence
                 ):
                     continue
+        candidate.highlight_evidence = [e for e in candidate.current_evidence if e.direction != "unknown"][:2]
+        candidate.more_evidence = [e for e in candidate.current_evidence if e not in candidate.highlight_evidence]
+        candidate.unknown_count = sum(e.direction == "unknown" for e in candidate.more_evidence)
+        candidate.latest_screening = max(candidate.screenings.all(), key=lambda s: s.pk, default=None)
         entries.append(candidate)
     page = paginate(request, entries)
     if wants_json(request):
@@ -527,7 +535,7 @@ def item(request, pk):
     )
     if not candidate:
         raise Http404
-    rows = list(candidate.evidence.select_related("revision", "input_relation__target").prefetch_related("reviews").order_by("-pk"))
+    rows = list(candidate.evidence.select_related("revision", "input_relation__target", "input_body").prefetch_related("reviews").order_by("-pk"))
     current_ids = {e.pk for e in current_evidence(candidate, rows)}
     for evidence in rows:
         evidence.is_current = evidence.pk in current_ids
@@ -550,6 +558,7 @@ def item(request, pk):
                         "source_claim": e.source_claim,
                         "author_opinion": e.author_opinion,
                         "input_relation_id": e.input_relation_id,
+                        "input_body_id": e.input_body_id,
                         "quote": e.quote,
                         "locator": e.locator,
                         "conditions": e.conditions,
@@ -592,6 +601,11 @@ def item(request, pk):
             stale=candidate_stale(candidate),
             version=candidate.material_version,
             original_candidate=original_candidate,
+            body_snapshot=BodySnapshot.objects.filter(material_version=candidate.material_version).first(),
+            screening=candidate.screenings.select_related("batch").order_by("-pk").first(),
+            body_attempt=BodyAttempt.objects.filter(family=member.family, security=candidate.dossier.security,
+                material_version=candidate.material_version).first(),
+            body_references=BodySnapshot.objects.filter(pk__in={e.input_body_id for e in rows if e.input_body_id}).select_related("material_version"),
         ),
     )
 
@@ -899,6 +913,15 @@ def coverage(request):
 
     sources = NewsSource.objects.filter(family=member.family).order_by("name")
     budget = budget_status(member.family)
+    from django.conf import settings
+    from .body_capture import china_day, firecrawl_key
+    body_enabled = getattr(settings, "INVESTMENT_WATCH_BODY_ENABLED", False)
+    body_configured = bool(firecrawl_key())
+    body_attempts = BodyAttempt.objects.filter(family=member.family, candidate__dossier__owner=member).select_related(
+        "security", "material_version").order_by("-created_at")[:15]
+    screenings = ScreeningBatch.objects.filter(dossier__owner=member, dossier__family=member.family).select_related("dossier__security").order_by("-created_at")[:10]
+    body_usage = [{"company": d.security.name, "used": BodyAttempt.objects.filter(family=member.family,
+        security=d.security, day=china_day()).count()} for d in accessible_dossiers(member).select_related("security")]
     runs = WatchRun.objects.filter(
         dossier__owner=member, dossier__family=member.family
     ).order_by("-created_at")[:20]
@@ -906,6 +929,7 @@ def coverage(request):
         return JsonResponse(
             {
                 "budget": budget,
+                "body_pipeline": {"enabled": body_enabled, "configured": body_configured, "daily_limit": 3, "usage": body_usage},
                 "sources": list(
                     sources.values(
                         "id",
@@ -937,6 +961,11 @@ def coverage(request):
             sources=sources,
             budget=budget,
             runs=runs,
+            body_enabled=body_enabled,
+            body_configured=body_configured,
+            body_usage=body_usage,
+            body_attempts=body_attempts,
+            screenings=screenings,
             is_admin=member.role == FamilyMember.ROLE_ADMIN,
         ),
     )
