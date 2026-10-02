@@ -34,6 +34,7 @@ from .forms import (
     NotebookSelectionForm,
     ProposalReviewForm,
     TaxonomyMergeForm,
+    WebCaptureForm,
 )
 from .imports import KnowledgeImportError, create_uploaded_import_batch
 from .microsoft import (
@@ -60,6 +61,7 @@ from .models import (
     KnowledgeSource,
     KnowledgeTag,
     KnowledgeVisibility,
+    KnowledgeWebCapture,
     SourceConnection,
 )
 from .permissions import (
@@ -276,8 +278,62 @@ def _knowledge_stats(member):
     }
 
 
+@login_required
+def web_captures(request):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    form = WebCaptureForm(request.POST or None)
+    if request.method == "POST":
+        if not _can_write(member):
+            return HttpResponseForbidden("只读成员不能提交网页收藏。")
+        if form.is_valid():
+            from .web_capture import submit_capture
+            values = {k: v for k, v in form.cleaned_data.items() if k != "crawl_consent"}
+            capture, created = submit_capture(member, **values)
+            messages.success(request, "已加入保存队列，正文归档后进入待整理。" if created else "此链接已经收藏，已打开原记录；不会重复抓取或改变可见范围。")
+            return redirect("knowledge:web_capture_detail", pk=capture.pk)
+    captures = KnowledgeWebCapture.objects.filter(owner=member, family=member.family).select_related("document", "last_job")
+    return render(request, "knowledge/web_captures.html", {"form": form, "page_obj": Paginator(captures, 20).get_page(request.GET.get("page")), "can_write": _can_write(member), "configured": bool(getattr(settings, "KNOWLEDGE_FIRECRAWL_API_KEY", ""))})
+
+
+@login_required
+def web_capture_detail(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    capture = get_object_or_404(KnowledgeWebCapture.objects.select_related("document__current_revision", "last_job"), owner=member, family=member.family, pk=pk)
+    active = bool(capture.last_job_id and capture.last_job.status in KnowledgeJob.ACTIVE_STATUSES)
+    ai_ready = bool(capture.document_id and capture.document.proposal_runs.filter(revision=capture.document.current_revision).exists())
+    history = KnowledgeJob.objects.filter(family=member.family, requested_by=member, job_type=KnowledgeJob.TYPE_CAPTURE_WEB, parameters__capture_id=capture.pk).order_by("-id")[:10]
+    return render(request, "knowledge/web_capture_detail.html", {"capture": capture, "active": active, "can_write": _can_write(member), "ai_ready": ai_ready, "capture_history": history})
+
+
+@login_required
+@require_POST
+def web_capture_retry(request, pk):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    capture = get_object_or_404(KnowledgeWebCapture, owner=member, family=member.family, pk=pk)
+    if not _can_write(member):
+        return HttpResponseForbidden("只读成员不能重试网页收藏。")
+    from .web_capture import queue_capture
+    from .web_fetch import WebCaptureError
+    try:
+        _, created = queue_capture(capture, request.POST.get("mode", "resume"))
+        messages.success(request, "已加入重试队列。" if created else "保存任务仍在运行，请勿重复提交。")
+    except WebCaptureError as exc:
+        messages.error(request, str(exc))
+    return redirect("knowledge:web_capture_detail", pk=pk)
+
+
 def _build_source_directory(entries):
     groups = []
+    web_nodes = list(entries.filter(item_kind=KnowledgeSearchEntry.KIND_DOCUMENT, source_kind=KnowledgeSource.KIND_WEB_CAPTURE).order_by().values("document__source_id", "source_name").annotate(count=Count("id")).order_by("source_name"))
+    if web_nodes:
+        groups.append({"id": "web_capture", "name": "网页收藏", "count": sum(n["count"] for n in web_nodes),
+            "nodes": [{"name": n["source_name"], "count": n["count"], "source_id": str(n["document__source_id"]), "author": ""} for n in web_nodes]})
 
     onenote_nodes = list(
         entries.filter(
@@ -380,6 +436,7 @@ def _build_source_directory(entries):
                 KnowledgeSource.KIND_HTML_IMPORT,
                 KnowledgeSource.KIND_MARKDOWN_IMPORT,
                 KnowledgeSource.KIND_INTELLIGENCE,
+                KnowledgeSource.KIND_WEB_CAPTURE,
             ]
         )
         .order_by()
@@ -505,7 +562,7 @@ def _library_response(
 
     if directory_mode not in {"category", "source"}:
         directory_mode = "category"
-    if source_group not in {"onenote", "notes", "people", "other"}:
+    if source_group not in {"onenote", "notes", "people", "other", "web_capture"}:
         source_group = ""
     if source_id == "notes":
         source_group = "notes"
@@ -579,6 +636,8 @@ def _library_response(
         entries = entries.filter(category=category)
     if source_group == "onenote":
         entries = entries.filter(source_kind=KnowledgeSource.KIND_ONENOTE)
+    elif source_group == "web_capture":
+        entries = entries.filter(source_kind=KnowledgeSource.KIND_WEB_CAPTURE)
     elif source_group == "notes":
         entries = entries.filter(
             item_kind=KnowledgeSearchEntry.KIND_INVESTMENT_NOTE
@@ -602,6 +661,7 @@ def _library_response(
                 KnowledgeSource.KIND_HTML_IMPORT,
                 KnowledgeSource.KIND_MARKDOWN_IMPORT,
                 KnowledgeSource.KIND_INTELLIGENCE,
+                KnowledgeSource.KIND_WEB_CAPTURE,
             ]
         )
     if source_author:
@@ -1494,6 +1554,7 @@ def document_detail(request, pk):
             "document": document,
             "revision": revision,
             "artifact_evidence": artifact_evidence,
+            "capture_active": KnowledgeWebCapture.objects.filter(document=document, last_job__status__in=KnowledgeJob.ACTIVE_STATUSES).exists() if document.source.kind == KnowledgeSource.KIND_WEB_CAPTURE else False,
             "proposals": proposals,
             "pending_proposals": pending_proposals,
             "history_runs": history_runs,
@@ -1630,6 +1691,7 @@ def _selected_ai_documents(member, raw_ids, *, mode="pending_documents"):
                 KnowledgeDocument.CURATION_NORMALIZED,
             ],
         )
+    queryset = queryset.exclude(web_capture__last_job__status__in=KnowledgeJob.ACTIVE_STATUSES)
     documents = list(queryset.order_by("source__name", "title", "id"))
     if len(documents) != len(document_ids):
         raise KnowledgeAiError(
@@ -1940,7 +2002,7 @@ def revision_raw_download(request, pk):
     response = FileResponse(
         _open_protected_file(revision.raw_file),
         as_attachment=True,
-        filename=f"knowledge-{document.pk}-v{revision.revision_number}.html",
+        filename=f"knowledge-{document.pk}-v{revision.revision_number}.{'json' if document.source.kind == KnowledgeSource.KIND_WEB_CAPTURE else 'html'}",
         content_type="application/octet-stream",
     )
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -2469,6 +2531,7 @@ def _visible_jobs(member):
         "source",
         "requested_by",
     )
+    jobs = jobs.filter(~Q(job_type=KnowledgeJob.TYPE_CAPTURE_WEB) | Q(requested_by=member))
     if member.role == FamilyMember.ROLE_ADMIN:
         return jobs
     return jobs.filter(
@@ -2565,6 +2628,8 @@ def job_retry(request, pk):
     if member is None:
         return _membership_required_response(request)
     previous = get_object_or_404(_visible_jobs(member), pk=pk)
+    if previous.job_type == KnowledgeJob.TYPE_CAPTURE_WEB:
+        return redirect("knowledge:web_capture_detail", pk=previous.parameters["capture_id"])
     if (
         not _can_write(member)
         or (

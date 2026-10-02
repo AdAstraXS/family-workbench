@@ -9620,3 +9620,22 @@ textarea {
   text-decoration: underline;
   text-underline-offset: 0.4em;
 }
+
+.web-capture-grid { display: grid; grid-template-columns: minmax(300px, 0.95fr) minmax(300px, 1.2fr); gap: 24px; align-items: start; }
+.songting.view-web_captures .knowledge-home-hero p, .songting.view-web_capture_detail .knowledge-home-hero p { color: var(--ws-muted, #526174); }
+.songting.view-web_capture_detail .knowledge-home-hero a { color: var(--ws-accent, #356b9c); overflow-wrap: anywhere; }
+.web-capture-form .form-row { margin: 20px 0; }
+.web-capture-form .form-row > label { display: block; margin-bottom: 8px; }
+.web-capture-form input:not([type="checkbox"]), .web-capture-form select { width: 100%; box-sizing: border-box; }
+.web-capture-consent label { display: flex !important; gap: 10px; align-items: start; line-height: 1.7; }
+.web-capture-consent input { flex: 0 0 auto; margin-top: 6px; }
+.web-capture-row { padding: 18px 0; border-bottom: 1px solid var(--line, #e5e7eb); overflow-wrap: anywhere; }
+.web-capture-detail { overflow-wrap: anywhere; }
+.web-capture-detail .action-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+.web-capture-detail details { margin: 20px 0; }
+.web-capture-detail summary { cursor: pointer; }
+@media (max-width: 1000px) {
+  .web-capture-grid { grid-template-columns: minmax(0, 1fr); }
+  .songting.app-knowledge .knowledge-hub-shell { grid-template-columns: minmax(0, 1fr); }
+  .songting.app-knowledge .knowledge-hub-sidebar { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+}

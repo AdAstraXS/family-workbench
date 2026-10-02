@@ -18,7 +18,8 @@
         {% if document.hierarchy.intelligence_event_id %}<a class="button primary" href="{% url 'intelligence:event_detail' document.hierarchy.intelligence_event_id %}">返回原始情报</a>{% endif %}
         {% if document.source_url %}<a class="button" href="{{ document.source_url }}" rel="noopener noreferrer" target="_blank">打开原文链接</a>{% endif %}
         {% if revision %}<a class="button" href="{% url 'knowledge:revision_raw_download' revision.pk %}">下载原始版本</a>{% endif %}
-        {% if can_organize %}
+        {% if capture_active %}<span class="muted">网页收藏仍在处理；完成或取消后可以整理。</span>{% endif %}
+        {% if can_organize and not capture_active %}
           {% if document.knowledge_status == "pending" %}
             {% if document.curation_status == "pending_ai" %}
               <button class="button primary" type="button" disabled>AI 整理中</button>
@@ -56,6 +57,9 @@
       </div>
     </header>
 
+    {% if document.source.kind == 'web_capture' %}
+      <aside class="notice"><strong>网页归档快照</strong><p>正文和已保存图片来自收藏时的网页，不随源站变化自动更新。{% if document.web_capture.owner_id == request.family_member.id %}<a href="{% url 'knowledge:web_capture_detail' document.web_capture.pk %}">查看保存记录与重试</a>{% endif %}</p>{% if document.web_capture.image_failures %}<p>有 {{ document.web_capture.image_failures|length }} 张图片未保存，正文中的对应位置已标明。</p>{% endif %}</aside>
+    {% endif %}
     {% if artifact_evidence %}
     <aside class="notice warning knowledge-evidence-version-notice">
       <strong>正在查看专题成果引用的固定证据版本 v{{ revision.revision_number }}</strong>

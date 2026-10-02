@@ -14,6 +14,21 @@ from .models import (
 from .taxonomy import canonicalize_document_taxonomy
 
 
+class WebCaptureForm(forms.Form):
+    url = forms.URLField(label="网页链接", max_length=1000, widget=forms.URLInput(attrs={"placeholder": "https://…"}))
+    note = forms.CharField(label="收藏备注（可选）", max_length=500, required=False)
+    visibility = forms.ChoiceField(label="可见范围", choices=KnowledgeVisibility.choices, initial=KnowledgeVisibility.PRIVATE)
+    crawl_consent = forms.BooleanField(label="同意将此公开链接发送给 Firecrawl Cloud 抓取正文和图片")
+    organize_with_ai = forms.BooleanField(label="同时允许将正文发送给已配置的文本 AI，生成待确认的摘要、分类和标签", required=False, initial=True)
+
+    def clean_url(self):
+        from .web_fetch import canonical_url
+        try:
+            return canonical_url(self.cleaned_data["url"])
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
+
+
 class NotebookSelectionForm(forms.Form):
     notebook_id = forms.ChoiceField(label="试点笔记本")
     visibility = forms.ChoiceField(

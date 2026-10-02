@@ -153,6 +153,7 @@ class KnowledgeSource(TimestampedModel):
     KIND_MARKDOWN_IMPORT = "markdown_import"
     KIND_INTELLIGENCE = "intelligence"
     KIND_READING = "reading"
+    KIND_WEB_CAPTURE = "web_capture"
     KIND_CHOICES = [
         (KIND_ONENOTE, "OneNote"),
         (KIND_INTERNAL_NOTES, "随手记"),
@@ -160,6 +161,7 @@ class KnowledgeSource(TimestampedModel):
         (KIND_MARKDOWN_IMPORT, "Markdown 历史资料"),
         (KIND_INTELLIGENCE, "AI 情报归档"),
         (KIND_READING, "阅读成果"),
+        (KIND_WEB_CAPTURE, "网页收藏"),
     ]
 
     ROUTE_KNOWLEDGE = "knowledge"
@@ -778,6 +780,7 @@ class KnowledgeJob(TimestampedModel):
     TYPE_PREVIEW_IMPORT = "preview_import"
     TYPE_IMPORT_BATCH = "import_batch"
     TYPE_ROLLBACK_IMPORT = "rollback_import"
+    TYPE_CAPTURE_WEB = "capture_web"
     TYPE_CHOICES = [
         (TYPE_SYNC_SOURCE, "同步来源"),
         (TYPE_GENERATE_PROPOSALS, "生成 AI 整理建议"),
@@ -785,6 +788,7 @@ class KnowledgeJob(TimestampedModel):
         (TYPE_PREVIEW_IMPORT, "检查导入资料"),
         (TYPE_IMPORT_BATCH, "执行资料导入"),
         (TYPE_ROLLBACK_IMPORT, "回滚导入批次"),
+        (TYPE_CAPTURE_WEB, "保存网页收藏"),
     ]
 
     STATUS_PENDING = "pending"
@@ -869,6 +873,30 @@ class KnowledgeJob(TimestampedModel):
 
     def __str__(self):
         return f"{self.get_job_type_display()} · {self.get_status_display()}"
+
+
+class KnowledgeWebCapture(TimestampedModel):
+    family = models.ForeignKey(Family, on_delete=models.CASCADE)
+    owner = models.ForeignKey(FamilyMember, on_delete=models.CASCADE)
+    url = models.URLField("网页链接", max_length=1000)
+    url_hash = models.CharField(max_length=64)
+    visibility = models.CharField("可见范围", max_length=20, choices=KnowledgeVisibility.choices, default=KnowledgeVisibility.PRIVATE)
+    note = models.CharField("收藏备注", max_length=500, blank=True)
+    organize_with_ai = models.BooleanField("生成 AI 整理建议", default=True)
+    document = models.OneToOneField(KnowledgeDocument, on_delete=models.SET_NULL, null=True, blank=True, related_name="web_capture")
+    last_job = models.ForeignKey(KnowledgeJob, on_delete=models.SET_NULL, null=True, blank=True, related_name="web_captures")
+    stage = models.CharField("当前步骤", max_length=30, default="queued", choices=[("queued", "等待保存"), ("capture", "抓取正文"), ("images", "归档图片"), ("ai", "生成整理建议"), ("done", "已保存"), ("failed", "需要重试")])
+    image_failures = models.JSONField("未保存图片", default=list, blank=True)
+    error_message = models.TextField("错误说明", blank=True)
+
+    class Meta:
+        verbose_name = "网页收藏"
+        verbose_name_plural = "网页收藏"
+        ordering = ["-created_at"]
+        constraints = [models.UniqueConstraint(fields=["owner", "url_hash"], name="unique_web_capture_owner_url")]
+
+    def __str__(self):
+        return self.document.title if self.document_id else self.url
 
 
 class KnowledgeJobItem(models.Model):

@@ -21,8 +21,17 @@ from .models import (
     KnowledgeSearchEntry,
     KnowledgeSource,
     KnowledgeTag,
+    KnowledgeWebCapture,
     SourceConnection,
 )
+
+
+@admin.register(KnowledgeWebCapture)
+class KnowledgeWebCaptureAdmin(PrivateContentAdmin):
+    def allowed_objects(self, member):
+        return KnowledgeWebCapture.objects.filter(owner=member, family=member.family)
+
+    list_display = ("id", "url", "owner", "stage", "document", "updated_at")
 
 
 class KnowledgeArtifactVersionInline(admin.TabularInline):
@@ -291,7 +300,7 @@ class KnowledgeJobItemInline(admin.TabularInline):
 @admin.register(KnowledgeJob)
 class KnowledgeJobAdmin(PrivateContentAdmin):
     def allowed_objects(self, member):
-        return KnowledgeJob.objects.filter(family=member.family, source__owner=member)
+        return KnowledgeJob.objects.filter(family=member.family).filter(Q(source__owner=member) | Q(job_type=KnowledgeJob.TYPE_CAPTURE_WEB, requested_by=member))
 
     list_display = (
         "id",

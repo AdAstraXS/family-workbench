@@ -214,6 +214,17 @@ def rebuild_document_normalized_content(document, *, save=True):
     revision = document.current_revision
     if revision is None:
         raise ValueError("知识文档没有可重建的当前原始版本。")
+    if document.source.kind == KnowledgeSource.KIND_WEB_CAPTURE:
+        from .web_capture import CONVERTER_VERSION, web_revision_content
+        safe_html, plain_text = web_revision_content(revision)
+        changed = revision.normalized_html != safe_html or revision.converter_version != CONVERTER_VERSION
+        if save and changed:
+            revision.normalized_html, revision.plain_text = safe_html, plain_text
+            revision.normalized_hash = content_hash(plain_text.encode())
+            revision.converter_version = CONVERTER_VERSION
+            revision.save(update_fields=["normalized_html", "plain_text", "normalized_hash", "converter_version"])
+            index_document(document)
+        return {"changed": changed, "plain_text_length": len(plain_text), "asset_count": revision.assets.count()}
     with revision.raw_file.open("rb") as raw_file:
         raw_bytes = raw_file.read()
     raw_html = raw_bytes.decode("utf-8", errors="replace")
@@ -787,6 +798,9 @@ def claim_next_job():
 
 
 def process_job(job):
+    if job.job_type == KnowledgeJob.TYPE_CAPTURE_WEB:
+        from .web_capture import process_capture_job
+        return process_capture_job(job)
     try:
         if job.job_type == KnowledgeJob.TYPE_SYNC_SOURCE:
             counters = sync_onenote_source(job)

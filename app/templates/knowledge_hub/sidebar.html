@@ -1,6 +1,7 @@
 <nav class="knowledge-hub-nav" aria-label="知识产品导航">
   <section>
     <h2>知识空间</h2>
+    <a href="{% url 'knowledge:web_captures' %}"{% if "web_capture" in request.resolver_match.url_name %} class="active"{% endif %}><span aria-hidden="true">藏</span><strong>网页收藏</strong></a>
     <a href="{% url 'knowledge:index' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "index" %} class="active"{% endif %}>
       <span aria-hidden="true">总</span><strong>总览</strong>
     </a>

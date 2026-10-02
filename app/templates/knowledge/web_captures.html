@@ -1,0 +1,26 @@
+{% extends "knowledge_hub/base.html" %}
+{% block title %}网页收藏{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>网页收藏</span>{% endblock %}
+{% block hub_content %}
+<section class="knowledge-home-hero"><div><span class="eyebrow">收集 · 长期保存</span><h1>收藏一篇网页</h1><p>保存正文、普通图片和静态图表。AI 只生成建议，确认后才成为精选知识。</p></div></section>
+<div class="web-capture-grid">
+  <section class="panel web-capture-form">
+    <h2>粘贴公开网页链接</h2>
+    <p class="muted">不支持登录后内容、付费墙、视频和交互图表；不会提交浏览器账号或 Cookie。</p>
+    {% if not configured %}<p class="notice">网页抓取服务尚未配置。可以先登记链接，管理员配置 Firecrawl 后再重试。</p>{% endif %}
+    {% if can_write %}<form method="post">{% csrf_token %}
+      {{ form.non_field_errors }}
+      {% for field in form %}<div class="form-row{% if field.field.widget.input_type == 'checkbox' %} web-capture-consent{% endif %}">{{ field.errors }}{% if field.field.widget.input_type == 'checkbox' %}<label>{{ field }}<span>{{ field.label }}</span></label>{% else %}{{ field.label_tag }}{{ field }}{% endif %}</div>{% endfor %}
+      <button type="submit" class="button primary">保存网页</button>
+    </form>{% else %}<p>当前账号只读，可以查看已有收藏。</p>{% endif %}
+    <p class="muted">正文归档到 NAS 后进入待整理。同一账号重复提交相同链接，只会打开原记录。</p>
+  </section>
+  <section class="panel">
+    <header class="section-heading"><h2>我的收藏记录</h2><a href="{% url 'knowledge:library' %}?collection=archive&amp;source=web_capture&amp;directory=source">查看归档正文</a></header>
+    <div class="knowledge-compact-list">{% for capture in page_obj %}
+      <article class="web-capture-row"><a href="{% url 'knowledge:web_capture_detail' capture.pk %}"><strong>{% if capture.document_id %}{{ capture.document.title }}{% else %}{{ capture.url }}{% endif %}</strong></a><p class="muted">{{ capture.created_at|date:"m-d H:i" }} · {{ capture.get_visibility_display }} · {% if capture.last_job_id %}{{ capture.last_job.get_status_display }}{% else %}尚未排队{% endif %}</p>{% if capture.note %}<p>{{ capture.note }}</p>{% endif %}{% if capture.image_failures %}<small>有 {{ capture.image_failures|length }} 张图片未保存</small>{% endif %}</article>
+      {% empty %}<div class="knowledge-gentle-empty"><strong>还没有收藏网页</strong><span>从一篇值得保存的文章开始。</span></div>{% endfor %}</div>
+    {% if page_obj.has_previous %}<a href="?page={{ page_obj.previous_page_number }}">上一页</a>{% endif %} {% if page_obj.has_next %}<a href="?page={{ page_obj.next_page_number }}">下一页</a>{% endif %}
+  </section>
+</div>
+{% endblock %}

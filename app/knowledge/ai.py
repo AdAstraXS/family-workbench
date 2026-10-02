@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import socket
+from contextlib import contextmanager
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,6 +31,18 @@ SENSITIVE_EXTRA_KEYS = {"api_key", "apikey", "secret_key", "access_token", "toke
 
 class KnowledgeAiError(RuntimeError):
     pass
+
+
+@contextmanager
+def _proposal_save_guard(analysis_request):
+    try:
+        with transaction.atomic():
+            yield
+    except Exception:
+        analysis_request.status = AiAnalysisRequest.STATUS_FAILED
+        analysis_request.error_message = "整理结果未应用：任务取消、正文版本变化或保存失败。"
+        analysis_request.save(update_fields=["status", "error_message", "updated_at"])
+        raise
 
 
 def _active_provider(provider_id=None):
@@ -202,10 +215,12 @@ def _parse_result(payload, *, category_names, tag_names):
     }
 
 
-def generate_proposals(document, *, cloud_ai_consent="source", requested_by=None):
+def generate_proposals(document, *, cloud_ai_consent="source", requested_by=None, before_save=None):
     revision = document.current_revision
     if revision is None:
         raise KnowledgeAiError("文档尚无可分析的正文版本。")
+    if document.source.kind == "web_capture" and len(revision.plain_text) > 80000:
+        raise KnowledgeAiError("网页正文超过 AI 完整分析长度限制，请人工整理或拆分后导入；原文保持不变。")
     if document.source.allow_cloud_ai:
         consent_scope = "source"
     elif cloud_ai_consent == "one_time":
@@ -293,7 +308,14 @@ def generate_proposals(document, *, cloud_ai_consent="source", requested_by=None
         raise
 
     usage = payload.get("usage") or {}
-    with transaction.atomic():
+    with _proposal_save_guard(analysis_request):
+        if before_save:
+            before_save()
+            locked_document = type(document).objects.select_for_update().get(pk=document.pk)
+            if locked_document.current_revision_id != revision.pk:
+                raise KnowledgeAiError("正文版本已经变化，旧 AI 结果未应用，请重试。")
+            if locked_document.curation_status == "confirmed" and document.curation_status != "confirmed":
+                raise KnowledgeAiError("成员已完成手动整理，旧 AI 结果未应用；已确认内容保持不变。")
         analysis_request.status = AiAnalysisRequest.STATUS_SUCCESS
         analysis_request.error_message = ""
         analysis_request.save(update_fields=["status", "error_message", "updated_at"])
