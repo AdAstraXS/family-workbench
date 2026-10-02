@@ -1,6 +1,6 @@
 # 重要新闻初筛、正文与动态列表
 
-2026-10-02。本轮已实现，尚未部署或调用真实 Firecrawl。
+2026-10-02。本轮已部署启用；已验证真实 Firecrawl 凭证与额度，尚待后续新候选验证正文质量。
 
 ## 已确认范围
 
@@ -61,4 +61,15 @@
 3. 启用 `INVESTMENT_WATCH_BODY_ENABLED=true`，保留已有微软授权、四个活跃信源、日/月模型预算和 15 分钟 DSM 调度。美联储已从本模块暂停，宏观模块另行处理。
 4. 用后续真实新候选验收一次完整流程，核对正文原文、初筛理由、引文、费用和当天名额。没有重要候选时接受零篇，不为验收自动补抓历史文章。
 
-2026-10-02 本次只读核对 NAS：运行提交 `f669167db1edb7a10823ea56fb408dc938026444`，数据库与 OpenD 健康。本轮未部署、未改生产数据库或环境。
+## NAS 发布验收 · 2026-10-02 22:12
+
+- 以当时运行的网页收藏提交 `48b21ce3676e27d00942cbe9d39d4e1dcea2937e` 为基线合入新闻功能，保留同期已上线代码。实际运行提交 `b0c0d6e805000e048e6a6625609887ee358fc6b8` 已推送 GitHub；之后的验收记录提交仅含文档。
+- 合并后 94 项投资动态专项与 PostgreSQL 并发测试全部通过（含共用凭证与显式凭证优先用例）；迁移检查无变化，系统检查、补丁检查通过。依赖和 Compose 无变化，复用现有镜像。
+- 生产备份 `/volume1/docker/family-workbench/backups/family-workbench-watch-body-predeploy-20261002-2206.dump`，53 MB，已通过 `pg_restore -l`；SHA256 `84917a05f8e191827b7142abadbeaab7c3a503301963f433b86ae45fb433618f`。
+- 源码恢复点 `/volume1/docker/family-workbench/backups/source-predeploy-48b21ce3676e27d00942cbe9d39d4e1dcea2937e-20261002-220621.tar.gz`；SHA256 `1c8f10a634efc97b8b5e2849f55f3f5fc9475cfcbe3bc8890e19a942e44bfde8`。
+- 发布包 SHA256 `f073ae50f717ba39a315b24fb3c0cda5cc483e63d3e7b5f34b15627c697cbbb1`，上传与 NAS 核对一致。包装器仅安装 `app/`。
+- NAS 环境只追加 `INVESTMENT_WATCH_BODY_ENABLED=true`；复用既有 `KNOWLEDGE_FIRECRAWL_API_KEY`。环境 SHA256 从 `b6c9b0cc7bb6affde593b089b598c40c1d36cdb9234cfed01d718b01d9a9447f` 变为 `700ee62f6c51bb721cdfc27eb37a6f591039baa04cab8f5eecd8beb450ed9c49`，其余配置原字节保持。
+- web 重建后 `investment_watch.0008` 成功，系统检查零问题，静态文件与 Gunicorn 正常。DB、OpenD 容器保持原创建时间与健康状态。内部请求正常转到登录页，外部登录态页面可用，正文显示已启用且密钥已配置；精简动态列表已核对。
+- 财务基线前后完全相同：账户 35、持仓 483、交易 1,080、快照 2,284、快照明细 14,244、估值运行 80；最新快照日期 2026-10-02。生产写入限于本模块迁移、启用时间与新闻任务记录。
+- DSM 原有 `family-workbench-investment-watch` 任务继续每 15 分钟运行。22:10:51 手动触发首轮，22:11 完成：初筛 0 条、正文分析 0 篇，无历史补抓或新增模型占用。现有四个活跃信源仍每 120 分钟采集；美联储暂停，仅本人微软模型授权继续生效。
+- 剩余验收：待后续启用后的真实新候选出现，再核对 GLM 初筛理由、Firecrawl 正文与精确引文。零候选启动成功不能作为正文质量已验收；历史候选和旧摘要分析保留，不自动补抓。
