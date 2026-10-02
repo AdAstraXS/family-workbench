@@ -8975,6 +8975,19 @@ textarea {
 }
 
 @media (max-width: 640px) {
+  .knowledge-home-shortcuts > a {
+    position: relative;
+  }
+
+  .knowledge-home-shortcuts .knowledge-help-tip {
+    position: static;
+  }
+
+  .knowledge-home-shortcuts > a:nth-child(even) .knowledge-help-tip-popup {
+    right: 0;
+    left: auto;
+  }
+
   .knowledge-help-tip-popup {
     right: auto;
     left: 0;
