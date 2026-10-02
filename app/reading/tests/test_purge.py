@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import Client, TestCase
+from django.core.files.storage import FileSystemStorage
 from django.urls import reverse
 
 from reading import ai
@@ -16,6 +17,7 @@ from reading.services import process_file, change_book_deleted_state
 from reading.storage import storage
 from ai_analysis.models import AiProvider, AiAnalysisRequest, AiAnalysisResult
 from knowledge.models import KnowledgeRevision
+from knowledge.permissions import accessible_documents, accessible_search_entries
 from .test_reading import ReadingTests
 from .test_collaboration import structured
 
@@ -75,6 +77,18 @@ class PurgeTests(TestCase):
         self.assertEqual(archived_path.read_bytes(), archived_bytes)
         self.assertEqual(other_path.read_bytes(), b"other book")
         document.refresh_from_db()
+        self.assertIsNone(document.reading_archive.version_id)
+        self.assertTrue(accessible_documents(self.peer).filter(pk=document.pk).exists())
+        self.assertTrue(accessible_search_entries(self.peer).filter(document=document).exists())
+        self.assertFalse(accessible_documents(self.owner).filter(pk=document.pk).exists())
+        self.assertFalse(accessible_documents(self.other).filter(pk=document.pk).exists())
+        self.client.force_login(self.peer.user)
+        self.assertContains(self.client.get(reverse("knowledge:document_detail", args=[document.pk])), "测试观点")
+        with patch.object(KnowledgeRevision._meta.get_field("raw_file"), "storage", FileSystemStorage(location=self.tmp.name)):
+            download = self.client.get(reverse("knowledge:revision_raw_download", args=[document.current_revision_id]))
+            self.assertEqual(download.status_code, 200)
+            self.assertEqual(b"".join(download.streaming_content), archived_bytes)
+        self.client.force_login(self.owner.user)
         revision = document.current_revision
         self.assertTrue((Path(self.tmp.name) / str(revision.raw_file)).exists())
         self.assertIn("此归档版本独立保留", revision.normalized_html)

@@ -19,6 +19,7 @@ def accessible_documents(member):
     return (
         KnowledgeDocument.objects.filter(family=member.family)
         .filter(~Q(source__kind=KnowledgeSource.KIND_READING) | Q(
+            reading_archive__isnull=False, reading_archive__version__isnull=True) | Q(
             reading_archive__version__artifact__in=accessible_reading_artifacts(member)))
         .filter(
             Q(owner=member)

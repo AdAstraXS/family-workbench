@@ -72,7 +72,7 @@ def request_purge(book, member):
         # Preserve usage/cost audit, remove book excerpts and generated private content from AI audit.
         AiAnalysisRequest.objects.filter(pk__in=request_ids).update(prompt="", sanitized_input={}, scope={}, error_message="")
         AiAnalysisResult.objects.filter(request_id__in=request_ids).update(result_text="", result_json={})
-        ReadingArchive.objects.filter(version__in=versions).delete()
+        # Keep the archive receipt; deleting versions detaches its nullable source reference.
         ReadingArtifact.objects.filter(book=book).update(current_version=None)
         versions.delete()
         ReadingArtifact.objects.filter(book=book).delete()

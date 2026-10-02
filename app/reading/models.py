@@ -198,7 +198,7 @@ class ReadingArtifactVersion(models.Model):
 
 
 class ReadingArchive(models.Model):
-    version = models.OneToOneField(ReadingArtifactVersion,on_delete=models.PROTECT,related_name="archive")
+    version = models.OneToOneField(ReadingArtifactVersion,on_delete=models.SET_NULL,related_name="archive",null=True,blank=True)
     document = models.OneToOneField("knowledge.KnowledgeDocument",on_delete=models.PROTECT,related_name="reading_archive")
     created_at = models.DateTimeField(auto_now_add=True)
 
