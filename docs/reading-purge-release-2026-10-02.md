@@ -29,4 +29,35 @@
 - 已合入部署前生产 `dbe9ce5`，组合版本阅读回归通过；最终路径校验调整后专项 20 项通过。
   NAS 既有 DSM 阅读任务 ID11 每五分钟运行，包含 `process_reading_imports --limit 1`，无需新建任务。
 
-NAS 发布记录待部署验收补充。
+## NAS 发布与恢复点
+
+- 发布时间：2026-10-02 17:00–17:18（Asia/Shanghai）。最终运行提交：`f669167db1edb7a10823ea56fb408dc938026444`，已推送 `origin/codex/reading-nas-release`。
+- 发布前运行 `dbe9ce54725ae19e186deea8c097a28f2f3bfee7`，已合入保留其投资研究更新。最初安装 `1c728d1` 并应用 `reading.0006_bookpurgetask`，随后在最终登记前补充归档独立权限修复 `f669167` 和 `reading.0007_alter_readingarchive_version`。
+- 两次均用精确 Git 归档、受限包装器安装 `app/` 并重启 Web；无依赖变化。最终 15 个变更文件与归档逐项 SHA-256 一致。未跟踪 demo、临时数据库和测试脚本未打包。
+
+恢复点均保存在 NAS `/volume1/docker/family-workbench/backups/`：
+
+| 文件 | SHA-256 |
+| --- | --- |
+| `family-workbench-pre-reading-purge-20261002-1657.dump`（52 MB；首次迁移前） | `298b29e919e0c93a88bc053553579ef92bd80457506ef56be81720ad59bde6db` |
+| `family-workbench-pre-reading-purge-archive-fix-20261002-1711.dump`（52 MB；0006 已应用、归档修复前） | `71bd9a166a3849443463d93389267b0d5c3323f4ce479bc1f1e1ac4834345281` |
+| `source-predeploy-dbe9ce54725ae19e186deea8c097a28f2f3bfee7-20261002-170001.tar.gz`（发布前源码） | `a55a85913c8acef530296b6d4a9fa59b2645315442447e117c85faeeaee44cec` |
+| `source-predeploy-dbe9ce54725ae19e186deea8c097a28f2f3bfee7-20261002-171315.tar.gz`（实际为中间版本 `1c728d1` 源码；文件名沿用暂未更新的运行标记） | `d2f4a4ace54457798acdee4e05809907336ee3f929ec439ab70cfbe10c49f78b` |
+| `family-workbench-reading-purge-1c728d1.tar.gz`（首版归档） | `df6c7ae24c63649731177c867a839105dc18c847227024794181e36e188df111` |
+| `family-workbench-reading-purge-f669167.tar.gz`（最终归档，4,691,041 字节） | `59ade540786c26ed638e221dfe50548173c016668f7ad46618665ec22e0c945a` |
+
+两个数据库备份均由包装器通过 `pg_restore -l` 验证；旧源码包验证可读；上传归档哈希一致。
+
+## 生产验收及发布期间事件
+
+- 初次启动日志明确 `reading.0006_bookpurgetask... OK`。最终源码包含 0007，最终容器启动执行全部应用迁移并报告 `No migrations to apply`，确认没有待应用迁移。0007 执行时的旧容器日志因下述并行重建未保留在当前容器日志中。
+- 最终 Django check 无问题，Gunicorn 正常；内部回收站与外部书库/回收站匿名访问均正常跳转登录（302），阅读器静态 JS 返回 200。
+- 财务基线在初次部署、补丁前和最终验收均一致：账户 35、持仓 483、流水 1080、快照 2284、明细 14244、每日估值运行 80，最新快照日期 2026-10-02。
+- DB、OpenD 原创建时间与健康状态保持。未执行生产永久删除、恢复、造测试记录或手动阅读队列命令；未导入本地数据库或修改上传文件。
+- DSM 阅读任务 ID11 保持启用，每日 00:00–23:55 每五分钟运行，使用 `flock`，依次执行 `process_reading_imports --limit 1` 和 `process_reading_ai --limit 1`。未更改任务配置或手动触发。
+- 17:00 原定时任务恰在源码安装和0006建表之间触发，记录一次缺少 `reading_bookpurgetask` 表的错误。17:05、17:10、17:15 自动轮次均恢复正常、失败或中断为零。
+- 17:14 验收期间另一项用户授权的投资新闻配置任务更新 `.env` 并执行 `recreate-web`，导致短暂502。本发布暂停写入，主代理核实来源及授权后继续只读验收；17:14:47新容器启动，17:16内外访问恢复正常，源码哈希仍完全匹配 `f669167`。
+- 并行任务仅调整 `INVESTMENT_WATCH_COLLECT_ENABLED`、`INVESTMENT_WATCH_MODEL_ENABLED`、`INVESTMENT_WATCH_DAILY_CNY`、`INVESTMENT_WATCH_MONTHLY_CNY`。配置哈希由 `78d7894b721698adf1d5a4ce3c969e4983b2ee079cdebdb5082db3aca985b51c` 变为已确认的新基线 `3d1302a80b543f6c33b41b77228571cdba96abe18c8b98227f5fd4df8929a5b4`；本阅读发布未改环境配置。
+- 验收通过后将 `DEPLOYED_COMMIT` 更新并复核为 `f669167db1edb7a10823ea56fb408dc938026444`。GitHub直连一度超时，最终源码按既有约定使用单次本机代理推送成功，未修改永久代理配置。
+
+本记录为部署后的文档提交，实际运行代码仍以 `f669167` 为准。生产未试删，永久删除效果与归档权限以临时 PostgreSQL 联合116项测试验收。保留长期部署密钥与受限包装器，未创建临时权限。
