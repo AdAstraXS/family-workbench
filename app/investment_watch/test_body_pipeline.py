@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from . import tests as legacy
 from .analysis import analyze_candidate, analysis_key, validate_result, set_consent
-from .body_capture import capture_body, reserve_body, china_day, MAX_RESPONSE_BYTES
+from .body_capture import capture_body, reserve_body, china_day, MAX_RESPONSE_BYTES, firecrawl_key
 from .models import BodyAttempt, BodySnapshot, BudgetReceipt, CandidateScreening, ScreeningBatch, WatchPipelineState, WatchRule, ThesisEvidence, NewsSource
 from .screening import screen_candidates, screening_key, validate_screening
 from .services import ingest, associate, WatchError, digest
@@ -46,6 +46,13 @@ class BodyPipelineTests(TestCase):
             summary="Copilot adds autonomous application capabilities; commercial impact needs checking.",
             url=f"https://example.com/body-{index}", published_at=timezone.now())
         return associate(self.member, self.dossier.pk, version.pk, self.dossier.current_revision_id)
+
+    @override_settings(INVESTMENT_WATCH_FIRECRAWL_KEY_ENV="WATCH_SHARED_TEST_KEY", KNOWLEDGE_FIRECRAWL_API_KEY="shared-fixture")
+    def test_existing_knowledge_key_is_reused_and_explicit_key_wins(self):
+        with patch.dict("os.environ", {"WATCH_SHARED_TEST_KEY": ""}):
+            self.assertEqual(firecrawl_key(), "shared-fixture")
+        with patch.dict("os.environ", {"WATCH_SHARED_TEST_KEY": "dedicated-fixture"}):
+            self.assertEqual(firecrawl_key(), "dedicated-fixture")
 
     def select(self, candidate, priority=90, selected=True):
         key = screening_key(candidate, self.provider)
