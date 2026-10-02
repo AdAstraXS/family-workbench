@@ -216,6 +216,9 @@ class ThesisEvidence(models.Model):
     method = models.CharField(max_length=20, default="model")
     created_at = models.DateTimeField(auto_now_add=True)
     input_key = models.CharField(max_length=64)
+    input_body = models.ForeignKey(
+        "BodySnapshot", null=True, blank=True, on_delete=models.PROTECT
+    )
 
     class Meta:
         constraints = [
@@ -334,3 +337,52 @@ class MaterialRelation(models.Model):
     reason = models.CharField(max_length=500)
     member = models.ForeignKey("family_core.FamilyMember", on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class WatchPipelineState(models.Model):
+    family = models.OneToOneField("family_core.Family", on_delete=models.PROTECT)
+    started_at = models.DateTimeField(default=timezone.now)
+
+
+class ScreeningBatch(TimestampedModel):
+    dossier = models.ForeignKey("investment_research.ResearchDossier", on_delete=models.PROTECT)
+    input_key = models.CharField(max_length=64, unique=True)
+    status = models.CharField(max_length=20, default="reserved")
+    message = models.CharField(max_length=500, blank=True)
+
+
+class CandidateScreening(models.Model):
+    candidate = models.ForeignKey(ResearchCandidate, on_delete=models.PROTECT, related_name="screenings")
+    batch = models.ForeignKey(ScreeningBatch, on_delete=models.PROTECT)
+    input_key = models.CharField(max_length=64, unique=True)
+    selected = models.BooleanField(default=False)
+    priority = models.PositiveSmallIntegerField(default=0)
+    reason = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class BodySnapshot(models.Model):
+    material_version = models.OneToOneField(MaterialVersion, on_delete=models.PROTECT, related_name="body_snapshot")
+    source_url = models.URLField(max_length=1000)
+    text = models.TextField()
+    content_hash = models.CharField(max_length=64)
+    raw_gzip = models.BinaryField()
+    fetched_at = models.DateTimeField(default=timezone.now)
+    method = models.CharField(max_length=30, default="firecrawl-v2")
+
+
+class BodyAttempt(TimestampedModel):
+    family = models.ForeignKey("family_core.Family", on_delete=models.PROTECT)
+    security = models.ForeignKey("portfolio.Security", on_delete=models.PROTECT)
+    candidate = models.ForeignKey(ResearchCandidate, on_delete=models.PROTECT)
+    material_version = models.ForeignKey(MaterialVersion, on_delete=models.PROTECT)
+    day = models.DateField()
+    status = models.CharField(max_length=20, default="reserved")
+    message = models.CharField(max_length=500, blank=True)
+    snapshot = models.ForeignKey(BodySnapshot, null=True, blank=True, on_delete=models.PROTECT)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["family", "security", "material_version"], name="watch_body_attempt_once"
+        )]
+        indexes = [models.Index(fields=["family", "security", "day"], name="watch_body_daily")]

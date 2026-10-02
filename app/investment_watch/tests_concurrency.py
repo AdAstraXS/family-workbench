@@ -70,3 +70,34 @@ class ConcurrencyTests(TransactionTestCase):
         from .models import OperationReceipt
 
         self.assertEqual(OperationReceipt.objects.count(), 1)
+
+    def test_parallel_body_reservations_share_company_cap(self):
+        from portfolio.models import Security
+        from investment_research.services import create_dossier
+        from .models import NewsSource, BodyAttempt
+        from .services import ingest, associate
+        from .body_capture import reserve_body
+
+        security = Security.objects.create(symbol="MSFT", name="Microsoft", market="US", asset_type="stock")
+        dossier = create_dossier(actor=self.member, security=security, initial_thesis="Test thesis", pillars=["Demand"], questions=[])
+        source = NewsSource.objects.create(family=self.family, key="test-body", name="Test", url="https://example.com/feed")
+        candidates = []
+        for i in range(4):
+            version, _ = ingest(source, external_id=str(i), title=f"Microsoft cloud development {i}", summary="Test", url=f"https://example.com/{i}")
+            c = associate(self.member, dossier.pk, version.pk, dossier.current_revision_id)
+            # Resolve shared immutable objects before entering independent connections.
+            c.dossier.family
+            c.dossier.security
+            candidates.append(c)
+        reserve_body(candidates[0])
+        reserve_body(candidates[1])
+
+        def action(index):
+            try:
+                reserve_body(candidates[index + 2])
+                return "reserved"
+            except WatchError:
+                return "blocked"
+
+        self.assertCountEqual(self.parallel(action), ["reserved", "blocked"])
+        self.assertEqual(BodyAttempt.objects.count(), 3)
