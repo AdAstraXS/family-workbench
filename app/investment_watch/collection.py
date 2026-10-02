@@ -234,11 +234,15 @@ def collect_source(source, fetcher=fetch_public_url, force=False):
             source.last_success_at = now
         if not response.not_modified and not rejected:
             source.cursor = {
+                **source.cursor,
                 "etag": response.etag,
                 "last_modified": response.last_modified,
             }
+        source.consecutive_failures = source.consecutive_failures + 1 if rejected else 0
+        source.last_added = added
+        source.last_result = "partial" if rejected else "success"
         source.save(
-            update_fields=["last_success_at", "last_error", "cursor", "updated_at"]
+            update_fields=["last_success_at", "last_error", "cursor", "updated_at", "consecutive_failures", "last_added", "last_result"]
         )
         return {
             "status": "partial" if rejected else "success",
@@ -253,7 +257,10 @@ def collect_source(source, fetcher=fetch_public_url, force=False):
             if isinstance(exc, WatchError)
             else "解析或网络失败，请检查来源。"
         )[:500]
-        source.save(update_fields=["last_error", "updated_at"])
+        source.consecutive_failures += 1
+        source.last_result = "failed"
+        source.last_added = 0
+        source.save(update_fields=["last_error", "updated_at", "consecutive_failures", "last_result", "last_added"])
         return {"status": "failed", "added": 0, "error": source.last_error}
 
 

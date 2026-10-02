@@ -107,6 +107,8 @@ def deleted_entries(body):
 
 def parse_source(body, source):
     if source.adapter == "rss":
+        from .rss_body import content_by_id
+        contents = content_by_id(body, source.url)
         return [
             {
                 "external_id": r.external_id,
@@ -114,6 +116,7 @@ def parse_source(body, source):
                 "summary": r.excerpt,
                 "url": r.canonical_url,
                 "published_at": r.published_at,
+                "feed_body": contents.get(r.external_id, ""),
             }
             for r in parse_rss_or_atom(
                 body, base_url=source.url, max_items=min(source.max_items, 50)

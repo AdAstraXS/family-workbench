@@ -86,11 +86,13 @@ def add_company(member, data):
 
 
 def preview_rule(member, values):
+    from .profiles import domains
     rule = SimpleNamespace(
         enabled=True,
+        official_domains=domains(values.get("official_domains", [])),
         **{
             k: words(values.get(k, []))
-            for k in ("aliases", "topics", "include", "exclude")
+            for k in ("aliases", "products", "topics", "include", "exclude")
         },
     )
     rows = []
@@ -121,6 +123,8 @@ def reading_rule(dossier):
         aliases=rule.aliases
         if rule
         else [dossier.security.name, dossier.security.symbol],
+        products=rule.products if rule else [],
+        official_domains=rule.official_domains if rule else [],
         topics=rule.topics if rule else [],
         include=rule.include if rule else [],
         exclude=rule.exclude if rule else [],

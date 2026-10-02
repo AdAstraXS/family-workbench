@@ -19,6 +19,9 @@ class NewsSource(TimestampedModel):
     cursor = models.JSONField(default=dict)
     public_metadata_only = models.BooleanField(default=True)
     config = models.JSONField(default=dict, blank=True)
+    consecutive_failures = models.PositiveIntegerField(default=0)
+    last_added = models.PositiveIntegerField(default=0)
+    last_result = models.CharField(max_length=20, blank=True)
 
     class Meta:
         constraints = [
@@ -151,6 +154,9 @@ class WatchRule(TimestampedModel):
         related_name="watch_rule",
     )
     aliases = models.JSONField(default=list)
+    products = models.JSONField(default=list, blank=True)
+    official_domains = models.JSONField(default=list, blank=True)
+    business_context = models.CharField(max_length=1000, blank=True)
     topics = models.JSONField(default=list)
     include = models.JSONField(default=list)
     exclude = models.JSONField(default=list)
@@ -176,6 +182,8 @@ class ResearchCandidate(TimestampedModel):
     rule_version = models.PositiveIntegerField(default=0)
     status = models.CharField(max_length=20, default="pending")
     selected_for_research = models.BooleanField(default=False)
+    reading_requested = models.BooleanField(default=False)
+    reading_reason = models.CharField(max_length=500, blank=True)
 
     class Meta:
         constraints = [
@@ -358,6 +366,8 @@ class CandidateScreening(models.Model):
     selected = models.BooleanField(default=False)
     priority = models.PositiveSmallIntegerField(default=0)
     reason = models.CharField(max_length=500)
+    relevance = models.CharField(max_length=20, default="unknown")
+    duplicate_of = models.ForeignKey(ResearchCandidate, null=True, blank=True, on_delete=models.PROTECT, related_name="reading_duplicates")
     created_at = models.DateTimeField(auto_now_add=True)
 
 
@@ -386,3 +396,13 @@ class BodyAttempt(TimestampedModel):
             fields=["family", "security", "material_version"], name="watch_body_attempt_once"
         )]
         indexes = [models.Index(fields=["family", "security", "day"], name="watch_body_daily")]
+
+
+class CaptureAccountState(models.Model):
+    # Only a fingerprint is stored; credentials never enter the database.
+    key_hash = models.CharField(max_length=64, unique=True)
+    checked_at = models.DateTimeField(null=True)
+    remaining = models.PositiveIntegerField(null=True)
+    plan_credits = models.PositiveIntegerField(null=True)
+    resets_at = models.DateTimeField(null=True)
+    error = models.CharField(max_length=200, blank=True)
