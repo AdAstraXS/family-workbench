@@ -17,6 +17,7 @@ urlpatterns = [
     path("news/<int:pk>/associate/", views.news_associate, name="associate"),
     path("items/", views.items, name="items"),
     path("items/<int:pk>/", views.item, name="item"),
+    path("items/<int:pk>/request-reading/", views.request_reading, name="request_reading"),
     path("events/<int:pk>/annotation/", views.annotation, name="annotation"),
     path("events/<int:pk>/organize/", views.event_organize, name="event_organize"),
     path("evidence/<int:pk>/review/", views.evidence_review, name="review"),

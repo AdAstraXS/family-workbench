@@ -94,6 +94,7 @@ def queue_run(dossier):
             PROMPT_VERSION,
             bool(getattr(settings, "INVESTMENT_WATCH_BODY_ENABLED", False)),
             pipeline_progress(dossier) if getattr(settings, "INVESTMENT_WATCH_BODY_ENABLED", False) else None,
+            ResearchCandidate.objects.filter(dossier=dossier, reading_requested=True).order_by("-updated_at").values_list("pk", "updated_at").first(),
             MaterialRelation.objects.filter(
                 source__material__source__family=dossier.family
             )
@@ -252,6 +253,9 @@ def run_cycle(family, *, collect=True, analyze=True, limit=3):
         return {
             "status": "done",
             "sources": results,
+            "collection_message": ("未到来源采集时间；按现有间隔检查。" if collect and not results
+                else "本轮未执行信源采集。" if not collect else
+                f"检查 {len(results)} 个来源，新增 {sum(r.get('added', 0) for r in results)} 个材料版本。"),
             "recalled": recalled,
             "runs": completed,
             "blocked": blocked,

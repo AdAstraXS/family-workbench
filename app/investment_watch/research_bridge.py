@@ -44,8 +44,13 @@ def append_news(packet, dossier, excluded_versions=None):
         if len(snapshots) >= 10:
             continue
         seen.add(chain)
-        text = version.title + "\n" + version.summary
-        frozen = text[:1500]
+        version = canonical
+        from .models import BodySnapshot
+        body = BodySnapshot.objects.filter(material_version=version).first()
+        text = version.title + "\n" + (body.text if body else version.summary)
+        # The synthesis input limit rejects oversized packets explicitly; never
+        # silently discard the saved body or claim to have sent a full article.
+        frozen = text if body else text[:1500]
         citation = {
             "kind": "news",
             "version_id": version.pk,
@@ -54,6 +59,8 @@ def append_news(packet, dossier, excluded_versions=None):
             "start": 0,
             "end": len(frozen),
             "hash": digest(frozen),
+            "body_id": body.pk if body else None,
+            "body_hash": body.content_hash if body else None,
         }
         packet["evidence"].append(
             {
@@ -69,6 +76,9 @@ def append_news(packet, dossier, excluded_versions=None):
                 "version_id": version.pk,
                 "title": version.title,
                 "excerpt": frozen,
+                "body_id": body.pk if body else None,
+                "body_hash": body.content_hash if body else None,
+                "content_depth": "body" if body else "summary",
                 "url": version.url,
                 "source": version.material.source.name,
                 "original_chain": version.original_chain,

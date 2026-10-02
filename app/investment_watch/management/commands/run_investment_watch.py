@@ -20,6 +20,12 @@ class Command(BaseCommand):
             raise CommandError("家庭不存在。")
         if options["seed"]:
             seed_sources(family)
+        from django.conf import settings
+        from investment_watch.models import WatchConsent
+        if (not options["no_analyze"] and getattr(settings, "INVESTMENT_WATCH_BODY_ENABLED", False)
+                and WatchConsent.objects.filter(dossier__family=family, active=True).exists()):
+            from investment_watch.capture_account import refresh_usage
+            refresh_usage()
         result = run_cycle(
             family, collect=not options["no_collect"], analyze=not options["no_analyze"]
         )

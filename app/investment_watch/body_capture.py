@@ -14,7 +14,7 @@ from django.utils import timezone
 from family_core.models import Family
 from intelligence.http_client import validate_public_http_url, SafeHttpError
 from .models import BodySnapshot, BodyAttempt, WatchPipelineState, ResearchCandidate, BudgetReceipt
-from .screening import authorized_provider, latest_screening, eligible
+from .screening import authorized_provider, latest_screening, eligible, chosen
 from .services import WatchError, candidate_stale, clean_url
 
 DAILY_BODY_LIMIT = 3
@@ -79,8 +79,7 @@ def capture_body(candidate, *, transport=None, url_validator=None):
     provider = authorized_provider(candidate.dossier)
     state, _ = WatchPipelineState.objects.get_or_create(family=candidate.dossier.family)
     screening = latest_screening(candidate, provider)
-    if (not eligible(candidate, state) or not screening or not screening.selected
-            or screening.batch.status != "completed"):
+    if not eligible(candidate, state) or not chosen(candidate, screening):
         raise WatchError("候选未通过当前版本的初筛，不能抓取正文。")
     version = candidate.material_version
     if version.material.source.family_id != candidate.dossier.family_id:
@@ -110,6 +109,8 @@ def capture_body(candidate, *, transport=None, url_validator=None):
     api_key = firecrawl_key()
     if not api_key:
         raise WatchError("Firecrawl 密钥尚未配置，未发送正文请求。")
+    from .capture_account import check_credits
+    check_credits()
     try:
         url = (url_validator or validate_public_http_url)(clean_url(version.url))
     except SafeHttpError as exc:
@@ -155,6 +156,9 @@ def capture_body(candidate, *, transport=None, url_validator=None):
             attempt.save(update_fields=["snapshot", "status", "message", "updated_at"])
         return snapshot
     except Exception as exc:
+        if isinstance(exc, HTTPError) and exc.code == 402:
+            from .capture_account import exhausted
+            exhausted()
         attempt.status = "failed"
         attempt.message = (str(exc) if isinstance(exc, WatchError) else
                            f"正文服务返回 HTTP {exc.code}。" if isinstance(exc, HTTPError) else
