@@ -18,7 +18,6 @@
     <div class="knowledge-home-import-actions" aria-label="资料导入入口">
       <a class="button primary" href="{% url 'knowledge:web_captures' %}">收藏网页</a>
       <a class="button" href="{% url 'knowledge:imports' %}">上传资料</a>
-      <a class="button" href="{% url 'knowledge:imports' %}">导入记录</a>
     </div>
   </div>
 </section>
@@ -44,11 +43,6 @@
       {% for entry in today_entries %}{% include "knowledge/_compact_entry.html" %}
       {% empty %}<div class="knowledge-gentle-empty"><strong>今天还没有新知识</strong><span>OneNote 按分区规则分流；随手记只有明确勾选后才会加入。</span></div>{% endfor %}
     </div>
-  </article>
-
-  <article class="knowledge-home-section">
-    <header><div><span class="eyebrow">Reading</span><h2>继续阅读</h2></div><a href="{% url 'reading:index' %}">打开在线书库</a></header>
-    <div class="knowledge-gentle-empty"><strong>尚未产生阅读进度</strong><span>reading 模块落地后，这里显示最近阅读的图书、章节和真实进度；不使用演示书籍伪造数据。</span></div>
   </article>
 
   <article class="knowledge-home-section">
@@ -80,8 +74,4 @@
 </section>
 {% endif %}
 
-<section class="knowledge-future-ribbon">
-  <div><span class="eyebrow">逐步开放</span><strong>在线阅读与交易复盘保持独立模块</strong>{% include "knowledge/_help_tip.html" with text="书籍、批注和评论由阅读模块负责；交易案例、纪律版本和复盘由交易日志模块负责。两者只把可检索知识投影到知识底座。" %}</div>
-  <a href="{% url 'knowledge:architecture' %}">查看完整边界与后续工作</a>
-</section>
 {% endblock %}

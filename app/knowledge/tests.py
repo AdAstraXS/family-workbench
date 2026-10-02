@@ -6,6 +6,7 @@ from io import BytesIO, StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+from bs4 import BeautifulSoup
 from cryptography.fernet import Fernet
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
@@ -876,10 +877,31 @@ class KnowledgeBaseTests(TestCase):
         home = self.client.get(reverse("knowledge:index"))
         self.assertContains(home, "今天需要做什么？")
         self.assertContains(home, "待整理")
-        self.assertContains(home, "在线阅读")
-        self.assertContains(home, "交易复盘")
+        content = BeautifulSoup(home.content, "html.parser").select_one("#workspace-main")
+        self.assertNotIn("在线书库", content.get_text())
+        self.assertNotIn("继续阅读", content.get_text())
+        self.assertNotIn("交易复盘", content.get_text())
+        self.assertNotIn("导入记录", content.get_text())
+        self.assertEqual(
+            [a.get_text(strip=True) for a in content.select(".knowledge-home-import-actions a")],
+            ["收藏网页", "上传资料"],
+        )
         self.assertContains(home, document.title)
         self.assertContains(home, "knowledge-help-tip-icon")
+
+        for url in [reverse("knowledge:index"), reverse("knowledge:library"), reverse("knowledge:web_captures")]:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                page = BeautifulSoup(response.content, "html.parser")
+                navigation = page.select_one(".knowledge-hub-nav")
+                self.assertIsNotNone(navigation)
+                self.assertNotIn("网页收藏", navigation.get_text())
+                self.assertNotIn("在线书库", navigation.get_text())
+                self.assertNotIn("交易复盘", navigation.get_text())
+                main_navigation = page.select_one("#ws-sidebar")
+                self.assertIsNotNone(main_navigation.select_one(f'a[href="{reverse("reading:index")}"]'))
+                self.assertIsNotNone(main_navigation.select_one(f'a[href="{reverse("trading_journal:index")}"]'))
 
         inbox = self.client.get(reverse("knowledge:inbox"))
         self.assertContains(inbox, pending_document.title)

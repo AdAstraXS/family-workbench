@@ -1,3 +1,12 @@
-{% extends "knowledge_hub/base.html" %}{% load static %}
+{% extends "base.html" %}{% load static %}
 {% block extra_head %}<link rel="stylesheet" href="{% static 'reading/library.css' %}">{% endblock %}
-{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'reading:index' %}">在线书库</a>{% endblock %}
+{% block content %}
+<section class="reading-module-main">
+  <nav class="knowledge-breadcrumb" aria-label="面包屑">
+    <a href="{% url 'dashboard:home' %}">工作台</a>
+    <span aria-hidden="true">›</span>
+    <a href="{% url 'reading:index' %}">在线书库</a>
+  </nav>
+  {% block hub_content %}{% endblock %}
+</section>
+{% endblock %}

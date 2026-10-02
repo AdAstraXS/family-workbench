@@ -1,7 +1,6 @@
 <nav class="knowledge-hub-nav" aria-label="知识产品导航">
   <section>
     <h2>知识空间</h2>
-    <a href="{% url 'knowledge:web_captures' %}"{% if "web_capture" in request.resolver_match.url_name %} class="active"{% endif %}><span aria-hidden="true">藏</span><strong>网页收藏</strong></a>
     <a href="{% url 'knowledge:index' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "index" %} class="active"{% endif %}>
       <span aria-hidden="true">总</span><strong>总览</strong>
     </a>
@@ -11,18 +10,8 @@
     <a href="{% url 'knowledge:people' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "people" %} class="active"{% endif %}>
       <span aria-hidden="true">人</span><strong>关注人物</strong><small>历史知识</small>
     </a>
-    <a href="{% url 'reading:index' %}"{% if request.resolver_match.app_name == "reading" %} class="active"{% endif %}>
-      <span aria-hidden="true">读</span><strong>在线书库</strong>
-    </a>
     <a href="{% url 'knowledge:topics' %}"{% if request.resolver_match.url_name == "topics" %} class="active"{% endif %}>
       <span aria-hidden="true">类</span><strong>分类与标签</strong>
-    </a>
-  </section>
-
-  <section>
-    <h2>专题模块</h2>
-    <a href="{% url 'trading_journal:index' %}"{% if request.resolver_match.app_name == "trading_journal" %} class="active"{% endif %}>
-      <span aria-hidden="true">复</span><strong>交易复盘</strong><small>规划中</small>
     </a>
   </section>
 

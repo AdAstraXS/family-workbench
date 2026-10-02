@@ -1,3 +1,4 @@
+from bs4 import BeautifulSoup
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -26,3 +27,11 @@ class TradingJournalPlanningPageTests(TestCase):
         self.assertContains(response, "尚未开放业务功能")
         self.assertContains(response, "流水继续由 portfolio 负责")
         self.assertContains(response, "不得创建第二套交易流水")
+        page = BeautifulSoup(response.content, "html.parser")
+        self.assertIsNone(page.select_one(".knowledge-hub-sidebar"))
+        self.assertIsNone(page.select_one(".knowledge-hub-shell"))
+        breadcrumb = page.select_one('nav[aria-label="面包屑"]')
+        self.assertIn("交易复盘", breadcrumb.get_text())
+        self.assertNotIn("知识中心", breadcrumb.get_text())
+        self.assertIsNotNone(page.select_one(f'#ws-sidebar a[href="{reverse("knowledge:index")}"]'))
+        self.assertContains(response, "交易复盘 · 家庭工作台")

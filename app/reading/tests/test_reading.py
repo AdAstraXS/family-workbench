@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 from datetime import timedelta
 
+from bs4 import BeautifulSoup
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -66,6 +67,30 @@ class ReadingTests(TestCase):
         self.assertContains(response, "从第一本书开始")
         self.assertEqual(Book.objects.count(), 0)
         self.assertEqual(ReadingPosition.objects.count(), 0)
+
+    def test_reading_pages_have_independent_navigation_and_keep_reading_workflows(self):
+        book = self.upload()
+        process_file(book.file.pk)
+        self.client.post(self.url("position", book), self.payload(book), content_type="application/json")
+        for url in [reverse("reading:index"), reverse("reading:plans"), reverse("reading:upload"),
+                    reverse("reading:recycle"), self.url("detail", book), self.url("edit", book)]:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, 200)
+                page = BeautifulSoup(response.content, "html.parser")
+                self.assertIsNone(page.select_one(".knowledge-hub-sidebar"))
+                self.assertIsNone(page.select_one(".knowledge-hub-shell"))
+                breadcrumb = page.select_one('nav[aria-label="面包屑"]')
+                self.assertIsNotNone(breadcrumb.select_one(f'a[href="{reverse("reading:index")}"]'))
+                self.assertIsNone(breadcrumb.select_one(f'a[href="{reverse("knowledge:index")}"]'))
+                self.assertIsNotNone(page.select_one(".reading-module-main"))
+        shelf = self.client.get(reverse("reading:index"))
+        self.assertContains(shelf, "继续阅读")
+        self.assertContains(shelf, "45%")
+        self.assertContains(shelf, book.title)
+        self.assertContains(self.client.get(self.url("detail", book)), "阅读成果")
+        self.assertNotContains(self.client.get(self.url("reader", book)), "knowledge-hub-sidebar")
+        self.assertEqual(ReadingPosition.objects.count(), 1)
 
     def test_upload_process_and_immutable_duplicate(self):
         book = self.upload()

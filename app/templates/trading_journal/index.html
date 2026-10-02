@@ -1,9 +1,12 @@
-{% extends "knowledge_hub/base.html" %}
+{% extends "base.html" %}
 
-{% block title %}交易复盘 · 家庭知识中心{% endblock %}
-{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>交易复盘</span>{% endblock %}
+{% block title %}交易复盘 · 家庭工作台{% endblock %}
 
-{% block hub_content %}
+{% block content %}
+<nav class="knowledge-breadcrumb" aria-label="面包屑">
+  <a href="{% url 'dashboard:home' %}">工作台</a>
+  <span aria-hidden="true">›</span><span>交易复盘</span>
+</nav>
 <section class="knowledge-page-heading">
   <div><span class="eyebrow">独立模块 · 规划中</span><h1>交易日志、纪律与复盘</h1><p>把交易事实与主观复盘分开：流水继续由 portfolio 负责，交易日志只引用事实并记录计划、纪律和偏差。</p></div>
   <span class="status-pill">尚未开放业务功能</span>
