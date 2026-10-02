@@ -1,6 +1,6 @@
 """Permanent deletion with a durable, retryable file-cleanup receipt."""
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -49,11 +49,12 @@ def request_purge(book, member):
                 KnowledgeRevision.objects.filter(raw_file__startswith=prefix)]
             directories.append({"name": name, "preserve": preserve})
         for path in [file.original_path, file.normalized_path]:
-            if path and not path.startswith(f"{book.pk}/"):
+            if path and (not path.startswith(f"{book.pk}/") or ".." in PurePosixPath(path).parts or "\\" in path):
                 raise ValidationError("图书文件路径异常，未执行永久删除。")
         versions = ReadingArtifactVersion.objects.filter(artifact__book=book)
         for version in versions:
-            if version.original_path and not version.original_path.startswith(f"artifacts/{version.artifact_id}/"):
+            path = version.original_path
+            if path and (not path.startswith(f"artifacts/{version.artifact_id}/") or ".." in PurePosixPath(path).parts or "\\" in path):
                 raise ValidationError("阅读成果路径异常，未执行永久删除。")
         # Archived knowledge keeps its own immutable raw file and body. Remove the obsolete reading link.
         for archive in ReadingArchive.objects.filter(version__in=versions).select_related("version"):

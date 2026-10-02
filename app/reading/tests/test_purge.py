@@ -124,6 +124,8 @@ class PurgeTests(TestCase):
         with self.assertRaises(ValidationError): request_purge(book, self.owner)
         self.assertTrue(Book.objects.filter(pk=book.pk).exists())
         self.assertFalse(BookPurgeTask.objects.exists())
+        type(book.file).objects.filter(pk=book.file.pk).update(original_path=f"{book.pk}/../../outside.txt")
+        with self.assertRaises(ValidationError): request_purge(book, self.owner)
         task = BookPurgeTask.objects.create(book_id=book.pk, owner=self.owner, title="invalid", directories=[{"name":"../", "preserve":[]}])
         self.assertFalse(process_purge(task.pk))
         root = Path(storage().location)
