@@ -46,7 +46,11 @@ def estimate_cost(snapshot,tokens):
     except (InvalidOperation,KeyError):return None
 
 
+@transaction.atomic
 def draft(book,member,provider,scope):
+    book = accessible_books(member).select_for_update(of=("self",)).filter(pk=book.pk).first()
+    if book is None:
+        raise ValidationError("图书已不可访问，请重新选择。")
     sources=[]
     if scope["kind"]=="chapter":
         if book.file.status!="ready":raise ValidationError("图书尚未可读。")
@@ -136,8 +140,8 @@ def process_job(job_id):
     with transaction.atomic():
         candidate=ReadingAiJob.objects.filter(pk=job_id).first()
         if candidate is None:return False
-        book=Book.objects.select_for_update().get(pk=candidate.book_id)
-        if book.deleted_at:return False
+        book=Book.objects.select_for_update().filter(pk=candidate.book_id).first()
+        if book is None or book.deleted_at:return False
         if not ReadingAiJob.objects.filter(pk=job_id,status="queued",confirmed_at__isnull=False).update(status="running",started_at=timezone.now()):return False
     job=ReadingAiJob.objects.select_related("book__file","member","provider").get(pk=job_id)
     audit=None

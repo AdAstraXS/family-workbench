@@ -2,10 +2,12 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from unittest import skipUnless
 from django.db import connection, connections
+from django.core.exceptions import ValidationError
 from django.test import Client, TransactionTestCase
 from django.urls import reverse
-from reading.models import ReadingPosition, ReadingArtifactVersion, Book
-from reading.services import process_file
+from reading.models import ReadingPosition, ReadingArtifactVersion, Book, BookPurgeTask
+from reading.services import process_file, change_book_deleted_state
+from reading.purge import request_purge, process_purge
 from reading.artifacts import publish, validate_data, export_html
 from .test_reading import ReadingTests
 from .test_collaboration import structured
@@ -40,3 +42,31 @@ class ConcurrentReadingTests(TransactionTestCase):
             finally:connections.close_all()
         with ThreadPoolExecutor(max_workers=2) as pool:ids=list(pool.map(save,range(2)))
         self.assertEqual(ids[0],ids[1]);self.assertEqual(ReadingArtifactVersion.objects.count(),1)
+
+    def test_concurrent_permanent_deletion_creates_one_cleanup_receipt(self):
+        book = self.upload()
+        change_book_deleted_state(book, self.owner, True)
+        barrier = Barrier(2)
+        def remove(_):
+            try:
+                barrier.wait(timeout=10)
+                try:
+                    return request_purge(book, self.owner).pk
+                except ValidationError:
+                    return None
+            finally:
+                connections.close_all()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(remove, range(2)))
+        self.assertEqual(sum(result is not None for result in results), 1)
+        self.assertFalse(Book.objects.filter(pk=book.pk).exists())
+        self.assertEqual(BookPurgeTask.objects.count(), 1)
+        task = BookPurgeTask.objects.get()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            def cleanup(_):
+                try:
+                    return process_purge(task.pk)
+                finally:
+                    connections.close_all()
+            outcomes = list(pool.map(cleanup, range(2)))
+        self.assertEqual(outcomes, [True, True])

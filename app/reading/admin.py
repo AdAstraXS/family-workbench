@@ -5,6 +5,14 @@ from .permissions import accessible_books
 from .models import Annotation, AnnotationComment, ReadingPlan, ReadingPlanItem, ReadingArtifact, ReadingArtifactVersion, ReadingArchive, ReadingAiJob
 from .annotations import accessible_annotations
 from .permissions import accessible_reading_artifacts
+from .models import BookPurgeTask
+
+
+@admin.register(BookPurgeTask)
+class BookPurgeTaskAdmin(PrivateContentAdmin):
+    list_display = ("title", "owner", "status", "created_at", "finished_at")
+    def allowed_objects(self, member):
+        return BookPurgeTask.objects.filter(owner=member, owner__family=member.family)
 
 
 @admin.register(Annotation)

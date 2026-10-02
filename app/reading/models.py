@@ -69,6 +69,19 @@ class BookFile(TimestampedModel):
         return self.get_status_display()
 
 
+class BookPurgeTask(TimestampedModel):
+    book_id = models.UUIDField(unique=True)
+    owner = models.ForeignKey("family_core.FamilyMember", on_delete=models.PROTECT)
+    title = models.CharField(max_length=250)
+    directories = models.JSONField(default=list)
+    status = models.CharField(max_length=10, default="queued", choices=[("queued", "等待清理"), ("failed", "清理失败"), ("success", "已永久删除")])
+    error = models.CharField(max_length=250, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+
 class ReadingImportRun(models.Model):
     file = models.ForeignKey(BookFile, on_delete=models.CASCADE, related_name="runs")
     token = models.UUIDField(default=uuid.uuid4, unique=True)

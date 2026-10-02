@@ -25,7 +25,9 @@ class DuplicateBook(Exception):
 
 def change_book_deleted_state(book, member, deleted):
     with transaction.atomic():
-        book = Book.objects.select_for_update().get(pk=book.pk, owner=member, family=member.family)
+        book = Book.objects.select_for_update().filter(pk=book.pk, owner=member, family=member.family).first()
+        if book is None:
+            raise ValidationError("图书已永久删除，请刷新回收站。")
         if bool(book.deleted_at) == deleted:
             return book
         if deleted and book.ai_jobs.filter(status="running").exists():
@@ -125,7 +127,7 @@ def process_file(file_id):
         ReadingImportRun.objects.filter(pk=run.pk).update(
             status=result["status"] if won else "superseded", message=result.get("error", ""), finished_at=timezone.now())
     if (not won or result["status"] != "ready") and target.exists():
-        target.unlink()  # Only this attempt's generated derivative, never original content.
+        target.unlink(missing_ok=True)  # Only this attempt's generated derivative, never original content.
     return result["status"] == "ready" and bool(won)
 
 

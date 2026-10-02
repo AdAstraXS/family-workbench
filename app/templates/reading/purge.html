@@ -1,0 +1,7 @@
+{% extends "reading/base.html" %}
+{% block title %}永久删除 · {{ book.title }}{% endblock %}
+{% block hub_content %}
+<header class="reading-heading"><div><span class="eyebrow">图书回收站</span><h1>永久删除《{{ book.title }}》？</h1><p>确认后无法从回收站恢复。</p></div></header>
+<section class="reading-panel"><h2>将清除的内容</h2><p>图书原文件和解析文件、所有成员的阅读进度、划线、批注、讨论、本书的阅读计划条目、阅读成果及 AI 任务内容将永久清除。其他图书和阅读计划本身保留。</p><p>已归档到知识中心的资料及其归档文件保留。删除操作与 AI 用量、费用的审计记录保留，不包含被清除的正文和批注。</p><p>图书仍在解析或生成 AI 内容时无法永久删除。文件清理失败会显示重试入口；确认后的永久删除无法撤销。</p><p class="muted">此操作清理当前存储。此前的 NAS 备份按原备份保留规则处理。</p></section>
+<section class="reading-panel"><form method="post">{% csrf_token %}<p><label for="purge-title">请输入完整书名：{{ book.title }}</label><input id="purge-title" name="book_title" type="text" maxlength="250" required autocomplete="off"></p><p><label><input type="checkbox" name="confirmed" value="yes" required> 我确认清除本书及所有成员的关联阅读记录，且无法恢复。</label></p><nav class="reading-actions"><button class="button danger-outline" style="background:#a33b3b!important;color:#fff!important;border-color:#a33b3b!important" type="submit">确认永久删除</button><a class="button" href="{% url 'reading:recycle' %}">返回回收站</a></nav></form></section>
+{% endblock %}

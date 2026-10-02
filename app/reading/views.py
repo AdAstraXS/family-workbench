@@ -18,7 +18,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from family_core.permissions import current_member
 from .forms import BookEditForm, BookUploadForm
-from .models import Book, ReadingPosition
+from .models import Book, BookPurgeTask, ReadingPosition
 from .permissions import accessible_books
 from .services import DuplicateBook, change_book_deleted_state, position_payload, retry_file, save_position, upload_book
 from .storage import max_upload_bytes, storage
@@ -132,14 +132,58 @@ def delete(request, pk):
 def recycle(request):
     books = Book.objects.filter(owner=request.reader_member, family=request.reader_member.family,
         deleted_at__isnull=False).select_related("file").order_by("-deleted_at")
-    return render(request, "reading/recycle.html", {"page": Paginator(books, 24).get_page(request.GET.get("page"))})
+    return render(request, "reading/recycle.html", {"page": Paginator(books, 24).get_page(request.GET.get("page")),
+        "purge_tasks": BookPurgeTask.objects.filter(owner=request.reader_member).order_by("-created_at")[:20]})
+
+
+@member_required
+@require_http_methods(["GET", "POST"])
+def purge(request, pk):
+    from .purge import request_purge, process_purge
+    book = managed_book(request, pk)
+    if not book.deleted_at:
+        raise Http404
+    if request.method == "POST":
+        if request.POST.get("confirmed") != "yes" or request.POST.get("book_title") != book.title:
+            messages.error(request, "请填写完整书名，并勾选无法恢复的确认。")
+        else:
+            try:
+                task = request_purge(book, request.reader_member)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0])
+            else:
+                if process_purge(task.pk):
+                    messages.success(request, "图书已永久删除，已归档到知识中心的资料保留。")
+                else:
+                    messages.error(request, "阅读记录已永久删除，文件清理未完成；请在下方删除记录中重试。")
+                return redirect("reading:recycle")
+    return render(request, "reading/purge.html", {"book": book})
+
+
+@member_required
+@require_POST
+def purge_retry(request, task_id):
+    from .purge import process_purge
+    if request.reader_member.role == "viewer":
+        raise Http404
+    task = get_object_or_404(BookPurgeTask, pk=task_id, owner=request.reader_member,
+        owner__family=request.reader_member.family)
+    if process_purge(task.pk):
+        messages.success(request, "永久删除的文件清理已完成。")
+    else:
+        messages.error(request, "文件清理仍未完成，请稍后重试或联系管理员。")
+    return redirect("reading:recycle")
 
 
 @member_required
 @require_POST
 def restore(request, pk):
     book = managed_book(request, pk)
-    change_book_deleted_state(book, request.reader_member, False)
+    try:
+        change_book_deleted_state(book, request.reader_member, False)
+    except ValidationError as exc:
+        messages.error(request, exc.messages[0])
+        return redirect("reading:recycle")
     messages.success(request, "图书已恢复，原有阅读进度、批注和成果仍保留。")
     return redirect("reading:detail", pk=pk)
 
