@@ -20,7 +20,7 @@ from family_core.permissions import current_member
 from .forms import BookEditForm, BookUploadForm
 from .models import Book, ReadingPosition
 from .permissions import accessible_books
-from .services import DuplicateBook, position_payload, retry_file, save_position, upload_book
+from .services import DuplicateBook, change_book_deleted_state, position_payload, retry_file, save_position, upload_book
 from .storage import max_upload_bytes, storage
 
 
@@ -78,6 +78,9 @@ def upload(request):
         try:
             book = upload_book(request.reader_member, form.cleaned_data)
         except DuplicateBook as exc:
+            if exc.book.deleted_at:
+                messages.info(request, "这个文件已在回收站，请恢复原有图书。")
+                return redirect("reading:recycle")
             messages.info(request, "你已经上传过这个文件，已打开原有图书。")
             return redirect("reading:detail", pk=exc.book.pk)
         except ValidationError as exc:
@@ -86,6 +89,59 @@ def upload(request):
             messages.success(request, "文件已保存，正在等待解析。处理结果会显示在图书详情。")
             return redirect("reading:detail", pk=book.pk)
     return render(request, "reading/upload.html", {"form": form, "max_mb": max_upload_bytes() // (1024 * 1024)})
+
+
+def managed_book(request, pk, lock=False):
+    if request.reader_member.role == "viewer":
+        raise Http404
+    books = Book.objects.filter(owner=request.reader_member, family=request.reader_member.family)
+    if lock:
+        books = books.select_for_update()
+    return get_object_or_404(books, pk=pk)
+
+
+@member_required
+@require_http_methods(["GET", "POST"])
+def delete(request, pk):
+    from .annotations import accessible_annotations
+    from .models import ReadingPlanItem
+    from .permissions import accessible_reading_artifacts
+    with transaction.atomic():
+        book = managed_book(request, pk, lock=request.method == "POST")
+        if request.method == "POST":
+            if request.POST.get("confirmed") != "yes":
+                messages.error(request, "请勾选确认后再删除图书。")
+            else:
+                try:
+                    change_book_deleted_state(book, request.reader_member, True)
+                except ValidationError as exc:
+                    messages.error(request, exc.messages[0])
+                else:
+                    messages.success(request, "图书已移入回收站，上传人可以恢复。")
+                    return redirect("reading:recycle")
+        if book.deleted_at:
+            return redirect("reading:recycle")
+    return render(request, "reading/delete.html", {"book": book,
+        "notes": accessible_annotations(request.reader_member, book),
+        "plan_items": ReadingPlanItem.objects.filter(book=book, plan__member=request.reader_member).select_related("plan"),
+        "artifacts": accessible_reading_artifacts(request.reader_member).filter(book=book)})
+
+
+@member_required
+@require_GET
+def recycle(request):
+    books = Book.objects.filter(owner=request.reader_member, family=request.reader_member.family,
+        deleted_at__isnull=False).select_related("file").order_by("-deleted_at")
+    return render(request, "reading/recycle.html", {"page": Paginator(books, 24).get_page(request.GET.get("page"))})
+
+
+@member_required
+@require_POST
+def restore(request, pk):
+    book = managed_book(request, pk)
+    change_book_deleted_state(book, request.reader_member, False)
+    messages.success(request, "图书已恢复，原有阅读进度、批注和成果仍保留。")
+    return redirect("reading:detail", pk=pk)
 
 
 @member_required

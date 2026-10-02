@@ -56,7 +56,7 @@
       const page = new DOMParser().parseFromString(await response.text(), 'text/html');
       const next = page.getElementById('runtime-monitor');
       if (!next || !next.querySelector('.mon-columns')) throw new Error('Monitoring content missing');
-      for (const selector of ['.mon-stats', '.mon-accounts', '.mon-columns']) {
+      for (const selector of ['.mon-stats', '.mon-accounts', '.mon-columns', '.mon-traffic-trend']) {
         root.querySelector(selector).replaceWith(next.querySelector(selector));
       }
       updateCoverage(next);
@@ -85,8 +85,14 @@
   root.addEventListener('click', event => {
     const bar = event.target.closest('.mon-bar-hit');
     if (bar) {
-      root.querySelector('#chart-detail').textContent =
-        `${bar.dataset.label} · 已计价费用 ¥${bar.dataset.amount}`;
+      if (bar.dataset.chart === 'traffic') {
+        root.querySelector('#traffic-chart-detail').textContent = bar.dataset.confirmed === 'true'
+          ? `${bar.dataset.label} · 总流量 ${bar.dataset.amount} ${bar.dataset.unit}`
+          : `${bar.dataset.label} · 暂无有效采样`;
+      } else {
+        root.querySelector('#chart-detail').textContent =
+          `${bar.dataset.label} · 已计价费用 ¥${bar.dataset.amount}`;
+      }
       return;
     }
     const link = event.target.closest('.mon-card-target, .mon-period a');

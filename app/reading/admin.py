@@ -1,6 +1,6 @@
 from django.contrib import admin
 from family_core.private_admin import PrivateContentAdmin
-from .models import Book, BookFile, ReadingImportRun, ReadingPosition
+from .models import Book, BookFile, BookLifecycleEvent, ReadingImportRun, ReadingPosition
 from .permissions import accessible_books
 from .models import Annotation, AnnotationComment, ReadingPlan, ReadingPlanItem, ReadingArtifact, ReadingArtifactVersion, ReadingArchive, ReadingAiJob
 from .annotations import accessible_annotations
@@ -53,9 +53,16 @@ class JobAdmin(PrivateContentAdmin):
 
 @admin.register(Book)
 class BookAdmin(PrivateContentAdmin):
-    list_display = ("title", "author", "owner", "visibility", "created_at")
+    list_display = ("title", "author", "owner", "visibility", "deleted_at", "created_at")
     def allowed_objects(self, member):
         return accessible_books(member)
+
+
+@admin.register(BookLifecycleEvent)
+class BookLifecycleEventAdmin(PrivateContentAdmin):
+    list_display = ("book", "actor", "action", "created_at")
+    def allowed_objects(self, member):
+        return BookLifecycleEvent.objects.filter(book__owner=member, book__family_id=member.family_id)
 
 
 @admin.register(BookFile)

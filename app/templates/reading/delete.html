@@ -1,0 +1,8 @@
+{% extends "reading/base.html" %}
+{% block title %}删除图书 · {{ book.title }}{% endblock %}
+{% block hub_content %}
+<header class="reading-heading"><div><span class="eyebrow">图书管理</span><h1>删除《{{ book.title }}》？</h1><p>图书将移入回收站，所有成员都无法继续打开它。</p></div></header>
+<section class="reading-panel"><h2>删除后的处理</h2><p>原文件、各成员的阅读进度、划线、批注、讨论和阅读成果都会保留，上传人可在回收站恢复图书。已经归档到知识中心的资料仍可查看。</p><p>待生成的 AI 任务会取消，恢复后需要重新确认生成；正在生成的任务完成后才能删除。回收站中的图书不会释放文件占用空间。</p></section>
+<section class="reading-panel"><h2>你可查看的关联内容</h2><p class="muted">以下只展示你有权查看的记录，其他成员的私密内容仍会保留。</p><h3>划线与批注</h3><ul>{% for note in notes %}<li>{{ note.quote|truncatechars:80 }} · {{ note.author.display_name }}</li>{% empty %}<li>没有可见划线或批注。</li>{% endfor %}</ul><h3>我的阅读计划</h3><ul>{% for item in plan_items %}<li>{{ item.plan.title }}</li>{% empty %}<li>未加入你的阅读计划。</li>{% endfor %}</ul><h3>阅读成果</h3><ul>{% for artifact in artifacts %}<li>{{ artifact.title }}</li>{% empty %}<li>没有可见阅读成果。</li>{% endfor %}</ul></section>
+<section class="reading-panel"><form method="post">{% csrf_token %}<p><label><input type="checkbox" name="confirmed" value="yes" required> 我确认将这本图书移入回收站。</label></p><nav class="reading-actions"><button type="submit">确认删除图书</button><a class="button" href="{% url 'reading:detail' book.pk %}">返回图书</a></nav></form></section>
+{% endblock %}

@@ -55,10 +55,10 @@ def configured_models():
     return names
 
 
-def overview(family, period='month', vendor='all', unknown=False, page=1):
+def overview(family, period='30days', vendor='all', unknown=False, page=1):
     now=timezone.now(); today=timezone.localdate(now)
-    period=period if period in {'day','week','month'} else 'month'
-    start_date=today if period=='day' else today-timedelta(days=6) if period=='week' else today.replace(day=1)
+    period=period if period in {'day','week','30days'} else '30days'
+    start_date=today if period=='day' else today-timedelta(days=6) if period=='week' else today-timedelta(days=29)
     start=timezone.make_aware(datetime.combine(start_date,time.min))
     end=timezone.make_aware(datetime.combine(today+timedelta(days=1),time.min))
     records=UsageRecord.objects.filter(family=family,started_at__gte=start,started_at__lt=end)
@@ -112,6 +112,25 @@ def overview(family, period='month', vendor='all', unknown=False, page=1):
     traffic=samples.aggregate(up=Sum('upload_delta'),down=Sum('download_delta'),gaps=Count('id',filter=Q(gap=True)))
     traffic['total']=byte_label((traffic['up'] or 0)+(traffic['down'] or 0)) if traffic['up'] is not None else '—'
     traffic['upload']=byte_label(traffic['up']);traffic['download']=byte_label(traffic['down'])
+    traffic_amounts=[0]*count
+    traffic_sampled=[False]*count
+    for row in samples.values('sampled_at','upload_delta','download_delta'):
+        if row['upload_delta'] is None or row['download_delta'] is None:
+            continue
+        dt=timezone.localtime(row['sampled_at'])
+        i=dt.hour if period=='day' else (dt.date()-start_date).days
+        traffic_amounts[i]+=row['upload_delta']+row['download_delta']
+        traffic_sampled[i]=True
+    traffic_max=max(traffic_amounts,default=0)
+    factor,unit=next(((factor,unit) for factor,unit in (
+        (1024**3,'GiB'),(1024**2,'MiB'),(1024,'KiB')) if traffic_max>=factor),(1,'B'))
+    traffic['unit']=unit
+    traffic['chart_total']=f'{sum(traffic_amounts)/factor:.2f} {unit}' if any(traffic_sampled) else '—'
+    traffic['bars']=[{
+        'label':bars[i]['label'],'tick':bars[i]['tick'],'confirmed':traffic_sampled[i],
+        'bytes':value,'amount':f'{value/factor:.2f}',
+        'height':value/(traffic_max or 1)*100,
+    } for i,value in enumerate(traffic_amounts)]
     host=HostSample.objects.first(); subscriptions=[]
     if host:
         host.stale=now-host.sampled_at>STALE_AFTER
@@ -142,7 +161,7 @@ def overview(family, period='month', vendor='all', unknown=False, page=1):
                 d.subscription_name=d.source
                 d.entry_title=f'节目 #{d.entry_id}'
     logs=filtered.filter(status='unknown') if unknown else filtered
-    return dict(period=period,period_label={'day':'今天','week':'近 7 天','month':'本月'}[period],vendor=vendor,
+    return dict(period=period,period_label={'day':'今天','week':'近 7 天','30days':'近 30 天'}[period],vendor=vendor,
         vendors=VENDORS,selected_vendor_label=dict(VENDORS).get(vendor,''),agg=agg,accounts=accounts,bars=bars,ranks=ranks,traffic=traffic,host=host,
         subscriptions=subscriptions,downloads=downloads,logs=Paginator(logs,30).get_page(page),unknown=unknown,
         collector=CollectorState.objects.filter(key='main').first(),collection_minutes=COLLECTION_MINUTES,start_date=start_date,today=today,
@@ -152,7 +171,7 @@ def overview(family, period='month', vendor='all', unknown=False, page=1):
 
 @login_required
 def index(request):
-    ctx=overview(family_for(request),request.GET.get('period','month'),request.GET.get('vendor','all'),
+    ctx=overview(family_for(request),request.GET.get('period','30days'),request.GET.get('vendor','all'),
                  request.GET.get('unknown')=='1',request.GET.get('page',1))
     ctx['can_configure']=can_configure(request)
     return render(request,'monitoring/index.html',ctx)

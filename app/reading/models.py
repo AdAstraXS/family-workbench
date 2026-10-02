@@ -15,6 +15,7 @@ class Book(TimestampedModel):
     author = models.CharField("作者", max_length=250, blank=True)
     visibility = models.CharField("可见范围", max_length=10, choices=VISIBILITY, default=PRIVATE)
     description = models.TextField("简介", blank=True, max_length=5000)
+    deleted_at = models.DateTimeField("移入回收站时间", null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -24,6 +25,16 @@ class Book(TimestampedModel):
 
     def __str__(self):
         return self.title
+
+
+class BookLifecycleEvent(models.Model):
+    book = models.ForeignKey(Book, on_delete=models.PROTECT, related_name="lifecycle_events")
+    actor = models.ForeignKey("family_core.FamilyMember", on_delete=models.PROTECT)
+    action = models.CharField(max_length=10, choices=[("delete", "移入回收站"), ("restore", "恢复图书")])
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
 
 
 class BookFile(TimestampedModel):

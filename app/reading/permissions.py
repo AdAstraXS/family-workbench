@@ -3,7 +3,7 @@ from .models import Book, ReadingArtifact
 
 
 def accessible_books(member):
-    return Book.objects.filter(family_id=member.family_id).filter(
+    return Book.objects.filter(family_id=member.family_id, deleted_at__isnull=True).filter(
         Q(owner=member) | Q(visibility=Book.FAMILY)
     ).select_related("file", "owner")
 
