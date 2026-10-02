@@ -208,6 +208,7 @@ class ResearchThesisRevision(models.Model):
     thesis = models.TextField("当前判断")
     pillars = models.JSONField("关键假设", default=list, blank=True)
     questions = models.JSONField("待验证问题", default=list, blank=True)
+    hypothesis_context = models.JSONField("假设的反证与跟踪背景", default=list, blank=True, db_default=[])
     change_reason = models.CharField("修改原因", max_length=500, blank=True)
     created_by = models.ForeignKey(
         FamilyMember,

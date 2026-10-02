@@ -741,7 +741,7 @@ class EditRequestTests(ResearchViewTestBase):
         v1 = self.dossier.current_revision
         resp = self.client.post(edit_url(self.dossier), self.edit_payload(v1.pk))
         self.assertEqual(resp.status_code, 302)
-        self.assertRedirects(resp, detail_url(self.dossier))
+        self.assertRedirects(resp, reverse("investment_research:company_research", args=[self.dossier.pk]))
         self.dossier.refresh_from_db()
         self.assertEqual(self.dossier.current_revision.revision_number, 2)
         self.assertEqual(self.dossier.current_revision.thesis, "第二版判断。")

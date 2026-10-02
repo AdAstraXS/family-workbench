@@ -23,6 +23,7 @@
       <button type="submit">保存新版本</button>
     </form>
     <aside class="research-edit-reference" aria-label="AI 参考建议">
+      {% if dossier.current_revision.hypothesis_context %}<section class="research-brief-card"><h2>假设的反证与跟踪背景</h2>{% include "investment_research/hypothesis_context.html" with hypothesis_context=dossier.current_revision.hypothesis_context %}<p>保留原文的假设沿用这些条件；修改假设内容后，原条件不自动套用。</p></section>{% endif %}
       <section class="research-brief-card">
         <h2>公司研究 · AI 措辞建议</h2>
         {% if suggestion %}

@@ -62,7 +62,7 @@ class StockResearchPageTests(TestCase):
         fetch.assert_not_called()
 
     @patch("portfolio.views.fetch_stock_research")
-    def test_stale_cache_autofetches_only_after_cooldown(self, fetch):
+    def test_stale_cache_requires_explicit_refresh(self, fetch):
         self.client.force_login(self.owner_user)
         snapshot = StockMarketResearchSnapshot.objects.create(
             security=self.security,
@@ -70,11 +70,28 @@ class StockResearchPageTests(TestCase):
             fetched_at=timezone.now() - timedelta(days=2),
             last_attempt_at=timezone.now() - timedelta(hours=2),
         )
-        self.assertContains(self.client.get(self.url), 'data-autofetch="true"')
+        response = self.client.get(self.url)
+        self.assertContains(response, 'data-autofetch="false"')
+        self.assertNotContains(response, "if(form.dataset.autofetch")
         snapshot.last_attempt_at = timezone.now()
         snapshot.save(update_fields=["last_attempt_at"])
         self.assertContains(self.client.get(self.url), 'data-autofetch="false"')
         fetch.assert_not_called()
+
+    @patch("portfolio.views.fetch_stock_research")
+    def test_own_exploration_can_read_market_page_without_position_or_watchlist(self, fetch):
+        from investment_research.services import create_exploration
+        security = Security.objects.create(symbol="EXPLORE", name="探索示例", market="US", currency="USD")
+        dossier = create_exploration(actor=self.owner, security=security)
+        url = reverse("portfolio:stock_market_detail", args=[security.pk])
+        self.client.force_login(self.owner_user)
+        response = self.client.get(url)
+        self.assertContains(response, reverse("investment_research:company_research", args=[dossier.pk]))
+        self.assertFalse(StockMarketResearchSnapshot.objects.filter(security=security).exists())
+        fetch.assert_not_called()
+        self.client.force_login(self.other_user)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.post(reverse("portfolio:stock_market_refresh", args=[security.pk])).status_code, 404)
 
     @patch("portfolio.views.fetch_stock_research")
     def test_refresh_reports_partial_failure_and_keeps_cached_view(self, fetch):

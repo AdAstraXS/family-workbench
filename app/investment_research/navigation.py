@@ -34,9 +34,7 @@ def navigation(context):
             result['crumbs'][0].pop('url')
         return result
     pk = dossier.pk
-    stage_defs = [('prepare', '研究准备', '初识公司 · 确认问题', 'prepare'),
-                  ('research', '公司研究', '核查证据 · 形成分析', 'company_research'),
-                  ('judgment', '个人判断', '记录理由 · 明确条件', 'detail'),
+    stage_defs = [('research', '公司研究', '关键问题 · 证据 · 我的判断', 'company_research'),
                   ('follow', '持续跟踪', '观察变化 · 定期复核', 'follow')]
     area = next((area for area, names in {
         'prepare': {'prepare'},
@@ -48,14 +46,14 @@ def navigation(context):
     }.items() if name in names), 'library')
     if name == 'materials' and request.GET.get('context') == 'prepare':
         area = 'prepare'
-    if name == 'company_research' and request.GET.get('view') == 'evidence':
+    if name == 'company_research' and (request.GET.get('view') == 'evidence' or request.GET.get('tab') == 'evidence'):
         area = 'library'
     result['area'] = area
     result['state'] = company_state(dossier)
     for i, (key, label, hint, route) in enumerate(stage_defs, 1):
-        result['stages'].append({'key': key, 'label': label, 'hint': hint, 'number': i, 'url': url(route, pk), 'active': area == key})
+        result['stages'].append({'key': key, 'label': label, 'hint': hint, 'number': i, 'url': url(route, pk), 'active': area == key or key == 'research' and area in {'prepare', 'judgment'}})
     result['aux'] = [{'label': label, 'url': url(route, pk), 'active': area == key}
-                     for key, label, route in [('library', '资料库', 'materials'), ('financial', '财务与估值', 'financials')]]
+                     for key, label, route in [('library', '资料', 'materials'), ('financial', '财务与行情', 'financials'), ('history', '历史', 'research_history')]]
     tab = 'questions' if request.POST.get('action') == 'confirm' else request.GET.get('tab', '')
     definitions = {
         'prepare': [('准备资料', url('materials', pk, context='prepare'), name == 'materials'),
@@ -82,10 +80,12 @@ def navigation(context):
             definitions['library'][0] = (*definitions['library'][0][:2], False)
             definitions['library'][1] = (*definitions['library'][1][:2], True)
     result['tabs'] = [{'label': label, 'url': href, 'active': active} for label, href, active in definitions[area]]
+    if name in {'company_research', 'follow', 'detail', 'first_thesis', 'edit'} and area != 'library':
+        result['tabs'] = []
     if name == 'prepare' and request.GET.get('report', '').isdigit():
         for item in result['tabs'][1:]:
             item['url'] += ('&' if '?' in item['url'] else '?') + urlencode({'report': request.GET['report']})
-    area_label = dict((key, label) for key, label, *_ in stage_defs) | {'library': '资料库', 'financial': '财务与估值'}
+    area_label = dict((key, label) for key, label, *_ in stage_defs) | {'prepare': '研究问题', 'judgment': '我的判断', 'library': '资料库', 'financial': '财务与行情'}
     active = next((item for item in result['tabs'] if item['active']), None)
     result['crumbs'].append({'label': dossier.security.name, 'url': url('company_research', pk)})
     result['crumbs'].append({'label': area_label[area], 'url': next((s['url'] for s in result['stages'] + result['aux'] if s['active']), '')})

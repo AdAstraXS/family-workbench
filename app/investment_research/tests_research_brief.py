@@ -107,7 +107,7 @@ class ResearchBriefTests(TestCase):
                             reverse("investment_research:company_research", args=[self.dossier.pk]))
         unified = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]))
         self.assertEqual(unified.context["analysis"].pk, analysis.pk)
-        for text in ("财报、SEC 与 IR", "相关新闻", "综合分析与判断", "财务与估值", "持续跟踪", "资料库"):
+        for text in ("财报、SEC 与 IR", "相关新闻", "综合分析与判断", "财务与行情", "持续跟踪", "资料"):
             self.assertContains(unified, text)
         legacy = self.client.get(url + "?mode=audit")
         self.assertContains(legacy, "公司研究简报")

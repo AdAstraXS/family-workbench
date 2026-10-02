@@ -10,6 +10,7 @@ from family_core.models import FamilyMember
 from portfolio.models import Security
 
 from .models import ResearchDossier, ResearchThesisRevision
+from copy import deepcopy
 
 THESIS_MAX_LENGTH = 8000
 LIST_FIELD_MAX_ITEMS = 5
@@ -153,6 +154,16 @@ def create_exploration(*, actor, security):
         raise DuplicateDossier(existing) from None
 
 
+def _hypothesis_context(dossier, pillars, previous=None):
+    if previous is not None:
+        return [deepcopy(h) for h in previous.hypothesis_context if h.get("claim") in pillars]
+    prep = dossier.preparations.last()
+    if not prep:
+        return []
+    return [{**deepcopy(h), "preparation_id": prep.pk, "preparation_revision": prep.revision,
+             "analysis_id": prep.analysis_id} for h in prep.hypotheses if h.get("claim") in pillars]
+
+
 def save_first_thesis(*, actor, dossier_id, thesis, pillars, questions):
     """探索档案首次确认判断；并发或重复提交只能产生一版。"""
     _require_writer(actor)
@@ -172,6 +183,7 @@ def save_first_thesis(*, actor, dossier_id, thesis, pillars, questions):
         revision = ResearchThesisRevision.objects.create(
             dossier=dossier, revision_number=1, thesis=clean_thesis,
             pillars=pillars, questions=questions, created_by=actor,
+            hypothesis_context=_hypothesis_context(dossier, pillars),
         )
         dossier.initial_thesis = clean_thesis
         dossier.current_revision = revision
@@ -237,6 +249,7 @@ def save_thesis_revision(
             thesis=new_thesis,
             pillars=pillars,
             questions=questions,
+            hypothesis_context=_hypothesis_context(dossier, pillars, previous=current),
             change_reason=reason,
             created_by=actor,
         )

@@ -90,7 +90,8 @@ def _narrative(text):
     # Select actual paragraphs, recording offsets; use topic diversity rather than only the document header.
     terms = [r"manufactur|develop|products|services|主营|业务", r"competit|customers|supplier|竞争|客户",
              r"revenue|cash flow|results of operations|收入|现金流", r"risk|uncertainty|outlook|风险|展望"]
-    paragraphs = [(m.start(), m.group()) for m in re.finditer(r"[^\n]{100,}", text)]
+    paragraphs = [(m.start(), m.group()) for m in re.finditer(r"[^\n]{100,}", text)
+                  if not re.search(r"forward.looking statements|safe harbor|undue reliance|appointed.{0,100}(?:officer|director)|chief.{0,30}officer.{0,100}biograph", m.group(), re.I)]
     result, seen = [], set()
     for term in terms:
         found = 0
@@ -98,9 +99,10 @@ def _narrative(text):
             hit = re.search(term, paragraph, re.I)
             if start not in seen and hit:
                 seen.add(start)
-                # Include preceding heading/context so quarter, full-year and forecast statements stay distinct.
+                # Keep nearby context inside the substantive paragraph; a legal
+                # disclaimer immediately before it must not fill this excerpt.
                 focus = start + max(0, hit.start() - 180)
-                context_start = max(0, focus - 300, text.rfind("\n", 0, max(0, focus - 300)) + 1)
+                context_start = max(start, focus - 300)
                 result.append((text[context_start:focus + 800][:1100], context_start))
                 found += 1
                 if found == 2:

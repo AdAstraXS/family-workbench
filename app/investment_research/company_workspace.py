@@ -1,7 +1,7 @@
 """Read-only company workspace on the existing private research dossier."""
 from copy import deepcopy
 
-from django.db.models import F, Q
+from django.db.models import F, Q, OuterRef, Subquery
 
 from ai_analysis.models import AiAnalysisRequest
 from investment_watch.models import ResearchCandidate
@@ -47,8 +47,9 @@ def workspace_context(dossier, params):
         material_version__material__source__family_id=dossier.family_id,
     ).exclude(material_version__status="withdrawn").select_related(
         "material_version__material__source").prefetch_related("evidence").order_by("-created_at")
+    newest = OfficialResearchContentVersion.objects.filter(document_id=OuterRef("document_id")).order_by("-version_number").values("pk")[:1]
     official = OfficialResearchContentVersion.objects.filter(
-        document__security=dossier.security,
+        document__security=dossier.security, pk=Subquery(newest),
     ).select_related("document").defer("raw_gzip", "content_text").order_by("-fetched_at")
     pending_count = candidates.exclude(material_version_id__in=used_news).count()
     official_pending_count = official.exclude(pk__in=used_official).count()
