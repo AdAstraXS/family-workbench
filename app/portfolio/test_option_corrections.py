@@ -60,6 +60,7 @@ class OptionStrikeCorrectionTests(TestCase):
         self.assertEqual(form["currency"].value(), "USD")
         page = self.client.get(reverse("portfolio:option_contract_edit", args=[self.option.pk]))
         self.assertEqual(page.context["form"]["strike_price"].value(), D("153"))
+        self.assertContains(page, 'value="2026-10-02"')
         page = self.client.get(reverse("portfolio:transaction_edit", args=[self.open.pk]))
         self.assertContains(page, "修改合约行权价")
 

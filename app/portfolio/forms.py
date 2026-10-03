@@ -361,7 +361,7 @@ class OptionContractForm(forms.Form):
     )
     expiration_date = forms.DateField(
         label="到期日",
-        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
+        widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}, format="%Y-%m-%d"),
     )
     multiplier = forms.IntegerField(label="合约乘数", min_value=1, initial=100)
     market = forms.ChoiceField(label="市场")
