@@ -5,7 +5,7 @@
   <td>{{ row.market_value|currency0:selected_currency }}</td>
   <td>{% if row.position_ratio is None %}—{% else %}{{ row.position_ratio|floatformat:2 }}%{% endif %}</td>
   <td>{{ row.total_asset|currency0:selected_currency }}</td>
-  {% if historical_view %}<td class="{% if row.annual_total > 0 %}positive{% elif row.annual_total < 0 %}negative{% endif %}">{{ row.annual_total|signed_currency2:selected_currency }}</td><td class="{% if row.annual_realized > 0 %}positive{% elif row.annual_realized < 0 %}negative{% endif %}">{{ row.annual_realized|signed_currency2:selected_currency }}</td>{% else %}
+  {% if historical_view %}<td class="{% if row.annual_total > 0 %}positive{% elif row.annual_total < 0 %}negative{% endif %}">{{ row.annual_total|signed_currency0:selected_currency }}</td><td class="{% if row.annual_realized > 0 %}positive{% elif row.annual_realized < 0 %}negative{% endif %}">{{ row.annual_realized|signed_currency0:selected_currency }}</td>{% else %}
   <td class="{% if row.today_pnl > 0 %}positive{% elif row.today_pnl < 0 %}negative{% endif %}">{{ row.today_pnl|signed_currency0:selected_currency }}</td>
   <td class="{% if row.unrealized > 0 %}positive{% elif row.unrealized < 0 %}negative{% endif %}">{{ row.unrealized|signed_currency0:selected_currency }}</td>{% endif %}
   <td class="{% if row.realized > 0 %}positive{% elif row.realized < 0 %}negative{% endif %}">{{ row.realized|signed_currency0:selected_currency }}</td>

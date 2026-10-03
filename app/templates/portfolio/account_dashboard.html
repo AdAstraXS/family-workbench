@@ -61,7 +61,7 @@
       <strong>{{ row.total_asset|currency0:selected_currency }}</strong>
       <span>{{ row.cash|currency0:selected_currency }}</span>
       <span>{{ row.market_value|currency0:selected_currency }}</span>
-      {% if historical_view %}<strong class="{% if row.annual_total > 0 %}positive{% elif row.annual_total < 0 %}negative{% endif %}">{{ row.annual_total|signed_currency2:selected_currency }}</strong><span class="{% if row.annual_realized > 0 %}positive{% elif row.annual_realized < 0 %}negative{% endif %}">{{ row.annual_realized|signed_currency2:selected_currency }}</span>{% else %}
+      {% if historical_view %}<strong class="{% if row.annual_total > 0 %}positive{% elif row.annual_total < 0 %}negative{% endif %}">{{ row.annual_total|signed_currency0:selected_currency }}</strong><span class="{% if row.annual_realized > 0 %}positive{% elif row.annual_realized < 0 %}negative{% endif %}">{{ row.annual_realized|signed_currency0:selected_currency }}</span>{% else %}
       <span class="{% if row.today_pnl > 0 %}positive{% elif row.today_pnl < 0 %}negative{% endif %}">{{ row.today_pnl|signed_currency0:selected_currency }}</span>
       <span class="{% if row.unrealized > 0 %}positive{% elif row.unrealized < 0 %}negative{% endif %}">{{ row.unrealized|signed_currency0:selected_currency }}</span>{% endif %}
       <span class="{% if row.realized > 0 %}positive{% elif row.realized < 0 %}negative{% endif %}">{{ row.realized|signed_currency0:selected_currency }}</span>
