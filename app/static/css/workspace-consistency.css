@@ -33,6 +33,7 @@
 }
 .songting .mon-stat > strong { white-space: normal; overflow-wrap: anywhere; }
 .songting .mon-stat em { display: inline-block; }
+.songting .mon-column:last-child > small { align-self: flex-end; }
 .songting .page button:where(:not([class])) {
   background: var(--ws-accent);
   border-color: var(--ws-accent);

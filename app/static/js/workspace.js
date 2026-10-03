@@ -12,14 +12,20 @@
   }
   document.addEventListener('click', function (e) {
     var b = e.target.closest('button'); if (!b) return;
-    if (b.dataset.wsOpen) document.getElementById(b.dataset.wsOpen).showModal();
+    if (b.dataset.wsOpen) {
+      document.getElementById(b.dataset.wsOpen).showModal();
+      if (b.dataset.wsOpen === 'ws-launcher') document.getElementById('ws-module-query').focus();
+    }
     if (b.hasAttribute('data-ws-close')) b.closest('dialog').close();
     if (b.dataset.wsPalette) { root.dataset.palette = b.dataset.wsPalette; save('workbench-palette', b.dataset.wsPalette); sync(); }
     if (b.hasAttribute('data-ws-menu')) {
       var open = document.body.classList.toggle('ws-menu-open');
       b.setAttribute('aria-expanded', String(open));
       b.setAttribute('aria-label', open ? '收起所有模块' : '展开所有模块');
-      if (open) document.querySelector('#ws-sidebar a[aria-current="page"], #ws-sidebar a').focus();
+      if (open) {
+        var currentLink = document.querySelector('#ws-sidebar a[aria-current="page"]') || document.querySelector('#ws-sidebar a');
+        if (currentLink) currentLink.focus();
+      }
     }
   });
   document.querySelectorAll('#ws-appearance, #ws-launcher').forEach(function (dialog) {

@@ -10,7 +10,7 @@
   {% block extra_head %}{% endblock %}
   <link rel="stylesheet" href="{% static 'css/songting.css' %}?v=20261003-frontend-audit">
   <link rel="stylesheet" href="{% static 'css/module-motion.css' %}?v=20260925-1">
-  <link rel="stylesheet" href="{% static 'css/workspace-consistency.css' %}?v=20261003">
+  <link rel="stylesheet" href="{% static 'css/workspace-consistency.css' %}?v=20261003-final">
 </head>
 <body class="songting app-{{ request.resolver_match.app_name|default:'site' }} view-{{ request.resolver_match.url_name|default:'page' }}">
   <a class="ws-skip" href="#workspace-main">跳到页面内容</a>
@@ -61,7 +61,7 @@
   <footer class="ws-footer"><span>{{ site_household_name }} · 共同积累，从容生活</span><a href="{% static 'songting/credits.html' %}" target="_blank" rel="noopener">设计素材鸣谢</a></footer>
   </div>
   {% include 'workspace/appearance.html' %}
-  <script src="{% static 'js/workspace.js' %}?v=20261003-frontend-audit" defer></script>
+  <script src="{% static 'js/workspace.js' %}?v=20261003-frontend-audit-final" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
