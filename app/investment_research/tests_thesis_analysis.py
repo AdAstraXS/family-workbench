@@ -21,10 +21,26 @@ from .models import OfficialResearchContentVersion, OfficialResearchDocument
 from .research_ai import ResearchAiError
 from .services import create_dossier, save_thesis_revision
 from .tests_financial_overview import filing
-from .thesis_analysis import _validate_output, generate_thesis_analysis
+from .thesis_analysis import _fit_evidence, _validate_output, generate_thesis_analysis
 
 
 class ThesisAnalysisTests(TestCase):
+    def test_input_budget_preserves_latest_tables_metrics_and_selected_news(self):
+        evidence = [{"id": f"E{i}", "text": text} for i, text in enumerate([
+            "财年截至 2025: 净利润 100",
+            "管理层讨论摘录：" + "旧背景" * 500,
+            "最新财务报表原文摘录：2026 | 2025\n全年净利润 | 9226 | 8099",
+            "最新财务报表原文摘录：2026 | 2025\n经营现金流 | 15825 | 13335",
+            "旧财务报表原文摘录：" + "旧数据" * 500,
+            "新闻来源 已选择摘录",
+        ], start=1)]
+        selected, omitted = _fit_evidence(evidence, 400)
+        self.assertEqual([item["id"] for item in selected], ["E1", "E3", "E4", "E6"])
+        self.assertEqual(selected[1], evidence[2])
+        self.assertEqual(omitted, 2)
+        self.assertLessEqual(sum(len(f"\n[{i['id']}] {i['text']}") for i in selected), 400)
+        self.assertEqual(len(evidence), 6)
+
     @classmethod
     def setUpTestData(cls):
         family = Family.objects.create(name="Synthesis family")

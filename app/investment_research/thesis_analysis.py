@@ -26,9 +26,28 @@ from .research_ai import (
 from .services import DossierNotFound, ResearchValidationError, _require_writer
 
 
-PROMPT_VERSION = "research-thesis-synthesis-v9"
+PROMPT_VERSION = "research-thesis-synthesis-v10"
 MARKET_EXPECTATION_QUESTION = re.compile(
     r"超越市场预期|超出市场预期|超预期|市场一致预期|分析师预期")
+
+
+def _fit_evidence(evidence, available):
+    """Keep metrics, selected news and the newest complete statement excerpts."""
+    selected = list(evidence)
+    statements = [item for item in selected if "财务报表原文摘录" in item["text"]]
+    protected = {item["id"] for item in statements[:2]}
+    candidates = [item for item in reversed(selected)
+                  if item["id"] not in protected
+                  and not item["text"].startswith(("财年截至", "新闻来源"))]
+    # Remove older prose before older statement tables; never clip table columns.
+    candidates.sort(key=lambda item: "财务报表原文摘录" in item["text"])
+    size = sum(len(f"\n[{item['id']}] {item['text']}") for item in selected)
+    for item in candidates:
+        if size <= available:
+            break
+        selected.remove(item)
+        size -= len(f"\n[{item['id']}] {item['text']}")
+    return selected, len(evidence) - len(selected)
 
 
 class ResponseFormatError(ResearchAiError):
@@ -352,7 +371,9 @@ def _generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
     if packet["market_context"]:
         lines.append("已保存的行情快照（不是官方财报，且没有历史倍数或市场一致预期）：" +
                      json.dumps(packet["market_context"], ensure_ascii=False))
-    lines.append("以下是系统整理并核对来源的全部可用资料项，非原件全文：")
+    lines.append("以下是按本次输入容量选择的可用资料项，非原件全文；未提供的材料不代表原件没有披露：")
+    evidence, omitted_count = _fit_evidence(evidence, policy["max_input_chars"] - len(system)
+                                           - len("\n".join(lines)))
     lines.extend(f"[{item['id']}] {item['text']}" for item in evidence)
     user_prompt = "\n".join(lines)
     if len(system) + len(user_prompt) > policy["max_input_chars"]:
@@ -405,8 +426,9 @@ def _generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                "sources": packet["sources"], "financial_periods": packet["periods"],
                "valuation_basis": packet["valuation_basis"],
                "market_context": packet["market_context"],
-               "financial_count": packet["financial_count"],
-               "narrative_count": packet["narrative_count"],
+               "financial_count": sum("财年截至" in item["text"] for item in evidence),
+               "narrative_count": sum("摘录" in item["text"] for item in evidence),
+               "omitted_evidence_count": omitted_count,
                "preparation_problem": packet["problem"],
                "prompt_version": PROMPT_VERSION, "consent": "one_time",
                "news_snapshots": packet.get("news_snapshots", []),
