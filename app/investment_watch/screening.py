@@ -122,8 +122,13 @@ def validate_screening(raw, candidates, recent_ids=()):
     if seen != allowed:
         raise WatchError("初筛没有覆盖本批全部候选。")
     selected = {r["candidate_id"] for r in rows if r["selected"]}
-    if any(r.get("duplicate_of") is not None and r["duplicate_of"] not in set(recent_ids) | selected for r in rows):
-        raise WatchError("重复报道只能引用近期已选或本批已选材料。")
+    for row in rows:
+        if row.get("duplicate_of") is not None and row["duplicate_of"] not in set(recent_ids) | selected:
+            # A model may group two rejected stories. This is not a usable reading
+            # deduplication reference, but must not discard unrelated valid choices.
+            # Keep the rejection; never turn an invalid reference into a paid read.
+            row["duplicate_of"] = None
+            row["reason"] = "判重引用未通过已选材料校验，未建立关联；保留候选，暂不抓取。"
     return rows
 
 
