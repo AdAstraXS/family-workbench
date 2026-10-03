@@ -2211,9 +2211,13 @@ def option_contract_edit(request, pk):
         instance=security,
     )
     if request.method == "POST" and form.is_valid():
-        form.save(member)
-        messages.success(request, "期权合约已更新。")
-        return redirect("portfolio:security_list")
+        try:
+            form.save(member, user=request.user)
+        except ValidationError as exc:
+            form.add_error(None, exc)
+        else:
+            messages.success(request, "期权合约已更新，关联行权/指派流水的现金和盈亏已重算；历史快照需另行重算。")
+            return redirect("portfolio:security_list")
     return render(
         request,
         "form.html",
@@ -2619,5 +2623,11 @@ def save_transaction_form(request, title, instance=None):
     return render(
         request,
         "portfolio/transaction_form.html",
-        {"form": form, "title": title},
+        {
+            "form": form, "title": title,
+            "option_contract_edit_url": reverse("portfolio:option_contract_edit", args=[instance.security_id])
+            if instance and instance.security_id
+            and instance.security.asset_type == Security.TYPE_OPTION
+            and instance.security.data_source == "manual" else "",
+        },
     )

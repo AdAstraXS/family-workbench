@@ -2,6 +2,7 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 from django import forms
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -238,6 +239,7 @@ def build_option_contract_symbol(underlying, expiration_date, option_type, strik
     return f"{root}{expiration_date:%y%m%d}{option_code}{strike_code:08d}"
 
 
+@transaction.atomic
 def save_option_contract(
     *,
     member,
@@ -248,8 +250,24 @@ def save_option_contract(
     multiplier,
     contract_symbol="",
     security=None,
+    user=None,
 ):
     from .market_data import ensure_quote_config
+
+    if security and security.pk:
+        contract = OptionContract.objects.select_for_update().get(security=security)
+        if strike_price <= 0:
+            raise forms.ValidationError("行权价必须大于 0。")
+        if InvestmentTransaction.objects.filter(security=security).exists():
+            if any([
+                underlying.pk != contract.underlying_id,
+                option_type != contract.option_type,
+                expiration_date != contract.expiration_date,
+                multiplier != contract.multiplier,
+            ]):
+                raise forms.ValidationError("已有历史交易的合约仅支持更正行权价；正股、类型、到期日和乘数不能改成另一份合约。")
+        from .option_corrections import correct_settlement_prices
+        correct_settlement_prices(contract, strike_price, family=member.family, user=user)
 
     contract_symbol = (contract_symbol or build_option_contract_symbol(
         underlying,
@@ -337,7 +355,10 @@ class OptionContractForm(forms.Form):
         help_text="可以留空，系统会按正股、到期日、期权类型和行权价自动生成。",
     )
     option_type = forms.ChoiceField(label="期权类型", choices=OptionContract.OPTION_TYPE_CHOICES)
-    strike_price = forms.DecimalField(label="行权价", max_digits=20, decimal_places=6)
+    strike_price = forms.DecimalField(
+        label="行权价", max_digits=20, decimal_places=6, min_value=Decimal("0.000001"),
+        help_text="更正行权价会同步更正已关联的行权/指派股票成交金额、现金和盈亏；保存的历史快照需另行重算。",
+    )
     expiration_date = forms.DateField(
         label="到期日",
         widget=forms.DateInput(attrs={"class": "form-control", "type": "date"}),
@@ -348,7 +369,7 @@ class OptionContractForm(forms.Form):
 
     def __init__(self, *args, family=None, instance=None, **kwargs):
         self.instance = instance
-        if instance and not args and "initial" not in kwargs:
+        if instance and "initial" not in kwargs:
             contract = instance.option_contract
             kwargs["initial"] = {
                 "underlying": contract.underlying,
@@ -410,7 +431,7 @@ class OptionContractForm(forms.Form):
                 self.add_error(None, "相同条款的期权合约已经存在。")
         return cleaned
 
-    def save(self, member):
+    def save(self, member, user=None):
         return save_option_contract(
             member=member,
             underlying=self.cleaned_data["underlying"],
@@ -420,6 +441,7 @@ class OptionContractForm(forms.Form):
             multiplier=self.cleaned_data["multiplier"],
             contract_symbol=self.cleaned_data["contract_symbol"],
             security=self.instance,
+            user=user,
         )
 
 

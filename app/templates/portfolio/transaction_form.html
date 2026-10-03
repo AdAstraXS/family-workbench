@@ -9,6 +9,9 @@
       {% if form_intro %}<p>{{ form_intro }}</p>{% endif %}
     </div>
   </div>
+  {% if option_contract_edit_url %}
+    <p class="transaction-section-intro">行权价属于期权合约。<a href="{{ option_contract_edit_url }}">修改合约行权价</a>（会同步更正关联的行权/指派流水）。</p>
+  {% endif %}
   <form method="post" class="data-form transaction-data-form">
     {% csrf_token %}
     {% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}">{% endif %}
