@@ -30,19 +30,21 @@
   <main class="page" id="workspace-main" tabindex="-1">
 
     {% url 'dashboard:home' as workspace_home_url %}
+    {% url 'ledger:overview' as ledger_home_url %}
+    {% url 'ipo:index' as ipo_home_url %}
+    {% url 'notes:index' as notes_home_url %}
+    {% url 'intelligence:index' as intelligence_home_url %}
     {% if user.is_authenticated and page_parent_url and page_parent_url != workspace_home_url and request.resolver_match.app_name != "knowledge" and request.resolver_match.app_name != "reading" and request.resolver_match.app_name != "trading_journal" and request.resolver_match.app_name != "investment_research" %}
       <nav class="page-context-nav" aria-label="页面快捷导航">
         <a class="button page-nav-back" href="{{ page_parent_url }}">返回上一级</a>
-        {% if request.resolver_match.app_name == "ledger" and request.resolver_match.url_name != "overview" %}
+        {% if request.resolver_match.app_name == "ledger" and request.resolver_match.url_name != "overview" and page_parent_url != ledger_home_url %}
           <a class="button page-nav-module" href="{% url 'ledger:overview' %}">家庭账本首页</a>
-        {% elif request.resolver_match.app_name == "ipo" and request.resolver_match.url_name != "index" %}
+        {% elif request.resolver_match.app_name == "ipo" and request.resolver_match.url_name != "index" and page_parent_url != ipo_home_url %}
           <a class="button page-nav-module" href="{% url 'ipo:index' %}">港股打新首页</a>
-        {% elif request.resolver_match.app_name == "notes" and request.resolver_match.url_name != "index" %}
+        {% elif request.resolver_match.app_name == "notes" and request.resolver_match.url_name != "index" and page_parent_url != notes_home_url %}
           <a class="button page-nav-module" href="{% url 'notes:index' %}">投资笔记首页</a>
-        {% elif request.resolver_match.app_name == "intelligence" and request.resolver_match.url_name != "index" %}
+        {% elif request.resolver_match.app_name == "intelligence" and request.resolver_match.url_name != "index" and page_parent_url != intelligence_home_url %}
           <a class="button page-nav-module" href="{% url 'intelligence:index' %}">AI 情报首页</a>
-        {% elif request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name != "index" %}
-          <a class="button page-nav-module" href="{% url 'knowledge:index' %}">知识中心首页</a>
         {% endif %}
       </nav>
     {% endif %}
