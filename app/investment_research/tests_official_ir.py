@@ -268,7 +268,9 @@ class OfficialIRIntegrationTests(TestCase):
         self.assertIn('attachment', response['Content-Disposition'])
 
     def test_explore_creates_korean_target_without_holding_or_thesis(self):
-        response = self.client.post(reverse('investment_research:explore'),{'company':'skhynix'})
+        from django.core import signing
+        token = signing.dumps({'code':'KR.000660','name':'SK hynix','source':'test fixture'}, salt='company-choice')
+        response = self.client.post(reverse('investment_research:explore'),{'choice':token})
         self.assertEqual(response.status_code, 302)
         target = ResearchDossier.objects.get(security__symbol='000660')
         self.assertEqual(target.security.market,'KR')

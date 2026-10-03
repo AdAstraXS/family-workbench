@@ -3,7 +3,7 @@
 {% block research_content %}
 <section class="research-page">
 
-  <header class="research-header"><div><h1>了解一家公司</h1><p class="research-private-note">查找公司 → 确认上市市场 → 获取基础资料 → 阅读与检查缺失</p></div></header><p>已经有明确判断？<a href="{% url 'investment_research:create' %}">记录已有判断并建立档案</a>。</p>
+  <header class="research-header"><div><h1>了解一家公司</h1><p class="research-private-note">查找公司 → 确认上市市场 → 获取基础资料 → 阅读与检查缺失</p></div></header>
   <form method="post" class="research-form">{% csrf_token %}<label for="company-query">公司中文名、英文名或股票代码</label>
     <input id="company-query" name="query" value="{{ query }}" placeholder="例如：蔚来、Tencent、ASML、600519" maxlength="80" minlength="2" required>
     <p>同一家公司可能在多个市场上市，请选择你研究的证券。系统会显示已经核对的其他上市代码。</p><button type="submit">查找公司</button></form>

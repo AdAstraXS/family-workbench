@@ -6,6 +6,7 @@
 {% block research_content %}
 <section class="research-page">
   <header class="research-header"><div><h1>{{ version.material.title }}</h1><p class="research-private-note">{% if version.material.kind == 'facts' %}财务期间见各表 · {% elif version.material.kind == 'financials' %}报表最新期末 {{ financial_period|default:'未标注' }} · 主营构成期末 {{ version.data.breakdown.period|default:'未标注' }} · {% elif version.material.kind != 'profile' %}报告期 {{ version.report_date|default:"来源未标注" }} · {% endif %}获取于 {{ version.fetched_at|date:"Y-m-d H:i" }} · 第 {{ version.number }} 版</p></div><a class="button" href="?download=1">下载原始资料</a></header>
+  {% if prepared_view %}<p class="research-method-note">SEC 年度／季度财务整理报表：按已保存的 Company Facts 与已核对公告整理；原件获取时间见上方，各指标的报告期、单季／累计和来源见各表。<a href="{% url 'investment_research:material_read' dossier.pk version.pk %}?download=1">核对原始结构化数据</a></p>{% endif %}
   {% if version.source_url %}<p class="research-private-note">来源：<a href="{{ version.source_url }}" rel="noopener noreferrer" target="_blank">查看来源页面</a></p>{% endif %}
   {% if version.material.kind == 'facts' or version.material.kind == 'financials' %}<p class="research-private-note">保留原币种和统计口径；金额仅缩写单位以便阅读。</p>{% endif %}
   {% if version.data.warning %}<p class="research-source-error">{{ version.data.warning }}</p>{% endif %}

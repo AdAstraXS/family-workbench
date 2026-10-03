@@ -57,13 +57,13 @@ class ReportFixTests(TestCase):
         self.assertGreater(Decimal(job.scope['reported_cost_usd']), 0)
         self.assertFalse(hasattr(job, 'result'))
 
-    def test_prompt_page_and_report_hypotheses_are_visible(self):
+    def test_preferences_move_to_settings_and_report_has_no_hypothesis_editor(self):
         self.job()
         response = self.client.get(self.url)
-        self.assertContains(response, '候选假设')
-        self.assertContains(response, '现金流持续下降')
+        self.assertNotContains(response, 'name="claim_0"')
+        self.assertContains(response, '研究过程与本次阅读证据')
         prompt_url = reverse('investment_research:prompt_settings', args=[self.dossier.pk])
-        self.assertContains(self.client.get(prompt_url), '我的通用模板')
+        self.assertContains(self.client.get(prompt_url), '通用研究偏好')
         self.client.force_login(self.outsider.user)
         self.assertEqual(self.client.get(prompt_url).status_code, 404)
 

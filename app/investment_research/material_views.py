@@ -80,7 +80,8 @@ def library(request, pk):
     kinds = {'sec': {'facts', 'sec_document', 'sec'}, 'futu': {'profile', 'financials', 'research'}, 'ir': {'ir'}}
     display_materials = [m for m in materials if (m.kind in kinds.get(category, set()) if category != 'other'
                          else m.kind not in set().union(*kinds.values()))]
-    return render(request, "investment_research/material_library.html", {
+    from .material_table import table_context
+    return render(request, "investment_research/material_table.html", {
         "dossier": dossier, "identity": identity, "identity_info": info,
         "materials": display_materials,
         "category": category, "layer": 'prepared' if request.GET.get('layer') == 'prepared' else 'original',
@@ -90,7 +91,8 @@ def library(request, pk):
         "fiscal_calendar": fiscal,
         "facts_version": facts_version,
         "manifest": manifest, "sources": sources,
-        "job": job, "active": active, "can_write": is_writer(member)})
+        "job": job, "active": active, "can_write": is_writer(member),
+        **table_context(request, dossier, materials, overview)})
 
 
 @login_required
@@ -124,6 +126,7 @@ def read(request, pk, version_pk):
         "profile": profile_content(data) if version.material.kind == "profile" else None,
         "retired": version.material.kind in RETIRED_SOURCES,
         "tables": tables, "financial_period": financial_period,
+          "prepared_view": request.GET.get('view') == 'prepared' and version.material.kind == 'facts',
         "groups": breakdown_tables(data.get("breakdown")) if version.material.kind == "financials" else [],
         "versions": version.material.versions.only("id", "number", "fetched_at", "report_date"),
     })

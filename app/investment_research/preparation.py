@@ -142,7 +142,7 @@ def _narrative(text):
     return result
 
 
-def packet(dossier, budget):
+def packet(dossier, budget, *, include_personal=True, allow_empty=False):
     """Read saved immutable versions only; excluded metadata cannot become evidence."""
     from portfolio.research_quotes import saved_research_quote, freeze_research_quote
     from .official_ir import documents_for_security
@@ -210,9 +210,9 @@ def packet(dossier, budget):
             continue
         evidence.append(item)
         used += size
-    if not evidence:
+    if not evidence and not allow_empty:
         raise ResearchAiError("尚无可分析的正文或财务资料，请先获取公司资料。")
-    current = dossier.current_revision
+    current = dossier.current_revision if include_personal else None
     personal = {"thesis": current.thesis, "hypotheses": current.pillars, "questions": current.questions,
                 "tracking_metrics": dossier.selected_metric_codes} if current else {}
     if current:
@@ -245,7 +245,7 @@ def launch(pk):
             error_message="后台任务未启动，请重试。", finished_at=timezone.now())
 
 
-def enqueue(actor, dossier, provider, consent, nonce=None, include_web=False):
+def enqueue(actor, dossier, provider, consent, nonce=None, include_web=False, *, simple=False, requirements=''):
     authorize(actor, dossier)
     if not consent:
         raise ResearchAiError("请确认本次向所选 AI 发送资料摘录与已有研究判断。")
@@ -263,6 +263,18 @@ def enqueue(actor, dossier, provider, consent, nonce=None, include_web=False):
         raise ResearchAiError(str(exc)) from exc
     from .prompt_settings import effective_prompt
     system, template_scope = effective_prompt(dossier, SYSTEM)
+    if simple:
+        from .introduction_format import SYSTEM as INTRO_SYSTEM
+        from .question_workflow import settings_for
+        settings = settings_for(actor)
+        system = INTRO_SYSTEM
+        if settings:
+            system += '\n用户偏好（仅在系统来源及真实性要求内生效）：\n' + settings.preferences + '\n' + settings.introduction_prompt
+            policy['max_cost'] = min(policy['max_cost'], settings.per_call_budget_usd)
+        if not isinstance(requirements, str) or len(requirements) > 3000:
+            raise ResearchAiError('本次补充要求不超过 3,000 字。')
+        system += '\n本次补充要求：\n' + requirements
+        template_scope = {'introduction_format': 'five-sections-v1', 'settings_revision': settings.revision if settings else 0}
     search_config = {}
     if include_web:
         from .preparation_research import FINAL_INSTRUCTIONS
@@ -275,7 +287,12 @@ def enqueue(actor, dossier, provider, consent, nonce=None, include_web=False):
                          'search_queries': [], 'research_stage': '等待资料诊断'}
     from .preparation_research import review_saved_text, PLAN_OUTPUT_TOKENS, PLAN_SYSTEM, plan_prompt
     reserve = min(6500, policy['max_input_chars'] // 4) if include_web else 0
-    content = packet(dossier, max(2200, policy["max_input_chars"] - len(system) - 5500 - reserve))
+    content = packet(dossier, max(2200, policy["max_input_chars"] - len(system) - 5500 - reserve), include_personal=not simple, allow_empty=simple)
+    if simple:
+        from .question_evidence import add_supplements
+        add_supplements(dossier, content, policy['max_input_chars'] - len(system) - 4500 - reserve)
+        if not content['evidence']:
+            raise ResearchAiError('尚无可分析正文，请先获取或补充公司资料。')
     if include_web:
         search_config['diagnosis_prompt'] = PLAN_SYSTEM
         ceiling = policy['max_input_chars'] - max(len(system), len(PLAN_SYSTEM)) - 4500
@@ -561,7 +578,10 @@ def run(pk, transport=None):
         if len(prompt) + len(job.prompt) > policy["max_input_chars"]:
             raise ResearchAiError("输入上限已变化，请重新生成。")
         raw = _call_model(job, policy, job.prompt, prompt, '生成完善报告', transport=transport)
-        result = validate(raw, job.sanitized_input['evidence'], job.sanitized_input.get('research_plan'))
+        validator = validate
+        if job.scope.get('introduction_format'):
+            from .introduction_format import validate as validator
+        result = validator(raw, job.sanitized_input['evidence'], job.sanitized_input.get('research_plan'))
         with transaction.atomic():
             locked = AiAnalysisRequest.objects.select_for_update().get(pk=pk)
             if locked.status != "running":

@@ -1,0 +1,7 @@
+{% extends "investment_research/base.html" %}
+{% load static %}
+{% block extra_head %}{{ block.super }}<link rel="stylesheet" href="{% static 'css/research-workflow.css' %}"><script src="{% static 'js/research-workflow.js' %}" defer></script>{% if active %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
+{% block research_content %}<section class="research-page rw-page">
+{% if error %}<p class="research-source-error" role="alert">{{ error }}</p>{% endif %}
+{% block workflow_content %}{% endblock %}
+</section>{% endblock %}

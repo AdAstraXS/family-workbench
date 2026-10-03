@@ -170,8 +170,7 @@ class MaterialTests(TestCase):
         self.assertEqual(overview["releases"][0]["audit"], "未经审计（原文标注）")
         self.assertEqual(overview["annual"][0]["period"], "2025-08-28")
         self.client.force_login(self.actor.user)
-        for url in [reverse("investment_research:materials", args=[self.dossier.pk]),
-                    reverse("investment_research:material_read", args=[self.dossier.pk, facts.pk])]:
+        for url in [reverse("investment_research:material_read", args=[self.dossier.pk, facts.pk])]:
             response = self.client.get(url)
             for label in ["最新业绩公告", "年度财务", "季度财务", "全年业绩公告", "2026-09-03", "未经审计"]:
                 self.assertContains(response, label)
@@ -215,7 +214,8 @@ class MaterialTests(TestCase):
         self.client.force_login(self.actor.user)
         with patch("investment_research.company_sources.quote_context") as fetch:
             response = self.client.get(reverse("investment_research:materials", args=[self.dossier.pk]) + "?tab=inventory")
-            self.assertContains(response, "原始资料与版本")
+            self.assertContains(response, "原始／整理")
+            self.assertContains(response, '<table')
             self.assertNotContains(response, "五步资料清单")
             manifest = self.client.get(reverse("investment_research:materials", args=[self.dossier.pk]) + "?format=manifest")
             self.assertIn('steps', manifest.json())

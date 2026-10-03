@@ -195,9 +195,17 @@ def run_cycle(family, *, collect=True, analyze=True, limit=3):
             recalled += recall(dossier)
             if (
                 analyze
+                and not dossier.question_workflow
                 and WatchConsent.objects.filter(dossier=dossier, active=True).exists()
             ):
                 queue_run(dossier)
+            if analyze and dossier.question_workflow:
+                from investment_research.question_ai import automatic_check
+                from investment_research.research_ai import ResearchAiError
+                try:
+                    automatic_check(dossier)
+                except ResearchAiError as exc:
+                    results.append({'dossier': dossier.pk, 'question_check': str(exc)})
         # Reclaim interrupted runs only after acquiring the expired family lease.
         WatchRun.objects.filter(dossier__family=family, status="running").update(
             status="queued", message="上轮中断，继续未付费的候选。"
@@ -210,7 +218,7 @@ def run_cycle(family, *, collect=True, analyze=True, limit=3):
         ).select_related("dossier__owner", "dossier__current_revision")[
             : max(1, min(limit, 3))
         ]:
-            if run.revision_id != run.dossier.current_revision_id:
+            if run.dossier.question_workflow or run.revision_id != run.dossier.current_revision_id:
                 run.status = "stale"
                 run.message = "判断已更新，请重新发起。"
             elif not analyze:

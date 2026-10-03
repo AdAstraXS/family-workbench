@@ -1,0 +1,17 @@
+{% extends "investment_research/workflow_base.html" %}
+{% block title %}跟踪问题 · {{ dossier.security.name }}{% endblock %}
+{% block workflow_content %}
+<header class="research-header"><div><p class="research-eyebrow">第三步 · 跟踪问题</p><h1>{{ dossier.security.name }} · 最近变化</h1><p>先看影响答案的新证据和重要缺口，再查需要继续核实的资料。</p></div><a href="{% url 'investment_research:questions' dossier.pk %}">修改问题清单</a></header>
+{% include "investment_research/workflow_job.html" %}
+{% if not dossier.question_workflow %}<p class="rw-notice">请先整理并确认新的问题清单。旧流程记录仍保留在历史中，自动分析不会代你转换。</p>{% endif %}
+<p class="research-private-note">自动 AI：{% if consent and not consent.revoked_at %}已开启 · 本公司授权每日上限 ${{ consent.daily_budget_usd }}{% else %}关闭{% endif %} · <a href="{% url 'investment_research:research_settings' dossier.pk %}">研究设置</a></p>
+{% for source in source_errors %}<p class="research-source-error">{{ source.get_source_display }} 获取未完成：{{ source.last_error }} · 最近检查 {{ source.last_checked_at|date:"Y-m-d H:i" }}</p>{% endfor %}
+{% if acquisition.status == 'failed' %}<p class="research-source-error">最近一次资料获取未完成，请在资料页查看逐项结果。</p>{% endif %}
+{% for item in acquisition_errors %}<p class="research-source-error">{{ item.title }} 最近获取未完成：{{ item.message }}</p>{% endfor %}
+{% if news_errors %}<details class="research-current"><summary>新闻原文未读 · {{ news_errors|length }} 项</summary>{% for item in news_errors %}<p>{{ item.material_version.title }} · {{ item.updated_at|date:"Y-m-d H:i" }}<br>{{ item.message }}</p>{% endfor %}<p>标题与摘要只作线索，不能用来确认财务指标或宣称核查无变化。</p></details>{% endif %}
+{% for question in questions %}{% include "investment_research/workflow_question_result.html" %}{% empty %}<p class="rw-notice">当前没有列出的证据增强、减弱或重要缺口。资料未更新、任务未完成与“核查后无变化”请通过下方问题及运行记录区分。</p>{% endfor %}
+<details class="research-current"{% if not questions %} open{% endif %}><summary>其他跟踪问题 · {{ quiet_questions|length }} 个</summary>{% for question in quiet_questions %}{% include "investment_research/workflow_question_result.html" %}{% empty %}<p>没有其他跟踪中的问题。</p>{% endfor %}</details>
+{% if can_write %}<details class="research-current"><summary>主动核查已保存资料</summary><p>共用财报和新闻资料，逐项检查同一份问题清单。无相关新资料时自动任务不重复分析；此处为主动生成。</p><form method="post" class="research-form">{% csrf_token %}{% include "investment_research/workflow_provider.html" %}<button{% if active %} disabled{% endif %}>核查问题</button></form></details>{% endif %}
+<div class="research-actions"><a href="{% url 'investment_research:materials' dossier.pk %}">查看／补充资料</a><a href="{% url 'investment_research:prepare' dossier.pk %}">更新初识报告</a><a href="{% url 'investment_research:questions' dossier.pk %}?status=resolved">查看已解决／暂停问题</a></div>
+<details class="research-current"><summary>问题分析运行记录</summary>{% for job in reports %}<details><summary>{{ job.created_at|date:"Y-m-d H:i" }} · {{ job.get_status_display }}</summary>{% include "investment_research/workflow_audit.html" %}{% if job.status == 'success' %}<p>{{ job.result.result_json.summary }}</p>{% endif %}</details>{% empty %}<p>尚无问题分析任务。</p>{% endfor %}{% if dossier.current_revision_id %}<p><a href="{% url 'investment_research:research_history' dossier.pk %}">旧流程历史记录</a></p>{% endif %}</details>
+{% endblock %}

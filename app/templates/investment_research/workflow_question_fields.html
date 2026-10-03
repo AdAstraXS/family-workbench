@@ -1,0 +1,5 @@
+<label>待跟踪问题<textarea name="title{% if indexed %}_{{ index }}{% endif %}" rows="2" maxlength="600" required>{{ question.title }}</textarea></label>
+<label>什么证据会更相信<textarea name="supporting_condition{% if indexed %}_{{ index }}{% endif %}" rows="2" maxlength="1600">{{ question.supporting_condition }}</textarea></label>
+<label>什么证据会重新考虑<textarea name="reconsidering_condition{% if indexed %}_{{ index }}{% endif %}" rows="2" maxlength="1600">{{ question.reconsidering_condition }}</textarea></label>
+<label>关注指标及口径<textarea name="metrics{% if indexed %}_{{ index }}{% endif %}" rows="3" maxlength="1600" placeholder="可列多项；保留报告期、单季／累计、同比／环比、披露／计算口径">{{ question.metrics }}</textarea></label>
+<label>指标来源<textarea name="source_notes{% if indexed %}_{{ index }}{% endif %}" rows="2" maxlength="1600" placeholder="例如：年报分部数据；未披露的指标明确写缺失">{{ question.source_notes }}</textarea></label>

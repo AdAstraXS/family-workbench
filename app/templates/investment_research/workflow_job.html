@@ -1,0 +1,4 @@
+{% if active %}<p class="rw-notice" role="status">正在后台生成，可以离开后再回来。本页每 10 秒更新进度。</p>{% endif %}
+{% if job.status == 'failed' %}<p class="research-source-error" role="alert">{{ job.error_message }}</p>{% endif %}
+{% if job and not active and job.status == 'pending' or job and not active and job.status == 'running' %}<p class="research-source-error" role="alert">任务已超时或中断，未自动重试。请查看运行记录后主动重新提交。</p>{% endif %}
+{% if job.scope.superseded %}<p class="rw-notice">生成期间问题或授权已更新；本结果仅保留在历史中，不作为当前问题答案。</p>{% endif %}

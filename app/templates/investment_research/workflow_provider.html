@@ -1,0 +1,5 @@
+<label for="rw-provider">本次使用的模型</label><select id="rw-provider" name="provider">{% for provider in providers %}<option value="{{ provider.pk }}"{% if settings.provider_id == provider.pk %} selected{% endif %}>{{ provider.name }} · {{ provider.model_name }}</option>{% empty %}<option value="">尚无可用模型</option>{% endfor %}</select>
+<p class="research-private-note">单次费用上限：{% if settings %}${{ settings.per_call_budget_usd }}{% else %}沿用模型已批准的上限{% endif %}。<a href="{% url 'investment_research:research_settings' dossier.pk %}">研究设置</a></p>
+<label for="rw-requirements">本次补充要求（可选）</label><textarea id="rw-requirements" name="requirements" rows="3" maxlength="3000" placeholder="例如：重点核查最近财年的现金回报">{{ requirements }}</textarea>
+<input type="hidden" name="nonce" value="{{ nonce }}">
+<label class="rw-check"><input type="checkbox" name="consent" value="yes" required>同意本次向所选模型发送资料摘录、本人问题及关注点。</label>

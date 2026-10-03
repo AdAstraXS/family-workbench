@@ -442,6 +442,8 @@ def thesis_analysis(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow:
+        return redirect('investment_research:follow', pk=pk)
     from .research_basis import research_basis
     basis = research_basis(dossier)
     can_write = is_writer(member)
@@ -583,6 +585,8 @@ def next_day_consent(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow:
+        return redirect('investment_research:research_settings', pk=pk)
     if not is_writer(member):
         return HttpResponseForbidden("查看者角色不能修改自动分析授权。")
     action = request.POST.get("action")
@@ -606,6 +610,8 @@ def next_day_generate(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow:
+        return redirect('investment_research:follow', pk=pk)
     if not is_writer(member):
         return HttpResponseForbidden("查看者角色不能生成自动事件简报。")
     try:
@@ -769,6 +775,8 @@ def review_plan(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow and request.method == 'POST':
+        return redirect('investment_research:questions', pk=pk)
     if request.method == "POST" and not is_writer(member):
         return HttpResponseForbidden("查看者角色不能生成或确认复核计划。")
     version = latest_plan_source(dossier)
@@ -853,6 +861,8 @@ def filing_review(request, pk, document_pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow and request.method == 'POST':
+        return redirect('investment_research:follow', pk=pk)
     if dossier.current_revision_id is None:
         return redirect("investment_research:first_thesis", pk=pk)
     _, items = reviewable_filings(dossier)
@@ -1079,6 +1089,8 @@ def metric_focus(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow and request.method == 'POST':
+        return redirect('investment_research:questions', pk=pk)
     if request.method == "POST" and not is_writer(member):
         return HttpResponseForbidden("查看者角色不能修改追踪指标。")
     version = (OfficialResearchContentVersion.objects.filter(
@@ -1221,6 +1233,8 @@ def generate_draft(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow:
+        return redirect('investment_research:questions', pk=pk)
     if not is_writer(member):
         return HttpResponseForbidden("查看者角色不能发起 AI 分析。")
     try:

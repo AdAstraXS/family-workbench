@@ -164,6 +164,9 @@ class ResearchDossier(TimestampedModel):
     )
     initial_thesis = models.TextField("原始持有理由", blank=True)
     is_watched = models.BooleanField("加入观察", default=False, db_default=False)
+    question_workflow = models.BooleanField("已采用问题清单流程", default=False, db_default=False)
+    question_list_revision = models.PositiveIntegerField("问题清单版本", default=0, db_default=0)
+    research_paused = models.BooleanField("暂时结束研究", default=False, db_default=False)
     selected_metric_codes = models.JSONField("已确认追踪指标", default=list, blank=True)
     current_revision = models.ForeignKey(
         "ResearchThesisRevision",
@@ -202,10 +205,108 @@ class ResearchAutoDigestConsent(TimestampedModel):
         related_name="research_auto_digest_consents", verbose_name="授权成员")
     authorized_at = models.DateTimeField("授权时间", default=timezone.now)
     revoked_at = models.DateTimeField("关闭时间", null=True, blank=True)
+    provider_signature = models.CharField("授权时模型配置校验", max_length=64, blank=True, default='', db_default='')
+    daily_budget_usd = models.DecimalField("自动分析每日费用上限", max_digits=9, decimal_places=4,
+                                           default="0.30", db_default="0.30")
 
     class Meta:
         verbose_name = "次日跟踪自动对照授权"
         verbose_name_plural = "次日跟踪自动对照授权"
+
+
+class ResearchQuestion(TimestampedModel):
+    """The owner's confirmed question; AI suggestions never write this table."""
+    dossier = models.ForeignKey(ResearchDossier, on_delete=models.PROTECT, related_name="research_questions")
+    title = models.CharField("待跟踪问题", max_length=600)
+    supporting_condition = models.TextField("什么证据会更相信", blank=True)
+    reconsidering_condition = models.TextField("什么证据会重新考虑", blank=True)
+    metrics = models.TextField("关注指标及口径", blank=True)
+    source_notes = models.TextField("指标来源", blank=True)
+    status = models.CharField("状态", max_length=20, default="tracking", choices=[
+        ("tracking", "跟踪中"), ("resolved", "已解决"), ("paused", "暂停"), ("removed", "已移出清单")])
+    revision = models.PositiveIntegerField("问题版本", default=1)
+    position = models.PositiveIntegerField(default=0)
+    introduction = models.ForeignKey("ai_analysis.AiAnalysisRequest", null=True, blank=True,
+                                     on_delete=models.PROTECT, related_name="confirmed_questions")
+
+    class Meta:
+        ordering = ["position", "pk"]
+        verbose_name = "待跟踪问题"
+        verbose_name_plural = verbose_name
+
+
+class ResearchQuestionRevision(models.Model):
+    question = models.ForeignKey(ResearchQuestion, on_delete=models.PROTECT, related_name="revisions")
+    number = models.PositiveIntegerField()
+    content = models.JSONField(default=dict)
+    created_by = models.ForeignKey(FamilyMember, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-number"]
+        constraints = [models.UniqueConstraint(fields=["question", "number"], name="unique_research_question_revision")]
+
+
+class ResearchQuestionUpdate(models.Model):
+    question = models.ForeignKey(ResearchQuestion, on_delete=models.PROTECT, related_name="updates")
+    question_revision = models.PositiveIntegerField()
+    analysis = models.ForeignKey("ai_analysis.AiAnalysisRequest", on_delete=models.PROTECT,
+                                  related_name="question_updates")
+    answer = models.TextField()
+    change = models.TextField(blank=True)
+    direction = models.CharField(max_length=20, choices=[("strengthened", "证据增强"),
+        ("weakened", "证据减弱"), ("unchanged", "未改变"), ("unresolved", "仍待核实")])
+    evidence = models.JSONField(default=list)
+    gap = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        constraints = [models.UniqueConstraint(fields=["analysis", "question"], name="unique_question_analysis_update")]
+
+
+class ResearchQuestionAction(models.Model):
+    question = models.ForeignKey(ResearchQuestion, on_delete=models.PROTECT, related_name="actions")
+    created_by = models.ForeignKey(FamilyMember, on_delete=models.PROTECT)
+    previous_status = models.CharField(max_length=20)
+    status = models.CharField(max_length=20)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+
+
+class ResearchWorkflowSettings(TimestampedModel):
+    owner = models.OneToOneField(FamilyMember, on_delete=models.PROTECT, related_name="research_settings")
+    provider = models.ForeignKey("ai_analysis.AiProvider", null=True, blank=True, on_delete=models.PROTECT)
+    preferences = models.TextField("通用研究偏好", blank=True)
+    introduction_prompt = models.TextField("初识报告高级提示词", blank=True)
+    question_prompt = models.TextField("问题建议高级提示词", blank=True)
+    tracking_prompt = models.TextField("问题跟踪高级提示词", blank=True)
+    per_call_budget_usd = models.DecimalField(max_digits=9, decimal_places=4, default="0.30")
+    daily_budget_usd = models.DecimalField(max_digits=9, decimal_places=4, default="0.30")
+    revision = models.PositiveIntegerField(default=1)
+
+
+class ResearchSupplement(TimestampedModel):
+    """Private, immutable user-provided original; not shared CompanyMaterial."""
+    dossier = models.ForeignKey(ResearchDossier, on_delete=models.PROTECT, related_name="supplements")
+    created_by = models.ForeignKey(FamilyMember, on_delete=models.PROTECT)
+    title = models.CharField(max_length=500)
+    source_url = models.URLField(max_length=1500, blank=True)
+    original_name = models.CharField(max_length=250, blank=True)
+    media_type = models.CharField(max_length=120, blank=True)
+    raw_gzip = models.BinaryField()
+    sha256 = models.CharField(max_length=64)
+    text = models.TextField(blank=True)
+    period = models.CharField(max_length=100, blank=True)
+    published_at = models.DateField(null=True, blank=True)
+    summary = models.CharField(max_length=1000, blank=True)
+    extraction_note = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        constraints = [models.UniqueConstraint(fields=["dossier", "sha256"], name="unique_private_research_supplement")]
 
 
 class ResearchThesisRevision(models.Model):

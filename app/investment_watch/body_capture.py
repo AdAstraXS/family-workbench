@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import json
 import os
+from datetime import timedelta
 from urllib.error import HTTPError
 from urllib.request import Request, HTTPRedirectHandler, build_opener
 from zoneinfo import ZoneInfo
@@ -69,6 +70,79 @@ def _snapshot(version, text, raw, url, method="firecrawl-v2"):
     return BodySnapshot.objects.get_or_create(material_version=version, defaults={
         "text": text, "content_hash": hashlib.sha256(text.encode()).hexdigest(),
         "raw_gzip": gzip.compress(raw), "source_url": url, "method": method})[0]
+
+
+def capture_question_body(candidate):
+    """Reuse the archive/quota for new question workflows; public HTML only.
+
+    This path never buys Firecrawl or calls a second screening model. Sources
+    requiring login, scripts or a paywall stay explicit unread leads.
+    """
+    from investment_research.question_ai import consent_for
+    from investment_research.models import ResearchAutoDigestConsent
+    from investment_research.preparation import authorize
+    from investment_research.research_ai import ResearchAiError
+    from investment_research.ir_extraction import extract_material
+    from knowledge.web_fetch import public_request, WebCaptureError
+    from types import SimpleNamespace
+    candidate = ResearchCandidate.objects.select_related('dossier__owner__user', 'dossier__security',
+        'material_version__material__source', 'material_version__official_version').get(pk=candidate.pk)
+    dossier, version = candidate.dossier, candidate.material_version
+    if not getattr(settings, 'INVESTMENT_WATCH_BODY_ENABLED', False):
+        raise WatchError('新闻正文采集尚未启用，保留标题与摘要线索。')
+    try:
+        authorize(dossier.owner, dossier)
+        consent = ResearchAutoDigestConsent.objects.filter(dossier=dossier, revoked_at__isnull=True).select_related('provider').first()
+        if not consent:
+            raise ResearchAiError('自动问题分析未授权。')
+        consent_for(dossier, consent.provider)
+    except ResearchAiError as exc:
+        raise WatchError(str(exc)) from exc
+    if not dossier.owner.user.is_active or version.material.source.family_id != dossier.family_id:
+        raise WatchError('成员或来源权限已变化，停止正文获取。')
+    if version.status != 'active':
+        raise WatchError('来源已更正或撤回，保留版本信息供核查。')
+    saved = BodySnapshot.objects.filter(material_version=version).first()
+    if saved:
+        return saved
+    if version.official_version_id and version.official_version.content_text.strip():
+        text = version.official_version.content_text
+        return _snapshot(version, text, text.encode(), version.url, 'official-archive')
+    # Never consume historical material when automatic analysis is first enabled.
+    if version.found_at < consent.authorized_at or version.found_at < timezone.now() - timedelta(hours=48):
+        raise WatchError('授权前的历史候选不自动补抓正文。')
+    same = BodySnapshot.objects.filter(material_version__material__source__family_id=dossier.family_id,
+        material_version__url=version.url, material_version__content_hash=version.content_hash).first()
+    if same:
+        return _snapshot(version, same.text, gzip.decompress(bytes(same.raw_gzip)), same.source_url, 'cached')
+    attempt, created = reserve_body(candidate)
+    if not created:
+        if attempt.snapshot_id:
+            return attempt.snapshot
+        raise WatchError('正文请求已有记录，失败或中断不自动重试。')
+    try:
+        # Consent can be revoked between the quota reservation and network request.
+        dossier.refresh_from_db()
+        consent_for(dossier, consent.provider)
+        version.refresh_from_db()
+        if version.status != 'active':
+            raise WatchError('来源已更正或撤回，停止正文请求。')
+        raw, content_type = public_request(clean_url(version.url), limit=MAX_RESPONSE_BYTES, timeout=20)
+        extracted = extract_material(SimpleNamespace(url=version.url, raw=raw, content_type=content_type.split(';')[0].strip()))
+        if len(extracted['text']) < 1500 and any(marker in extracted['text'].casefold() for marker in (
+                'subscribe to continue', 'sign in to continue', 'subscription required', '订阅后阅读', '登录后阅读')):
+            raise WatchError('来源只返回登录或订阅提示，保留摘要线索和原文链接。')
+        with transaction.atomic():
+            saved = _snapshot(version, extracted['text'], raw, version.url, 'public-original')
+            attempt.snapshot, attempt.status = saved, 'completed'
+            attempt.message = '已保存公开原文；不含登录或付费页面，事实仍需核查。'
+            attempt.save(update_fields=['snapshot', 'status', 'message', 'updated_at'])
+        return saved
+    except Exception as exc:
+        message = str(exc) if isinstance(exc, (WatchError, ResearchAiError, WebCaptureError)) else '公开原文暂时无法读取，保留摘要线索。'
+        attempt.status, attempt.message = 'failed', message[:500]
+        attempt.save(update_fields=['status', 'message', 'updated_at'])
+        raise WatchError(attempt.message) from exc
 
 
 def capture_body(candidate, *, transport=None, url_validator=None):

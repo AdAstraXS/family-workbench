@@ -525,7 +525,7 @@ class ViewerTests(ResearchViewTestBase):
             ).status_code,
             403,
         )
-        self.assertEqual(self.client.get(edit_url(own)).status_code, 403)
+        self.assertRedirects(self.client.get(edit_url(own)), reverse('investment_research:questions', args=[own.pk]))
         self.assertEqual(
             self.client.post(
                 edit_url(own),
@@ -605,277 +605,89 @@ class IsolationTests(ResearchViewTestBase):
         self.assertNotContains(resp, "Globex Inc")
 
 
-class CreateRequestTests(ResearchViewTestBase):
+class QuestionRequestTests(ResearchViewTestBase):
+    """Replace retired independent-judgment forms with owner-confirmed questions."""
     def setUp(self):
         self.alice = self.make_member(self.family, "Alice")
         self.bob = self.make_member(self.family, "Bob")
+        self.dossier = self.create_dossier_for(self.alice, thesis="保留的旧判断")
         self.login(self.alice)
+        self.url = reverse("investment_research:questions", args=[self.dossier.pk])
 
-    def valid_payload(self, security=None, thesis="我认为它会增长。"):
-        return {
-            "security": (security or self.security).pk,
-            "initial_thesis": thesis,
-            "pillars": "假设一\n假设二",
-            "questions": "问题一",
-        }
+    def payload(self, **kwargs):
+        return {"action":"add", "list_revision":"0", "title":"现金流能否覆盖投入？",
+                "metrics":"全年经营现金流和资本开支", "source_notes":"官方年报", **kwargs}
 
-    def test_create_success(self):
-        resp = self.client.post(CREATE_URL, self.valid_payload())
-        self.assertEqual(resp.status_code, 302)
-        dossier = ResearchDossier.objects.get(owner=self.alice, security=self.security)
-        self.assertRedirects(resp, detail_url(dossier))
-        self.assertEqual(dossier.family, self.family)
-        self.assertEqual(dossier.current_revision.revision_number, 1)
-        self.assertEqual(dossier.current_revision.pillars, ["假设一", "假设二"])
-        self.assertEqual(dossier.current_revision.questions, ["问题一"])
-
-    def test_empty_lists_become_empty_list(self):
-        payload = self.valid_payload()
-        payload["pillars"] = ""
-        payload["questions"] = "\n\n  \n"
-        resp = self.client.post(CREATE_URL, payload)
-        self.assertEqual(resp.status_code, 302)
-        dossier = ResearchDossier.objects.get(owner=self.alice)
-        self.assertEqual(dossier.current_revision.pillars, [])
-        self.assertEqual(dossier.current_revision.questions, [])
-
-    def test_forged_owner_family_fields_do_not_change_attribution(self):
-        payload = self.valid_payload()
-        payload["owner"] = self.bob.pk
-        payload["family"] = self.other_family.pk
-        resp = self.client.post(CREATE_URL, payload)
-        self.assertEqual(resp.status_code, 302)
-        dossier = ResearchDossier.objects.get(owner=self.alice, security=self.security)
-        self.assertEqual(dossier.owner, self.alice)
-        self.assertEqual(dossier.family, self.family)
-        self.assertEqual(ResearchDossier.objects.filter(owner=self.bob).count(), 0)
-
-    def test_duplicate_create_redirects_to_existing(self):
-        first = self.create_dossier_for(self.alice)
-        resp = self.client.post(CREATE_URL, self.valid_payload(thesis="再来一次"))
-        self.assertEqual(resp.status_code, 302)
-        self.assertRedirects(resp, detail_url(first))
-        self.assertEqual(ResearchDossier.objects.filter(owner=self.alice).count(), 1)
-
-    def test_invalid_input_preserves_and_blocks(self):
-        resp = self.client.post(CREATE_URL, self.valid_payload(thesis="   "))
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["form"].errors.as_data()["initial_thesis"][0].code, "required")
-        self.assertEqual(resp.context["form"].data["pillars"], "假设一\n假设二")
-        self.assertEqual(ResearchDossier.objects.filter(owner=self.alice).count(), 0)
-
-    def test_empty_post_is_bound_and_shows_errors(self):
-        resp = self.client.post(CREATE_URL, {})
-        self.assertEqual(resp.status_code, 200)
-        self.assertTrue(resp.context["form"].is_bound)
-        self.assertIn("security", resp.context["form"].errors)
-        self.assertIn("initial_thesis", resp.context["form"].errors)
-        self.assertFalse(ResearchDossier.objects.exists())
-
-    def test_service_validation_error_shown_on_form(self):
-        payload = self.valid_payload()
-        payload["pillars"] = "\n".join(f"假设{i}" for i in range(6))
-        resp = self.client.post(CREATE_URL, payload)
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "最多 5 条")
-        self.assertEqual(ResearchDossier.objects.filter(owner=self.alice).count(), 0)
-
-    def test_malicious_html_escaped_in_detail(self):
-        payload = self.valid_payload(thesis="<script>alert('x')</script>判断")
-        resp = self.client.post(CREATE_URL, payload)
-        self.assertEqual(resp.status_code, 302)
-        dossier = ResearchDossier.objects.get(owner=self.alice)
-        resp = self.client.get(detail_url(dossier))
-        self.assertContains(resp, "&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;")
-        self.assertNotContains(resp, "<script>alert('x')</script>")
-
-    def test_csrf_missing_token_rejected(self):
-        client = Client(enforce_csrf_checks=True)
-        client.force_login(self.alice.user)
-        resp = client.post(CREATE_URL, self.valid_payload())
-        self.assertEqual(resp.status_code, 403)
-        self.assertEqual(ResearchDossier.objects.filter(owner=self.alice).count(), 0)
-
-    def test_unsupported_write_method_405(self):
-        dossier = self.create_dossier_for(self.alice)
-        self.assertEqual(self.client.put(CREATE_URL).status_code, 405)
-        self.assertEqual(self.client.put(detail_url(dossier)).status_code, 405)
-        self.assertEqual(self.client.delete(INDEX_URL).status_code, 405)
-
-    def test_get_requests_do_not_write(self):
-        dossier = self.create_dossier_for(self.alice)
-        before_count = ResearchDossier.objects.count()
-        before_revision_count = ResearchThesisRevision.objects.count()
-        before_updated = dossier.updated_at
-        before_current = dossier.current_revision_id
-        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("外部请求")):
-            self.assertEqual(self.client.get(INDEX_URL).status_code, 200)
-            self.assertEqual(self.client.get(detail_url(dossier)).status_code, 200)
-            self.assertEqual(self.client.get(history_url(dossier)).status_code, 200)
-            self.assertEqual(self.client.get(CREATE_URL).status_code, 200)
-            self.assertEqual(self.client.get(edit_url(dossier)).status_code, 200)
-        dossier.refresh_from_db()
-        self.assertEqual(ResearchDossier.objects.count(), before_count)
-        self.assertEqual(ResearchThesisRevision.objects.count(), before_revision_count)
-        self.assertEqual(dossier.updated_at, before_updated)
-        self.assertEqual(dossier.current_revision_id, before_current)
-
-
-class EditRequestTests(ResearchViewTestBase):
-    def setUp(self):
-        self.alice = self.make_member(self.family, "Alice")
-        self.bob = self.make_member(self.family, "Bob")
-        self.dossier = self.create_dossier_for(self.alice, thesis="第一版判断。")
-        self.login(self.alice)
-
-    def edit_payload(self, expected, thesis="第二版判断。", reason="新数据"):
-        return {
-            "thesis": thesis,
-            "pillars": "新假设",
-            "questions": "",
-            "change_reason": reason,
-            "expected_revision_id": expected,
-        }
-
-    def test_edit_success_appends_version(self):
-        v1 = self.dossier.current_revision
-        resp = self.client.post(edit_url(self.dossier), self.edit_payload(v1.pk))
-        self.assertEqual(resp.status_code, 302)
-        self.assertRedirects(resp, reverse("investment_research:company_research", args=[self.dossier.pk]))
-        self.dossier.refresh_from_db()
-        self.assertEqual(self.dossier.current_revision.revision_number, 2)
-        self.assertEqual(self.dossier.current_revision.thesis, "第二版判断。")
-        # 旧版本与原始理由不变
-        v1.refresh_from_db()
-        self.assertEqual(v1.thesis, "第一版判断。")
-        self.assertEqual(self.dossier.initial_thesis, "第一版判断。")
-
-    def test_stale_expected_409_preserves_input_and_old_version(self):
-        v1 = self.dossier.current_revision
-        payload = self.edit_payload(v1.pk, thesis="旧表单 A")
-        # 先让版本前进（模拟另一客户端保存成功）
-        save_thesis_revision(
-            actor=self.alice,
-            dossier_id=self.dossier.pk,
-            expected_revision_id=v1.pk,
-            thesis="别的客户端的新版本",
-            pillars=[],
-            questions=[],
-            change_reason="他人更新",
-        )
-        resp = self.client.post(edit_url(self.dossier), payload)
-        self.assertEqual(resp.status_code, 409)
-        # 输入保留、隐藏版本仍是旧值、提示查看最新详情
-        self.assertContains(resp, "旧表单 A", status_code=409)
-        self.assertContains(resp, f'name="expected_revision_id" value="{v1.pk}"', status_code=409)
-        self.assertContains(resp, "查看最新详情", status_code=409)
-        # 版本数不变，再提交仍 409
-        self.dossier.refresh_from_db()
-        self.assertEqual(self.dossier.current_revision.revision_number, 2)
-        self.assertEqual(
-            ResearchThesisRevision.objects.filter(dossier=self.dossier).count(), 2
-        )
-        resp = self.client.post(edit_url(self.dossier), payload)
-        self.assertEqual(resp.status_code, 409)
-        self.assertEqual(
-            ResearchThesisRevision.objects.filter(dossier=self.dossier).count(), 2
-        )
-
-    def test_two_stale_forms_second_gets_409(self):
-        v1 = self.dossier.current_revision
-        form_a = self.edit_payload(v1.pk, thesis="表单 A")
-        form_b = self.edit_payload(v1.pk, thesis="表单 B")
-        resp_a = self.client.post(edit_url(self.dossier), form_a)
-        self.assertEqual(resp_a.status_code, 302)
-        resp_b = self.client.post(edit_url(self.dossier), form_b)
-        self.assertEqual(resp_b.status_code, 409)
-        self.assertContains(resp_b, "表单 B", status_code=409)
-        self.assertContains(resp_b, f'name="expected_revision_id" value="{v1.pk}"', status_code=409)
-        self.assertEqual(
-            ResearchThesisRevision.objects.filter(dossier=self.dossier).count(), 2
-        )
-
-    def test_forged_expected_revision_id_no_escalation(self):
-        # Bob 的档案版本 id 被 Alice 伪造提交：不能借它通过，也不能动 Bob 的档案。
-        bob_dossier = self.create_dossier_for(self.bob, security=self.other_security)
-        resp = self.client.post(
-            edit_url(self.dossier),
-            self.edit_payload(bob_dossier.current_revision.pk),
-        )
-        self.assertEqual(resp.status_code, 409)
-        self.dossier.refresh_from_db()
-        self.assertEqual(self.dossier.current_revision.revision_number, 1)
-
-    def test_missing_expected_revision_id_rejected(self):
-        payload = self.edit_payload(1)
-        del payload["expected_revision_id"]
-        resp = self.client.post(edit_url(self.dossier), payload)
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "expected_revision_id")
-        self.assertEqual(
-            ResearchThesisRevision.objects.filter(dossier=self.dossier).count(), 1
-        )
-
-    def test_non_numeric_expected_revision_id_rejected(self):
-        resp = self.client.post(
-            edit_url(self.dossier), self.edit_payload("abc")
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(
-            ResearchThesisRevision.objects.filter(dossier=self.dossier).count(), 1
-        )
-
-    def test_v2_requires_change_reason(self):
-        v1 = self.dossier.current_revision
-        resp = self.client.post(
-            edit_url(self.dossier), self.edit_payload(v1.pk, reason="")
-        )
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "修改原因")
-        self.assertEqual(
-            ResearchThesisRevision.objects.filter(dossier=self.dossier).count(), 1
-        )
-
-    def test_edit_page_does_not_expose_initial_thesis_or_security(self):
-        resp = self.client.get(edit_url(self.dossier))
-        self.assertContains(resp, "expected_revision_id")
-        # 原始理由与证券字段不在编辑表单里
-        self.assertNotContains(resp, "name=\"initial_thesis\"")
-        self.assertNotContains(resp, "name=\"security\"")
-
-
-    def test_forged_edit_fields_do_not_change_identity_or_initial_reason(self):
-        payload = self.edit_payload(self.dossier.current_revision_id)
-        payload.update(owner=self.bob.pk, family=self.other_family.pk,
-                       security=self.other_security.pk, initial_thesis="forged")
-        response = self.client.post(edit_url(self.dossier), payload)
+    def test_confirmation_creates_question_without_rewriting_legacy(self):
+        old = self.dossier.current_revision_id
+        response = self.client.post(self.url, self.payload())
         self.assertEqual(response.status_code, 302)
         self.dossier.refresh_from_db()
-        self.assertEqual(self.dossier.owner_id, self.alice.pk)
-        self.assertEqual(self.dossier.family_id, self.family.pk)
-        self.assertEqual(self.dossier.security_id, self.security.pk)
-        self.assertEqual(self.dossier.initial_thesis, "第一版判断。")
+        self.assertEqual(self.dossier.current_revision_id, old)
+        self.assertEqual(self.dossier.research_questions.count(), 1)
 
-    def test_edit_service_error_preserves_input(self):
-        payload = self.edit_payload(self.dossier.current_revision_id)
-        payload["questions"] = "\n".join(["问题"] * 6)
-        response = self.client.post(edit_url(self.dossier), payload)
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context["form"].non_field_errors())
-        self.assertEqual(response.context["form"].data["questions"], payload["questions"])
-        self.assertEqual(self.dossier.revisions.count(), 1)
+    def test_forged_owner_family_security_do_not_change_attribution(self):
+        self.client.post(self.url, self.payload(owner=self.bob.pk, family=self.other_family.pk, security=self.other_security.pk))
+        q = self.dossier.research_questions.get()
+        self.assertEqual(q.dossier.owner_id, self.alice.pk)
+        self.assertEqual(q.dossier.security_id, self.security.pk)
 
-    def test_edit_csrf_rejected_without_token_and_accepted_with_token(self):
+    def test_empty_title_and_stale_list_do_not_write(self):
+        for values in [self.payload(title=""), self.payload(list_revision="99")]:
+            self.assertContains(self.client.post(self.url, values), 'role="alert"')
+        self.assertFalse(self.dossier.research_questions.exists())
+
+    def test_repeated_form_conflicts_without_duplicate(self):
+        self.client.post(self.url, self.payload())
+        response = self.client.post(self.url, self.payload())
+        self.assertContains(response, "问题清单刚刚更新")
+        self.assertEqual(self.dossier.research_questions.count(), 1)
+
+    def test_private_question_title_is_escaped(self):
+        self.client.post(self.url, self.payload(title="<script>alert('x')</script>"))
+        response = self.client.get(self.url)
+        self.assertContains(response, "&lt;script&gt;")
+        self.assertNotContains(response, "<script>alert('x')</script>")
+
+    def test_other_owner_cannot_edit_question(self):
+        self.client.post(self.url, self.payload())
+        q = self.dossier.research_questions.get()
+        self.login(self.bob)
+        url = reverse("investment_research:question_detail", args=[self.dossier.pk,q.pk])
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.assertEqual(self.client.post(url, self.payload()).status_code, 404)
+
+    def test_edits_append_revision_and_preserve_old_content(self):
+        self.client.post(self.url, self.payload())
+        q = self.dossier.research_questions.get()
+        url = reverse("investment_research:question_detail", args=[self.dossier.pk,q.pk])
+        values = self.payload(action="save", list_revision="1", revision="1", title="现金回报是否改善？")
+        self.assertEqual(self.client.post(url, values).status_code, 302)
+        self.assertContains(self.client.post(url, values), "问题清单刚刚更新")
+        q.refresh_from_db()
+        self.assertEqual(q.revision, 2)
+        self.assertEqual(q.revisions.get(number=1).content["title"], "现金流能否覆盖投入？")
+
+    def test_csrf_and_write_methods_are_rejected(self):
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.alice.user)
-        url = edit_url(self.dossier)
-        payload = self.edit_payload(self.dossier.current_revision_id)
-        self.assertEqual(client.post(url, payload).status_code, 403)
-        self.assertEqual(self.dossier.revisions.count(), 1)
-        self.assertEqual(client.get(url).status_code, 200)
-        payload["csrfmiddlewaretoken"] = client.cookies["csrftoken"].value
-        self.assertEqual(client.post(url, payload).status_code, 302)
-        self.assertEqual(self.dossier.revisions.count(), 2)
+        self.assertEqual(client.post(self.url, self.payload()).status_code, 403)
+        self.assertEqual(self.client.put(self.url).status_code, 405)
+
+    def test_get_pages_do_not_create_questions_or_analysis(self):
+        from ai_analysis.models import AiAnalysisRequest
+        before = AiAnalysisRequest.objects.count()
+        for name in ["index","prepare","questions","follow","materials","research_settings"]:
+            url = reverse("investment_research:"+name, args=[] if name == "index" else [self.dossier.pk])
+            self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(AiAnalysisRequest.objects.count(), before)
+        self.assertFalse(self.dossier.research_questions.exists())
+
+    def test_retired_edit_redirect_preserves_legacy_records(self):
+        old = self.dossier.current_revision_id
+        self.assertRedirects(self.client.post(edit_url(self.dossier), {"thesis":"不应写入"}), self.url)
+        self.dossier.refresh_from_db()
+        self.assertEqual(self.dossier.current_revision_id, old)
 
 
 class PaginationAndStateTests(ResearchViewTestBase):
@@ -915,19 +727,9 @@ class PaginationAndStateTests(ResearchViewTestBase):
 
     def test_empty_state_and_success_message(self):
         resp = self.client.get(INDEX_URL)
-        self.assertContains(resp, "你还没有研究档案")
-        resp = self.client.post(
-            CREATE_URL,
-            {
-                "security": self.security.pk,
-                "initial_thesis": "第一份档案",
-                "pillars": "",
-                "questions": "",
-            },
-        )
-        dossier = ResearchDossier.objects.get(owner=self.alice)
-        self.assertRedirects(resp, detail_url(dossier), msg_prefix="成功提示跳转", fetch_redirect_response=False)
-        self.assertContains(self.client.get(detail_url(dossier)), "研究档案已创建")
+        self.assertContains(resp, "开始了解一家公司")
+        self.assertContains(self.client.get(CREATE_URL), "查找公司")
+        self.assertFalse(ResearchDossier.objects.filter(owner=self.alice).exists())
 
 
 class WiringTests(ResearchViewTestBase):
