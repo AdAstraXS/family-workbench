@@ -109,7 +109,9 @@ def _narrative(text):
              r"revenue|cash flow|results of operations|收入|现金流", r"risk|uncertainty|outlook|风险|展望"]
     paragraphs = [(m.start(), m.group()) for m in re.finditer(r"[^\n]{100,}", text)
                   if not re.search(r"forward.looking statements|safe harbor|undue reliance|appointed.{0,100}(?:officer|director)|chief.{0,30}officer.{0,100}biograph", m.group(), re.I)]
-    result, seen = [], set()
+    from .financial_excerpts import statement_excerpts
+    result = statement_excerpts(text)
+    seen = {offset for _, offset in result}
     # Preserve table headers/periods around earnings rows, even when rows are short.
     for match in re.finditer(r'(?im)^.*(?:net sales|membership fees|net income|operating cash|cash.*operating activities).*[0-9].*$', text):
         start = max(0, text.rfind('\n', 0, max(0, match.start() - 400)) + 1)
@@ -117,7 +119,7 @@ def _narrative(text):
             continue
         result.append((text[start:start + 1100], start))
         seen.add(start)
-        if len(result) >= 3:
+        if len(result) >= 4:
             break
     for term in terms:
         found = 0
@@ -184,19 +186,27 @@ def packet(dossier, budget):
     ordered += [g for g in groups if g not in ordered]
     ordered = ordered[:8]
     evidence, used = [], 0
+    # Reserve complete income/cash-flow columns from the latest release before
+    # generic prose consumes the packet. Never splice away dates or units.
+    latest_tables = next((g for g in groups if g[0]['kind'] in {'sec_document', 'official'}
+                         and any('CONSOLIDATED STATEMENTS' in p[0][:100] for p in g[1][:2])), None)
+    prioritized = [(latest_tables[0], piece) for piece in latest_tables[1][:2]] if latest_tables else []
     for index in range(36):
         for source, pieces in ordered:
             if index >= len(pieces):
                 continue
-            text, offset = pieces[index]
-            text = text[:1100]
-            item = {**source, "id": f"E{len(evidence) + 1}", "text": text,
-                    "offset": offset, "excerpt_sha256": hashlib.sha256(text.encode()).hexdigest()}
-            size = len(json.dumps(_prompt_evidence(item), ensure_ascii=False))
-            if used + size > budget or len(evidence) >= 36:
-                continue
-            evidence.append(item)
-            used += size
+            pair = (source, pieces[index])
+            if pair not in prioritized:
+                prioritized.append(pair)
+    for source, (text, offset) in prioritized:
+        text = text[:1800]
+        item = {**source, "id": f"E{len(evidence) + 1}", "text": text,
+                "offset": offset, "excerpt_sha256": hashlib.sha256(text.encode()).hexdigest()}
+        size = len(json.dumps(_prompt_evidence(item), ensure_ascii=False))
+        if used + size > budget or len(evidence) >= 36:
+            continue
+        evidence.append(item)
+        used += size
     if not evidence:
         raise ResearchAiError("尚无可分析的正文或财务资料，请先获取公司资料。")
     current = dossier.current_revision

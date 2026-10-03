@@ -139,6 +139,13 @@ def _validate_output(raw, targets, evidence, *, validate_parts=True):
             invalid_refs += 1
             verdict = "unknown"
             reason = "模型未给出可核查证据，这一项暂不能形成结论。"
+        elif (verdict != "unknown" and re.search(r'(?i)FY\s*(20\d{2})', target['text']) and
+              not any(re.search(r'(?i)FY\s*(20\d{2})', target['text']).group(1) in evidence_by_id[ref]['text']
+                      for ref in valid_refs)):
+            invalid_refs += 1
+            verdict = "unknown"
+            reason = "引用未覆盖问题指定的财年，不能用其他年份的数据回答。"
+            valid_refs = []
         else:
             reason = _model_text(item.get("reason"), 500)
             if not reason:
@@ -318,6 +325,8 @@ def _generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
         "结合新材料解释哪些条件发生变化；没有前次分析输入时，不虚构与前次结论的差异。"
         "在 reason、detail、boundary、implication 中用自然语言解释，不直接写 E 编号；编号只放在 evidence_ids。"
         "如果资料包不足以回答某项，verdict 设 unknown 并说清缺口。"
+        "问题指定财年时必须核对对应年份；不得用上一财年数据把本财年问题标为 supports。"
+        "表格先读单位、列日期和周数，区分单季与全年；未确定季度编号时直接使用截至日期，不猜 Q1/Q2/Q3/Q4。"
         "行情快照只说明某一时点的股价和TTM市盈率，不证明市场未来会提高倍数；"
         "没有披露前市场一致预期时，不能把实际增长判定为超出市场预期。"
         '格式示例：{"headline":"现金回报仍待验证","overview":"收入有支持，投入回报仍需跟踪。",'

@@ -86,6 +86,33 @@ class ReportFixTests(TestCase):
 
 
 class SearchContractTests(SimpleTestCase):
+    def test_statement_excerpt_preserves_period_unit_and_quote_offsets(self):
+        from .financial_excerpts import statement_excerpts
+        text = ('Table of contents\nCONSOLIDATED STATEMENTS OF INCOME\nSee page 45\n' + 'x' * 1900 +
+            '\nCONSOLIDATED STATEMENTS OF INCOME\n(dollars in millions)\n16 Weeks Ended | 52 Weeks Ended\n'
+            'August 30, 2026 | August 31, 2025\nMembership fees | 1,850 | 5,907\n'
+            'Operating income | 3,801 | 11,685\nNET INCOME | 2,998 | 9,226\n' +
+            '\nCONDENSED CONSOLIDATED STATEMENTS OF CASH FLOWS\n(amounts in millions)\n52 Weeks Ended\n'
+            'August 30, 2026 | August 31, 2025\nNet income | 9,226 | 8,099\n'
+            'Net cash provided by operating activities | 15,825 | 13,335\n')
+        excerpts = statement_excerpts(text)
+        self.assertEqual(len(excerpts), 2)
+        for quote, start in excerpts:
+            self.assertEqual(text[start:start + len(quote)], quote)
+            self.assertIn('2026', quote)
+            self.assertIn('millions', quote)
+        self.assertIn('5,907', excerpts[0][0])
+        self.assertIn('15,825', excerpts[1][0])
+
+    def test_year_mismatch_cannot_support_question(self):
+        from .thesis_analysis import _validate_output
+        target = {'kind': 'question', 'index': 0, 'text': 'FY2026净利润是多少？'}
+        raw = json.dumps({'assessments': [{**target, 'verdict': 'supports',
+            'reason': '已有利润数据', 'evidence_ids': ['E1']}]})
+        result = _validate_output(raw, [target], [{'id': 'E1', 'text': '财年截至2025-08-31净利润', 'citations': []}])
+        self.assertEqual(result['assessments'][0]['verdict'], 'unknown')
+        self.assertEqual(result['invalid_reference_count'], 1)
+
     def test_futu_excerpts_balance_statements_and_keep_period_currency(self):
         from types import SimpleNamespace
         from .preparation import _pieces
