@@ -120,6 +120,27 @@ class StandardizationTests(TestCase):
                 validate_screening(json.dumps({"decisions": [{"candidate_id": c.pk, "selected": False,
                     "priority": 0, "reason": "Duplicate", "duplicate_of": reference}]}), [c])
 
+    def test_duplicate_of_rejected_story_preserves_other_valid_choices(self):
+        original, duplicate, important = [self.make_candidate(i) for i in (1, 2, 3)]
+        decisions = [
+            {"candidate_id": original.pk, "selected": False, "priority": 0,
+             "reason": "普通教程", "duplicate_of": None},
+            {"candidate_id": duplicate.pk, "selected": False, "priority": 0,
+             "reason": "重复教程", "duplicate_of": original.pk},
+            {"candidate_id": important.pk, "selected": True, "priority": 95,
+             "reason": "重大产品发布", "duplicate_of": None},
+        ]
+        screen_candidates(self.dossier, [original, duplicate, important],
+            transport=lambda *a, **k: response({"decisions": decisions}),
+            url_validator=lambda p: "https://example.ai/chat")
+        invalid = CandidateScreening.objects.get(candidate=duplicate)
+        self.assertIsNone(invalid.duplicate_of_id)
+        self.assertFalse(invalid.selected)
+        self.assertIn("未建立关联", invalid.reason)
+        self.assertEqual(invalid.batch.status, "completed")
+        self.assertEqual([c.pk for c in ready_candidates(self.dossier)], [important.pk])
+        self.assertFalse(BodyAttempt.objects.exists())
+
     def test_company_profile_and_official_host_are_configurable(self):
         rule = WatchRule.objects.get(dossier=self.dossier)
         save_rule(self.member, self.dossier.pk, {"enabled": True, "aliases": ["NVIDIA"],
