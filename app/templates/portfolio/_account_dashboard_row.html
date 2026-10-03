@@ -1,12 +1,13 @@
 {% load money %}
 <tr>
-  <td><strong>{{ row.account.account_name }}</strong>{% if row.account.account_no_masked %}<small>{{ row.account.account_no_masked }}</small>{% endif %}{% if row.history_note %}<small>{{ row.history_note }}</small>{% endif %}</td>
+  <td><strong>{{ row.account.account_name }}</strong>{% if row.account.account_no_masked %}<small>{{ row.account.account_no_masked }}</small>{% endif %}{% if row.history_note %}<small>{{ row.history_note }}</small>{% endif %}{% if row.annual_note %}<small class="form-error">{{ row.annual_note }}</small>{% endif %}</td>
   <td>{{ row.cash|currency0:selected_currency }}</td>
   <td>{{ row.market_value|currency0:selected_currency }}</td>
   <td>{% if row.position_ratio is None %}—{% else %}{{ row.position_ratio|floatformat:2 }}%{% endif %}</td>
   <td>{{ row.total_asset|currency0:selected_currency }}</td>
-  <td class="{% if row.today_pnl > 0 %}positive{% elif row.today_pnl < 0 %}negative{% endif %}">{% if historical_view %}未统计{% else %}{{ row.today_pnl|signed_currency0:selected_currency }}{% endif %}</td>
-  <td class="{% if row.unrealized > 0 %}positive{% elif row.unrealized < 0 %}negative{% endif %}">{{ row.unrealized|signed_currency0:selected_currency }}</td>
+  {% if historical_view %}<td class="{% if row.annual_total > 0 %}positive{% elif row.annual_total < 0 %}negative{% endif %}">{{ row.annual_total|signed_currency2:selected_currency }}</td><td class="{% if row.annual_realized > 0 %}positive{% elif row.annual_realized < 0 %}negative{% endif %}">{{ row.annual_realized|signed_currency2:selected_currency }}</td>{% else %}
+  <td class="{% if row.today_pnl > 0 %}positive{% elif row.today_pnl < 0 %}negative{% endif %}">{{ row.today_pnl|signed_currency0:selected_currency }}</td>
+  <td class="{% if row.unrealized > 0 %}positive{% elif row.unrealized < 0 %}negative{% endif %}">{{ row.unrealized|signed_currency0:selected_currency }}</td>{% endif %}
   <td class="{% if row.realized > 0 %}positive{% elif row.realized < 0 %}negative{% endif %}">{{ row.realized|signed_currency0:selected_currency }}</td>
   <td><a class="button compact" href="{% url 'portfolio:account_detail' row.account.pk %}?currency={{ selected_currency }}{% if historical_view %}&year={{ selected_year }}{% endif %}">查看账户</a></td>
 </tr>

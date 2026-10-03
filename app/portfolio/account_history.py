@@ -1,6 +1,7 @@
 """Read-only account views of a single, explicitly dated portfolio snapshot."""
 
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
 
 from django.db.models import Sum
@@ -166,10 +167,96 @@ def snapshot_account_data(snapshot, accounts, selected_currency):
                 "pricing_status": line.get_pricing_status_display() or "未记录价格状态",
             })
     rows.sort(key=lambda row: (row["total_asset"] is not None, row["total_asset"] or ZERO), reverse=True)
+    annual = annual_account_data(snapshot, accounts, selected_currency, rates, rows, lines, scopes)
+    annual_by_security = defaultdict(list)
+    for transaction in annual["annual_transactions"]:
+        annual_by_security[(transaction.account_id, transaction.security_id)].append(transaction)
+    for holding in holdings:
+        holding["annual_realized"] = total_or_none(rates.convert(
+            item.realized_pnl, item.currency, holding["currency"],
+        ) for item in annual_by_security[(holding["account"].pk, holding["security"].pk if holding["security"] else None)])
     return {
         "accounts": accounts, "account_rows": rows, "historical_positions": holdings,
         "positions": [], "balance_snapshot_date": snapshot.snapshot_date,
         "balance_snapshot": snapshot, "historical_view": True,
         "history_missing_rates": sorted(rates.missing),
         "missing_exchange_rates": bool(rates.missing),
+        **annual,
+    }
+
+
+def annual_account_data(snapshot, accounts, currency, rates, rows, closing_lines, closing_scopes):
+    """Annual trading P&L at closing FX, without exchange-rate returns.
+
+    Both endpoints include every saved holding, including positions sold during
+    the year. Missing opening evidence is never replaced with a zero balance.
+    """
+    start = date(snapshot.snapshot_date.year, 1, 1)
+    opening_date = date(start.year - 1, 12, 31)
+    opening = family_snapshots(snapshot.family).filter(snapshot_date=opening_date).first()
+    opening_lines = list(opening.position_lines.all()) if opening else []
+    opening_scopes = {
+        item.account_id: item for item in PortfolioSnapshot.objects.filter(
+            family=snapshot.family, snapshot_date=opening_date,
+            currency=snapshot.currency, account__isnull=False,
+        )
+    } if opening else {}
+    opening_ids = account_ids_as_of(snapshot.family, opening_date) if opening else set()
+    transactions = list(InvestmentTransaction.objects.filter(
+        account__in=accounts, trade_date__gte=start, trade_date__lte=snapshot.snapshot_date,
+        status__in=[TradeStatusChoices.PARTIAL, TradeStatusChoices.COMPLETED],
+    ).select_related("security", "account").order_by("-trade_date", "-pk"))
+    profits = defaultdict(list)
+    for transaction in transactions:
+        profits[transaction.account_id].append(rates.convert(transaction.realized_pnl, transaction.currency, currency))
+
+    def endpoint(account, saved, scopes, lines, *, allow_new=False):
+        if saved is None:
+            return None, f"缺少 {opening_date} 期初快照，仅展示当年已实现收益"
+        scope = scopes.get(account.pk)
+        own_lines = [line for line in lines if line.account_id == account.pk]
+        details = (scope.extra_data if scope else saved.extra_data) or {}
+        for key, label in (("missing_prices", "缺少价格"), ("stale_prices", "价格需核对"),
+                           ("missing_exchange_rates", "缺少汇率"), ("valuation_errors", "流水或估值错误")):
+            if any(item.get("account_id") == account.pk for item in details.get(key, [])):
+                return None, label
+        if not own_lines and not scope:
+            if allow_new and account.pk not in opening_ids and details.get("complete") is True:
+                return ZERO, ""
+            return None, "缺少账户快照明细"
+        if scope and not own_lines and (scope.total_cash or scope.total_market_value):
+            return None, "缺少账户快照明细"
+        if details.get("complete") is not True:
+            return None, "快照完整性未确认"
+        value = total_or_none(rates.convert(
+            line.market_value_original - line.cost_original, line.currency, currency,
+        ) for line in own_lines if line.asset_type != "cash")
+        return value, "缺少或冲突的折算汇率" if value is None else ""
+
+    for row in rows:
+        account = row["account"]
+        row["annual_realized"] = total_or_none(profits[account.pk])
+        row["opening_unrealized"], opening_note = endpoint(account, opening, opening_scopes, opening_lines, allow_new=True)
+        row["closing_unrealized"], closing_note = endpoint(account, snapshot, closing_scopes, closing_lines)
+        row["annual_total"] = (
+            row["annual_realized"] + row["closing_unrealized"] - row["opening_unrealized"]
+            if all(row[key] is not None for key in ("annual_realized", "closing_unrealized", "opening_unrealized")) else None
+        )
+        row["annual_note"] = "；".join(filter(None, (
+            f"期初：{opening_note}" if opening_note else "",
+            f"期末：{closing_note}" if closing_note else "",
+            "当年已实现盈亏缺少折算汇率" if row["annual_realized"] is None else "",
+        )))
+        row["annual_basis"] = (
+            "期初系统无更早记录，按 0 计算" if opening and account.pk not in opening_ids
+            and not any(line.account_id == account.pk for line in opening_lines)
+            and account.pk not in opening_scopes and row["opening_unrealized"] == ZERO else "依据齐全"
+        )
+    return {
+        "annual_start": start, "annual_opening_date": opening_date,
+        "annual_transactions": transactions,
+        "annual_period_label": "年初至今" if snapshot.snapshot_date.year == date.today().year else (
+            "全年" if (snapshot.snapshot_date.month, snapshot.snapshot_date.day) == (12, 31) else "截至期末快照"
+        ),
+        "annual_fx_rates": [{"currency": code, "rate": value} for code, value in sorted(rates.rates.items())],
     }

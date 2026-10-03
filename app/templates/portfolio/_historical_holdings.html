@@ -3,13 +3,13 @@
   <div class="section-head"><div><h2>历史持仓明细</h2><p>{{ balance_snapshot_date|date:"Y-m-d" }} 快照中的持仓，金额按原币展示，成本为持仓总成本。仅列已保存的估值明细；缺价标的请查看快照审计。</p></div></div>
   <div class="account-table-wrap">
     <table class="account-prototype-table holdings-prototype-table dashboard-holdings-table">
-      <thead><tr><th>证券代码</th><th>证券名称</th><th>成员</th><th>券商账户</th><th>数量</th><th>快照价格</th><th>市值</th><th>持仓总成本</th><th>持仓浮盈</th><th>截至快照日已实现</th><th>价格依据</th></tr></thead>
+      <thead><tr><th>证券代码</th><th>证券名称</th><th>成员</th><th>券商账户</th><th>数量</th><th>快照价格</th><th>市值</th><th>持仓总成本</th><th>持仓浮盈</th><th>当年已实现盈亏</th><th>价格依据</th></tr></thead>
       <tbody>
         {% for item in historical_positions %}
           <tr>
             <td>{{ item.security.symbol|default:"—" }}</td><td>{{ item.name }}</td><td>{{ item.account.member }}</td><td>{{ item.account.account_name }}</td>
             <td>{{ item.quantity|floatformat:"-4" }}</td><td>{{ item.price|currency2:item.currency }}</td><td>{{ item.market_value|currency0:item.currency }}</td><td>{{ item.cost|currency0:item.currency }}</td>
-            <td>{{ item.unrealized|signed_currency0:item.currency }}</td><td>{{ item.realized|signed_currency0:item.currency }}</td>
+            <td>{{ item.unrealized|signed_currency0:item.currency }}</td><td>{{ item.annual_realized|signed_currency2:item.currency }}<small>历年累计 {{ item.realized|signed_currency2:item.currency }}</small></td>
             <td>{{ item.price_as_of|date:"Y-m-d"|default:"日期未记录" }}<small>{{ item.pricing_status }}</small></td>
           </tr>
         {% empty %}<tr><td colspan="11">该快照没有可展示的持仓明细，未混入当前持仓。</td></tr>{% endfor %}
