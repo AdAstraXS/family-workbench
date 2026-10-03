@@ -176,6 +176,8 @@ def _summary_rows(account_rows):
             "today_pnl": _sum_or_none(row["today_pnl"] for row in rows),
             "unrealized": _sum_or_none(row["unrealized"] for row in rows),
             "realized": _sum_or_none(row["realized"] for row in rows),
+            "annual_realized": _sum_or_none(row.get("annual_realized") for row in rows),
+            "annual_total": _sum_or_none(row.get("annual_total") for row in rows),
         }
         for label, rows in scopes
     ]
@@ -212,6 +214,9 @@ def _account_member_groups(account_rows, family, *, include_inactive=False):
             for row in rows
             if row["total_asset_cny"] is not None
             and row["total_asset_cny"] < LOW_VALUE_ACCOUNT_THRESHOLD_CNY
+            and not row.get("annual_note")
+            and not row.get("annual_realized")
+            and not row.get("annual_total")
         ]
         collapsed_ids = {row["account"].id for row in collapsed_rows}
         groups.append(

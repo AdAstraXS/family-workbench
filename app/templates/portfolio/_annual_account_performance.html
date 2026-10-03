@@ -1,0 +1,17 @@
+{% load money %}
+<section class="panel" id="annual-calculation">
+  <div class="section-head"><div><h2>年度收益计算依据</h2><p>期初 {{ annual_opening_date|date:"Y-m-d" }}，期末 {{ balance_snapshot_date|date:"Y-m-d" }}；两端持仓浮盈均使用期末汇率。</p></div></div>
+  <div class="account-table-wrap account-table-scroll"><table class="account-prototype-table annual-calculation-table">
+    <thead><tr><th>账户</th><th>当年已实现盈亏</th><th>期末持仓浮盈</th><th>期初持仓浮盈</th><th>当年交易总盈亏</th><th>核对说明</th></tr></thead>
+    <tbody>{% for row in account_rows %}<tr><td>{{ row.account.member }} / {{ row.account.account_name }}</td><td>{{ row.annual_realized|signed_currency0:selected_currency }}</td><td>{{ row.closing_unrealized|signed_currency0:selected_currency }}</td><td>{{ row.opening_unrealized|signed_currency0:selected_currency }}</td><td>{{ row.annual_total|signed_currency0:selected_currency }}</td><td>{{ row.annual_note|default:row.annual_basis }}</td></tr>{% empty %}<tr><td colspan="6">暂无年度计算依据。</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% if account %}
+<section class="panel" id="annual-transactions">
+  <div class="section-head"><div><h2>{{ selected_year }} 年有效交易</h2><p>截至 {{ balance_snapshot_date|date:"Y-m-d" }} 的已完成及部分成交流水。盈亏、费用按交易原币展示。</p></div></div>
+  <div class="account-table-wrap account-table-scroll"><table class="account-prototype-table annual-transactions-table">
+    <thead><tr><th>交易日期</th><th>证券</th><th>类型</th><th>状态</th><th>数量</th><th>已实现盈亏</th><th>手续费</th></tr></thead>
+    <tbody>{% for item in annual_transactions %}<tr><td>{{ item.trade_date|date:"Y-m-d" }}</td><td>{{ item.security|default:"现金" }}</td><td>{{ item.get_trade_type_display }}</td><td>{{ item.get_status_display }}</td><td>{{ item.quantity|floatformat:"-4" }}</td><td>{{ item.realized_pnl|signed_currency2:item.currency }}</td><td>{{ item.fee|currency2:item.currency }}</td></tr>{% empty %}<tr><td colspan="7">当年暂无有效交易。</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% endif %}
