@@ -82,7 +82,7 @@ def queue_run(dossier):
             dossier=dossier, revision=dossier.current_revision
         )
         .order_by("pk")
-        .values_list("pk", "material_version_id", "rule_version")
+        .values_list("pk", "material_version_id", "rule_version", "manual")
     )
     key = digest(
         [

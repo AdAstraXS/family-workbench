@@ -141,6 +141,23 @@ class StandardizationTests(TestCase):
         self.assertEqual([c.pk for c in ready_candidates(self.dossier)], [important.pk])
         self.assertFalse(BodyAttempt.objects.exists())
 
+    def test_manual_selection_of_existing_history_queues_a_new_run(self):
+        from .worker import queue_run
+        c = self.make_candidate(1)
+        c.manual = False
+        c.save(update_fields=["manual"])
+        previous = queue_run(self.dossier)
+        previous.status = "completed"
+        previous.save(update_fields=["status"])
+        c.manual = True
+        c.save(update_fields=["manual"])
+        requested = queue_run(self.dossier)
+        self.assertNotEqual(requested.pk, previous.pk)
+        self.assertEqual(requested.status, "queued")
+        self.assertEqual(queue_run(self.dossier).pk, requested.pk)
+        self.assertFalse(CandidateScreening.objects.exists())
+        self.assertFalse(BodyAttempt.objects.exists())
+
     def test_company_profile_and_official_host_are_configurable(self):
         rule = WatchRule.objects.get(dossier=self.dossier)
         save_rule(self.member, self.dossier.pk, {"enabled": True, "aliases": ["NVIDIA"],
