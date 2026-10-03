@@ -58,6 +58,19 @@ class CompanyIdentity(TimestampedModel):
         verbose_name_plural = verbose_name
 
 
+class ResearchPromptTemplate(TimestampedModel):
+    owner = models.ForeignKey(FamilyMember, on_delete=models.CASCADE)
+    dossier = models.ForeignKey("ResearchDossier", null=True, blank=True, on_delete=models.CASCADE)
+    instructions = models.TextField(blank=True)
+    revision = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["owner", "dossier"], name="unique_company_research_prompt"),
+            models.UniqueConstraint(fields=["owner"], condition=models.Q(dossier__isnull=True), name="unique_default_research_prompt"),
+        ]
+
+
 class ResearchPreparation(TimestampedModel):
     """Owner-confirmed preparation; never replaces a formal thesis revision."""
     dossier = models.ForeignKey("ResearchDossier", on_delete=models.CASCADE, related_name="preparations")

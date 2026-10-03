@@ -37,28 +37,27 @@ def navigation(context):
     stage_defs = [('research', '公司研究', '关键问题 · 证据 · 我的判断', 'company_research'),
                   ('follow', '持续跟踪', '观察变化 · 定期复核', 'follow')]
     area = next((area for area, names in {
-        'prepare': {'prepare'},
-        'research': {'company_research', 'thesis_analysis', 'thesis_analysis_detail', 'research_history', 'draft_detail'},
+        'prepare': {'prepare', 'prompt_settings'},
+        'research': {'company_research', 'thesis_analysis'},
+        'history': {'research_history', 'thesis_analysis_detail', 'draft_detail'},
         'judgment': {'detail', 'edit', 'first_thesis', 'history'},
         'follow': {'follow', 'metric_focus', 'review_plan', 'filing_reviews', 'filing_review', 'next_day_tracking'},
-        'library': {'materials', 'material_read', 'documents', 'document_detail', 'library_news'},
-        'financial': {'financials', 'futu_financials', 'document_metrics', 'valuation'},
+        'library': {'materials', 'material_read', 'documents', 'document_detail', 'library_news', 'financials', 'futu_financials', 'document_metrics', 'valuation'},
     }.items() if name in names), 'library')
     if name == 'materials' and request.GET.get('context') == 'prepare':
         area = 'prepare'
-    if name == 'company_research' and (request.GET.get('view') == 'evidence' or request.GET.get('tab') == 'evidence'):
-        area = 'library'
     result['area'] = area
     result['state'] = company_state(dossier)
     for i, (key, label, hint, route) in enumerate(stage_defs, 1):
         result['stages'].append({'key': key, 'label': label, 'hint': hint, 'number': i, 'url': url(route, pk), 'active': area == key or key == 'research' and area in {'prepare', 'judgment'}})
     result['aux'] = [{'label': label, 'url': url(route, pk), 'active': area == key}
-                     for key, label, route in [('library', '资料', 'materials'), ('financial', '财务与行情', 'financials'), ('history', '历史', 'research_history')]]
+                     for key, label, route in [('library', '资料', 'materials'), ('history', '历史', 'research_history')]]
     tab = 'questions' if request.POST.get('action') == 'confirm' else request.GET.get('tab', '')
     definitions = {
         'prepare': [('准备资料', url('materials', pk, context='prepare'), name == 'materials'),
                     ('公司初识', url('prepare', pk), name == 'prepare' and tab != 'questions'),
-                    ('问题与候选假设', url('prepare', pk, tab='questions'), name == 'prepare' and tab == 'questions')],
+                    ('问题与候选假设', url('prepare', pk, tab='questions'), name == 'prepare' and tab == 'questions'),
+                    ('提示词设置', url('prompt_settings', pk), name == 'prompt_settings')],
         'research': [('研究总览', url('company_research', pk), name in {'company_research', 'thesis_analysis'} and tab != 'evidence'),
                      ('关键问题与证据', url('company_research', pk, tab='evidence'), name == 'company_research' and tab == 'evidence'),
                      ('分析历史', url('research_history', pk), name in {'research_history', 'thesis_analysis_detail', 'draft_detail'})],
@@ -66,26 +65,30 @@ def navigation(context):
         'follow': [('公司动态', url('follow', pk), name in {'follow', 'next_day_tracking'}),
                    ('跟踪计划', url('metric_focus', pk), name in {'metric_focus', 'review_plan'}),
                    ('复核记录', url('filing_reviews', pk), name in {'filing_reviews', 'filing_review'})],
-        'library': [('财报与官方资料', url('materials', pk), name in {'materials', 'documents', 'document_detail', 'material_read'} and tab not in {'futu', 'inventory', 'acquisition'}),
-                    ('富途资料', url('materials', pk, tab='futu'), tab == 'futu'),
-                    ('新闻与外部资料', url('library_news', pk), name == 'library_news'),
-                    ('资料清单', url('materials', pk, tab='inventory'), tab == 'inventory')],
+        'history': [],
+        'library': [('SEC', url('materials', pk, category='sec'), name in {'financials', 'document_metrics'} or context.get('category', 'sec') == 'sec' and name == 'materials'),
+                    ('富途', url('materials', pk, category='futu'), name == 'futu_financials' or context.get('category') == 'futu'),
+                    ('公司 IR', url('materials', pk, category='ir'), name in {'documents', 'document_detail'} or context.get('category') == 'ir'),
+                    ('行情与估值', url('valuation', pk), name == 'valuation'),
+                    ('其他', url('materials', pk, category='other'), context.get('category') == 'other')],
         'financial': [('财务概览', url('financials', pk), name in {'financials', 'document_metrics'}),
                       ('财务报表', url('futu_financials', pk), name == 'futu_financials'),
                       ('行情与估值', url('valuation', pk), name == 'valuation')],
     }
     if name == 'material_read' and context.get('version'):
         material = context['version'].material
-        if material.kind not in {'facts', 'sec_document', 'ir'}:
-            definitions['library'][0] = (*definitions['library'][0][:2], False)
-            definitions['library'][1] = (*definitions['library'][1][:2], True)
+        source_index = (0 if material.kind in {'facts', 'sec_document', 'sec'} else
+                        2 if material.kind == 'ir' else
+                        1 if material.kind in {'profile', 'financials', 'research'} else 4)
+        definitions['library'] = [(label, href, i == source_index)
+                                  for i, (label, href, _) in enumerate(definitions['library'])]
     result['tabs'] = [{'label': label, 'url': href, 'active': active} for label, href, active in definitions[area]]
     if name in {'company_research', 'follow', 'detail', 'first_thesis', 'edit'} and area != 'library':
         result['tabs'] = []
     if name == 'prepare' and request.GET.get('report', '').isdigit():
         for item in result['tabs'][1:]:
             item['url'] += ('&' if '?' in item['url'] else '?') + urlencode({'report': request.GET['report']})
-    area_label = dict((key, label) for key, label, *_ in stage_defs) | {'prepare': '研究问题', 'judgment': '我的判断', 'library': '资料库', 'financial': '财务与行情'}
+    area_label = dict((key, label) for key, label, *_ in stage_defs) | {'prepare': '研究问题', 'judgment': '我的判断', 'library': '资料', 'financial': '财务与行情', 'history': '历史'}
     active = next((item for item in result['tabs'] if item['active']), None)
     result['crumbs'].append({'label': dossier.security.name, 'url': url('company_research', pk)})
     result['crumbs'].append({'label': area_label[area], 'url': next((s['url'] for s in result['stages'] + result['aux'] if s['active']), '')})
@@ -106,9 +109,9 @@ def navigation(context):
     switch_route = {'thesis_analysis_detail': 'research_history', 'draft_detail': 'research_history',
                     'filing_review': 'filing_reviews', 'document_detail': 'documents',
                     'document_metrics': 'financials', 'material_read': 'materials'}.get(name, name)
-    switch_query = {key: request.GET[key] for key in ('tab', 'context') if key in request.GET}
-    if name == 'material_read' and definitions['library'][1][2]:
-        switch_query['tab'] = 'futu'
+    switch_query = {key: request.GET[key] for key in ('tab', 'context', 'category', 'layer') if key in request.GET}
+    if name == 'material_read':
+        switch_query['category'] = ['sec', 'futu', 'ir', 'market', 'other'][source_index]
     result['companies'] = [{'label': f'{item.security.name} · {item.security.symbol}',
                             'url': url(switch_route, item.pk, **switch_query), 'selected': item.pk == pk}
                            for item in accessible_dossiers(get_current_member(request)).order_by('security__symbol')]

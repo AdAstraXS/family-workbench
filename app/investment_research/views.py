@@ -459,12 +459,14 @@ def thesis_analysis(request, pk):
                 consent=request.POST.get("one_time_consent") == "yes",
                 include_news=request.POST.get("include_news") == "yes",
                 review_mode=request.POST.get("review_mode", "full"),
+                background=True,
+                allow_retry=False,
             )
         except (ResearchAiError, ResearchValidationError) as exc:
             messages.error(request, str(exc))
         else:
-            messages.success(request, "公司研究简报已生成；关键结论可展开核对原文。")
-            return redirect("investment_research:company_research", pk=pk)
+            messages.success(request, "研究分析已在后台开始，可在历史版本查看状态和结果。")
+            return redirect("investment_research:thesis_analysis_detail", pk=pk, analysis_pk=analysis.pk)
         return redirect("investment_research:thesis_analysis", pk=pk)
     sources = source_preview(dossier)
     from investment_watch.research_bridge import selected_candidates

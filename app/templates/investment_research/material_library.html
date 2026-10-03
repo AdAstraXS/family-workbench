@@ -1,33 +1,16 @@
 {% extends "investment_research/base.html" %}
-{% block title %}{% if request.GET.context == "prepare" %}准备资料{% else %}资料库{% endif %} · {{ dossier.security.name }}{% endblock %}
-{% block extra_head %}{{ block.super }}{% if active %}<meta http-equiv="refresh" content="12">{% endif %}
-<style>.material-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,310px),1fr));gap:16px}.material-grid article{margin:0;padding:20px}.material-meta{font-size:.9rem;color:#626d67}.material-source-options{display:flex;flex-wrap:wrap;gap:14px;margin:18px 0}.material-source-options label{display:flex;align-items:center;gap:6px}.material-tabs{display:flex;gap:20px;flex-wrap:wrap;padding:16px 0;border-bottom:1px solid #dde4d8;margin-bottom:24px}</style>{% endblock %}
-{% block research_content %}
-<section class="research-page">
-
-  <header class="research-header"><div><p class="research-eyebrow">了解公司 · 基础资料</p><h1>{{ dossier.security.name }}</h1>
-    <p>{{ dossier.security.symbol }} · {{ dossier.security.market }}{% if identity.cik %} · SEC CIK {{ identity.cik }}{% endif %}</p>
-    <p class="material-meta">已确认上市代码：{{ identity_info.listings|join:" · " }}。财务数据保留来源币种与统计口径，不做货币换算。</p></div>
-    <div class="research-actions"><a class="button" href="{% url 'investment_research:prepare' dossier.pk %}">下一步 · AI 公司初识</a><a href="{% url 'investment_research:company_research' dossier.pk %}">进入公司研究</a></div></header>
-
-<p><a href="{% url 'investment_research:materials' dossier.pk %}?tab=acquisition">获取与更新资料</a> · <a href="{% url 'investment_research:documents' dossier.pk %}">官方文件目录</a> · <a href="{% url 'investment_research:ir_catalogue' %}">公司官方 IR</a></p>
-{% if request.GET.tab != 'inventory' and request.GET.tab != 'acquisition' %}<section id="library"><h2>已保存的资料</h2><p class="research-private-note">点开阅读整理后的内容，也可查看历史版本和下载原件。原有官方资料继续保留。</p>
-    {% if request.GET.tab != 'futu' %}{% if sec_materials or facts_version %}{% include "investment_research/sec_financial_overview.html" %}{% endif %}{% endif %}
-    <div class="material-grid">{% for item in materials %}{% include "investment_research/material_card.html" %}{% empty %}<article class="research-current"><h3>开始积累这家公司的资料</h3><p>选择下方可用来源获取资料。已有的 SEC、IR 文件可从“已有官方资料”进入。</p></article>{% endfor %}</div>
-    {% if request.GET.tab != 'futu' and sec_materials %}<details class="research-current"><summary>SEC 报告与附件 · {{ sec_materials|length }} 项</summary><p class="material-meta">年报、近期公告及其附件，按原报告保存，可逐份阅读和重试。</p><div class="material-grid">{% for item in sec_materials %}{% include "investment_research/material_card.html" %}{% endfor %}</div></details>{% endif %}
-  </section>
-  {% if retired_materials %}<details class="research-current"><summary>已停用资料 · 历史存档</summary><p>行业标签与关键词匹配的产业链不能证明公司关系；评级汇总没有分析理由。这两项已停止采集，历史原件保留，不计入五步研究资料。</p><div class="material-grid">{% for item in retired_materials %}{% include "investment_research/material_card.html" %}{% endfor %}</div></details>{% endif %}
-{% endif %}{% if request.GET.tab == 'inventory' or request.GET.context == 'prepare' %}<section id="inventory" class="research-current"><h2>五步资料清单</h2><p>这是后续分析的材料准备情况，已有材料仍需判断是否充分、是否过期。</p>
-    {% for step in manifest.steps %}<details class="research-method-note"><summary>{{ forloop.counter }} · {{ step.title }} — {{ step.status }}</summary><p>{{ step.boundary }}</p>
-      {% for ref in step.materials %}<p>{% if ref.version_id %}<a href="{% url 'investment_research:material_read' dossier.pk ref.version_id %}">{{ ref.title }}</a>{% else %}<a href="{% url 'investment_research:document_detail' dossier.pk ref.legacy_document_id %}">{{ ref.title }}</a>{% endif %} · {{ ref.report_date|default:"报告期未标注" }}</p>{% endfor %}
-      {% if step.missing %}<p>待补充：{{ step.missing|join:"、" }}</p>{% endif %}</details>{% endfor %}
-    <p><a href="?format=manifest">查看供后续 AI 使用的资料清单</a></p></section>
-{% endif %}{% if request.GET.tab == 'acquisition' or request.GET.context == 'prepare' %}<section id="acquisition" class="research-current"><h2>获取与更新</h2><p>选择要补充的资料；更新时保留旧版本，相同内容不重复保存。</p>
-    {% if can_write %}<form method="post">{% csrf_token %}<div class="material-source-options">{% for source in sources %}<label><input type="checkbox" name="source" value="{{ source.key }}"{% if source.applicable %} checked{% else %} disabled{% endif %}>{{ source.title }}{% if not source.applicable %}（当前来源未覆盖）{% endif %}</label>{% endfor %}</div>
-    <button type="submit"{% if active %} disabled{% endif %}>{% if active %}正在获取，页面会自动更新进度{% else %}获取所选资料{% endif %}</button></form>{% endif %}
-    <p class="material-meta">首次获取 SEC 常用年报、季报及近期公告，包含各自附件。6-K 是公告类型，不能直接视为季报。更早历史文件保留目录线索。</p>
-    {% if job %}<h3>最近一次获取</h3>{% if not active and not job.finished_at %}<p class="research-source-error">任务已超时或中断，请重新获取。已保存的内容不受影响。</p>{% endif %}
-    {% for item in job.items %}<p><strong>{{ item.title }}</strong> · {% if item.status == 'success' %}完成{% elif item.status == 'failed' %}未完成{% else %}获取中{% endif %}<br><span class="material-meta">{{ item.message }}</span></p>{% empty %}<p>正在准备任务。</p>{% endfor %}{% endif %}
-  </section>
-{% endif %}</section>
-{% endblock %}
+{% block title %}资料 · {{ dossier.security.name }}{% endblock %}
+{% block extra_head %}{{ block.super }}<style>.material-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,310px),1fr));gap:16px}.material-grid article{margin:0;padding:20px}.material-meta{font-size:.9rem;color:#626d67}.material-source-options{display:flex;flex-wrap:wrap;gap:14px;margin:18px 0}.material-tabs{display:flex;gap:20px;flex-wrap:wrap;padding:16px 0;margin-bottom:24px}</style>{% endblock %}
+{% block research_content %}<section class="research-page">
+<header class="research-header"><div><h1>{{ dossier.security.name }} · 资料</h1><p>{{ dossier.security.symbol }} · {{ dossier.security.market }}{% if identity.cik %} · SEC CIK {{ identity.cik }}{% endif %}</p><p class="material-meta">财务数据保留来源币种、报告期和统计口径。</p></div><div class="research-actions"><a class="button" href="?tab=acquisition">获取与更新资料</a><a class="button" href="{% url 'investment_research:prepare' dossier.pk %}">生成／更新初识报告</a></div></header>
+{% if request.GET.tab != 'acquisition' and request.GET.context != 'prepare' %}
+<nav class="material-tabs" aria-label="资料形式"><a href="?category={{ category }}&layer=original"{% if layer == 'original' %} aria-current="page"{% endif %}>原始资料</a><a href="?category={{ category }}&layer=prepared"{% if layer == 'prepared' %} aria-current="page"{% endif %}>整理材料</a></nav>
+{% if layer == 'original' %}<h2>原始资料与版本</h2>{% if category == 'sec' %}{% include "investment_research/sec_financial_overview.html" %}{% endif %}{% if category == 'other' %}<p>历史存档：已停用资料仅保留原件，不纳入研究证据。</p>{% endif %}<p>阅读页保留原件下载、报告日期及历史版本。</p><div class="material-grid">{% for item in materials %}{% include "investment_research/material_card.html" %}{% empty %}<p>此分类尚无已保存资料。</p>{% endfor %}</div>{% if category == 'ir' %}<p><a href="{% url 'investment_research:documents' dossier.pk %}">查看官方 IR 文件与正文版本</a></p>{% endif %}
+{% else %}<h2>整理材料</h2>{% if category == 'sec' %}<p><a class="button" href="{% url 'investment_research:financials' dossier.pk %}">年报财务概览与可核查指标</a></p>{% include "investment_research/sec_financial_overview.html" %}{% elif category == 'futu' %}<p><a class="button" href="{% url 'investment_research:futu_financials' dossier.pk %}">财务报表与主要指标</a></p><div class="material-grid">{% for item in materials %}{% include "investment_research/material_card.html" %}{% endfor %}</div>{% elif category == 'ir' %}<p><a href="{% url 'investment_research:documents' dossier.pk %}">官方文件正文、章节与引用</a></p>{% else %}<p>尚无此分类的整理材料。</p>{% endif %}{% endif %}
+{% endif %}
+{% if request.GET.tab == 'acquisition' or request.GET.context == 'prepare' %}<section id="acquisition" class="research-current"><h2>获取与更新</h2><p>选择要补充的资料；更新时保留旧版本，相同内容不重复保存。</p>
+{% if can_write %}<form method="post">{% csrf_token %}<div class="material-source-options">{% for source in sources %}<label><input type="checkbox" name="source" value="{{ source.key }}"{% if source.applicable %} checked{% else %} disabled{% endif %}>{{ source.title }}{% if not source.applicable %}（当前来源未覆盖）{% endif %}</label>{% endfor %}</div><button id="acquire-button" type="submit"{% if active %} disabled{% endif %}>{% if active %}正在获取{% else %}获取所选资料{% endif %}</button></form>{% endif %}
+<p class="material-meta">SEC 年报、季报、近期公告及附件分别保存。6-K 是公告类型，不能直接视为季报。</p>
+<div id="acquisition-progress" aria-live="polite">{% if job %}<h3>最近一次获取</h3>{% if not active and not job.finished_at %}<p>任务已超时或中断，请重新获取。</p>{% endif %}{% for item in job.items %}<p><strong>{{ item.title }}</strong> · {{ item.status }}<br>{{ item.message }}</p>{% empty %}<p>正在准备任务。</p>{% endfor %}{% endif %}</div></section>{% endif %}
+{% if active %}<script>(()=>{const node=document.getElementById('acquisition-progress');if(!node)return;async function poll(){try{const r=await fetch('?format=progress',{credentials:'same-origin'});if(!r.ok)throw Error();const data=await r.json();node.replaceChildren();for(const item of data.items){const p=document.createElement('p');p.textContent=item.title+' · '+({'success':'完成','failed':'未完成','running':'获取中'}[item.status]||item.status)+' · '+item.message;node.append(p);}if(data.active){setTimeout(poll,5000);}else{const button=document.getElementById('acquire-button');if(button){button.disabled=false;button.textContent='获取所选资料';}}}catch(e){node.textContent='进度暂时无法更新，请稍后刷新查看。';}}setTimeout(poll,5000);})();</script>{% endif %}
+</section>{% endblock %}

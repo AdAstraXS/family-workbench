@@ -3,6 +3,11 @@
 import json
 import os
 import re
+import subprocess
+import sys
+from decimal import Decimal
+from datetime import timedelta
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,7 +23,7 @@ from .research_ai import (
     MAX_RESPONSE_BYTES, ResearchAiError, _cost, _default_transport,
     _redact_quantified_sentences, _safe_text, research_provider_policy,
 )
-from .services import DossierNotFound, _require_writer
+from .services import DossierNotFound, ResearchValidationError, _require_writer
 
 
 PROMPT_VERSION = "research-thesis-synthesis-v9"
@@ -203,7 +208,19 @@ def _validate_output(raw, targets, evidence, *, validate_parts=True):
 
 def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                              transport=None, url_validator=None, include_news=False,
-                             review_mode="full"):
+                             review_mode="full", background=False, allow_retry=True):
+    arguments = dict(actor=actor, dossier_id=dossier_id, provider_id=provider_id, consent=consent,
+        transport=transport, url_validator=url_validator, include_news=include_news,
+        review_mode=review_mode, background=background, allow_retry=allow_retry)
+    if background:
+        with transaction.atomic():
+            return _generate_thesis_analysis(**arguments)
+    return _generate_thesis_analysis(**arguments)
+
+
+def _generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
+                             transport=None, url_validator=None, include_news=False,
+                             review_mode="full", background=False, allow_retry=True):
     _require_writer(actor)
     if consent is not True:
         raise ResearchAiError("请先确认本次发送给云端模型的资料和个人判断。")
@@ -214,6 +231,17 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
     ).select_related("current_revision", "security").first()
     if dossier is None:
         raise DossierNotFound("研究档案不存在或不属于你。")
+    if background:
+        ResearchDossier.objects.select_for_update().get(pk=dossier.pk)
+        from django.utils import timezone
+        AiAnalysisRequest.objects.filter(member=actor, analysis_type="thesis_synthesis",
+            scope__dossier_id=dossier.pk, status__in=["pending", "running"],
+            created_at__lt=timezone.now() - timedelta(minutes=10)).update(
+                status="failed", finished_at=timezone.now(), error_message="后台任务超时或中断；已知费用以调用记录为准。")
+        active = AiAnalysisRequest.objects.filter(member=actor, analysis_type="thesis_synthesis",
+            scope__dossier_id=dossier.pk, status__in=["pending", "running"]).first()
+        if active:
+            return active
     from .research_basis import research_basis
     revision = research_basis(dossier)
     targets = _targets(revision) if revision else []
@@ -259,7 +287,8 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
     provider = AiProvider.objects.filter(pk=provider_id).first()
     if provider is None:
         raise ResearchAiError("所选文本模型不可用。")
-    policy = research_provider_policy(provider)
+    from .research_ai import report_policy
+    policy = report_policy(provider)
     api_key = os.getenv(policy["api_key_env_var"], "")
     if not api_key:
         raise ResearchAiError("文本模型的 API Key 尚未配置。")
@@ -338,7 +367,7 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
     ]}
     retry_body = json.dumps(retry_payload, ensure_ascii=False).encode("utf-8")
     retry_cost = _cost(len(retry_body), policy["max_output_tokens"], policy)
-    can_retry = worst_cost + retry_cost <= policy["max_cost"]
+    can_retry = allow_retry and worst_cost + retry_cost <= policy["max_cost"]
     estimated_cost = worst_cost + retry_cost if can_retry else worst_cost
     news_receipt = None
     if include_news and packet.get("news_snapshots"):
@@ -376,12 +405,70 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                "baseline_news_snapshots": ((baseline.scope.get("news_snapshots", []) +
                                              baseline.scope.get("baseline_news_snapshots", [])) if baseline else []),
                "evidence_scope": "combined" if packet.get("news_snapshots") else "research",
-               "estimated_max_cost_usd": str(estimated_cost)},
+               "estimated_max_cost_usd": str(estimated_cost), "max_output_tokens": policy['max_output_tokens']},
         sanitized_input={"source_count": len(packet["sources"]),
                          "evidence_count": len(evidence), "provided_characters": len(user_prompt),
                          "private_thesis_included": True},
     )
+    frozen = {"payload": payload, "retry_payload": retry_payload, "can_retry": can_retry,
+              "targets": targets, "evidence": evidence,
+              "policy": {key: str(value) if isinstance(value, Decimal) else value
+                         for key, value in policy.items()},
+              "endpoint": endpoint, "model": provider.model_name, "base_url": provider.base_url,
+              "news_receipt_id": news_receipt.pk if news_receipt else None,
+              "exchange": str(exchange) if news_receipt else None}
+    analysis.scope = {**analysis.scope, "execution": frozen}
+    analysis.save(update_fields=["scope", "updated_at"])
+    if background:
+        transaction.on_commit(lambda: launch_thesis_analysis(analysis.pk))
+        return analysis
+    return run_thesis_analysis(analysis.pk, transport=transport, url_validator=url_validator)
+
+
+def launch_thesis_analysis(pk):
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS} if os.name == "nt" else {"start_new_session": True}
     try:
+        subprocess.Popen([sys.executable, "manage.py", "run_thesis_analysis", str(pk)],
+            cwd=Path(__file__).resolve().parents[1], stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, **options)
+    except OSError:
+        from django.utils import timezone
+        AiAnalysisRequest.objects.filter(pk=pk, status="pending").update(
+            status="failed", error_message="后台任务未启动，请重试。", finished_at=timezone.now())
+
+
+def run_thesis_analysis(pk, *, transport=None, url_validator=None):
+    from django.utils import timezone
+    if not AiAnalysisRequest.objects.filter(pk=pk, analysis_type="thesis_synthesis", status="pending").update(
+            status="running", started_at=timezone.now()):
+        return AiAnalysisRequest.objects.get(pk=pk)
+    analysis = AiAnalysisRequest.objects.select_related("provider", "member").get(pk=pk)
+    provider = analysis.provider
+    frozen = analysis.scope["execution"]
+    policy = dict(frozen["policy"])
+    for key in ("input_rate", "output_rate", "max_cost"):
+        policy[key] = Decimal(policy[key])
+    targets, evidence = frozen["targets"], frozen["evidence"]
+    request_body = json.dumps(frozen["payload"], ensure_ascii=False).encode("utf-8")
+    retry_body = json.dumps(frozen["retry_payload"], ensure_ascii=False).encode("utf-8")
+    can_retry = frozen["can_retry"]
+    news_receipt = None
+    if frozen["news_receipt_id"]:
+        from investment_watch.models import BudgetReceipt
+        news_receipt = BudgetReceipt.objects.get(pk=frozen["news_receipt_id"])
+    exchange = Decimal(frozen["exchange"]) if news_receipt else None
+    attempts = total_in = total_out = 0
+    usage_complete = True
+    try:
+        _require_writer(analysis.member)
+        research_provider_policy(provider)
+        endpoint = (url_validator or _chat_url)(provider)
+        if (endpoint != frozen["endpoint"] or provider.model_name != frozen["model"] or
+                provider.base_url != frozen["base_url"]):
+            raise ResearchAiError("模型配置已变化，请重新确认后提交。")
+        api_key = os.getenv(policy["api_key_env_var"], "")
+        if not api_key:
+            raise ResearchAiError("文本模型的 API Key 尚未配置。")
         attempts = 0
         total_in = total_out = 0
         usage_complete = True
@@ -393,7 +480,7 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                 method="POST",
             )
             from monitoring.metering import tracked_call
-            body = tracked_call(lambda: (transport or _default_transport)(request, timeout=60),
+            body = tracked_call(lambda: (transport or _default_transport)(request, timeout=180),
                 provider=provider, module="investment_research", family_id=analysis.family_id, source=analysis.pk)
             if len(body) > MAX_RESPONSE_BYTES:
                 raise ResearchAiError("AI 返回内容超过大小上限。")
@@ -411,7 +498,7 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                 usage_complete = False
             choice = response["choices"][0]
             if choice.get("finish_reason") == "length":
-                raise ResearchAiError("AI 输出达到长度上限，未生成完整分析。")
+                raise ResearchAiError(f"AI 输出达到 {policy['max_output_tokens']:,} tokens 长度上限，未生成完整分析；本次用量已记录。")
             if choice.get("finish_reason") in {"content_filter", "insufficient_system_resource", "aborted"}:
                 raise ResearchAiError("文本模型未能完成本次分析，请稍后再试或切换模型。")
             try:
@@ -422,24 +509,30 @@ def generate_thesis_analysis(*, actor, dossier_id, provider_id, consent,
                 raise
             break
         actual_cost = _cost(total_in, total_out, policy) if usage_complete else None
-    except (ResearchAiError, urllib.error.URLError, TimeoutError, OSError,
+    except (ResearchAiError, ResearchValidationError, KnowledgeAiError, urllib.error.URLError, TimeoutError, OSError,
             UnicodeError, ValueError, KeyError, IndexError, TypeError) as exc:
         message = str(exc) if isinstance(exc, ResearchAiError) else "AI 服务暂时不可用或返回格式不正确。"
         analysis.status = AiAnalysisRequest.STATUS_FAILED
+        from django.utils import timezone
+        analysis.finished_at = timezone.now()
         analysis.error_message = message[:2000]
         analysis.sanitized_input = {**analysis.sanitized_input,
                                     "model_attempts": attempts,
+                                    "max_output_tokens": policy["max_output_tokens"],
+                                    "reported_cost_usd": str(_cost(total_in, total_out, policy)) if usage_complete else None,
                                     "reported_tokens": total_in + total_out if usage_complete else None}
-        analysis.save(update_fields=["status", "error_message", "sanitized_input", "updated_at"])
+        analysis.save(update_fields=["status", "error_message", "sanitized_input", "finished_at", "updated_at"])
         if news_receipt:
             from investment_watch.budget import settle
-            settle(news_receipt,failed=True)
+            settle(news_receipt, _cost(total_in, total_out, policy) * exchange if usage_complete else None, failed=True)
         raise ResearchAiError(message) from exc
     with transaction.atomic():
         analysis.status = AiAnalysisRequest.STATUS_SUCCESS
+        from django.utils import timezone
+        analysis.finished_at = timezone.now()
         analysis.sanitized_input = {**analysis.sanitized_input,
                                     "model_attempts": attempts}
-        analysis.save(update_fields=["status", "sanitized_input", "updated_at"])
+        analysis.save(update_fields=["status", "sanitized_input", "finished_at", "updated_at"])
         AiAnalysisResult.objects.create(request=analysis, result_text="逐项判断综合分析草稿",
                                         result_json=result,
                                         tokens_used=(total_in + total_out if usage_complete else None),

@@ -41,7 +41,11 @@ def history(request, pk):
     # Legacy draft views enforce the request type and dossier ownership again.
     drafts = drafts.filter(analysis_type='document_draft')
     from .preparation import history as introduction_history
+    kind = request.GET.get('kind', 'all')
+    if kind not in {'all', 'research', 'initial', 'judgment', 'review'}:
+        kind = 'all'
     return render(request, 'investment_research/analysis_history.html', {
+        'kind': kind, 'reviews': dossier.filing_reviews.select_related('document', 'thesis_revision'),
         'dossier': dossier, 'reports': research_history(dossier), 'drafts': drafts,
         'introductions': introduction_history(dossier), 'revisions': dossier.revisions.order_by('-revision_number')})
 
@@ -50,11 +54,7 @@ def history(request, pk):
 def library_news(request, pk):
     member = get_current_member(request)
     dossier = get_accessible_dossier_or_404(member, pk)
-    params = request.GET.copy()
-    params.update({'view': 'evidence', 'source_type': 'news'})
-    return render(request, 'investment_research/company_materials.html', {
-        'dossier': dossier, 'can_write': is_writer(member), 'library_page': True,
-        **workspace_context(dossier, params)})
+    return redirect('/research/watch/items/?dossier=' + str(dossier.pk))
 
 
 @_method(['GET'])

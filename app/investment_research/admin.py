@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import CompanyIdentity, CompanyMaterial, CompanyMaterialVersion, CompanyAcquisitionJob
+from .models import CompanyIdentity, CompanyMaterial, CompanyMaterialVersion, CompanyAcquisitionJob, ResearchPromptTemplate
 
 
 class ArchiveAdmin(admin.ModelAdmin):
@@ -9,6 +9,14 @@ class ArchiveAdmin(admin.ModelAdmin):
         return False
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(ResearchPromptTemplate)
+class PromptTemplateAdmin(ArchiveAdmin):
+    list_display = ('owner', 'dossier', 'revision', 'updated_at')
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(owner__user=request.user)
 
 
 @admin.register(CompanyMaterial)

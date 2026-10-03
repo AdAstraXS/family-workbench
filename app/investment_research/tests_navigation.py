@@ -25,7 +25,7 @@ class NavigationTests(TestCase):
 
     def test_all_primary_and_auxiliary_pages_share_shell_and_are_read_only(self):
         for route in ['prepare', 'company_research', 'detail', 'follow', 'metric_focus', 'review_plan',
-                      'filing_reviews', 'materials', 'library_news', 'research_history', 'valuation',
+                      'filing_reviews', 'materials', 'prompt_settings', 'research_history', 'valuation',
                       'financials', 'futu_financials', 'next_day_tracking', 'documents']:
             with self.subTest(route=route), CaptureQueriesContext(connection) as queries:
                 response = self.client.get(self.path(route))
@@ -36,7 +36,12 @@ class NavigationTests(TestCase):
                 html = response.content.decode()
                 stages = html.split('aria-label="公司研究流程"')[1].split('</nav>')[0]
                 self.assertEqual(stages.count('aria-current="step"'), 0 if route in
-                    ['materials', 'library_news', 'financials', 'futu_financials', 'valuation', 'documents'] else 1)
+                    ['materials', 'research_history', 'financials', 'futu_financials', 'valuation', 'documents'] else 1)
+
+    def test_news_library_redirects_to_investment_watch(self):
+        response = self.client.get(self.path('library_news'))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, '/research/watch/items/?dossier=' + str(self.dossier.pk))
 
     def test_observation_is_private_post_only_and_does_not_change_judgment(self):
         before = self.dossier.current_revision_id

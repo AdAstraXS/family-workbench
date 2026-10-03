@@ -215,7 +215,10 @@ class MaterialTests(TestCase):
         self.client.force_login(self.actor.user)
         with patch("investment_research.company_sources.quote_context") as fetch:
             response = self.client.get(reverse("investment_research:materials", args=[self.dossier.pk]) + "?tab=inventory")
-            self.assertContains(response, "五步资料清单")
+            self.assertContains(response, "原始资料与版本")
+            self.assertNotContains(response, "五步资料清单")
+            manifest = self.client.get(reverse("investment_research:materials", args=[self.dossier.pk]) + "?format=manifest")
+            self.assertIn('steps', manifest.json())
             self.assertEqual(CompanyMaterialVersion.objects.count(), 1)
             fetch.assert_not_called()
         url = reverse("investment_research:material_read", args=[self.dossier.pk, version.pk])
@@ -271,8 +274,8 @@ class MaterialTests(TestCase):
         self.assertEqual(manifest["steps"][1]["status"], "待补充")
         self.assertEqual(manifest["steps"][3]["status"], "待补充")
         self.client.force_login(self.actor.user)
-        response = self.client.get(reverse("investment_research:materials", args=[self.dossier.pk]))
-        self.assertContains(response, "已停用资料")
+        response = self.client.get(reverse("investment_research:materials", args=[self.dossier.pk]), {'category': 'other'})
+        self.assertContains(response, "历史存档")
         self.assertNotContains(response, 'value="ratings"')
         self.assertNotContains(response, 'value="industry"')
 

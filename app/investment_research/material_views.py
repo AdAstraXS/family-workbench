@@ -61,6 +61,8 @@ def library(request, pk):
     info = relation(qualified(dossier.security))
     job = dossier.acquisition_jobs.order_by("-pk").first()
     active = job and job.status in {"queued", "running"} and job.expires_at > timezone.now()
+    if request.GET.get("format") == "progress":
+        return JsonResponse({"active": bool(active), "items": job.items if job else []})
     from .providers.ir_registry import company_for_security
     sources = [{"key": k, "title": v, "applicable": bool(info["sec_ticker"]) if k in {"sec", "facts"}
                 else bool(company_for_security(dossier.security)) if k == "ir"
@@ -72,13 +74,16 @@ def library(request, pk):
     _, fiscal, _ = annual_reading(facts_version.data if facts_version else {}, overview)
     calendar = fiscal_calendar(facts_version.data if facts_version else {}, overview)
     fiscal = max((item for item in (fiscal, calendar) if item), key=lambda item: item["end"], default=None)
-    display_materials = [m for m in materials if m.kind != 'sec_document' and not m.retired]
-    if request.GET.get('context') != 'prepare':
-        official_kinds = {'facts', 'ir'}
-        display_materials = [m for m in display_materials if (m.kind not in official_kinds if request.GET.get('tab') == 'futu' else m.kind in official_kinds)]
+    category = request.GET.get('category', 'futu' if request.GET.get('tab') == 'futu' else 'sec')
+    if category not in {'sec', 'futu', 'ir', 'other'}:
+        category = 'sec'
+    kinds = {'sec': {'facts', 'sec_document', 'sec'}, 'futu': {'profile', 'financials', 'research'}, 'ir': {'ir'}}
+    display_materials = [m for m in materials if (m.kind in kinds.get(category, set()) if category != 'other'
+                         else m.kind not in set().union(*kinds.values()))]
     return render(request, "investment_research/material_library.html", {
         "dossier": dossier, "identity": identity, "identity_info": info,
         "materials": display_materials,
+        "category": category, "layer": 'prepared' if request.GET.get('layer') == 'prepared' else 'original',
         "retired_materials": [m for m in materials if m.retired],
         "sec_materials": [m for m in materials if m.kind == "sec_document"],
         "sec_overview": overview,
@@ -106,6 +111,8 @@ def read(request, pk, version_pk):
     annual_rows, fiscal, notices = annual_reading(data, overview) if overview else ([], None, [])
     calendar = fiscal_calendar(data, overview) if overview else None
     fiscal = max((item for item in (fiscal, calendar) if item), key=lambda item: item["end"], default=None)
+    tables = statement_tables(data.get("statements", []), provider_code(dossier.security)) if version.material.kind == "financials" else []
+    financial_period = max((report.get('period_end', '') for table in tables for report in table['reports']), default='')
     return render(request, "investment_research/material_read.html", {
         "dossier": dossier, "version": version, "sections": reading_sections(version),
         "fact_tables": fact_tables(data, rows=annual_rows) if version.material.kind == "facts" else [],
@@ -116,7 +123,7 @@ def read(request, pk, version_pk):
         "sec_report": report_info(version) if version.material.kind == "sec_document" else None,
         "profile": profile_content(data) if version.material.kind == "profile" else None,
         "retired": version.material.kind in RETIRED_SOURCES,
-        "tables": statement_tables(data.get("statements", []), provider_code(dossier.security)) if version.material.kind == "financials" else [],
+        "tables": tables, "financial_period": financial_period,
         "groups": breakdown_tables(data.get("breakdown")) if version.material.kind == "financials" else [],
         "versions": version.material.versions.only("id", "number", "fetched_at", "report_date"),
     })

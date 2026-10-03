@@ -37,7 +37,7 @@ ITEMS = (
 _LABELS = {code: (label, title) for code, label, title in ITEMS}
 _HEADING = re.compile(
     r"(?m)^[ \t]*(?P<item>ITEM|Item)[ \t]+(?P<code>1[0-6]|[1-9])(?P<suffix>[ABC]?)[ \t]*"
-    r"(?:[.:\-–][ \t]*|[ \t]+)(?P<title>[^\n]{2,150})"
+    r"(?:[.:\-–—][ \t]*|[ \t]+)(?P<title>[^\n]{2,150})"
 )
 
 

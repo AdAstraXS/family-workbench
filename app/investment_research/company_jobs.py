@@ -130,7 +130,7 @@ def run(job_id):
     index = 0
     while index < len(selection) and timezone.now() < job.expires_at:
         key = selection[index]
-        title = SOURCE_TASKS.get(key, "SEC 报告及附件")
+        title = SOURCE_TASKS.get(key) or CompanyMaterial.objects.filter(security=job.dossier.security, key=key).values_list('title', flat=True).first() or "SEC 报告及附件"
         results.append({"key": key, "title": title, "status": "running", "message": "正在获取"})
         job.items = results
         job.save(update_fields=["items", "updated_at"])

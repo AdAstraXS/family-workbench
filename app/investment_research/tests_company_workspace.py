@@ -35,7 +35,7 @@ class CompanyWorkspaceTests(TestCase):
     def test_original_page_and_news_entry_are_one_workspace(self):
         self.client.force_login(self.user)
         response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]))
-        for text in ("公司研究", "持续跟踪", "资料", "我的判断", "财务与行情"):
+        for text in ("公司研究", "持续跟踪", "资料", "我的判断", "历史"):
             self.assertContains(response, text)
         self.assertRedirects(self.client.get(reverse("investment_watch:company", args=[self.dossier.pk])),
                              reverse("investment_research:company_research", args=[self.dossier.pk]))
@@ -57,7 +57,7 @@ class CompanyWorkspaceTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
         self.assertTemplateUsed(response, "investment_research/detail.html")
-        for text in ("公司研究", "个人判断", "持续跟踪", "资料", "财务与行情"):
+        for text in ("公司研究", "个人判断", "持续跟踪", "资料", "历史"):
             self.assertContains(response, text)
         self.assertContains(response, self.dossier.current_revision.thesis)
         self.assertNotContains(response, 'css/company-research.css')
@@ -113,7 +113,7 @@ class CompanyWorkspaceTests(TestCase):
         with self.assertRaisesMessage(ResearchAiError, "没有尚未采用"):
             self.generate(review_mode="incremental")
 
-    @override_settings(INVESTMENT_WATCH_MODEL_ENABLED=True)
+    @override_settings(INVESTMENT_WATCH_MODEL_ENABLED=True, INVESTMENT_WATCH_DAILY_CNY='10')
     def test_incremental_retains_baseline_and_does_not_repeat_news(self):
         self.provider.extra_data["watch_usd_cny"] = "7"
         self.provider.save()

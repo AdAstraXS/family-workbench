@@ -5,6 +5,7 @@ from . import views, ir_views, material_views, preparation_views, navigation_vie
 app_name = "investment_research"
 
 urlpatterns = [
+    path('<int:pk>/prepare/prompts/', preparation_views.prompts, name='prompt_settings'),
     path('<int:pk>/follow/', navigation_views.follow, name='follow'),
     path('<int:pk>/follow/observation/', navigation_views.observation, name='observation'),
     path('<int:pk>/company/history/', navigation_views.history, name='research_history'),

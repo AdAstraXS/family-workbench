@@ -91,6 +91,31 @@ class ThesisAnalysisTests(TestCase):
         with patch.dict(os.environ, {"SYNTHESIS_TEST_KEY": "test-token"}):
             return generate_thesis_analysis(**arguments)
 
+    def test_background_freezes_input_and_worker_claims_only_once(self):
+        from .thesis_analysis import run_thesis_analysis
+        with patch('investment_research.thesis_analysis.launch_thesis_analysis') as launch:
+            with self.captureOnCommitCallbacks(execute=True):
+                queued = self.generate(background=True, allow_retry=False)
+                duplicate = self.generate(background=True, allow_retry=False)
+            self.assertEqual(duplicate.pk, queued.pk)
+            launch.assert_called_once_with(queued.pk)
+        self.assertEqual(queued.status, 'pending')
+        original = queued.scope['execution']['payload']
+        save_thesis_revision(actor=self.actor, dossier_id=self.dossier.pk,
+            expected_revision_id=self.dossier.current_revision_id,
+            thesis='后来修改的判断', pillars=['后来新增的假设'], questions=[], change_reason='检验冻结资料')
+        calls = []
+        def transport(request, **kwargs):
+            calls.append(json.loads(request.data))
+            return self.response()
+        with patch.dict(os.environ, {'SYNTHESIS_TEST_KEY': 'test-token'}):
+            result = run_thesis_analysis(queued.pk, transport=transport,
+                url_validator=lambda provider: 'https://example.ai/v1/chat/completions')
+            run_thesis_analysis(queued.pk, transport=transport)
+        self.assertEqual(result.status, 'success')
+        self.assertEqual(calls, [original])
+        self.assertNotIn('后来新增的假设', json.dumps(calls, ensure_ascii=False))
+
     @override_settings(INVESTMENT_WATCH_MODEL_ENABLED=True)
     def test_selected_news_is_a_frozen_new_analysis_input(self):
         import re
