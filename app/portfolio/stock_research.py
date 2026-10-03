@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from .market_data import futu_code_for_security
 from .models import Security, StockMarketResearchSnapshot
+from .research_quotes import market_zone, normalize_quote, positive_number
 
 
 def number(value):
@@ -106,7 +107,53 @@ def _fetch_section(context, name, callback, errors):
         return None
 
 
-def fetch_stock_research(security):
+def _fetch_dated_quote(context, security, code, errors):
+    from futu import AuType
+    data = _fetch_section(context, "quote", lambda: context.get_market_snapshot([code]), errors)
+    if data is not None and not data.empty:
+        item = data.iloc[0]
+        price, previous_close = number(item.get("last_price")), positive_number(item.get("prev_close_price"))
+        raw = {
+            "as_of": str(item.get("update_time") or "")[:19],
+            "price": as_text(price), "previous_close": as_text(previous_close),
+            "change_rate": as_text((price / previous_close - 1) * 100)
+                           if price is not None and previous_close else None,
+            "price_source": "富途行情快照", "price_type": "last", "is_delayed": None,
+        }
+        for target, field in {"open": "open_price", "high": "high_price", "low": "low_price",
+                              "volume": "volume", "market_cap": "total_market_val", "pe_ttm": "pe_ttm_ratio",
+                              "pb": "pb_ratio", "ps": "ps_ratio", "high_52w": "highest52weeks_price",
+                              "low_52w": "lowest52weeks_price"}.items():
+            raw[target] = as_text(item.get(field))
+        if normalize_quote(security, raw):
+            return raw
+        errors["quote"] = "行情未提供有效价格或价格时点；不能用获取时间代替。"
+    elif data is not None:
+        errors["quote"] = "富途没有返回这只股票的行情。"
+    # A separately requested, unadjusted completed daily bar can support valuation.
+    # Existing QFQ candles remain solely for trends and are never used here.
+    today = timezone.now().astimezone(market_zone(security)).date()
+    end = today - timedelta(days=1)
+    bars = _fetch_section(context, "quote_close", lambda: context.request_history_kline(
+        code, start=(end - timedelta(days=14)).isoformat(), end=end.isoformat(),
+        autype=AuType.NONE, max_count=20), errors)
+    if bars is not None and not bars.empty:
+        for row in sorted(bars.to_dict("records"), key=lambda row: str(row.get("time_key", "")), reverse=True):
+            stamp = str(row.get("time_key", ""))[:10]
+            try:
+                observed = date.fromisoformat(stamp)
+            except ValueError:
+                continue
+            if observed > end or not positive_number(row.get("close")):
+                continue
+            return {"price": as_text(row["close"]), "as_of": stamp, "price_type": "close",
+                    "adjustment": "none", "price_source": "富途未复权日线", "is_delayed": None}
+    if "quote_close" not in errors:
+        errors["quote_close"] = "没有可核实的已结束交易日未复权收盘价；已有报价保留。"
+    return None
+
+
+def fetch_stock_research(security, *, quote_only=False):
     if security.asset_type != Security.TYPE_STOCK:
         raise ValueError("个股行情与估值只支持股票。")
     code = futu_code_for_security(security)
@@ -123,39 +170,25 @@ def fetch_stock_research(security):
 
     snapshot, _ = StockMarketResearchSnapshot.objects.get_or_create(security=security)
     snapshot.last_attempt_at = timezone.now()
-    errors = {}
+    errors = dict(snapshot.errors or {}) if quote_only else {}
+    errors.pop("quote", None)
+    errors.pop("quote_close", None)
     updated = False
     context = OpenQuoteContext(host=settings.FUTU_OPEND_HOST, port=settings.FUTU_OPEND_PORT)
     try:
-        quote = _fetch_section(context, "quote", lambda: context.get_market_snapshot([code]), errors)
-        if quote is not None and not quote.empty:
-            item = quote.iloc[0]
-            price = number(item.get("last_price"))
-            previous_close = number(item.get("prev_close_price"))
-            change_rate = (
-                (price / previous_close - 1) * 100
-                if price is not None and previous_close is not None and previous_close > 0
-                else None
-            )
-            snapshot.quote = {
-                "as_of": str(item.get("update_time") or "")[:19],
-                "price": as_text(item.get("last_price")),
-                "change_rate": as_text(change_rate),
-                "previous_close": as_text(item.get("prev_close_price")),
-                "open": as_text(item.get("open_price")),
-                "high": as_text(item.get("high_price")),
-                "low": as_text(item.get("low_price")),
-                "volume": as_text(item.get("volume")),
-                "market_cap": as_text(item.get("total_market_val")),
-                "pe_ttm": as_text(item.get("pe_ttm_ratio")),
-                "pb": as_text(item.get("pb_ratio")),
-                "ps": as_text(item.get("ps_ratio")),
-                "high_52w": as_text(item.get("highest52weeks_price")),
-                "low_52w": as_text(item.get("lowest52weeks_price")),
-            }
+        quote = _fetch_dated_quote(context, security, code, errors)
+        if quote:
+            old = normalize_quote(security, snapshot.quote or {})
+            if not old or normalize_quote(security, quote)["_rank"] >= old["_rank"]:
+                snapshot.quote = quote
             updated = True
-        elif quote is not None:
-            errors["quote"] = "富途没有返回这只股票的行情。"
+        if quote_only:
+            snapshot.errors = errors
+            if updated:
+                snapshot.fetched_at = timezone.now()
+            snapshot.save(update_fields=["quote", "errors", "fetched_at", "last_attempt_at"])
+            snapshot._refreshed_any = updated
+            return snapshot
 
         start = (date.today() - timedelta(days=450)).isoformat()
         bars = _fetch_section(

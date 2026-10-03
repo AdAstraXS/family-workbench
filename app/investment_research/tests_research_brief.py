@@ -97,7 +97,7 @@ class ResearchBriefTests(TestCase):
                       args=[self.dossier.pk, analysis.pk])
         response = self.client.get(url)
         self.assertContains(response, "公司研究简报")
-        self.assertContains(response, "$100.00")
+        self.assertContains(response, "生成时未保存股价")
         response = self.client.get(reverse("investment_research:valuation", args=[self.dossier.pk]))
         self.assertContains(response, "估值试算")
         self.assertContains(response, "161.05")

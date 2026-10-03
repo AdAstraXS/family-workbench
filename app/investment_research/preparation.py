@@ -142,6 +142,7 @@ def _narrative(text):
 
 def packet(dossier, budget):
     """Read saved immutable versions only; excluded metadata cannot become evidence."""
+    from portfolio.research_quotes import saved_research_quote, freeze_research_quote
     from .official_ir import documents_for_security
     groups, used_urls = [], set()
     materials = CompanyMaterial.objects.filter(security=dossier.security,
@@ -216,6 +217,7 @@ def packet(dossier, budget):
         plan = dossier.review_plans.filter(thesis_revision=current).first()
         personal["confirmed_review_plan"] = plan.items if plan else []
     return {"company": str(dossier.security), "evidence": evidence, "existing_judgment": personal,
+            "market_context": freeze_research_quote(saved_research_quote(dossier.security)),
             "reading_boundary": "仅分析下面的资料摘录和整理后的财务指标，未阅读全文；未提供的内容不能当作不存在。",
             "available_source_count": len(groups), "included_source_count": len({e["url"] for e in evidence})}
 

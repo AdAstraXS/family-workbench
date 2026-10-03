@@ -1,0 +1,5 @@
+<details class="research-private-note"><summary>查看费用估算与上限</summary>
+<p>下面是输出用满时的参考费用，输入另计。发送前按本次资料与输出上限核对合计费用，超过单次上限会停止；不会自动缩短报告或自动付费重试。</p>
+<ul>{% for provider in providers %}<li>{{ provider.name }} · {{ provider.model_name }}：最多 {{ provider.report_output_tokens }} 个输出 tokens，输出用满约 ${{ provider.report_output_cost }}；输入每百万 tokens ${{ provider.extra_data.research_input_usd_per_million }}；单次合计上限 ${{ provider.extra_data.research_max_estimated_usd }}。</li>{% endfor %}</ul>
+<p>结果页按供应商返回的用量和配置单价显示估算费用，最终账单以供应商为准。</p>
+</details>

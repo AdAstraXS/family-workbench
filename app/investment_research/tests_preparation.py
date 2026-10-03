@@ -62,6 +62,18 @@ class PreparationTests(TestCase):
         self.assertTrue(all(e["official_version_id"] == self.version.pk for e in p["evidence"]))
         self.assertIn(f"version={self.version.pk}", p["evidence"][0]["url"])
 
+    def test_initial_report_keeps_generation_price_after_cache_update(self):
+        from portfolio.models import StockMarketResearchSnapshot
+        cache = StockMarketResearchSnapshot.objects.create(security=self.security,
+            quote={'price': '100', 'as_of': (timezone.now() - timedelta(hours=1)).isoformat()})
+        job = self.job()
+        cache.quote['price'] = '200'
+        cache.save(update_fields=['quote'])
+        job.refresh_from_db()
+        self.assertEqual(job.sanitized_input['market_context']['price'], '100')
+        page = self.client.get(self.url, {'report': job.pk})
+        self.assertContains(page, '后续行情更新不改变此报告')
+
     def test_generation_and_get_are_private_and_do_not_create_judgments(self):
         job = self.job()
         before = AiAnalysisRequest.objects.count()

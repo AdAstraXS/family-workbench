@@ -508,7 +508,7 @@ def thesis_analysis_detail(request, pk, analysis_pk):
     if result:
         from .report_sections import source_sections
         result = source_sections(result, analysis.scope or {})
-    valuation = build_valuation_trial(dossier.security, analysis.scope, request.GET)
+    valuation = build_valuation_trial(dossier.security, analysis.scope, request.GET, frozen=True)
     from .research_basis import basis_matches
     return render(request, "investment_research/thesis_analysis_brief.html", {
         "dossier": dossier, "analysis": analysis, "result": result,

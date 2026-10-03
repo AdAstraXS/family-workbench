@@ -104,10 +104,12 @@ def available_research_providers():
     available = []
     for provider in AiProvider.objects.filter(is_active=True, provider_type__in=["openai", "openai_compatible"]).order_by("name", "pk"):
         try:
-            research_provider_policy(provider)
+            policy = report_policy(provider)
         except ResearchAiError:
             continue
         if os.getenv((provider.extra_data or {})["api_key_env_var"], ""):
+            provider.report_output_tokens = policy["max_output_tokens"]
+            provider.report_output_cost = _cost(0, policy["max_output_tokens"], policy)
             available.append(provider)
     return prefer_default(available, "investment_research")
 

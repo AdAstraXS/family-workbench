@@ -10,11 +10,12 @@
       <p class="research-private-note">{{ analysis.created_at|date:"Y-m-d" }} 整理{% if analysis.scope.financial_periods %} · 财报截至 {{ analysis.scope.financial_periods|last }}{% endif %} · {% if analysis.scope.research_basis == "candidate_hypotheses" %}基于候选假设 · 尚无正式判断{% else %}第 {{ analysis.scope.thesis_revision_number }} 版判断{% endif %}</p>
     </div>
     <div class="research-brief-quote">
-      {% if valuation.price %}<strong>{% if valuation.currency == 'USD' %}${% elif valuation.currency == 'HKD' %}HK${% else %}{{ valuation.currency }} {% endif %}{{ valuation.price }}</strong><span>{{ valuation.price_as_of|date:"m 月 d 日 H:i" }} 行情 · {{ valuation.price_source }} · {{ valuation.pricing_status }}{% if valuation.is_delayed %} · 延迟{% endif %}</span>
-      {% else %}<strong>暂无股价</strong><span>需先更新已保存行情</span>{% endif %}
+      {% if valuation.price %}<strong>{% if valuation.currency == 'USD' %}${% elif valuation.currency == 'HKD' %}HK${% else %}{{ valuation.currency }} {% endif %}{{ valuation.price }}</strong><span>生成时保存的{{ valuation.price_label }} · {{ valuation.as_of_label }} · {{ valuation.price_source }}{% if valuation.is_delayed %} · 延迟{% endif %}</span>
+      {% else %}<strong>生成时未保存股价</strong><span>更新行情后可生成新报告</span>{% endif %}
       <a href="{% url 'portfolio:stock_market_detail' dossier.security.pk %}">查看个股行情与估值 →</a>
     </div>
   </header>
+  {% if analysis.result %}<p class="research-private-note">本次模型用量 {{ analysis.result.tokens_used|default_if_none:"未返回" }} tokens · 按返回用量估算费用 ${{ analysis.result.cost_estimate|default_if_none:"未返回" }} · 最终账单以供应商为准。</p>{% elif analysis.scope.reported_tokens != None %}<p class="research-private-note">供应商报告用量 {{ analysis.scope.reported_tokens }} tokens · 估算费用 ${{ analysis.scope.reported_cost_usd|default_if_none:"未返回" }}。</p>{% endif %}
   {% include "investment_research/company_navigation.html" %}
   {% if not is_current_revision %}<div class="research-document-empty">这份研究基于旧版判断或候选假设，请按生成时的背景阅读。</div>{% endif %}
   <p><a href="{% url 'investment_watch:items' %}?dossier={{ dossier.pk }}">查看新闻与证据变化{% if new_candidate_count %} · 此后新增 {{ new_candidate_count }} 条候选{% endif %} →</a></p>

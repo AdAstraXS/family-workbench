@@ -1683,7 +1683,8 @@ def stock_market_detail(request, pk):
         from investment_research.models import ResearchDossier
 
         dossier = ResearchDossier.objects.filter(owner=member, security=security).first()
-    quote = snapshot.quote if snapshot else {}
+    from .research_quotes import saved_research_quote
+    quote = saved_research_quote(security, stock_snapshot=snapshot)
     candles = snapshot.candles if snapshot else []
     observations = technical_observations(candles, quote.get("price"))
     selected_metric = request.GET.get("metric", "pe")

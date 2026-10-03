@@ -59,10 +59,36 @@ def library_news(request, pk):
 
 @_method(['GET'])
 def valuation(request, pk):
-    dossier = get_accessible_dossier_or_404(get_current_member(request), pk)
+    member = get_current_member(request)
+    dossier = get_accessible_dossier_or_404(member, pk)
     report = research_history(dossier).filter(status=AiAnalysisRequest.STATUS_SUCCESS).first()
-    return render(request, 'investment_research/valuation.html', {'dossier': dossier,
+    return render(request, 'investment_research/valuation.html', {'dossier': dossier, 'can_write': is_writer(member),
         'valuation': build_valuation_trial(dossier.security, report.scope if report else {}, request.GET)})
+
+
+@_method(['POST'])
+def refresh_quote(request, pk):
+    member = get_current_member(request)
+    dossier = get_accessible_dossier_or_404(member, pk)
+    if not is_writer(member):
+        return HttpResponseForbidden('查看者不能更新行情。')
+    from portfolio.stock_research import fetch_stock_research
+    from portfolio.models import StockMarketResearchSnapshot
+    from django.utils import timezone
+    try:
+        snapshot = fetch_stock_research(dossier.security, quote_only=True)
+    except Exception as exc:
+        snapshot, _ = StockMarketResearchSnapshot.objects.get_or_create(security=dossier.security)
+        snapshot.last_attempt_at = timezone.now()
+        snapshot.errors = {**snapshot.errors, 'quote': str(exc)[:240]}
+        snapshot.save(update_fields=['last_attempt_at', 'errors'])
+        messages.error(request, '行情更新未成功，原有数据保留。' + str(exc)[:240])
+    else:
+        if snapshot._refreshed_any:
+            messages.success(request, '已更新可核查的行情。价格类型、日期和来源见下方。')
+        else:
+            messages.error(request, '本次未取得有效报价或已结束交易日的未复权收盘价，原有数据保留。')
+    return redirect('investment_research:valuation', pk=pk)
 
 
 @_method(['POST'])

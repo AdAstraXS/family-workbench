@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
 
-from portfolio.models import SecurityMarketSnapshot
+from portfolio.research_quotes import saved_research_quote, normalize_quote
 
 
 GROWTH_RATES = (Decimal("0.10"), Decimal("0.15"), Decimal("0.20"))
@@ -27,18 +27,20 @@ def _money(value):
     return value.quantize(Decimal("0.01"))
 
 
-def build_valuation_trial(security, scope, query):
+def build_valuation_trial(security, scope, query, *, frozen=False):
     """Return labelled inputs and scenarios without fetching a live quote."""
-    snapshot = SecurityMarketSnapshot.objects.filter(security=security).first()
-    if not snapshot or not snapshot.last_price or snapshot.last_price <= 0 or not snapshot.price_as_of:
-        return {"available": False, "problem": "尚无带时点的已保存股价。请先到自选股的“行情与估值”更新行情。"}
-    price = snapshot.last_price
+    snapshot = (normalize_quote(security, (scope or {}).get("market_context") or {}) if frozen
+                else saved_research_quote(security))
+    if not snapshot:
+        return {"available": False, "problem": "本报告生成时未保存可用股价；更新行情后可生成新报告。" if frozen else
+                "尚无带时点的已保存股价。请点击更新行情，或到个股行情页查看获取状态。"}
+    price = snapshot["price"]
     quote = {"price": _money(price), "currency": security.currency,
-             "price_as_of": timezone.localtime(snapshot.price_as_of),
-             "price_source": snapshot.get_price_source_display(),
-             "pricing_status": snapshot.get_pricing_status_display(),
-             "is_delayed": snapshot.is_delayed,
-             "provider_pe_ttm": snapshot.pe_ttm_ratio}
+             "price_as_of": snapshot["price_as_of"], "as_of_label": snapshot["as_of_label"],
+             "price_source": snapshot["price_source"], "price_label": snapshot["price_label"],
+             "pricing_status": snapshot.get("pricing_status", ""),
+             "is_delayed": snapshot["is_delayed"], "is_stale": snapshot["is_stale"],
+             "frozen": frozen, "provider_pe_ttm": snapshot.get("pe_ttm")}
     annual = (scope or {}).get("valuation_basis") or {}
     eps = _decimal(annual.get("eps"))
     annual_ok = (security.currency == "USD" and eps is not None and eps > 0
@@ -49,7 +51,7 @@ def build_valuation_trial(security, scope, query):
         basis_citation = annual["citation"]
         basis_note = "年报 EPS 与当前行情日期不同；含可能的非经常性收益，未作正常化调整。"
     else:
-        provider_pe = snapshot.pe_ttm_ratio
+        provider_pe = snapshot.get("pe_ttm")
         if provider_pe is None or provider_pe <= 0:
             return {**quote, "available": False,
                     "problem": "已有股价，但缺少同一口径的 EPS 或正值 TTM PE，暂不能试算。"}
