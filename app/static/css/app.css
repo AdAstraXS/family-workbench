@@ -4895,7 +4895,9 @@ textarea {
   text-align: right;
 }
 
-.account-list-table :is(th, td):nth-child(n+3):nth-child(-n+9),
+.account-list-table :is(th, td):nth-child(n+2):nth-child(-n+8),
+.annual-calculation-table :is(th, td):nth-child(n+2):nth-child(-n+5),
+.annual-transactions-table :is(th, td):nth-child(n+5),
 .dashboard-holdings-table :is(th, td):nth-child(n+5):nth-child(-n+10),
 .account-positions-table :is(th, td):nth-child(n+4),
 .individual-profit-table :is(th, td):nth-child(n+4),
@@ -4907,6 +4909,27 @@ textarea {
 .watchlist-compact-table :is(th, td):nth-child(n+4):nth-child(-n+12) {
   text-align: right;
 }
+
+/* Keep account names and explanations readable while money columns line up. */
+.account-list-table { min-width: 1000px; }
+.account-list-table :is(th, td):first-child { width: 23%; text-align: left; }
+.account-name-link { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.account-name-link:hover { text-decoration-thickness: 2px; }
+.account-name-link:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 2px; }
+.annual-calculation-table { min-width: 920px; }
+.annual-calculation-table :is(th, td):first-child { width: 22%; text-align: left; }
+.annual-calculation-table :is(th, td):last-child { width: 24%; text-align: left; }
+.annual-transactions-table { min-width: 850px; }
+.annual-transactions-table :is(th, td):nth-child(2) { width: 30%; }
+.annual-transactions-table :is(th, td):nth-child(-n+4) { text-align: left; }
+.account-list-table td:nth-child(n+2),
+.annual-calculation-table td:nth-child(n+2):nth-child(-n+5),
+.annual-transactions-table td:nth-child(n+5) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.account-table-scroll { overflow-x: auto; }
+.dashboard-holdings-wrap { overflow-x: auto; }
+.dashboard-holdings-table { min-width: 1300px; }
+.dashboard-holdings-table :is(th, td):nth-child(2) { width: 18%; }
+.dashboard-holdings-table td:nth-child(n+5):nth-child(-n+10) { font-variant-numeric: tabular-nums; }
 
 .individual-profit-table .table-total-row td {
   border-top: 2px solid var(--line);
