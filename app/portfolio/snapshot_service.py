@@ -77,6 +77,10 @@ def create_portfolio_snapshot(
                 "stale_prices": valuation["stale_prices"],
                 "missing_prices": valuation["missing_prices"],
                 "valuation_errors": valuation["errors"],
+                "historical_price_reviews": [
+                    position.valuation_price_review for position in valuation["positions"]
+                    if hasattr(position, "valuation_price_review")
+                ],
             },
         },
     )
