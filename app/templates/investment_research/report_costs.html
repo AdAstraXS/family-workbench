@@ -2,4 +2,5 @@
 <p>下面是输出用满时的参考费用，输入另计。发送前按本次资料与输出上限核对合计费用，超过单次上限会停止；不会自动缩短报告或自动付费重试。</p>
 <ul>{% for provider in providers %}<li>{{ provider.name }} · {{ provider.model_name }}：最多 {{ provider.report_output_tokens }} 个输出 tokens，输出用满约 ${{ provider.report_output_cost }}；输入每百万 tokens ${{ provider.extra_data.research_input_usd_per_million }}；单次合计上限 ${{ provider.extra_data.research_max_estimated_usd }}。</li>{% endfor %}</ul>
 <p>结果页按供应商返回的用量和配置单价显示估算费用，最终账单以供应商为准。</p>
+{% if include_diagnosis %}<p>勾选定向补充时，最多调用模型两次：资料诊断最多 4,096 个输出 tokens，最终报告保留上方输出空间。两次输入与输出合计受同一个单次金额上限约束。</p><ul>{% for provider in providers %}<li>{{ provider.name }}：诊断输出用满另约 ${{ provider.diagnosis_output_cost }}，诊断输入另计。</li>{% endfor %}</ul><p>智谱搜索最多两次，预计合计不超过 ¥0.02，独立计费；原文获取不调用付费抓取服务。若无重要缺口则跳过搜索。</p>{% endif %}
 </details>

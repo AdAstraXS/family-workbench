@@ -3,11 +3,24 @@ import uuid
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, get_object_or_404
+from django.http import Http404
 from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from .permissions import get_current_member, get_accessible_dossier_or_404, is_writer
 from .research_ai import available_research_providers, ResearchAiError
 from .preparation import history, enqueue, confirm
+
+
+@login_required
+@require_http_methods(['GET'])
+def source(request, pk, report_pk, number):
+    dossier = get_accessible_dossier_or_404(get_current_member(request), pk)
+    job = get_object_or_404(history(dossier), pk=report_pk)
+    original = next((item for item in job.sanitized_input.get('web_originals', []) if item.get('number') == number), None)
+    if original is None:
+        raise Http404
+    return render(request, 'investment_research/preparation_source.html',
+                  {'dossier': dossier, 'job': job, 'original': original})
 
 
 @login_required

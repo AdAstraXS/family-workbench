@@ -67,13 +67,17 @@ class ReportFixTests(TestCase):
         self.client.force_login(self.outsider.user)
         self.assertEqual(self.client.get(prompt_url).status_code, 404)
 
-    def test_search_uses_public_queries_and_freezes_results_before_model(self):
+    def test_legacy_queued_search_keeps_its_original_single_pass_contract(self):
         engine = AiProvider.objects.create(name='Search', provider_type='openai_compatible',
             base_url='https://open.bigmodel.cn/api/paas/v4', model_name='glm-test',
             extra_data={'api_key_env_var': 'RESEARCH_TEST_KEY'})
         with self.captureOnCommitCallbacks(execute=False):
             job = enqueue(self.actor, self.dossier, self.provider, True, include_web=True)
         self.assertEqual(job.scope['search_provider_id'], engine.pk)
+        job.scope.pop('research_pipeline')
+        job.scope['search_queries'] = queries_for(self.security)
+        job.prompt = SYSTEM
+        job.save(update_fields=['scope', 'prompt'])
         rows = [{'title': '公开资料', 'kind': 'web_search', 'date': '2026-10-01',
                  'url': 'https://example.com/news', 'text': '公开信息摘录', 'offset': None}]
         response = json.dumps({'choices': [{'finish_reason': 'stop',

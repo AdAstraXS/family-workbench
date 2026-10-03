@@ -13,6 +13,7 @@ urlpatterns = [
     path('<int:pk>/valuation/', navigation_views.valuation, name='valuation'),
     path('<int:pk>/valuation/refresh/', navigation_views.refresh_quote, name='refresh_quote'),
     path('<int:pk>/prepare/', preparation_views.prepare, name='prepare'),
+    path('<int:pk>/prepare/<int:report_pk>/sources/<int:number>/', preparation_views.source, name='preparation_source'),
     path('materials/start/', material_views.start, name='material_start'),
     path('<int:pk>/materials/', material_views.library, name='materials'),
     path('<int:pk>/materials/version/<int:version_pk>/', material_views.read, name='material_read'),

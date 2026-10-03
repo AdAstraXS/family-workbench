@@ -110,6 +110,8 @@ def available_research_providers():
         if os.getenv((provider.extra_data or {})["api_key_env_var"], ""):
             provider.report_output_tokens = policy["max_output_tokens"]
             provider.report_output_cost = _cost(0, policy["max_output_tokens"], policy)
+            from .preparation_research import PLAN_OUTPUT_TOKENS
+            provider.diagnosis_output_cost = _cost(0, PLAN_OUTPUT_TOKENS, policy)
             available.append(provider)
     return prefer_default(available, "investment_research")
 

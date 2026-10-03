@@ -43,14 +43,19 @@ def queries_for(security):
     return [company + ' latest earnings business competition', company + ' valuation risks recent developments']
 
 
-def search(queries, provider, *, transport=None, receipt_callback=None):
+def search(queries, provider, *, transport=None, receipt_callback=None, query_periods=None):
     key = os.getenv((provider.extra_data or {}).get('api_key_env_var', ''), '')
     if not key or urllib.parse.urlsplit(provider.base_url).hostname != 'open.bigmodel.cn':
         raise ResearchAiError('网络搜索服务配置已变化，请重新生成。')
     rows, receipts, seen = [], [], set()
     for query in queries[:2]:
-        body = json.dumps({'search_query': query, 'search_engine': 'search_std', 'count': 5,
-                           'search_intent': False, 'search_recency_filter': 'oneYear'}).encode()
+        options = {'search_query': query, 'search_engine': 'search_std', 'count': 5, 'search_intent': False}
+        period = (query_periods or {}).get(query, 'latest')
+        if period == 'latest' or period == str(timezone.localdate().year):
+            options['search_recency_filter'] = 'oneYear'
+        else:
+            options['search_recency_filter'] = 'noLimit'
+        body = json.dumps(options).encode()
         request = urllib.request.Request(ENDPOINT, data=body,
             headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}, method='POST')
         receipt = {'query': query, 'engine': 'search_std', 'status': 'requested',

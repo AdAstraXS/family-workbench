@@ -37,7 +37,7 @@ def navigation(context):
     stage_defs = [('research', '公司研究', '关键问题 · 证据 · 我的判断', 'company_research'),
                   ('follow', '持续跟踪', '观察变化 · 定期复核', 'follow')]
     area = next((area for area, names in {
-        'prepare': {'prepare', 'prompt_settings'},
+        'prepare': {'prepare', 'prompt_settings', 'preparation_source'},
         'research': {'company_research', 'thesis_analysis'},
         'history': {'research_history', 'thesis_analysis_detail', 'draft_detail'},
         'judgment': {'detail', 'edit', 'first_thesis', 'history'},
@@ -96,7 +96,7 @@ def navigation(context):
               'edit': '修订个人判断', 'first_thesis': '保存第一版判断', 'review_plan': '财报复核计划',
               'filing_review': '记录财报复核', 'next_day_tracking': '次日跟踪设置' if tab == 'settings' else '次日跟踪摘要',
               'material_read': '阅读资料', 'document_detail': '阅读官方原文', 'document_metrics': '年报指标明细',
-              'documents': '官方文件目录'}.get(name)
+              'documents': '官方文件目录', 'preparation_source': '研究原文快照'}.get(name)
     if name == 'materials' and tab == 'acquisition':
         detail = '获取与更新资料'
     if detail:
@@ -106,7 +106,7 @@ def navigation(context):
     # A document/report ID belongs to one company. Switching returns to its parent tab.
     switch_route = {'thesis_analysis_detail': 'research_history', 'draft_detail': 'research_history',
                     'filing_review': 'filing_reviews', 'document_detail': 'documents',
-                    'document_metrics': 'financials', 'material_read': 'materials'}.get(name, name)
+                    'document_metrics': 'financials', 'material_read': 'materials', 'preparation_source': 'prepare'}.get(name, name)
     switch_query = {key: request.GET[key] for key in ('tab', 'context', 'category', 'layer') if key in request.GET}
     if name == 'material_read':
         switch_query['category'] = ['sec', 'futu', 'ir', 'market', 'other'][source_index]
