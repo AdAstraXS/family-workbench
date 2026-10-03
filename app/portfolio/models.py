@@ -765,6 +765,49 @@ class SecurityPriceRecord(models.Model):
         return f"{self.security} {self.price_as_of} {self.price}"
 
 
+class HistoricalValuationPrice(TimestampedModel):
+    """An audited valuation decision for one account and one date, not a market quote."""
+
+    account = models.ForeignKey("InvestmentAccount", verbose_name="投资账户", on_delete=models.PROTECT)
+    security = models.ForeignKey(Security, verbose_name="证券标的", on_delete=models.PROTECT)
+    valuation_date = models.DateField("估值确认日期")
+    quote_date = models.DateField("原始报价日期")
+    price = models.DecimalField("确认估值价格", max_digits=20, decimal_places=6)
+    currency = models.CharField("报价币种", max_length=10)
+    basis = models.CharField("估值依据", max_length=20, choices=[
+        ("grey_market", "暗盘收盘价"), ("bond_clean", "债券净价（不含应计利息）"),
+        ("suspended_close", "停牌前收盘价"),
+    ])
+    evidence = models.TextField("确认说明与来源")
+    confirmed_by = models.ForeignKey(settings.AUTH_USER_MODEL, verbose_name="确认人", on_delete=models.PROTECT)
+
+    class Meta:
+        verbose_name = "历史估值价格确认"
+        verbose_name_plural = "历史估值价格确认"
+        constraints = [models.UniqueConstraint(fields=["account", "security", "valuation_date"], name="unique_account_historical_price_review")]
+
+    def clean(self):
+        super().clean()
+        errors = {}
+        if self.price is None or self.price <= 0:
+            errors["price"] = "确认估值价格必须大于 0。"
+        if self.quote_date and self.valuation_date and self.quote_date > self.valuation_date:
+            errors["quote_date"] = "原始报价日期不能晚于估值确认日期。"
+        if self.security_id and self.currency != self.security.currency:
+            errors["currency"] = "报价币种必须与证券原币一致。"
+        if self.security_id and self.security.asset_type not in {Security.TYPE_STOCK, Security.TYPE_BOND}:
+            errors["security"] = "历史价格确认仅适用于股票与债券；期权仍须处理到期状态。"
+        if self.security_id and ((self.basis == "bond_clean") != (self.security.asset_type == Security.TYPE_BOND)):
+            errors["basis"] = "债券必须使用净价口径；股票不能使用债券净价口径。"
+        if not self.evidence or not self.evidence.strip():
+            errors["evidence"] = "请保留成员确认的报价与估值依据。"
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f"{self.account} {self.security} {self.valuation_date} {self.price}"
+
+
 class InvestmentPosition(TimestampedModel):
     account = models.ForeignKey(InvestmentAccount, verbose_name="投资账户", on_delete=models.CASCADE, related_name="positions")
     security = models.ForeignKey(Security, verbose_name="证券标的", on_delete=models.CASCADE, related_name="positions")

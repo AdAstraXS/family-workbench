@@ -12,6 +12,7 @@ from .models import (
     InvestmentCashMovement,
     InvestmentPosition,
     InvestmentTransaction,
+    HistoricalValuationPrice,
     PriceSourceChoices,
     PricingStatusChoices,
     SecurityPriceRecord,
@@ -232,6 +233,14 @@ def _apply_prices(positions, on_date):
     records = _price_records(positions, on_date)
     transaction_prices = _transaction_prices(positions, on_date)
     latest_transaction_prices = _latest_transaction_prices(positions, on_date)
+    reviews = {
+        (item.account_id, item.security_id): item
+        for item in HistoricalValuationPrice.objects.filter(
+            account_id__in={p.account.pk for p in positions},
+            security_id__in={p.security.pk for p in positions},
+            valuation_date=on_date,
+        ).select_related("security")
+    }
     for position in positions:
         security = position.security
         record = records.get(security.pk)
@@ -269,8 +278,25 @@ def _apply_prices(positions, on_date):
             position.price_source = snapshot.price_source
             position.pricing_status = PricingStatusChoices.LEGACY
 
+        review = reviews.get((position.account.pk, security.pk))
+        if review:
+            # Invalid decisions never suppress normal completeness checks.
+            review.full_clean()
+            position.price = review.price
+            position.price_as_of = review.quote_date
+            position.price_source = PriceSourceChoices.MANUAL
+            position.pricing_status = PricingStatusChoices.MANUAL
+            position.valuation_price_review = {
+                "id": review.pk, "account_id": review.account_id,
+                "account_name": str(position.account), "security_name": str(security),
+                "security_id": review.security_id, "valuation_date": str(review.valuation_date),
+                "quote_date": str(review.quote_date), "price": str(review.price),
+                "currency": review.currency, "basis": review.basis,
+                "evidence": review.evidence, "confirmed_by_id": review.confirmed_by_id,
+            }
         if (
-            position.price is not None
+            not review
+            and position.price is not None
             and position.price_as_of
             and position.price_source
             in {PriceSourceChoices.FUTU, PriceSourceChoices.MANUAL}
@@ -363,6 +389,9 @@ def value_historical_portfolio(
         position.market_value_original = security.market_value_for(
             position.quantity,
             position.price,
+            include_accrued=not (
+                getattr(position, "valuation_price_review", {}).get("basis") == "bond_clean"
+            ),
         )
         if rate is None:
             missing_rates.append(
