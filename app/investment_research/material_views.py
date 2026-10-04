@@ -54,15 +54,16 @@ def library(request, pk):
         from .navigation import url
         return redirect(url('materials', pk, context='prepare') if request.GET.get('context') == 'prepare'
                         else url('materials', pk, tab='acquisition'))
-    materials, manifest = inventory(dossier.security)
-    if request.GET.get("format") == "manifest":
-        return JsonResponse(manifest, json_dumps_params={"ensure_ascii": False})
-    identity = CompanyIdentity.objects.filter(security=dossier.security).first()
-    info = relation(qualified(dossier.security))
-    job = dossier.acquisition_jobs.order_by("-pk").first()
+    job = dossier.acquisition_jobs.only('status', 'items', 'expires_at').order_by("-pk").first()
     active = job and job.status in {"queued", "running"} and job.expires_at > timezone.now()
     if request.GET.get("format") == "progress":
         return JsonResponse({"active": bool(active), "items": job.items if job else []})
+    if request.GET.get("format") == "manifest":
+        _, manifest = inventory(dossier.security)
+        return JsonResponse(manifest, json_dumps_params={"ensure_ascii": False})
+    materials, manifest = inventory(dossier.security, lightweight=True)
+    identity = CompanyIdentity.objects.filter(security=dossier.security).first()
+    info = relation(qualified(dossier.security))
     from .providers.ir_registry import company_for_security
     sources = [{"key": k, "title": v, "applicable": bool(info["sec_ticker"]) if k in {"sec", "facts"}
                 else bool(company_for_security(dossier.security)) if k == "ir"
@@ -70,10 +71,6 @@ def library(request, pk):
     for material in materials:
         material.retired = material.kind in RETIRED_SOURCES
     overview = financial_overview(dossier.security)
-    facts_version = next((m.latest for m in materials if m.kind == "facts"), None)
-    _, fiscal, _ = annual_reading(facts_version.data if facts_version else {}, overview)
-    calendar = fiscal_calendar(facts_version.data if facts_version else {}, overview)
-    fiscal = max((item for item in (fiscal, calendar) if item), key=lambda item: item["end"], default=None)
     category = request.GET.get('category', 'futu' if request.GET.get('tab') == 'futu' else 'sec')
     if category not in {'sec', 'futu', 'ir', 'other'}:
         category = 'sec'
@@ -88,10 +85,8 @@ def library(request, pk):
         "retired_materials": [m for m in materials if m.retired],
         "sec_materials": [m for m in materials if m.kind == "sec_document"],
         "sec_overview": overview,
-        "fiscal_calendar": fiscal,
-        "facts_version": facts_version,
         "manifest": manifest, "sources": sources,
-        "job": job, "active": active, "can_write": is_writer(member),
+        "job": job, "active": active, "progress_polling": True, "can_write": is_writer(member),
         **table_context(request, dossier, materials, overview)})
 
 

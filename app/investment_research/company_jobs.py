@@ -79,12 +79,11 @@ def execute_item(job, key):
     if key.startswith("sec:"):
         material = CompanyMaterial.objects.get(security=security, key=key, kind="sec_document")
         identity = identity_for(security)
-        latest = material.versions.first()
-        if latest and latest.text and not material.last_error and key not in job.selection:
-            return "已有该 SEC 文件原件与正文，沿用本地版本"
-        index = CompanyMaterial.objects.get(security=security, key="sec").versions.first()
+        latest = material.versions.defer('raw_gzip', 'text').first()
+        index_material = CompanyMaterial.objects.filter(security=security, key="sec").first()
+        index = index_material.versions.only('data').first() if index_material else None
         accession = key.split(":")[1]
-        record = next((r for r in index.data["filings"] if r["accession"] == accession), None)
+        record = next((r for r in index.data["filings"] if r["accession"] == accession), None) if index else None
         if not record:
             record = latest.data if latest else material.metadata
         if not record:
@@ -92,7 +91,7 @@ def execute_item(job, key):
         if len(key.split(":")) > 2:
             sec_library._document(security, key, material.source_url, material.title, record,
                                   sec_library._default_sec_client(security))
-            return "附件已更新"
+            return "已复用本地原件或补取缺失附件"
         return sec_library.download(security, identity.cik, record)
     if key == "ir":
         from .official_ir import sync_official_ir, documents_for_security, fetch_ir_content

@@ -2,6 +2,9 @@
 from django.core.paginator import Paginator
 from django.urls import reverse
 from django.utils.dateparse import parse_date
+from django.db.models import OuterRef, Subquery
+from django.db.models.functions import Substr
+from .models import OfficialResearchContentVersion
 from .official_ir import documents_for_security
 
 KINDS = {'profile': ('futu', '公司资料'), 'financials': ('futu', '财务数据'), 'research': ('futu', '研报'),
@@ -21,12 +24,12 @@ def rows_for(dossier, materials, overview):
             'summary': '已停用来源，保留历史原件。' if item.retired else
                        'SEC 原始结构化数据；阅读页可查看来源单位和各指标日期。' if item.kind == 'facts' else
                        '富途返回的原始财务数据，页面按报表呈现。' if item.kind == 'financials' else
-                       (version.text[:180].replace('\n', ' ') if version and version.text else '来源数据及版本在详情中查看。'),
+                       ((getattr(version, 'snippet', '') or '').replace('\n', ' ') if version and getattr(version, 'snippet', '') else '来源数据及版本在详情中查看。'),
             'status': '最近获取失败：' + item.last_error if item.last_error else '可读' if version else '尚未取得',
             'url': reverse('investment_research:material_read', args=[dossier.pk, version.pk]) if version else ''}
         if version:
             seen.add(version.source_url)
-            row['published'] = version.data.get('published_at') or version.data.get('filing_date') or version.data.get('filed') or '' if isinstance(version.data, dict) else ''
+            row['published'] = getattr(version, 'published', '') or ''
         rows.append(row)
     if any(m.kind == 'facts' and m.latest for m in materials):
         facts = next(m for m in materials if m.kind == 'facts' and m.latest)
@@ -35,17 +38,21 @@ def rows_for(dossier, materials, overview):
             'fetched': facts.latest.fetched_at, 'layer': 'prepared', 'layer_label': '整理',
             'summary': '由已存 SEC 数据整理；详情保留期间、单位、直接披露／计算说明和原始数据链接。',
             'status': '可读', 'url': reverse('investment_research:material_read', args=[dossier.pk, facts.latest.pk]) + '?view=prepared'})
-    for doc in documents_for_security(dossier.security).prefetch_related('content_versions'):
-        version = next(iter(doc.content_versions.all()), None)
-        if version and version.source_url in seen:
+    newest = OfficialResearchContentVersion.objects.filter(document_id=OuterRef('pk')).order_by('-version_number')
+    documents = documents_for_security(dossier.security).only('id', 'title', 'source', 'document_type', 'period_end', 'published_at').annotate(
+        latest_id=Subquery(newest.values('pk')[:1]), latest_url=Subquery(newest.values('source_url')[:1]),
+        latest_fetched=Subquery(newest.values('fetched_at')[:1]),
+        snippet=Subquery(newest.annotate(snippet=Substr('content_text', 1, 180)).values('snippet')[:1]))
+    for doc in documents:
+        if doc.latest_id and doc.latest_url in seen:
             continue
         category = 'sec' if doc.source == 'sec' else 'ir'
         rows.append({'title': doc.title, 'source': 'SEC' if category == 'sec' else '公司 IR', 'category': category,
             'kind': doc.get_document_type_display(), 'period': str(doc.period_end or ''),
-            'published': str(doc.published_at or ''), 'fetched': version.fetched_at if version else None,
-            'layer': 'original', 'layer_label': '原始', 'summary': (version.content_text[:180].replace('\n', ' ') if version else '已取得目录；尚未取得原件正文。'),
-            'status': '可读' if version and version.content_text else '原件已存，待核对' if version else '仅目录',
-            'url': reverse('investment_research:document_detail', args=[dossier.pk, doc.pk]) + (f'?version={version.pk}' if version else '')})
+            'published': str(doc.published_at or ''), 'fetched': doc.latest_fetched,
+            'layer': 'original', 'layer_label': '原始', 'summary': (doc.snippet or '').replace('\n', ' ') if doc.latest_id else '已取得目录；尚未取得原件正文。',
+            'status': '可读' if doc.snippet else '原件已存，待核对' if doc.latest_id else '仅目录',
+            'url': reverse('investment_research:document_detail', args=[dossier.pk, doc.pk]) + (f'?version={doc.latest_id}' if doc.latest_id else '')})
     for supplement in dossier.supplements.defer('raw_gzip', 'text'):
         rows.append({'title': supplement.title, 'source': '人工补充', 'category': 'manual', 'kind': '补充文件／链接',
             'period': supplement.period, 'published': str(supplement.published_at or ''), 'fetched': supplement.created_at,

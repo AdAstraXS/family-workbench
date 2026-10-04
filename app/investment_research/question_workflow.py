@@ -208,5 +208,6 @@ def set_tracking_consent(actor, dossier, enabled, provider, daily_budget):
 def attach_updates(questions):
     for question in questions:
         question.latest_update = question.updates.filter(question_revision=question.revision).select_related('analysis').first()
+        question.legacy_answer = bool(question.latest_update and question.latest_update.analysis.analysis_type == 'thesis_synthesis')
         question.old_update = question.updates.exclude(question_revision=question.revision).exists()
     return questions
