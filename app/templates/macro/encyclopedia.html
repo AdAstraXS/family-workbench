@@ -1,0 +1,9 @@
+{% extends "macro/base.html" %}
+{% block macro_content %}
+<header class="macro-heading"><p class="macro-eyebrow">从基础开始</p><h1>指标百科</h1><p class="macro-meta">这是什么、怎么算、怎样统计、数字说明什么。教学例子均为假设，实际数据请进入指标趋势。</p></header>
+<form method="get" class="macro-search"><label>搜索指标<input name="q" value="{{ q }}" placeholder="名称、代码或关键词，如 PMI、固投、非农" maxlength="200"></label><label>国家<select name="country"><option value="">全部国家</option><option value="CN" {% if country == 'CN' %}selected{% endif %}>中国</option><option value="US" {% if country == 'US' %}selected{% endif %}>美国</option></select></label><label>主题<select name="theme">{% for t in themes %}<option {% if theme == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></label><button type="submit">查找</button></form>
+<details class="macro-basics"><summary>先认识几个基础概念</summary><div class="macro-basics-grid">{% for item in basics %}<article><h3>{{ item.0 }}</h3><p>{{ item.1 }}</p></article>{% endfor %}</div></details>
+<div class="macro-panel-title"><h2>{% if q %}搜索结果{% else %}指标说明{% endif %}</h2><span class="macro-meta">{{ result_count }} 项</span></div>
+<div class="macro-guide-grid">{% for row in rows %}<a class="macro-guide-card" href="{{ row.guide_url }}"><small>{{ row.country_name }} · {{ row.spec.category }} · {{ row.spec.code }}</small><h2>{{ row.spec.name }}</h2><p>{{ row.guide.lead }}</p><span>{{ row.guide.kind }} · 阅读说明 →</span></a>{% empty %}<div class="macro-empty">没有匹配的指标。试试简称或代码，或<a href="{% url 'macro:encyclopedia' %}">清除筛选</a>。</div>{% endfor %}</div>
+{% include "macro/pagination.html" %}
+{% endblock %}

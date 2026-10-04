@@ -1,7 +1,20 @@
 {% extends "base.html" %}
+{% load static %}
 {% block title %}宏观数据 · {{ site_household_name }}{% endblock %}
-{% block extra_head %}
-<style>
-.macro-nav{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0}.macro-nav a[aria-current]{font-weight:700;border-bottom:2px solid #286557}.macro-meta{color:#5b6872;line-height:1.8}.macro-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:14px}.macro-card{background:#fff;border:1px solid #dbe3e4;border-radius:12px;padding:18px}.macro-card h2{font-size:1.05rem;margin:8px 0}.macro-value{font-size:1.6rem;font-variant-numeric:tabular-nums}.macro-table{overflow-x:auto;background:#fff;border:1px solid #dbe3e4;border-radius:10px;margin:18px 0}.macro-table table{min-width:660px;width:100%;border-collapse:collapse}.macro-table th,.macro-table td{padding:12px;text-align:left;border-bottom:1px solid #e8eded}.macro-notice{padding:14px;background:#edf3f2;border-radius:8px;margin:16px 0}.macro-source{overflow-wrap:anywhere}.macro-card small{color:#52616b}.macro-page{display:flex;gap:18px;margin:20px 0}@media(max-width:600px){.macro-grid{grid-template-columns:1fr}.macro-card{padding:14px}.macro-value{font-size:1.4rem}}
-</style>
+{% block extra_head %}<link rel="stylesheet" href="{% static 'macro/macro.css' %}?v=20261005">{% endblock %}
+{% block content %}
+<div class="macro-shell">
+  <aside class="macro-sidebar">
+    <a class="macro-brand" href="{% url 'macro:index' %}">宏观数据<span>读数据，也读懂数据</span></a>
+    <nav aria-label="宏观栏目">
+      <a href="{% url 'macro:index' %}" {% if section == 'overview' %}aria-current="page"{% endif %}>总览</a>
+      <a href="{% url 'macro:country' 'CN' %}" {% if section == 'CN' %}aria-current="page"{% endif %}>中国</a>
+      <a href="{% url 'macro:country' 'US' %}" {% if section == 'US' %}aria-current="page"{% endif %}>美国</a>
+      <a href="{% url 'macro:encyclopedia' %}" {% if section == 'learn' %}aria-current="page"{% endif %}>指标百科</a>
+    </nav>
+    <div class="macro-secondary"><a href="{% url 'macro:status' %}" {% if section == 'sources' %}aria-current="page"{% endif %}>数据来源与更新</a></div>
+  </aside>
+  <div class="macro-main">{% block macro_content %}{% endblock %}</div>
+</div>
 {% endblock %}
+{% block scripts %}<script src="{% static 'macro/chart.js' %}?v=20261005" defer></script>{% endblock %}

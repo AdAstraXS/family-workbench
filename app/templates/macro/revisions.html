@@ -1,6 +1,6 @@
 {% extends "macro/base.html" %}
 {% load macro_format %}
-{% block content %}
+{% block macro_content %}
 <a href="{% url 'macro:detail' point.mapping.pk %}?geography={{ point.geography|urlencode }}">返回指标</a>
 <h1>{{ point.mapping.indicator.name }} · 修订记录</h1>
 <p>{{ point.geography }} · {{ point.period_date|date:"Y-m-d" }}</p>

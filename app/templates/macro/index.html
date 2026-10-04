@@ -1,25 +1,12 @@
-{% extends "macro/base.html" %}
-{% load macro_format %}
-{% block content %}
-<h1>宏观数据</h1>
-<p class="macro-meta">按国家查看经济指标。每个数值保留统计期、来源与修订记录。</p>
-<nav class="macro-nav" aria-label="国家与来源">
-  <a href="?country=CN" {% if country == "CN" %}aria-current="page"{% endif %}>中国</a>
-  <a href="?country=US" {% if country == "US" %}aria-current="page"{% endif %}>美国</a>
-  <a href="{% url 'macro:status' %}">数据来源与更新记录</a>
-</nav>
-<p class="macro-notice">当前为数据接入预览。不同指标发布节奏不同，请核对统计期；“尚未接入”不表示数值为零。趋势图将在后续页面阶段加入。</p>
-<div class="macro-grid">
-{% for row in rows %}
-  <article class="macro-card">
-    <small>{{ row.spec.category }} · {{ row.spec.frequency }}</small>
-    <h2>{% if row.mapping %}<a href="{% url 'macro:detail' row.mapping.pk %}">{{ row.spec.name }}</a>{% else %}{{ row.spec.name }}{% endif %}</h2>
-    {% if row.mapping.latest_date %}
-      {% if row.spec.provider == "nbs_city" %}<p class="macro-value">70 城数据</p>{% else %}<p class="macro-value">{{ row.mapping.latest_value|macro_number }}</p>{% endif %}
-      <p>统计期：{{ row.mapping.latest_date|date:"Y-m-d" }}{% if row.spec.frequency == "月度" or row.spec.frequency == "季度" or row.spec.frequency == "年度" %}（期初标记）{% endif %}</p>
-    {% else %}<p class="macro-value">尚未接入</p>{% endif %}
-    <p class="macro-meta">{{ row.spec.unit }} · {{ row.spec.seasonal }}<br>{{ row.spec.basis }}</p>
-  </article>
-{% endfor %}
-</div>
+{% extends "macro/base.html" %}{% load macro_format %}
+{% block macro_content %}
+<header class="macro-heading"><p class="macro-eyebrow">国家观察 · {{ country }}</p><h1>{{ country_name }}宏观数据</h1><p class="macro-meta">先选主题，再看趋势。每个指标保留自己的单位和统计口径。</p></header>
+<nav class="macro-themes" aria-label="主题">{% for t in themes %}<a href="{% url 'macro:country' country %}?theme={{ t|urlencode }}" {% if theme == t %}aria-current="page"{% endif %}>{{ t }}</a>{% endfor %}</nav>
+<div class="macro-summary-grid">{% for row in summary_rows %}<a class="macro-stat" href="{{ row.url }}"><h2>{{ row.spec.name }}</h2><div class="macro-value">{% if row.latest_date %}{{ row.latest_value|macro_number }}{% else %}尚未接入{% endif %}</div>{% if row.latest_date and row.latest_value is not None %}<div class="macro-unit">{{ row.spec.unit }}</div>{% endif %}<small>{% if row.latest_date %}{{ row.latest_date|macro_period:row.spec.frequency }}{% else %}等待导入公开数据{% endif %}{% if row.spec.provider == 'nbs_city' %} · {{ row.geography }}{% endif %}</small><small>{{ row.spec.basis }}</small></a>{% endfor %}</div>
+{% if selected %}<section class="macro-panel">
+<div class="macro-panel-title"><div><p class="macro-eyebrow">{{ theme }} · 趋势</p><h2>{{ spec.name }}</h2></div><a href="{{ selected.url }}">指标详情 →</a></div>
+<form method="get" action="{% url 'macro:country' country %}" class="macro-controls"><input type="hidden" name="theme" value="{{ theme }}"><input type="hidden" name="range" value="{{ range }}"><label>指标<select name="series" onchange="this.form.submit()">{% for row in rows %}<option value="{{ row.spec.code }}" {% if row.spec.code == spec.code %}selected{% endif %}>{{ row.spec.name }}</option>{% endfor %}</select></label><noscript><button type="submit">查看</button></noscript></form>
+{% include "macro/chart.html" %}
+</section>{% endif %}
+<section class="macro-panel"><div class="macro-panel-title"><h2>{{ theme }}指标</h2><span class="macro-meta">{{ rows|length }} 项</span></div>{% include "macro/indicator_list.html" %}</section>
 {% endblock %}

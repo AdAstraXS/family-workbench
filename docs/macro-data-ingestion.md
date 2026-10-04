@@ -56,8 +56,9 @@ python manage.py import_macro --group nbs_release --url https://www.stats.gov.cn
 
 ## 页面与运维
 
-`/macro/` 提供中国/美国独立列表、城市选择、分页历史和修订证据；`/macro/sources/` 可供普通
-有效家庭成员查看更新记录。所有入口只读，不在 GET 抓取或写入。后台模型只读，修订须走采集服务。
+`/macro/` 提供中国/美国独立入口、主题趋势、城市选择、分页历史、指标百科和修订证据；页面与
+展示约束见 [前端说明](macro-data-frontend.md)。`/macro/sources/` 可供普通有效家庭成员查看更新记录。
+所有入口只读，不在 GET 抓取或写入。后台模型只读，修订须走采集服务。
 
 本阶段尚未部署 NAS、执行生产迁移或配置 DSM 任务。新增 `akshare==1.19.1` 依赖，后续部署必须
 构建含此依赖的新镜像，并按 NAS 技能完成备份、生产基线核对和连通性验证；不能只挂载源码。
@@ -67,7 +68,7 @@ python manage.py import_macro --group nbs_release --url https://www.stats.gov.cn
 ## 延后项
 
 M1 的新旧口径及官方回溯、LPR/RRR 政策日期、ISM 当前数据源、GDP 平减指数测算、官方文章自动发现
-和历史回补，以及趋势图与完整产品页面仍属后续范围。此阶段不要求用户申请 FRED API Key。
+和历史回补仍属后续范围。此阶段不要求用户申请 FRED API Key。
 
 ## 本地验证
 

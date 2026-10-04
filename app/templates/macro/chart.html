@@ -1,0 +1,13 @@
+{% load macro_format %}
+<div class="macro-chart-tools">
+{% if geographies|length > 1 %}<form method="get" {% if theme %}action="{% url 'macro:country' country %}"{% endif %} class="macro-controls">{% if theme %}<input type="hidden" name="theme" value="{{ theme }}"><input type="hidden" name="series" value="{{ spec.code }}">{% endif %}<input type="hidden" name="range" value="{{ range }}">{% if tab %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}<label>城市<select name="geography" onchange="this.form.submit()">{% for g in geographies %}<option {% if g == geography %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></label><noscript><button type="submit">查看城市</button></noscript></form>{% endif %}
+<nav class="macro-ranges" aria-label="趋势时间范围">{% for item in ranges %}<a href="{{ item.url }}" {% if item.value == range %}aria-current="page"{% endif %}>{{ item.label }}</a>{% endfor %}</nav>
+</div>
+<p class="macro-chart-caption">{{ spec.unit }} · {{ definition.basis }} · {{ definition.seasonal }}{% if geographies|length > 1 %} · {{ geography }}{% endif %}</p>
+{% if chart_count %}
+{{ chart_data|json_script:"macro-chart-data" }}
+<div class="macro-chart" data-macro-chart><p class="macro-meta">正在绘制趋势。历史数据也可在下方表格查看。</p></div>
+<div class="macro-chart-inspector" aria-live="polite" data-macro-inspector></div>
+<label class="macro-point-control">逐期查看<input data-macro-point type="range" min="0" max="{{ chart_count|add:'-1' }}" value="{{ chart_count|add:'-1' }}" aria-label="选择统计期"></label>
+<p class="macro-meta macro-chart-coverage">{{ chart_start }} — {{ chart_end }} · {{ chart_count }} 个统计期{% if chart_count == 1 %} · 仅有一个已导入统计期，尚不能形成趋势{% endif %}。缺值保留空缺。</p>
+{% else %}<div class="macro-empty">{% if mapping %}该地区尚无观测数据。{% else %}尚未接入该指标的数据。可以先阅读统计口径与指标百科。{% endif %}</div>{% endif %}

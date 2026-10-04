@@ -1,0 +1,8 @@
+{% extends "macro/base.html" %}{% load macro_format %}
+{% block macro_content %}
+<header class="macro-heading"><p class="macro-eyebrow">家庭观察 · 宏观数据</p><h1>从一个问题开始看数据</h1><p class="macro-meta">按国家进入，选择主题，查看统计期与完整历史；遇到陌生指标，从百科开始。</p></header>
+<div class="macro-country-grid">{% for item in countries %}<a class="macro-country-card" href="{% url 'macro:country' item.code %}"><span class="macro-eyebrow">{{ item.code }}</span><h2>{{ item.name }}</h2><p>{{ item.count }} 个指标 · 按主题查看</p><strong>进入 {{ item.name }} →</strong></a>{% endfor %}</div>
+<section class="macro-panel"><div class="macro-panel-title"><h2>最近的统计期</h2><span class="macro-meta">按已导入数据的统计期排列</span></div>
+<div class="macro-recent-list">{% for row in recent %}<a href="{{ row.url }}"><div><small>{{ row.country_name }} · {{ row.spec.category }}</small><strong>{{ row.spec.name }}</strong></div><div class="macro-right"><b>{{ row.latest_value|macro_number }}</b>{% if row.latest_value is not None %}<small>{{ row.spec.unit }}</small>{% endif %}<small>{{ row.latest_date|macro_period:row.spec.frequency }}{% if row.spec.provider == 'nbs_city' %} · {{ row.geography }}{% endif %}</small></div></a>{% empty %}<p class="macro-meta">尚无导入数据。仍可进入国家页面了解指标范围，或阅读指标百科。</p>{% endfor %}</div></section>
+<a class="macro-learn-callout" href="{% url 'macro:encyclopedia' %}"><strong>看不懂数字？先读指标百科</strong><span>计算方法、统计范围、假设例子和常见误读 →</span></a>
+{% endblock %}
