@@ -37,7 +37,11 @@ TRACK_SYSTEM = BASE + '''逐项核查已确认的问题，并与previous_update�
 回答只落到这些问题，不另建清单；refs只引用提供的E编号。每个问题必须返回一项。
 返回{"summary":"本次变化及缺口","updates":[{"question_id":整数,"revision":整数,"answer":"当前认识，最多2000字",
 "change":"相较上次的新增信息，最多1200字","direction":"strengthened/weakened/unchanged/unresolved",
-"refs":["E1"],"gap":"缺口及需要验证的口径，最多1200字"}]}。'''
+  "refs":["E1"],"gap":"缺口及需要验证的口径，最多1200字",
+  "official_analysis":{"answer":"仅根据投研资料的分析，最多1200字","refs":["E1"],"gap":"边界，最多800字"},
+  "news_analysis":{"answer":"仅根据新闻资料的分析，最多1200字","refs":[],"gap":"边界，最多800字"}}]}。
+每项保留三部分：official_analysis仅引用非新闻资料；news_analysis仅引用news_body/news_lead，
+answer为综合分析。无相关证据时明确尚无依据，不得把综合回复复制成独立分析。'''
 
 
 def history(dossier, kind=TRACK):
@@ -112,6 +116,8 @@ def enqueue(actor, dossier, provider, *, kind=TRACK, consent=False, automatic=Fa
     if ceiling < 2200:
         raise ResearchAiError('问题及初识报告超过输入容量，请缩减问题或补充要求。')
     content = build(dossier, ceiling)
+    if kind == TRACK:
+        content['source_analysis_version'] = 1
     content.update(extra)
     digest = fingerprint(content)
     # Prior answers are excluded: a successful result itself cannot trigger another call.
@@ -202,9 +208,28 @@ def validate(raw, content, kind):
         answer = text(row.get('answer'), 2000)
         if not answer:
             raise ResearchAiError('问题缺少当前核查结果。')
-        clean.append({'question_id': row['question_id'], 'revision': row['revision'], 'answer': answer,
+        item = {'question_id': row['question_id'], 'revision': row['revision'], 'answer': answer,
             'change': text(row.get('change'), 1200), 'gap': text(row.get('gap'), 1200),
-            'direction': direction, 'refs': list(dict.fromkeys(refs))})
+            'direction': direction, 'refs': list(dict.fromkeys(refs))}
+        for key in ('official_analysis', 'news_analysis'):
+            part = row.get(key)
+            if part is None:
+                if content.get('source_analysis_version'):
+                    raise ResearchAiError('分析未完整返回投研、新闻与综合三部分。')
+                continue  # Older pending jobs did not request separate source analyses.
+            if not isinstance(part, dict) or not isinstance(part.get('refs'), list):
+                raise ResearchAiError('分析缺少分来源的证据引用。')
+            part_refs = part['refs']
+            if any(not isinstance(r, str) or r not in evidence or
+                   (evidence[r]['kind'] in {'news_body', 'news_lead'}) != (key == 'news_analysis')
+                   for r in part_refs):
+                raise ResearchAiError('分来源分析引用了其他来源的证据。')
+            part_answer = text(part.get('answer'), 1200)
+            if not part_answer:
+                raise ResearchAiError('分来源分析缺少回复。')
+            item[key] = {'answer': part_answer, 'gap': text(part.get('gap'), 800),
+                         'refs': list(dict.fromkeys(part_refs))}
+        clean.append(item)
     return {'summary': summary, 'updates': clean}
 
 

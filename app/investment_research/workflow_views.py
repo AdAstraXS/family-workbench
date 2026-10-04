@@ -217,11 +217,17 @@ def tracking(request, pk):
         except ResearchAiError as exc:
             data['error'] = str(exc)
     rows = workflow.attach_updates(list(workflow.active_questions(dossier)))
-    changes = [q for q in rows if q.latest_update and (q.latest_update.direction in {'strengthened', 'weakened'} or q.latest_update.gap)]
+    rows.sort(key=lambda q: (0 if q.legacy_kind == 'pillar' else 1, q.position, q.pk))
+    changes = [q for q in rows if q.latest_update and (q.legacy_answer or q.latest_update.direction in {'strengthened', 'weakened'} or q.latest_update.gap)]
     quiet = [q for q in rows if q not in changes]
     from .models import ResearchSourceState
     from investment_watch.models import BodyAttempt
     acquisition = dossier.acquisition_jobs.order_by('-pk').first()
+    from .company_workspace import research_history
+    from .valuation_trial import build_valuation_trial
+    report = research_history(dossier).filter(status='success').first()
+    data['valuation'] = build_valuation_trial(dossier.security, report.scope if report else {}, request.GET)
+    data['original_judgment'] = dossier.current_revision
     data.update(questions=changes, quiet_questions=quiet, job=job, active=status(job),
         consent=dossier.auto_digest_consent if hasattr(dossier, 'auto_digest_consent') else None,
         source_errors=ResearchSourceState.objects.filter(security=dossier.security).exclude(last_error__in=['', None]),

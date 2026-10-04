@@ -48,7 +48,9 @@ class QuestionWorkflowTests(TestCase):
     def output(self, job, direction='unresolved'):
         return {'summary': '资料不足，仍需核实', 'updates': [{'question_id': q['question_id'], 'revision': q['revision'],
             'answer': '提供的经营现金流摘录需要完整报表核查。', 'change': '本次初次核查。',
-            'direction': direction, 'refs': ['E1'], 'gap': '缺少相同报告期资本开支'} for q in job.sanitized_input['questions']]}
+            'direction': direction, 'refs': ['E1'], 'gap': '缺少相同报告期资本开支',
+            'official_analysis': {'answer': '投研资料需完整报表核查。', 'refs': [], 'gap': '缺少资本开支'},
+            'news_analysis': {'answer': '新闻尚无相关正文证据。', 'refs': [], 'gap': '缺少正文'}} for q in job.sanitized_input['questions']]}
 
     def response(self, content):
         return json.dumps({'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(content)}}],

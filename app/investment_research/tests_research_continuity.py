@@ -1,4 +1,5 @@
 import importlib
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from django.apps import apps
@@ -66,6 +67,93 @@ class ResearchContinuityTests(TestCase):
         self.migrate_questions()
         self.assertEqual(ResearchQuestion.objects.count(), 2)
         self.assertFalse(ResearchQuestionUpdate.objects.exists())
+
+    def restore_judgments(self):
+        migration = importlib.import_module('investment_research.migrations.0022_restore_confirmed_judgment_items')
+        migration.restore_judgment_items(apps, SimpleNamespace(connection=connection))
+
+    def test_judgment_restoration_is_idempotent_and_preserves_separate_analyses(self):
+        revision = self.legacy_revision()
+        job = self.analysis(revision)
+        result = job.result
+        result.result_json['assessments'][1].update(text='旧假设',
+            official_analysis={'verdict': 'supports', 'reason': '官方原结论', 'citations': [], 'cited_facts': []},
+            news_analysis={'verdict': 'weakens', 'reason': '新闻原结论', 'citations': [], 'cited_facts': []})
+        result.save()
+        original = result.result_json
+        self.migrate_questions()
+        self.restore_judgments()
+        self.restore_judgments()
+        self.assertEqual(ResearchQuestion.objects.count(), 3)
+        q = ResearchQuestion.objects.get(title='旧假设')
+        self.assertEqual(q.updates.get().created_at, job.finished_at)
+        response = self.client.get(reverse('investment_research:follow', args=[self.dossier.pk]))
+        self.assertContains(response, '原持有判断')
+        self.assertContains(response, '官方原结论')
+        self.assertContains(response, '新闻原结论')
+        self.assertContains(response, '三 · 综合分析与判断')
+        result.refresh_from_db()
+        self.assertEqual(result.result_json, original)
+
+    def test_judgments_require_matching_import_origin_and_owner(self):
+        revision = self.legacy_revision()
+        self.analysis(revision, self.outsider)
+        self.restore_judgments()
+        self.assertFalse(ResearchQuestion.objects.exists())
+        self.migrate_questions()
+        self.restore_judgments()
+        self.assertTrue(ResearchQuestion.objects.filter(title='旧假设').exists())
+        self.assertFalse(ResearchQuestionUpdate.objects.exists())
+
+    def test_removed_judgment_is_not_restored(self):
+        self.legacy_revision()
+        self.migrate_questions()
+        q = ResearchQuestion.objects.create(dossier=self.dossier, title='旧假设', status='removed')
+        self.restore_judgments()
+        q.refresh_from_db()
+        self.assertEqual(q.status, 'removed')
+
+    def test_tracking_trial_at_bottom_reuses_existing_calculation_and_never_writes(self):
+        from .valuation_trial import build_valuation_trial
+        from portfolio.models import StockMarketResearchSnapshot
+        StockMarketResearchSnapshot.objects.create(security=self.security,
+            quote={'price': '100', 'pe_ttm': '25', 'price_as_of': timezone.now().isoformat(),
+                   'price_source': '测试已保存报价'})
+        report = self.analysis(self.legacy_revision())
+        expected = build_valuation_trial(self.security, report.scope, {'years': '3', 'exit_pe': '20'})
+        self.assertTrue(expected['available'])
+        with patch('investment_research.valuation_trial.build_valuation_trial', return_value=expected) as trial:
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get(reverse('investment_research:follow', args=[self.dossier.pk]) + '?years=3&exit_pe=20')
+            self.assertFalse(any(q['sql'].lstrip().upper().startswith(('INSERT', 'UPDATE', 'DELETE')) for q in queries))
+        trial.assert_called_once()
+        self.assertEqual(trial.call_args.args[1], report.scope)
+        self.assertEqual(trial.call_args.args[2]['exit_pe'], '20')
+        self.assertContains(response, reverse('portfolio:stock_market_detail', args=[self.security.pk]))
+        self.assertContains(response, '个股行情与估值')
+        self.assertContains(response, '106.48')
+        html = response.content.decode()
+        self.assertGreater(html.index('id="tracking-valuation"'), html.index('问题分析运行记录'))
+        standalone = self.client.get(reverse('investment_research:valuation', args=[self.dossier.pk]) + '?years=3&exit_pe=20')
+        self.assertEqual(response.context['valuation'], standalone.context['valuation'])
+
+    def test_new_tracking_results_require_separate_sources_and_reject_crossed_refs(self):
+        from . import question_ai
+        from .research_ai import ResearchAiError
+        content = {'source_analysis_version': 1, 'questions': [{'question_id': 1, 'revision': 1}],
+                   'evidence': [{'id': 'E1', 'kind': 'official'}, {'id': 'E2', 'kind': 'news_body'}]}
+        row = {'question_id': 1, 'revision': 1, 'answer': '综合回复', 'gap': '', 'change': '',
+               'direction': 'unresolved', 'refs': ['E1', 'E2']}
+        raw = {'summary': '摘要', 'updates': [row]}
+        with self.assertRaises(ResearchAiError):
+            question_ai.validate(json.dumps(raw), content, question_ai.TRACK)
+        row.update(official_analysis={'answer': '官方回复', 'gap': '', 'refs': ['E1']},
+                   news_analysis={'answer': '新闻回复', 'gap': '', 'refs': ['E2']})
+        result = question_ai.validate(json.dumps(raw), content, question_ai.TRACK)
+        self.assertEqual(result['updates'][0]['news_analysis']['answer'], '新闻回复')
+        row['official_analysis']['refs'] = ['E2']
+        with self.assertRaises(ResearchAiError):
+            question_ai.validate(json.dumps(raw), content, question_ai.TRACK)
 
     def test_only_latest_confirmed_revision_is_imported(self):
         old = self.legacy_revision()

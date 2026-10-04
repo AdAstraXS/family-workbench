@@ -1,0 +1,15 @@
+    <details class="research-brief-card research-brief-expand" open>
+      <summary>估值试算 · 分开看盈利增长与倍数变化</summary>
+      {% if valuation.available %}
+        <p class="research-private-note">参考价格 {{ valuation.currency }} {{ valuation.price }}（{{ valuation.as_of_label }}，{{ valuation.price_source }}）；起点 {{ valuation.basis_label }} {{ valuation.eps }}（{{ valuation.basis_period }}），对应约 {{ valuation.starting_pe }} 倍。行情源 TTM PE：{{ valuation.provider_pe_ttm|floatformat:2|default:"未提供" }} 倍。以下是条件试算，不是目标价。</p>
+        <form method="get" class="research-brief-valuation-form">
+          <label>持有期限 <select name="years"><option value="1"{% if valuation.years == 1 %} selected{% endif %}>1 年</option><option value="3"{% if valuation.years == 3 %} selected{% endif %}>3 年</option><option value="5"{% if valuation.years == 5 %} selected{% endif %}>5 年</option></select></label>
+          <label>期末市盈率 <input name="exit_pe" type="number" min="1" max="200" step="0.01" value="{{ valuation.exit_pe }}" required> 倍</label>
+          <button type="submit">重新试算</button>
+        </form>
+        <p class="research-private-note">{{ valuation.basis_note }} 当前倍数仅作为输入参考，未来倍数由你设定。系统尚无经过同口径核对的历史 PE 序列，因此不标出历史高低区间。</p>
+        {% if valuation.basis_citation %}<p><a href="{% url 'investment_research:document_detail' dossier.pk valuation.basis_citation.document_id %}?version={{ valuation.basis_citation.version_id }}&amp;start={{ valuation.basis_citation.start }}&amp;end={{ valuation.basis_citation.end }}&amp;hash={{ valuation.basis_citation.hash }}#research-citation">核查年报 EPS 原文</a></p>{% endif %}
+        <div class="research-metric-scroll"><table class="research-metric-table"><thead><tr><th>假设 EPS 年增长</th><th>{{ valuation.years }} 年末每股收益</th><th>{{ valuation.years }} 年末价格</th><th>年化价格回报</th></tr></thead><tbody>{% for row in valuation.rows %}<tr><th>{{ row.growth }}% · 个人假设</th><td>{{ row.eps }}</td><td>{{ valuation.currency }} {{ row.price }}</td><td>{{ row.annual_return }}%</td></tr>{% endfor %}</tbody></table></div>
+        <details><summary>计算与口径</summary><p>期末每股收益 = 起点 EPS × (1 + 假设年增长率)^持有年数；期末价格 = 期末每股收益 × 期末市盈率；年化价格回报 = (期末价格 ÷ 参考价格)^(1 ÷ 持有年数) − 1。</p><p>不含分红、税费、交易成本和汇率。长期增长率与期末市盈率都是个人假设，不能将一年指引直接外推到三年或五年。</p></details>
+      {% else %}<p>{{ valuation.problem }}</p><a href="{% url 'portfolio:market_data_status' %}">查看行情与估值状态</a>{% endif %}
+    </details>

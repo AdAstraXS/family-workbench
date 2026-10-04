@@ -206,8 +206,25 @@ def set_tracking_consent(actor, dossier, enabled, provider, daily_budget):
 
 
 def attach_updates(questions):
+    from .report_sections import source_sections
+    reports = {}
     for question in questions:
-        question.latest_update = question.updates.filter(question_revision=question.revision).select_related('analysis').first()
+        question.latest_update = question.updates.filter(question_revision=question.revision).select_related('analysis__result').first()
         question.legacy_answer = bool(question.latest_update and question.latest_update.analysis.analysis_type == 'thesis_synthesis')
+        question.source_sections = []
+        origin = question.revisions.filter(number=1).values_list('content', flat=True).first() or {}
+        question.legacy_kind = origin.get('legacy_origin', {}).get('kind', 'question')
+        if question.latest_update:
+            analysis = question.latest_update.analysis
+            if question.legacy_answer:
+                if analysis.pk not in reports:
+                    reports[analysis.pk] = source_sections(analysis.result.result_json, analysis.scope)
+                matches = [item for item in reports[analysis.pk].get('assessments', [])
+                           if item.get('text') == question.title and item.get('kind') == question.legacy_kind]
+                if len(matches) == 1:
+                    question.source_sections = matches[0]['source_sections']
+            else:
+                from .question_sections import tracking_sections
+                question.source_sections = tracking_sections(question, question.latest_update)
         question.old_update = question.updates.exclude(question_revision=question.revision).exists()
     return questions
