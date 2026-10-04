@@ -18,12 +18,13 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .ai import KnowledgeAiError, generate_proposals
+from .article_extraction import extract_article, snapshot_body
 from .content import OneNoteHTMLRewriter, normalize_onenote_html, validate_resource_mime, validate_resource_signature
 from .models import KnowledgeAsset, KnowledgeDocument, KnowledgeJob, KnowledgeProposal, KnowledgeRevision, KnowledgeSource, KnowledgeWebCapture
 from .search import index_document
 from .web_fetch import WebCaptureError, canonical_url, public_addresses, public_request
 
-CONVERTER_VERSION = "web-capture-v1"
+CONVERTER_VERSION = "web-capture-readability-v2"
 MAX_IMAGES = 100
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_BYTES = 50 * 1024 * 1024
@@ -122,7 +123,7 @@ class WebHTMLRewriter(OneNoteHTMLRewriter):
 
 def normalize_web_html(snapshot, resources=None):
     parser = WebHTMLRewriter(snapshot["url"], resources)
-    parser.feed(snapshot["html"])
+    parser.feed(snapshot_body(snapshot))
     return normalize_onenote_html("".join(parser.output), {v: v for v in (resources or {}).values()})
 
 
@@ -174,6 +175,8 @@ def checkpoint(job, stage=None):
 
 
 def save_snapshot(job, snapshot):
+    # Store both the immutable acquisition and the exact derived body used for images/AI.
+    snapshot = {**snapshot, "article": extract_article(snapshot)}
     raw_bytes = json.dumps(snapshot, ensure_ascii=False, sort_keys=True).encode()
     safe, text = normalize_web_html(snapshot)
     if not text.strip():
@@ -217,7 +220,7 @@ def archive_images(job, capture):
     with revision.raw_file.open("rb") as raw:
         snapshot = json.load(raw)
     parser = WebHTMLRewriter(snapshot["url"])
-    parser.feed(snapshot["html"])
+    parser.feed(snapshot_body(snapshot))
     failures = [{"url": "", "alt": alt, "error": "抓取结果未提供可下载图片地址。"} for alt in parser.unresolved_images]
     stored = set(revision.assets.values_list("external_id", flat=True))
     total = sum(revision.assets.values_list("byte_size", flat=True))
@@ -285,12 +288,16 @@ def process_capture_job(job):
                 raise KnowledgeAiError("正文已保存；超过 AI 完整分析长度限制，请人工整理或拆分后导入。")
             generate_proposals(document, cloud_ai_consent="one_time", requested_by=capture.owner, before_save=lambda: checkpoint(job))
             index_document(document)
+        with document.current_revision.raw_file.open("rb") as raw:
+            article = json.load(raw).get("article") or {}
+        extraction_report = {key: article[key] for key in ("method", "version", "text_length", "image_count") if key in article}
         with transaction.atomic():
             capture = checkpoint(job, "done")
             capture.error_message = ""
             capture.save(update_fields=["error_message", "updated_at"])
             KnowledgeJob.objects.filter(pk=job.pk).update(status=KnowledgeJob.STATUS_PARTIAL if capture.image_failures else KnowledgeJob.STATUS_SUCCESS,
-                success_count=1, failed_count=0, result={"document_id": document.pk, "missing_images": len(capture.image_failures)}, finished_at=timezone.now(), heartbeat_at=timezone.now())
+                success_count=1, failed_count=0, result={"document_id": document.pk, "missing_images": len(capture.image_failures),
+                    "article_extraction": extraction_report}, finished_at=timezone.now(), heartbeat_at=timezone.now())
     except CaptureStopped:
         KnowledgeJob.objects.filter(pk=job.pk, status=KnowledgeJob.STATUS_CANCEL_REQUESTED, started_at=job.started_at).update(status=KnowledgeJob.STATUS_CANCELLED, finished_at=timezone.now())
     except Exception as exc:

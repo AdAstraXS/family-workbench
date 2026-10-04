@@ -23,7 +23,7 @@ from .web_capture import firecrawl_scrape, normalize_web_html, queue_capture, su
 from .web_fetch import WebCaptureError, canonical_url, public_addresses, public_request
 
 SNAPSHOT = {"url": "https://example.com/article", "metadata": {"title": "家庭的长期知识", "author": "作者甲"},
-    "html": '<h1>家庭的长期知识</h1><p>正文观点：长期保存资料。</p><img src="/chart.png" alt="静态图表"><a href="/related">相关文章</a>',
+    "html": '<h1>家庭的长期知识</h1><p>' + '正文观点：长期保存资料，保留原文来源、图表与家庭成员自己的整理结果。' * 8 + '</p><img src="/chart.png" alt="静态图表"><a href="/related">引用资料</a>',
     "rawHtml": "原始网页", "markdown": "# 家庭的长期知识\n正文观点：长期保存资料。"}
 PNG = b"\x89PNG\r\n\x1a\n" + b"example-image"
 
@@ -126,6 +126,8 @@ class WebCaptureTests(TestCase):
         job, _, images, ai = self.run_capture()
         capture.refresh_from_db()
         self.assertEqual(job.status, "success")
+        self.assertEqual(job.result["article_extraction"]["version"], "readability-0.6.0-v1")
+        self.assertEqual(job.result["article_extraction"]["image_count"], 1)
         self.assertEqual(capture.document.knowledge_status, "pending")
         self.assertEqual(capture.document.library_tier, "archive")
         ai.assert_not_called()
@@ -135,10 +137,12 @@ class WebCaptureTests(TestCase):
         self.assertIn("/knowledge/assets/", revision.normalized_html)
         self.assertNotIn('src="https:', revision.normalized_html)
         with revision.raw_file.open() as raw:
-            self.assertEqual(json.load(raw), SNAPSHOT)
+            saved = json.load(raw)
+            self.assertEqual({k: v for k, v in saved.items() if k != "article"}, SNAPSHOT)
+            self.assertEqual(saved["article"]["version"], "readability-0.6.0-v1")
         raw_response = self.client.get(reverse("knowledge:revision_raw_download", args=[revision.pk]))
         self.assertIn(".json", raw_response["Content-Disposition"])
-        self.assertEqual(json.loads(b"".join(raw_response.streaming_content)), SNAPSHOT)
+        self.assertEqual(json.loads(b"".join(raw_response.streaming_content)), saved)
         self.assertFalse(rebuild_document_normalized_content(capture.document)["changed"])
         self.assertContains(self.client.get(reverse("knowledge:document_detail", args=[capture.document_id])), "网页归档快照")
 
@@ -178,7 +182,7 @@ class WebCaptureTests(TestCase):
     def test_embedded_bitmap_is_archived_without_network_or_data_uri_display(self):
         capture = self.submit()
         snapshot = copy.deepcopy(SNAPSHOT)
-        snapshot["html"] = '<p>静态图表</p><img alt="内嵌图表" src="data:image/png;base64,' + base64.b64encode(PNG).decode() + '">'
+        snapshot["html"] = '<p>' + '文章中的静态图表，应与正文一起保存，保留原始来源和准确说明。' * 8 + '</p><img alt="内嵌图表" src="data:image/png;base64,' + base64.b64encode(PNG).decode() + '">'
         job, _, images, _ = self.run_capture(snapshot=snapshot)
         capture.refresh_from_db()
         self.assertEqual(job.status, "success")
@@ -334,6 +338,49 @@ class WebCaptureTests(TestCase):
         capture.refresh_from_db()
         self.assertEqual(job.status, "failed")
         self.assertGreater(len(capture.document.current_revision.plain_text), 80000)
+        ai.assert_not_called()
+
+    def test_uncertain_article_does_not_save_images_or_call_ai(self):
+        self.submit(organize_with_ai=True)
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["html"] = '<nav><a href="/other">热点新闻</a></nav><img src="/ad.png"><p>登录查看</p>'
+        job, _, images, ai = self.run_capture(snapshot=snapshot)
+        self.assertEqual(job.status, "failed")
+        self.assertIn("正文识别待确认", job.error_message)
+        self.assertEqual(KnowledgeDocument.objects.count(), 0)
+        images.assert_not_called()
+        ai.assert_not_called()
+
+    def test_only_extracted_images_and_text_enter_archive_and_ai(self):
+        capture = self.submit(organize_with_ai=True)
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["rawHtml"] = '<html><head><title>正文测试</title></head><body><nav>菜单</nav><article>' + snapshot["html"] + '</article><section class="recommendBox"><p>推荐内容不应进入正文</p><img src="/recommended.jpg"></section><div id="feedCommentBox"><p>他人留言</p><img src="/avatar.jpg"></div></body></html>'
+        job, _, images, ai = self.run_capture(snapshot=snapshot)
+        capture.refresh_from_db()
+        self.assertEqual(job.status, "success")
+        images.assert_called_once()
+        self.assertEqual(images.call_args.args[0], "https://example.com/chart.png")
+        self.assertNotIn("他人留言", capture.document.current_revision.plain_text)
+        self.assertNotIn("推荐内容", capture.document.current_revision.plain_text)
+        ai.assert_called_once()
+
+    def test_failed_recapture_preserves_old_body_and_confirmed_results(self):
+        capture = self.submit()
+        self.run_capture()
+        capture.refresh_from_db()
+        old_revision = capture.document.current_revision_id
+        capture.document.confirmed_summary = "人工确认的结果"
+        capture.document.save(update_fields=["confirmed_summary"])
+        queue_capture(capture, "recapture")
+        invalid = copy.deepcopy(SNAPSHOT)
+        invalid["html"] = '<p>找不到文章</p>'
+        job, _, images, ai = self.run_capture(snapshot=invalid)
+        capture.refresh_from_db()
+        self.assertEqual(job.status, "failed")
+        self.assertEqual(capture.document.current_revision_id, old_revision)
+        self.assertEqual(capture.document.confirmed_summary, "人工确认的结果")
+        self.assertEqual(KnowledgeRevision.objects.count(), 1)
+        images.assert_not_called()
         ai.assert_not_called()
 
     def test_actual_ai_pipeline_only_saves_pending_proposals_and_audit(self):

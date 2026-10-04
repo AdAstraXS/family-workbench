@@ -1,0 +1,10 @@
+{
+  "name": "family-workbench-article-extractor",
+  "private": true,
+  "version": "1.0.0",
+  "engines": { "node": ">=22.22.2" },
+  "dependencies": {
+    "@mozilla/readability": "0.6.0",
+    "jsdom": "30.1.2"
+  }
+}

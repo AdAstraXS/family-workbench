@@ -32,3 +32,15 @@ def knowledge_configuration_checks(app_configs, **kwargs):
             )
         )
     return warnings
+
+
+@register()
+def web_article_runtime_check(app_configs, **kwargs):
+    from .article_extraction import runtime_ready
+    if runtime_ready():
+        return []
+    return [Warning(
+        "网页正文提取环境未就绪，新的网页收藏不能可靠提取正文。",
+        hint="构建新版 app/Dockerfile 镜像；仅挂载源码不会安装 Readability 依赖。旧资料仍可阅读。",
+        id="knowledge.W003",
+    )]
