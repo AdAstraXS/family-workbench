@@ -5,8 +5,8 @@
 
 {% block hub_content %}
 <section class="knowledge-page-heading">
-  <div><span class="eyebrow">Historical knowledge</span><h1>关注人物{% include "knowledge/_help_tip.html" with text="这里汇总人物的历史文章和主动保存的情报快照；最新动态、AI 摘要、已读和收藏仍在 AI 情报中完成。" %}</h1></div>
-  <span class="status-pill">历史知识档案</span>
+  <div><span class="eyebrow">Historical knowledge</span><h1>关注人物{% include "knowledge/_help_tip.html" with text="在这里管理人物资料与作者关联，阅读历史文章、已保存的情报和专题成果。公司新闻在新闻跟踪，访谈和节目在精选订阅。" %}</h1></div>
+  <a class="button ghost" href="{% url 'knowledge:person_profiles' %}">{% if can_verify_identity %}管理人物{% else %}人物资料{% endif %}</a>
 </section>
 
 <section class="knowledge-people-layout">
@@ -35,7 +35,7 @@
           <div class="knowledge-person-identity-actions">
             {% if selected_subject %}
               <span class="status-pill">已关联人物档案</span>
-              <a class="button" href="{% url 'intelligence:subject_detail' selected_subject.slug %}">查看最新动态</a>
+              {% if can_verify_identity and selected_subject.subject_type == 'person' %}<a class="button" href="{% url 'knowledge:person_edit' selected_subject.slug %}">编辑人物资料</a>{% endif %}
             {% else %}
               <span class="status-pill warning">未关联人物档案</span>
               {% if can_verify_identity %}<a class="button" href="{{ identity_verification_url }}">去核验</a>{% endif %}
@@ -44,7 +44,8 @@
           </div>
         </div>
       </header>
-      {% if selected_subject and selected_author_names %}<p class="knowledge-person-identity-note">已连接历史作者：{{ selected_author_names|join:"、" }}</p>{% elif selected_subject %}<p class="notice warning">这个关注对象尚未连接知识中心的历史作者名称；家庭管理员可在 AI 情报中编辑人物资料完成关联。</p>{% endif %}
+      {% if selected_subject and selected_author_names %}<p class="knowledge-person-identity-note">已连接历史作者：{{ selected_author_names|join:"、" }}</p>{% elif selected_subject %}<p class="notice warning">此人物尚未关联历史作者名称；家庭管理员可在这里编辑人物资料完成关联。</p>{% endif %}
+      {% if selected_subject.profile_summary or selected_subject.aliases %}<details class="knowledge-person-profile-summary"><summary>人物资料</summary>{% if selected_subject.profile_summary %}<p>{{ selected_subject.profile_summary }}</p>{% endif %}{% if selected_subject.aliases %}<p>其它称呼：{{ selected_subject.aliases|join:"、" }}</p>{% endif %}</details>{% endif %}
 
       {% if artifacts %}
       <section class="knowledge-artifact-shelf" aria-labelledby="person-artifact-heading">
@@ -70,7 +71,7 @@
       {% endif %}
       <nav class="knowledge-person-filters" aria-label="人物动态类型">
         {% for filter in status_filters %}<a href="{{ filter.url }}"{% if selected_status == filter.value %} class="active" aria-current="page"{% endif %}>{{ filter.label }} <strong>{{ filter.count }}</strong></a>{% endfor %}
-        <span>最新动态与资讯请在 AI 情报查看</span>
+        <span>历史文章与已保存资料</span>
       </nav>
       <div class="knowledge-person-result-heading"><strong>{% if query %}“{{ query }}”找到 {% endif %}{{ timeline_page.paginator.count }} 篇</strong><span>按发布时间倒序 · 紧凑列表 · 每页 20 篇</span></div>
       <div class="knowledge-compact-table-wrap knowledge-person-compact-table-wrap">
@@ -87,7 +88,7 @@
       <div class="knowledge-person-empty">
         <span class="knowledge-hub-brand-mark" aria-hidden="true">人</span>
         <h2>选择作者查看已有内容</h2>
-        {% include "knowledge/_help_tip.html" with text="历史导入资料按作者显示；AI 情报中主动保存的长文、观点或事件也会进入对应人物档案。" %}
+        {% include "knowledge/_help_tip.html" with text="历史导入资料按作者显示；建立作者关联后，同一人物的不同署名会汇总在一起。主动保存的文章和情报保留各自来源。" %}
       </div>
     {% endif %}
   </article>
@@ -109,7 +110,7 @@
 
 <aside class="knowledge-planning-note">
   <strong>每日资讯的归档流程</strong>
-  {% include "knowledge/_help_tip.html" with text="每日抓取内容默认只留在 AI 情报信息流；成员主动点击“保存为知识”或“保存并加入待整理”后，才会在这里形成可追溯的知识快照。" %}
+  {% include "knowledge/_help_tip.html" with text="新闻和精选订阅先留在各自模块；成员主动保存为知识后，才进入知识中心。维护人物资料与作者关联不会启动新闻采集。" %}
 </aside>
 
 <section class="knowledge-source-identity-guide">

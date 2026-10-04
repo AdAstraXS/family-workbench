@@ -32,7 +32,7 @@
         <li>{{ source.document.get_source_display }} · {{ source.document.title }}{% if source.document.period_end %} · 截至 {{ source.document.period_end }}{% endif %}</li>
       {% endfor %}</ul></details>
       {% if selected_news %}
-      <label class="research-consent"><input type="checkbox" name="include_news" value="yes"{% if request.GET.include_news == '1' or review_mode == 'incremental' %} checked{% endif %}> 纳入已选新闻、行业与宏观摘录（计入投资动态模型预算）。</label><p class="research-private-note">不勾选时仅使用投研资料。检查最新变化时，背景已采用的新闻不重复作为新增资料。</p>{% endif %}
+      <label class="research-consent"><input type="checkbox" name="include_news" value="yes"{% if request.GET.include_news == '1' or review_mode == 'incremental' %} checked{% endif %}> 纳入已选新闻、行业与宏观摘录（计入新闻跟踪模型预算）。</label><p class="research-private-note">不勾选时仅使用投研资料。检查最新变化时，背景已采用的新闻不重复作为新增资料。</p>{% endif %}
       <h2>生成分析草稿</h2>
       <label for="synthesis-provider">本次使用的文本模型</label>
       <select id="synthesis-provider" name="provider" required>{% for provider in providers %}<option value="{{ provider.pk }}">{{ provider.name }} · {{ provider.model_name }} · 单次费用上限 ${{ provider.extra_data.research_max_estimated_usd }}</option>{% endfor %}</select>

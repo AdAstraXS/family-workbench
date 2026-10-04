@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site_household_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20261003-account-table-alignment">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20261004-observation-navigation">
   <script src="{% static 'js/workspace-preferences.js' %}?v=20260925"></script>
   {% block extra_head %}{% endblock %}
   <link rel="stylesheet" href="{% static 'css/songting.css' %}?v=20261003-frontend-audit">
@@ -43,6 +43,8 @@
           <a class="button page-nav-module" href="{% url 'ipo:index' %}">港股打新首页</a>
         {% elif request.resolver_match.app_name == "notes" and request.resolver_match.url_name != "index" and page_parent_url != notes_home_url %}
           <a class="button page-nav-module" href="{% url 'notes:index' %}">投资笔记首页</a>
+        {% elif workspace_is_programs %}
+          {% url 'intelligence:program_list' as programs_home_url %}{% if page_parent_url != programs_home_url %}<a class="button page-nav-module" href="{{ programs_home_url }}">精选订阅</a>{% endif %}
         {% elif request.resolver_match.app_name == "intelligence" and request.resolver_match.url_name != "index" and page_parent_url != intelligence_home_url %}
           <a class="button page-nav-module" href="{% url 'intelligence:index' %}">AI 情报首页</a>
         {% endif %}
@@ -55,6 +57,7 @@
         {% endfor %}
       </div>
     {% endif %}
+    {% if workspace_is_legacy_intelligence %}<aside class="ws-legacy-notice" aria-label="旧方案状态"><strong>AI 情报 · 废案待处理</strong><p>保留旧方案与历史记录。当前新闻请到<a href="{% url 'investment_watch:news' %}">新闻跟踪</a>，访谈与文章请到<a href="{% url 'intelligence:program_list' %}">精选订阅</a>，人物资料请到<a href="{% url 'knowledge:people' %}">知识中心 · 关注人物</a>。</p></aside>{% endif %}
     {% if request.resolver_match.app_name == "ledger" %}<p class="muted">明细保留原币；收支汇总为人民币，单笔按发生日、按月录入按统计期末日最近可用汇率折算。</p>{% endif %}
     {% block content %}{% endblock %}
   </main>

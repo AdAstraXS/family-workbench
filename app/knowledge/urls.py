@@ -36,6 +36,9 @@ urlpatterns = [
         name="taxonomy_merge",
     ),
     path("people/", views.people, name="people"),
+    path("people/profiles/", views.person_profiles, name="person_profiles"),
+    path("people/profiles/new/", views.person_create, name="person_create"),
+    path("people/profiles/<slug:slug>/edit/", views.person_edit, name="person_edit"),
     path("artifacts/new/", views.artifact_create, name="artifact_create"),
     path("artifacts/<int:pk>/", views.artifact_detail, name="artifact_detail"),
     path(

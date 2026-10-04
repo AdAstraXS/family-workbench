@@ -9,7 +9,6 @@
 <h1>精选订阅</h1>
 <p>每日市场观察、完整访谈和投资方法。先读重点，再回到原文核对。</p>
 </div><div>{% if can_write %}<a class="button ghost" href="{% url 'intelligence:program_upload' %}">上传资料</a>{% endif %} {% if can_admin %}<a class="button ghost" href="{% url 'intelligence:program_settings' %}">管理订阅</a>{% endif %}</div></section>
-{% include 'intelligence/_tabs.html' %}
 <nav class="program-stock-tabs" aria-label="关注股票">
   <a href="?source={{ source|urlencode }}" {% if not stock %}aria-current="page"{% endif %}>全部主题</a>
   {% for code,spec in stocks.items %}<a href="?stock={{ code }}&source={{ source|urlencode }}" {% if stock == code %}aria-current="page"{% endif %}>{{ spec.0 }} · {{ code }}</a>{% endfor %}

@@ -9670,6 +9670,22 @@ textarea {
 .web-capture-detail .action-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
 .web-capture-detail details { margin: 20px 0; }
 .web-capture-detail summary { cursor: pointer; }
+.songting .ws-nav-legacy:not(.active) { color: var(--ws-muted, #667085); }
+.songting .ws-nav-legacy small { display: block; font-size: 10px; line-height: 1.5; font-weight: 400; }
+.ws-legacy-notice { margin: 0 0 24px; padding: 16px 20px; border: 1px solid var(--line, #e5e7eb); border-radius: 12px; background: var(--ws-surface, #fff); }
+.ws-legacy-notice p { margin: 6px 0 0; line-height: 1.8; }
+.ws-legacy-notice a { margin: 0 4px; }
+.knowledge-person-profile-summary { margin: 12px 0 20px; overflow-wrap: anywhere; }
+.knowledge-person-profile-summary summary { cursor: pointer; }
+.knowledge-person-profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 20px; margin-top: 24px; }
+.knowledge-person-profile-grid .panel { margin: 0; overflow-wrap: anywhere; }
+.knowledge-person-profile-grid h2 { margin-top: 0; }
+.knowledge-person-profile-grid .action-row, .knowledge-person-form .action-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.knowledge-person-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.knowledge-person-form-grid .wide { grid-column: 1 / -1; }
+.knowledge-person-form-grid label, .knowledge-person-form-grid small { display: block; margin: 6px 0; }
+.knowledge-person-form-grid input, .knowledge-person-form-grid select, .knowledge-person-form-grid textarea { width: 100%; box-sizing: border-box; }
+@media (max-width: 600px) { .knowledge-person-form-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 1000px) {
   .web-capture-grid { grid-template-columns: minmax(0, 1fr); }
   .songting.app-knowledge .knowledge-hub-shell { grid-template-columns: minmax(0, 1fr); }

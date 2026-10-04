@@ -182,6 +182,10 @@ def page_navigation(request):
     if app_name == "knowledge":
         if url_name == "index":
             parent_url = reverse("dashboard:home")
+        elif url_name in {"person_create", "person_edit"}:
+            parent_url = reverse("knowledge:person_profiles")
+        elif url_name == "person_profiles":
+            parent_url = reverse("knowledge:people")
         elif url_name in {
             "microsoft_start",
             "microsoft_callback",
@@ -198,7 +202,16 @@ def page_navigation(request):
         return {"page_parent_url": parent_url}
 
     if app_name == "intelligence":
-        if url_name == "index":
+        if url_name.startswith("program_"):
+            if url_name == "program_list":
+                parent_url = reverse("dashboard:home")
+            elif url_name in {"program_source_new", "program_source_edit"}:
+                parent_url = reverse("intelligence:program_settings")
+            elif url_name in {"program_action", "program_audio", "program_uploaded_original"}:
+                parent_url = reverse("intelligence:program_detail", kwargs={"pk": kwargs["pk"]})
+            else:
+                parent_url = reverse("intelligence:program_list")
+        elif url_name == "index":
             parent_url = reverse("dashboard:home")
         elif url_name in {"event_edit", "event_ignore"}:
             parent_url = reverse(

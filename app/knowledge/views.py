@@ -76,6 +76,7 @@ from .permissions import (
     visible_connections,
     visible_sources,
 )
+from .people_forms import PersonProfileForm
 from .search import index_document
 from .search import index_artifact
 from .artifacts import (
@@ -1121,7 +1122,9 @@ def people(request):
     selected_author_names = []
     subject_slug = request.GET.get("subject", "").strip()
     if subject_slug:
-        selected_subject = IntelligenceSubject.objects.filter(slug=subject_slug).first()
+        selected_subject = IntelligenceSubject.objects.filter(slug=subject_slug).filter(
+            Q(knowledge_identities__family=member.family) | Q(family_follows__family=member.family)
+        ).first()
         if selected_subject is not None:
             selected_author_names = list(
                 SubjectKnowledgeIdentity.objects.filter(
@@ -1277,7 +1280,7 @@ def people(request):
             "clear_search_url": f"?{clear_search_params.urlencode()}",
             "can_verify_identity": request.user.is_superuser
             or member.role == FamilyMember.ROLE_ADMIN,
-            "identity_verification_url": reverse("intelligence:subject_create")
+            "identity_verification_url": reverse("knowledge:person_create")
             + f"?{identity_verification_params.urlencode()}",
             "historical_people": historical_people,
             "artifacts": artifacts,
@@ -1286,6 +1289,73 @@ def people(request):
             + (f"?{artifact_upload_params.urlencode()}" if artifact_upload_params else ""),
         },
     )
+
+
+@login_required
+def person_profiles(request):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    profiles = _family_person_profiles(member).prefetch_related("knowledge_identities")
+    query = request.GET.get("q", "").strip()
+    if query:
+        profiles = profiles.filter(Q(display_name__icontains=query) | Q(canonical_name__icontains=query))
+    page = Paginator(profiles, 30).get_page(request.GET.get("page"))
+    for profile in page:
+        profile.author_names = [
+            identity.author_name for identity in profile.knowledge_identities.all()
+            if identity.family_id == member.family_id and identity.is_active
+        ]
+    return render(request, "knowledge/person_profiles.html", {
+        "profiles": page, "query": query, "can_manage_people": _can_manage_people(request, member),
+    })
+
+
+def _family_person_profiles(member):
+    return IntelligenceSubject.objects.filter(subject_type=IntelligenceSubject.TYPE_PERSON).filter(
+        Q(knowledge_identities__family=member.family) | Q(family_follows__family=member.family)
+    ).distinct().order_by("display_name", "pk")
+
+
+def _can_manage_people(request, member):
+    return request.user.is_superuser or member.role == FamilyMember.ROLE_ADMIN
+
+
+@login_required
+def person_create(request):
+    return _person_editor(request)
+
+
+@login_required
+def person_edit(request, slug):
+    return _person_editor(request, slug=slug)
+
+
+def _person_editor(request, slug=None):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    if not _can_manage_people(request, member):
+        return HttpResponseForbidden("只有家庭管理员可以维护人物资料与作者关联。")
+    subject = get_object_or_404(_family_person_profiles(member), slug=slug) if slug else IntelligenceSubject(
+        subject_type=IntelligenceSubject.TYPE_PERSON, category=IntelligenceSubject.CATEGORY_OTHER,
+    )
+    author = " ".join(request.GET.get("knowledge_author_name", "").strip().split())
+    name = request.GET.get("display_name", "").strip() or author
+    form = PersonProfileForm(
+        request.POST if request.method == "POST" else None, instance=subject, family=member.family,
+        initial={"canonical_name": name, "display_name": name, "knowledge_author_names": author} if not slug else None,
+    )
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            subject = form.save()
+            form.save_knowledge_identities(subject=subject, user=request.user)
+        messages.success(request, "人物资料与作者关联已保存。")
+        return redirect(reverse("knowledge:people") + f"?subject={subject.slug}")
+    return render(request, "knowledge/person_form.html", {
+        "form": form, "profile": subject, "editing": bool(slug),
+        "cancel_url": reverse("knowledge:people") + f"?subject={subject.slug}" if slug else reverse("knowledge:person_profiles"),
+    })
 
 
 @login_required
