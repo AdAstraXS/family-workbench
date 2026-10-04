@@ -6,3 +6,4 @@ media/
 staticfiles/
 tmp/
 import_asset_snapshot_*.json
+**/node_modules/

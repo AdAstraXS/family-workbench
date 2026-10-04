@@ -29,3 +29,4 @@ import_asset_snapshot_*.json
 .venv/
 .uv-cache/
 .watch-local/
+node_modules/

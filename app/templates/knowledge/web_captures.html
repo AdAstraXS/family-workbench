@@ -6,7 +6,8 @@
 <div class="web-capture-grid">
   <section class="panel web-capture-form">
     <h2>粘贴公开网页链接</h2>
-    <p class="muted">不支持登录后内容、付费墙、视频和交互图表；不会提交浏览器账号或 Cookie。</p>
+    <p class="muted">自动识别文章正文，只保存正文引用的图片，不收集整页推荐和评论。不支持登录后内容、付费墙、视频和交互图表；不会提交浏览器账号或 Cookie。</p>
+    <p class="muted">无法可靠识别正文时会提示“正文识别待确认”，不会把整页当作完整文章保存。可核对原网页或导入仅含正文的文件。</p>
     {% if not configured %}<p class="notice">网页抓取服务尚未配置。可以先登记链接，管理员配置 Firecrawl 后再重试。</p>{% endif %}
     {% if can_write %}<form method="post">{% csrf_token %}
       {{ form.non_field_errors }}
