@@ -19,7 +19,7 @@ from .tests import fred_payload
 class GuideContentTests(SimpleTestCase):
     def test_every_registered_indicator_has_complete_source_backed_guide(self):
         self.assertEqual(set(GUIDES), {(s.country, s.code) for s in SERIES})
-        self.assertEqual(len(GUIDES), 79)
+        self.assertEqual(len(GUIDES), 81)
         for key, guide in GUIDES.items():
             with self.subTest(indicator=key):
                 for field in ["title", "lead", "scope", "calculation", "formula", "example", "method", "meaning", "kind", "aliases"]:
@@ -101,8 +101,8 @@ class FrontendTests(TestCase):
         self.assertEqual(response.context["chart_count"], 2)
         self.assertIsNone(response.context["latest"].value)
         self.assertIsNone(response.context["chart_data"]["points"][-1]["value"])
-        self.assertEqual(response.context["chart_data"]["reference"], "100")
-        response = self.client.get(path, {"range": "all", "geography": "上海市"})
+        self.assertEqual(response.context["chart_data"]["reference"], "0")
+        response = self.client.get(path, {"range": "all", "geography": "上海市", "measure": "level"})
         self.assertEqual(response.context["chart_count"], 1)
         self.assertEqual(response.context["chart_data"]["points"][0]["value"], "100.12345678")
         self.assertContains(response, "尚不能形成趋势")
@@ -141,7 +141,8 @@ class FrontendTests(TestCase):
         point = MacroObservation.objects.first()
         paths = [reverse("macro:index"), reverse("macro:country", args=["CN"]), reverse("macro:country", args=["US"]),
                  reverse("macro:indicator", args=["US", "UNRATE"]), reverse("macro:guide", args=["US", "UNRATE"]),
-                 reverse("macro:encyclopedia"), reverse("macro:status"), reverse("macro:revisions", args=[point.pk])]
+                 reverse("macro:encyclopedia"), reverse("macro:sources"), reverse("macro:status"), reverse("macro:calendar"),
+                 reverse("macro:housing_cities"), reverse("macro:revisions", args=[point.pk])]
         models = [MacroIndicator, MacroSourceMapping, MacroObservation, MacroObservationRevision, MacroImportRun]
         before = [m.objects.count() for m in models]
         with patch("macro.services.fetch_source", side_effect=AssertionError("GET cannot fetch")):
