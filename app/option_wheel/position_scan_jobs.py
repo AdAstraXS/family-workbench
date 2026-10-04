@@ -25,7 +25,7 @@ def launch_job(job_id):
         subprocess.Popen(
             [sys.executable, "manage.py", "run_wheel_position_scan", str(job_id)],
             cwd=Path(__file__).resolve().parent.parent,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=None,
             close_fds=True, **kwargs,
         )
     except OSError:

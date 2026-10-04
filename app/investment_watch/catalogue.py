@@ -16,6 +16,11 @@ TOPICS = [
             "铁矿石",
             "库存",
             "黄金",
+            "白银",
+            "煤炭",
+            "煤矿",
+            "silver",
+            "coal",
             "oil",
             "commodity",
         ],
@@ -160,7 +165,7 @@ def classify(title, summary, market):
             ]
             if key in topics
         ),
-        "公司",
+        "公司" if any(contains(text, word) for word in ["公司", "财报", "营收", "股份", "microsoft", "微软", "earnings", "corporation"]) else "行业",
     )
     return topics, category
 

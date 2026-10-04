@@ -1,6 +1,6 @@
 from django.urls import reverse
 
-from .models import SiteSetting
+from .household import get_site_setting
 from .navigation import return_url
 
 
@@ -248,7 +248,7 @@ def page_navigation(request):
 
 def site_identity(request):
     from .workspace import workspace_navigation
-    setting = SiteSetting.objects.filter(pk=1).first()
+    setting = get_site_setting()
     return {
         **workspace_navigation(request),
         "site_household_name": setting.household_name if setting else "家庭工作台",

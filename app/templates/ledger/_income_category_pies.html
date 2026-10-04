@@ -6,7 +6,7 @@
       <p>{{ year }}年{% if selected_income_category_month == "all" %}全年{% else %}{{ selected_income_category_month }}月{% endif %} · {{ income_category_scope }}收入分类占比
         · 单位：元 · 未细分金额自动补齐 · 点击扇区可联动下级分类</p>
     </div>
-    <form method="get" action="{{ request.path }}#monthly-income-category-pies" class="cashflow-trend-filter">
+    <form data-auto-filter method="get" action="{{ request.path }}#monthly-income-category-pies" class="cashflow-trend-filter">
       <input type="hidden" name="category_month" value="{{ selected_category_month }}">
       <input type="hidden" name="category_member" value="{{ selected_category_member }}">
       <label for="income-category-member">查看对象</label>

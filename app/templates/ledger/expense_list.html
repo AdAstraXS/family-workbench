@@ -89,7 +89,7 @@
       <span class="filter-status">已按条件筛选，合计已重新计算</span>
     {% endif %}
   </div>
-  <form id="expense-filter-form" method="get" action="{{ request.path }}"></form>
+  <form data-auto-filter id="expense-filter-form" method="get" action="{{ request.path }}"></form>
   <div class="record-table-wrap expense-record-window" tabindex="0" role="region" aria-label="支出记录，可在表格内滚动查看全部记录">
     <table class="record-table year-detail-table expense-detail-table">
       <thead>

@@ -2,16 +2,16 @@
 {% block watch_content %}
 <header class="iw-header"><div><h1>{% if topic_name %}{{ topic_name }}{% else %}新闻跟踪{% endif %}</h1><p>从财经材料中发现线索，按原始发布时间阅读。</p></div><a href="{% url 'investment_watch:items' %}">我的公司动态 →</a></header>
 {% if topic_name %}<p><a href="{% url 'investment_watch:topics' %}">返回主题</a> · <a href="{% url 'investment_watch:news' %}">全部新闻</a></p>{% endif %}
-<form method="get" class="iw-filters">{% if filters.dossier %}<input type="hidden" name="dossier" value="{{ filters.dossier }}">{% endif %}{% if filters.topic %}<input type="hidden" name="topic" value="{{ filters.topic }}">{% endif %}
+<form data-auto-filter method="get" class="iw-filters">{% if filters.dossier %}<input type="hidden" name="dossier" value="{{ filters.dossier }}">{% endif %}{% if filters.topic %}<input type="hidden" name="topic" value="{{ filters.topic }}">{% endif %}
 <nav class="iw-categories" aria-label="新闻类别"><button name="category" value=""{% if not filters.category %} aria-current="page"{% endif %}>全部</button>{% for c in categories %}<button name="category" value="{{ c }}"{% if filters.category == c %} aria-current="page"{% endif %}>{{ c }}</button>{% endfor %}</nav>
-<div class="iw-search"><label class="iw-grow">搜索<input type="search" name="q" value="{{ filters.q }}" placeholder="标题与简介"></label><button name="category" value="{{ filters.category }}">筛选</button></div>
+<div class="iw-search"><label class="iw-grow">搜索<input type="search" name="q" value="{{ filters.q }}" placeholder="标题与简介"></label><input type="hidden" name="category" value="{{ filters.category }}"><button data-filter-submit type="submit">筛选</button></div>
 <details{% if filters.market or filters.source or filters.date_from or filters.date_to %} open{% endif %}><summary>市场、来源与日期</summary><div class="iw-search">
 <label>市场<select name="market"><option value="">所有市场</option><option{% if filters.market == '中国' %} selected{% endif %}>中国</option><option{% if filters.market == '美国' %} selected{% endif %}>美国</option><option{% if filters.market == '全球' %} selected{% endif %}>全球</option></select></label>
 <label>来源<select name="source"><option value="">所有来源</option>{% for s in sources %}<option value="{{ s.key }}"{% if filters.source == s.key %} selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></label>
 <label>起始日期<input name="date_from" type="date" value="{{ filters.date_from }}"></label><label>截止日期<input name="date_to" type="date" value="{{ filters.date_to }}"></label></div></details></form>
 <p class="iw-muted">{{ items.paginator.count }} 条 · 未知日期置后 · 同篇合并展示</p>
 {% regroup items by published_at|date:"Y-m-d" as days %}
-{% for day in days %}<section class="iw-day"><h2>{{ day.grouper|default:"日期未知" }}</h2><div>{% for v in day.list %}<article class="iw-card"><div class="iw-meta">{{ v.material.source.name }} · {{ v.get_status_display }} · {{ v.market }}</div><h3><a href="{% url 'investment_watch:news_detail' v.material_id %}">{{ v.title }}</a></h3><p>{{ v.summary|truncatechars:350 }}</p><footer>{{ v.category }} <a href="{% url 'investment_watch:news_detail' v.material_id %}">来源、收藏与研究关联 →</a></footer></article>{% endfor %}</div></section>
+{% for day in days %}<section class="iw-day"><h2>{{ day.grouper|default:"日期未知" }}</h2><div>{% for v in day.list %}<article class="iw-card"><div class="iw-meta">{{ v.material.source.name }} · {{ v.get_status_display }} · {{ v.market }}</div><h3><a href="{% url 'investment_watch:news_detail' v.material_id %}">{{ v.title }}</a></h3><p>{{ v.summary|truncatechars:180 }}</p><footer>{{ v.category }} <a href="{% url 'investment_watch:news_detail' v.material_id %}">来源、收藏与研究关联 →</a></footer></article>{% endfor %}</div></section>
 {% empty %}<div class="iw-empty"><h2>当前没有符合条件的材料</h2><p>可以调整筛选，或查看来源是否已启用及最近检查结果。</p><a href="{% url 'investment_watch:coverage' %}">来源与运行</a></div>{% endfor %}
 {% include "investment_watch/pagination.html" %}
 {% endblock %}

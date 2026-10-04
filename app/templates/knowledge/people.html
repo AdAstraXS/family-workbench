@@ -24,7 +24,7 @@
       <header class="knowledge-person-heading">
         <div><span class="eyebrow">Author found in knowledge</span><h2>{{ selected_person }}{% if selected_subject %}{% include "knowledge/_help_tip.html" with text="历史作者名称已经与关注人物档案明确关联；文章是否属于本人直接发言，仍以每篇资料的来源标记为准。" %}{% else %}{% include "knowledge/_help_tip.html" with text="历史作者名称尚未与唯一人物档案建立明确关联，不能默认视为本人直接发言。" %}{% endif %}</h2></div>
         <div class="knowledge-person-heading-actions">
-          <form method="get" class="knowledge-person-search" role="search">
+          <form data-auto-filter method="get" class="knowledge-person-search" role="search">
             {% if selected_subject %}<input type="hidden" name="subject" value="{{ selected_subject.slug }}">{% else %}<input type="hidden" name="person" value="{{ selected_person }}">{% endif %}
             {% if selected_status != "all" %}<input type="hidden" name="status" value="{{ selected_status }}">{% endif %}
             <label class="sr-only" for="person-article-search">搜索 {{ selected_person }} 的文章</label>

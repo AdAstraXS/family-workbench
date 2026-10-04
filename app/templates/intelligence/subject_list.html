@@ -7,7 +7,7 @@
 {% block content %}
 <section class="intel-page-head"><div><span class="intel-eyebrow">TOPICS</span><h1>关注主题</h1><p>人物、机构、行业、技术、政策和证券共用主题时间线；一个信源可同时关联多个主题。</p></div>{% if can_admin %}<a class="button intel-primary" href="{% url 'intelligence:subject_create' %}">＋ 新增主题</a>{% endif %}</section>
 {% include "intelligence/_tabs.html" %}
-<form method="get" class="intel-filter-bar intel-filter-compact"><input type="search" name="q" value="{{ query }}" placeholder="搜索中英文名"><select name="category"><option value="">全部类别</option>{% for value, label in categories %}<option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><button type="submit">筛选</button><a class="button ghost" href="{% url 'intelligence:subject_list' %}">清除</a></form>
+<form data-auto-filter method="get" class="intel-filter-bar intel-filter-compact"><input type="search" name="q" value="{{ query }}" placeholder="搜索中英文名"><select name="category"><option value="">全部类别</option>{% for value, label in categories %}<option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><button type="submit">筛选</button><a class="button ghost" href="{% url 'intelligence:subject_list' %}">清除</a></form>
 <section class="intel-subject-grid">
   {% for subject in subjects %}
     <article class="intel-subject-card">

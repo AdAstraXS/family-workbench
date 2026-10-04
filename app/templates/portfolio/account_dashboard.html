@@ -24,14 +24,14 @@
       {% endif %}
     </div>
     {% endif %}
-    <form method="get" class="prototype-filters">
+    <form data-auto-filter method="get" class="prototype-filters">
       <label class="prototype-currency">展示币种
-        <select name="currency" onchange="this.form.submit()">
+        <select name="currency">
           {% for item in currency_options %}<option value="{{ item.code }}"{% if item.code == selected_currency %} selected{% endif %}>{{ item }}</option>{% endfor %}
         </select>
       </label>
       <label class="prototype-currency">查看年份
-        <select name="year" onchange="this.form.submit()">
+        <select name="year">
           <option value="all"{% if selected_year == "all" %} selected{% endif %}>当前余额与持仓</option>
           {% for year in year_options %}<option value="{{ year }}"{% if selected_year == year|stringformat:"s" %} selected{% endif %}>{{ year }} 年</option>{% endfor %}
         </select>
@@ -51,7 +51,7 @@
     {% if balance_snapshot and not snapshot_audit.complete %}<p class="form-error">该快照{% if snapshot_audit.status == 'warning' %}价格需核对{% else %}存在数据缺口或未记录完整性{% endif %}：缺价 {{ snapshot_audit.missing_prices|length }}、价格需核对 {{ snapshot_audit.stale_prices|length }}、缺汇率 {{ snapshot_audit.missing_rates|length }}、流水错误 {{ snapshot_audit.valuation_errors|length }}。显示金额不代表已与券商对账。</p>{% endif %}
     {% if history_missing_rates %}<p class="form-error">缺少或冲突的历史折算汇率：{{ history_missing_rates|join:"、" }}。相关盈亏显示“—”，不会将漏算金额当成 0。</p>{% endif %}
   {% endif %}
-  {% if missing_exchange_rates %}<p class="form-error">部分原币缺少兑 {{ selected_currency }} 的汇率，相关统一币种金额暂显示“-”，未按 1:1 错误合并。</p>{% endif %}
+  {% include "portfolio/_valuation_warnings.html" with base_currency=selected_currency %}
   <div class="account-summary-grid summary-grid-head">
     <span>统计范围</span><span>{% if historical_view %}期末{% endif %}总资产</span><span>现金余额</span><span>持仓市值</span><span>{% if historical_view %}当年交易总盈亏{% else %}今日盈亏{% endif %}</span><span>{% if historical_view %}当年已实现盈亏{% else %}累计浮动盈亏{% endif %}</span><span>{% if historical_view %}历年累计{% else %}累计{% endif %}已实现盈亏</span>
   </div>

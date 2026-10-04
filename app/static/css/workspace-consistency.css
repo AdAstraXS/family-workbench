@@ -160,3 +160,15 @@
 @media print {
   .songting .page { padding: 0; max-width: none; }
 }
+
+/* Shared read-only filtering feedback and compact historical comparison. */
+.songting form[data-auto-filter] { flex-wrap: wrap; }
+.songting .auto-filter-status { display: block; flex: 0 0 100%; grid-column: 1 / -1; line-height: 1.5; font-size: 12px; color: var(--muted, #68746d); }
+.songting .ipo-year-filter { max-width: 100%; gap: 8px; }
+.songting .ipo-year-filter > label { white-space: nowrap; flex: 0 0 auto; }
+.songting .ipo-year-filter > select { flex: 1 1 110px; min-width: 100px; }
+@media (max-width: 640px) {
+  .songting .ipo-year-filter { display: grid; grid-template-columns: auto minmax(0, 1fr); width: 100%; margin-left: 0; }
+}
+.songting .wheel-result-details > summary { cursor: pointer; padding: 14px 18px; border: 1px solid #d6ded8; border-radius: 12px; margin: 12px 0; }
+.songting .wheel-result-details > summary:focus-visible { outline: 2px solid #376552; outline-offset: 3px; }

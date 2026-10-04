@@ -128,7 +128,7 @@ def launch_global_ai_request(request_id):
             cwd=Path(__file__).resolve().parent.parent,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=None,
             close_fds=True,
             **platform,
         )
@@ -155,7 +155,7 @@ def launch_global_ai_knowledge_evaluation(member_id):
             cwd=Path(__file__).resolve().parent.parent,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=None,
             close_fds=True,
             **platform,
         )

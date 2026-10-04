@@ -9,6 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, When
+from django.db.models.functions import Substr
 from django.http import FileResponse, Http404, HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -162,9 +163,11 @@ def _entry_target(entry):
 
 
 def _hit_snippet(entry, query):
-    values = [entry.summary, entry.body]
     if not query:
+        if hasattr(entry, "list_body"):
+            return (entry.summary or entry.list_body)[:220]
         return (entry.summary or entry.body)[:220]
+    values = [entry.summary, entry.body]
     normalized = query.casefold()
     for value in values:
         value = value or ""
@@ -260,12 +263,13 @@ def _knowledge_stats(member):
     entries = accessible_search_entries(member).filter(owner=member)
     documents = accessible_documents(member).filter(owner=member)
     today = timezone.localdate()
+    curated = Q(pk__in=_curated_entries(entries).values("pk"))
     return {
-        "total": _curated_entries(entries).count(),
-        "today_new": _curated_entries(entries).filter(created_at__date=today).count(),
-        "inbox": entries.filter(
-            knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
-        ).count(),
+        **entries.aggregate(
+            total=Count("pk", filter=curated),
+            today_new=Count("pk", filter=curated & Q(created_at__date=today)),
+            inbox=Count("pk", filter=Q(knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING)),
+        ),
         "pending_review": documents.filter(
             curation_status=KnowledgeDocument.CURATION_PENDING_REVIEW
         ).count(),
@@ -608,29 +612,30 @@ def _library_response(
         )
 
     directory_entries = entries
-    directory_total = directory_entries.count()
-    workflow_counts = {
-        "all": directory_total,
-        "unorganized": directory_entries.filter(
+    workflow_counts = directory_entries.aggregate(
+        all=Count("id"),
+        unorganized=Count("id", filter=Q(
             curation_status__in=[
                 KnowledgeDocument.CURATION_INBOX,
                 KnowledgeDocument.CURATION_NORMALIZED,
             ]
-        ).count(),
-        "processing": directory_entries.filter(
+        )),
+        processing=Count("id", filter=Q(
             curation_status=KnowledgeDocument.CURATION_PENDING_AI,
-        ).count(),
-        "waiting_review": directory_entries.filter(
+        )),
+        waiting_review=Count("id", filter=Q(
             curation_status=KnowledgeDocument.CURATION_PENDING_REVIEW,
-        ).count(),
-    }
+        )),
+        uncategorized=Count("id", filter=Q(category="")),
+    )
+    directory_total = workflow_counts["all"]
     category_directory = list(
         directory_entries.exclude(category="")
         .values("category")
         .annotate(total=Count("id"))
         .order_by("category")
     )
-    uncategorized_count = directory_entries.filter(category="").count()
+    uncategorized_count = workflow_counts["uncategorized"]
     source_directory = _build_source_directory(directory_entries)
 
     if category:
@@ -732,6 +737,9 @@ def _library_response(
             )
         ).order_by("search_rank", "-content_time", "-updated_at")
 
+    entries = entries.defer("searchable_text", "tags_text")
+    if not query:
+        entries = entries.annotate(list_body=Substr("body", 1, 220)).defer("body")
     page_obj = Paginator(entries, 20).get_page(request.GET.get("page"))
     _decorate_entries(page_obj.object_list, query, member)
     ai_selectable_count = sum(

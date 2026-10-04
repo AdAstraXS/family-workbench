@@ -7,7 +7,9 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q, Count, Exists, OuterRef, Subquery, CharField
+from django.db.models.functions import Cast
+from django.db.models.fields.json import KeyTextTransform
 from django.http import HttpResponse, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -18,6 +20,7 @@ from .permissions import get_current_member, get_accessible_dossier_or_404, acce
 from .research_ai import available_research_providers, ResearchAiError
 from . import preparation, question_ai, question_workflow as workflow
 from .models import ResearchQuestion, ResearchQuestionUpdate, ResearchSupplement
+from ai_analysis.models import AiAnalysisRequest
 
 
 def context(request, dossier):
@@ -44,30 +47,42 @@ def index(request):
     member = get_current_member(request)
     if member is None:
         return HttpResponseForbidden('需要有效的家庭成员身份。')
-    dossiers = list(accessible_dossiers(member).order_by('-updated_at'))
+    dossiers = accessible_dossiers(member).order_by('-updated_at', '-pk')
     selected_filter = request.GET.get('filter', 'all')
     if selected_filter == 'watch':
-        dossiers = [d for d in dossiers if d.is_watched]
-    for dossier in dossiers:
-        dossier.questions_count = workflow.active_questions(dossier).count()
-        dossier.last_change = ResearchQuestionUpdate.objects.filter(question__dossier=dossier,
-            question__status='tracking', question_revision=F('question__revision')).select_related('question').order_by('-created_at').first()
-        dossier.last_job = question_ai.history(dossier).first()
+        dossiers = dossiers.filter(is_watched=True)
+    query = request.GET.get('q', '').strip()[:100]
+    if query:
+        dossiers = dossiers.filter(Q(security__name__icontains=query) | Q(security__symbol__icontains=query))
+    # Count and paginate the permission-filtered queryset before decorating rows.
+    page = Paginator(dossiers, 20).get_page(request.GET.get('page'))
+    jobs = AiAnalysisRequest.objects.filter(family_id=member.family_id, member_id=member.pk,
+        module='investment_research').annotate(dossier_key=KeyTextTransform('dossier_id', 'scope')).filter(
+            dossier_key=Cast(OuterRef('pk'), CharField()))
+    changes = ResearchQuestionUpdate.objects.filter(question__dossier_id=OuterRef('pk'),
+        question__status='tracking', question_revision=F('question__revision')).order_by('-created_at', '-pk')
+    rows = list(page.object_list.annotate(
+        questions_count=Count('research_questions', filter=Q(research_questions__status='tracking')),
+        has_questions=Exists(ResearchQuestion.objects.filter(dossier_id=OuterRef('pk')).exclude(status='removed')),
+        has_introduction=Exists(jobs.filter(analysis_type=preparation.TYPE, status='success')),
+        last_job_status=Subquery(jobs.filter(analysis_type=question_ai.TRACK).order_by('-pk').values('status')[:1]),
+        last_change_id=Subquery(changes.values('pk')[:1]),
+    ))
+    change_map = ResearchQuestionUpdate.objects.in_bulk([d.last_change_id for d in rows if d.last_change_id])
+    for dossier in rows:
+        dossier.last_change = change_map.get(dossier.last_change_id)
         if dossier.is_watched and dossier.question_workflow and dossier.questions_count:
             dossier.stage_label, dossier.next_name, dossier.next_label = '跟踪中', 'follow', '跟踪问题'
-        elif dossier.research_questions.exclude(status='removed').exists():
+        elif dossier.has_questions:
             dossier.stage_label, dossier.next_name, dossier.next_label = '问题待确认', 'questions', '提出问题'
-        elif workflow.latest_introduction(dossier):
+        elif dossier.has_introduction:
             dossier.stage_label, dossier.next_name, dossier.next_label = '已了解公司', 'questions', '提出问题'
         else:
             dossier.stage_label, dossier.next_name, dossier.next_label = '初识中', 'prepare', '了解公司'
         if dossier.research_paused:
             dossier.stage_label = '暂时结束'
         dossier.next_url = reverse('investment_research:' + dossier.next_name, args=[dossier.pk])
-    query = request.GET.get('q', '').strip()
-    if query:
-        dossiers = [d for d in dossiers if query.lower() in f'{d.security.name} {d.security.symbol}'.lower()]
-    page = Paginator(dossiers, 20).get_page(request.GET.get('page'))
+    page.object_list = rows
     return render(request, 'investment_research/workflow_index.html', {'dossiers': page, 'page': page, 'query': query,
         'selected_filter': selected_filter, 'can_write': is_writer(member)})
 

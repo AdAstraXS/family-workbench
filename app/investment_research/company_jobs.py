@@ -19,7 +19,7 @@ def launch(job_id):
     try:
         subprocess.Popen([sys.executable, "manage.py", "run_company_acquisition", str(job_id)],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, close_fds=True, **kwargs)
+            stderr=None, close_fds=True, **kwargs)
     except OSError:
         CompanyAcquisitionJob.objects.filter(pk=job_id, status="queued").update(
             status="failed", items=[{"title": "启动资料获取", "status": "failed", "message": "进程未启动，请重试。"}],

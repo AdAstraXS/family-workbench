@@ -12,7 +12,7 @@
   </header>
 
   {% if versions %}
-    <form method="get" class="research-version-picker">
+    <form data-auto-filter method="get" class="research-version-picker">
       <label for="financial-version">年报版本</label>
       <select id="financial-version" name="version">
         {% for item in versions %}<option value="{{ item.pk }}"{% if item.pk == version.pk %} selected{% endif %}>FY{{ item.document.period_end|date:"Y" }} · {{ item.document.title }} · 正文第 {{ item.version_number }} 版</option>{% endfor %}

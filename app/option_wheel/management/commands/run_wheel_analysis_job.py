@@ -1,10 +1,11 @@
+from family_core.job_runtime import BoundedJobCommand
 from uuid import UUID
 from django.core.management.base import BaseCommand, CommandError
 from option_wheel.jobs import run_job
 from option_wheel.models import WheelAnalysisJob
 
 
-class Command(BaseCommand):
+class Command(BoundedJobCommand):
     help = "处理一份已授权的车轮实时分析任务；不创建任务，不下单。"
 
     def add_arguments(self, parser):

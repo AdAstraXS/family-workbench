@@ -19,9 +19,9 @@
   <a class="button external-link-button" href="https://livereport.tradegomart.com/#/enterprise/examination" target="_blank" rel="noopener noreferrer">港股通预测</a>
   <a class="button external-link-button" href="https://www.vbkr.com/ipo/hk/v2/ipo-hk-index" target="_blank" rel="noopener noreferrer">预计孖展</a>
   <a class="button external-link-button" href="https://www.jesselivermore.com/ipo.html" target="_blank" rel="noopener noreferrer">后续涨幅</a>
-  <form method="get" class="ipo-year-filter">
+  <form data-auto-filter method="get" class="ipo-year-filter">
     <label for="ipo-listing-year">统计年份</label>
-    <select id="ipo-listing-year" name="year" onchange="this.form.submit()">
+    <select id="ipo-listing-year" name="year">
       <option value="all" {% if year_filter.selected_year == "all" %}selected{% endif %}>全部年份</option>
       {% for year in year_filter.available_years %}
         <option value="{{ year }}" {% if year_filter.selected_year == year|stringformat:"s" %}selected{% endif %}>{{ year }}年</option>

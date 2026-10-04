@@ -10,7 +10,7 @@
     {% include "knowledge/_help_tip.html" with text="正式资料统一进入归档底座，值得长期复用的内容再经过待整理进入精选知识；这里集中查看需要处理的事项。" %}
   </div>
   <div class="knowledge-home-commandbar">
-    <form method="get" action="{% url 'knowledge:library' %}" class="knowledge-global-search" role="search">
+    <form data-auto-filter method="get" action="{% url 'knowledge:library' %}" class="knowledge-global-search" role="search">
       <label class="sr-only" for="knowledge-home-search">搜索家庭知识</label>
       <input id="knowledge-home-search" type="search" name="q" placeholder="搜索家庭知识……">
       <button type="submit">搜索</button>

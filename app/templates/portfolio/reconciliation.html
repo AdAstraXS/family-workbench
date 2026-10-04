@@ -13,9 +13,9 @@
 </section>
 
 <section class="panel">
-  <form method="get" class="portfolio-member-filter">
+  <form data-auto-filter method="get" class="portfolio-member-filter">
     <label>家庭账本快照
-      <select name="date" onchange="this.form.submit()">
+      <select name="date">
         {% for snapshot in snapshots %}
           <option value="{{ snapshot.snapshot_date|date:'Y-m-d' }}"{% if selected_snapshot.pk == snapshot.pk %} selected{% endif %}>
             {{ snapshot.snapshot_date|date:"Y年n月j日" }}{% if snapshot.title %} · {{ snapshot.title }}{% endif %}

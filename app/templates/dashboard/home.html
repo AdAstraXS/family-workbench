@@ -9,7 +9,7 @@
     <div class="ws-card-heading"><span>{% workspace_icon 'wallet' %} 家庭资产快照</span><small>{{ latest_snapshot.base_currency|default:'CNY' }}</small></div>
     <strong class="ws-wealth-value">{% if latest_snapshot %}{{ bank_total|money2 }}{% else %}暂无快照{% endif %}</strong>
     <p>{% if latest_snapshot %}正式快照 · {{ latest_snapshot.snapshot_date|date:'Y.m.d' }}{% else %}建立正式资产快照后，在这里查看家庭资产。{% endif %}</p>
-    <div class="ws-wealth-bottom"><span>当前投资估值 <b>{{ total_investment_asset|thousands }}</b> CNY</span><a href="{% url 'portfolio:overview' %}" aria-label="查看投资组合">{% workspace_icon 'arrow-right' %}</a></div>
+    <div class="ws-wealth-bottom"><span>当前投资估值 <b>{{ total_investment_asset|thousands }}</b> CNY{% if not valuation.complete %} · 缺少价格或汇率{% elif valuation.stale_prices %} · 价格需核对{% endif %}</span><a href="{% url 'portfolio:overview' %}" aria-label="查看投资组合">{% workspace_icon 'arrow-right' %}</a></div>
     <div class="ws-landscape" aria-hidden="true"><i></i><b></b><em></em></div>
   </section>
   <section class="panel ws-cashflow"><div class="ws-card-heading"><h2>上个月的收支</h2><small>{{ previous_month|date:'Y 年 n 月' }}</small></div><div class="ws-cash-values"><div><span>上月收入</span><strong>{{ previous_month_income|thousands }}</strong></div><div><span>上月支出</span><strong>{{ previous_month_expense|thousands }}</strong></div></div><div class="ws-cash-bottom"><span>上月结余 <b>{{ previous_month_net|thousands }}</b></span><a href="{% url 'ledger:expense_list' %}">查看收支 {% workspace_icon 'arrow-right' %}</a></div><small>人民币 CNY · 按发生日／统计期末日折算</small></section>

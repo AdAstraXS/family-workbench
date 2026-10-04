@@ -152,7 +152,7 @@ def paginate(request, items):
             page_number = data["page"]
         except (signing.BadSignature, KeyError, TypeError, ValueError):
             raise WatchError("分页链接已失效，请从第一页重新浏览。")
-    page = Paginator(items, 30).get_page(page_number)
+    page = Paginator(items, 20).get_page(page_number)
 
     def cursor(number):
         return signing.dumps(

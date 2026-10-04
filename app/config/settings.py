@@ -62,6 +62,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "family_core.performance.RequestPerformanceMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -119,7 +120,10 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -191,3 +195,15 @@ INVESTMENT_WATCH_DAILY_CNY = os.getenv("INVESTMENT_WATCH_DAILY_CNY", "1")
 INVESTMENT_WATCH_MONTHLY_CNY = os.getenv("INVESTMENT_WATCH_MONTHLY_CNY", "30")
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/accounts/login/"
+
+BACKGROUND_JOB_SLOTS = 2
+BACKGROUND_JOB_TIMEOUT_SECONDS = 900
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"workbench_console": {"class": "logging.StreamHandler"}},
+    "loggers": {
+        "workbench.performance": {"handlers": ["workbench_console"], "level": "INFO", "propagate": False},
+        "workbench.jobs": {"handlers": ["workbench_console"], "level": "INFO", "propagate": False},
+    },
+}

@@ -26,7 +26,7 @@
 </section>
 {% endif %}
 
-<form method="get" class="intel-filter-bar intel-filter-compact">
+<form data-auto-filter method="get" class="intel-filter-bar intel-filter-compact">
   <input type="search" name="q" value="{{ query }}" placeholder="搜索信源或关联主题">
   <button type="submit">筛选</button>
   <a class="button ghost" href="{% url 'intelligence:source_list' %}">清除</a>

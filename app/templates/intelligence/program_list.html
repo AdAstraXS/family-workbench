@@ -14,7 +14,7 @@
   {% for code,spec in stocks.items %}<a href="?stock={{ code }}&source={{ source|urlencode }}" {% if stock == code %}aria-current="page"{% endif %}>{{ spec.0 }} · {{ code }}</a>{% endfor %}
 </nav>
 <section class="intel-section">
-<form method="get" class="program-filters">
+<form data-auto-filter method="get" class="program-filters">
 <input type="hidden" name="stock" value="{{ stock }}">
 <label>来源<select name="source">
 <option value="">全部订阅</option>{% for code,spec in catalogue.items %}<option value="{{ code }}" {% if source == code %}selected{% endif %}>{{ spec.name }}</option>{% endfor %}</select>

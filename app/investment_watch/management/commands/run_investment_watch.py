@@ -1,3 +1,4 @@
+from family_core.job_runtime import BoundedJobCommand
 import json
 from django.core.management.base import BaseCommand, CommandError
 from family_core.models import Family
@@ -5,7 +6,7 @@ from investment_watch.worker import run_cycle
 from investment_watch.collection import seed_sources
 
 
-class Command(BaseCommand):
+class Command(BoundedJobCommand):
     help = "Run a bounded investment news cycle; scheduled by NAS, not web reads."
 
     def add_arguments(self, parser):

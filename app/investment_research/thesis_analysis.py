@@ -461,7 +461,7 @@ def launch_thesis_analysis(pk):
     try:
         subprocess.Popen([sys.executable, "manage.py", "run_thesis_analysis", str(pk)],
             cwd=Path(__file__).resolve().parents[1], stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, **options)
+            stdout=subprocess.DEVNULL, stderr=None, close_fds=True, **options)
     except OSError:
         from django.utils import timezone
         AiAnalysisRequest.objects.filter(pk=pk, status="pending").update(

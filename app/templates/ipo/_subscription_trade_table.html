@@ -85,9 +85,9 @@
         {% if amount_column == "holding" %}
           <td class="number negative">{{ trade.display_holding_profit|money2 }}</td>
         {% elif closed_mode %}
-          <td class="number {% if trade.display_net_pnl > 0 %}positive{% elif trade.display_net_pnl < 0 %}negative{% endif %}">{{ trade.display_net_pnl|money2 }}</td>
+          <td class="number {% if trade.display_net_pnl > 0 %}positive{% elif trade.display_net_pnl < 0 %}negative{% endif %}">{{ trade.display_net_pnl|money2 }} {{ trade.currency }}</td>
         {% else %}
-          <td class="number {% if trade.realized_profit > 0 %}positive{% elif trade.realized_profit < 0 %}negative{% endif %}">{{ trade.realized_profit|money2 }}</td>
+          <td class="number {% if trade.realized_profit > 0 %}positive{% elif trade.realized_profit < 0 %}negative{% endif %}">{{ trade.realized_profit|money2 }} {{ trade.currency }}</td>
         {% endif %}
         <td>
           {% if closed_mode %}

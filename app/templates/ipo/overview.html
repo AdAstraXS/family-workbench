@@ -15,14 +15,15 @@
   <a class="button ghost" href="{% url 'ipo:allotment_index' %}">分配查询</a>
   <a class="button ghost" href="{% url 'ipo:strategy_index' %}">买卖策略分析</a>
   <a class="button ghost" href="{% url 'ipo:review_index' %}">交易复盘</a>
-  <form method="get" class="ipo-year-filter">
+  <form data-auto-filter method="get" class="ipo-year-filter">
     <label for="ipo-overview-year">统计年份</label>
-    <select id="ipo-overview-year" name="year" onchange="this.form.submit()">
+    <select id="ipo-overview-year" name="year">
       <option value="all" {% if year_filter.selected_year == "all" %}selected{% endif %}>全部年份</option>
       {% for year in year_filter.available_years %}
         <option value="{{ year }}" {% if year_filter.selected_year == year|stringformat:"s" %}selected{% endif %}>{{ year }}年</option>
       {% endfor %}
     </select>
+    <label for="ipo-profit-currency">图表币种</label><select id="ipo-profit-currency" name="currency">{% for currency in profit_currencies %}<option value="{{ currency }}"{% if currency == chart_currency %} selected{% endif %}>{{ currency }}</option>{% endfor %}</select>
   </form>
 </section>
 
@@ -41,10 +42,8 @@
     <div class="metric"><span>尚持有股票数量</span><strong>{{ metrics.trade_holding }}</strong></div>
     <div class="metric"><span>已卖出股票数量</span><strong>{{ metrics.trade_closed }}</strong></div>
     <div class="metric">
-      <span>已实现盈利总额</span>
-      <strong class="{% if metrics.realized_profit_total > 0 %}positive{% elif metrics.realized_profit_total < 0 %}negative{% endif %}">
-        {{ metrics.realized_profit_total|money2 }}
-      </strong>
+      <span>已实现盈亏 · 按原币</span>
+      <strong>{% include "ipo/_profit_totals.html" with totals=metrics.realized_profit_totals %}</strong>
     </div>
   </section>
 
@@ -55,7 +54,7 @@
           <span>股票表现</span>
           <h2>按股票盈利金额</h2>
         </div>
-        <small>单位：万元</small>
+        <small>单位：万 {{ chart_currency }}</small>
       </header>
       <div id="ipo-stock-profit-chart" class="ipo-ranking-chart" aria-label="按股票盈利金额横向柱状图"></div>
     </article>
@@ -66,7 +65,7 @@
           <span>账户表现</span>
           <h2>按账户盈利金额</h2>
         </div>
-        <small>单位：万元</small>
+        <small>单位：万 {{ chart_currency }}</small>
       </header>
       <div id="ipo-account-profit-chart" class="ipo-ranking-chart" aria-label="按账户盈利金额横向柱状图"></div>
     </article>
@@ -77,7 +76,7 @@
           <span>盈利节奏</span>
           <h2>盈利趋势</h2>
         </div>
-        <small>{% if year_filter.selected_year == "all" %}按年{% else %}按月{% endif %} · 单位：万元</small>
+        <small>{% if year_filter.selected_year == "all" %}按年{% else %}按月{% endif %} · 单位：万 {{ chart_currency }}</small>
       </header>
       <div id="ipo-profit-trend-chart" class="ipo-trend-chart" aria-label="盈利趋势折线图"></div>
     </article>

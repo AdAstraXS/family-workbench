@@ -1,9 +1,10 @@
+from family_core.job_runtime import BoundedJobCommand
 from django.core.management.base import BaseCommand, CommandError
 from option_wheel.advice_jobs import run_advice, MODULE
 from ai_analysis.models import AiAnalysisRequest
 
 
-class Command(BaseCommand):
+class Command(BoundedJobCommand):
     help = "处理一份已授权的 DeepSeek 期权解释请求；不抓行情、不下单。"
 
     def add_arguments(self, parser):

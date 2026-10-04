@@ -251,6 +251,14 @@ def convert_currency(amount, source, target, on_date=None):
     return None if rate is None else amount * rate
 
 
+def valuation_status(issues):
+    missing_rates = any(issue["kind"] == "rate" for issue in issues)
+    missing_prices = any(issue["kind"] == "price" for issue in issues)
+    return {"missing_rates": missing_rates, "missing_prices": missing_prices,
+            "stale_prices": any(issue["kind"] == "stale" for issue in issues),
+            "complete": not (missing_rates or missing_prices), "issues": issues}
+
+
 @exchange_rate_cache()
 def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=False):
     accounts = list(accounts)
@@ -258,7 +266,9 @@ def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=Fal
         InvestmentPosition.objects.filter(account__in=accounts).exclude(quantity=0)
         .select_related(
             "account__bank_account",
+            "account__bank_account__member",
             "security",
+            "security__asset_category",
             "security__market_snapshot",
             "security__option_contract",
             "security__bond_detail",
@@ -268,6 +278,7 @@ def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=Fal
     )
     resolutions = resolve_position_prices(positions, on_date)
     missing_rates = False
+    issues = []
     total_cash = ZERO
     cash_lines = []
     for row in (
@@ -281,6 +292,7 @@ def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=Fal
         rate = exchange_rate(row["currency"], target_currency, on_date)
         if rate is None:
             missing_rates = True
+            issues.append({"kind": "rate", "currency": row["currency"], "account_id": row["account_id"]})
             continue
         amount = row["amount"] or ZERO
         converted = amount * rate
@@ -304,6 +316,8 @@ def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=Fal
             PricingStatusChoices.EXPIRED_UNRESOLVED,
         }:
             stale_prices = True
+            issues.append({"kind": "stale", "security": position.security, "account": position.account,
+                           "as_of": resolution.price_as_of, "status": PricingStatusChoices(resolution.status).label})
         if price is None:
             position.valuation_price = None
             position.valuation_fx_rate = None
@@ -316,6 +330,7 @@ def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=Fal
             )
             position.valuation_cost = None
             missing_prices = True
+            issues.append({"kind": "price", "security": position.security, "account": position.account})
             if refresh_positions:
                 position.pricing_status = resolution.status
                 position.current_price_source = resolution.source or PriceSourceChoices.LEGACY
@@ -334,6 +349,8 @@ def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=Fal
             position.valuation_market_value = None
             position.valuation_cost = None
             missing_rates = True
+            issues.append({"kind": "rate", "security": position.security, "account": position.account,
+                           "currency": position.security.currency})
             continue
         position.valuation_market_value = position.valuation_market_value_original * rate
         position.valuation_cost = position.valuation_cost_original * rate
@@ -376,7 +393,5 @@ def value_portfolio(accounts, target_currency, on_date, *, refresh_positions=Fal
         "total_cost": total_cost,
         "total_asset": total_cash + total_market_value,
         "total_pnl": total_market_value - total_cost,
-        "missing_rates": missing_rates,
-        "stale_prices": stale_prices,
-        "missing_prices": missing_prices,
+        **valuation_status(issues),
     }

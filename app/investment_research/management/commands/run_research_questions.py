@@ -1,8 +1,9 @@
+from family_core.job_runtime import BoundedJobCommand
 from django.core.management.base import BaseCommand, CommandError
 from investment_research.question_ai import run
 
 
-class Command(BaseCommand):
+class Command(BoundedJobCommand):
     help = 'Run a single frozen question suggestion or tracking request; no automatic retry.'
 
     def add_arguments(self, parser):

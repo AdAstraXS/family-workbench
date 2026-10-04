@@ -54,7 +54,7 @@ def launch(pk):
     try:
         subprocess.Popen([sys.executable, 'manage.py', 'run_research_questions', str(pk)],
             cwd=Path(__file__).resolve().parents[1], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, close_fds=True, **flags)
+            stderr=None, close_fds=True, **flags)
     except OSError:
         AiAnalysisRequest.objects.filter(pk=pk, status='pending').update(status='failed', finished_at=timezone.now(),
             error_message='后台任务未启动，请主动重试。')

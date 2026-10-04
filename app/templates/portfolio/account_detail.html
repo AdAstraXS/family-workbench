@@ -20,18 +20,17 @@
 <section class="panel account-metric-panel">
   <div class="section-head">
     <h2>资产卡片</h2>
-    <form method="get" class="prototype-filters compact-filters">
+    <form data-auto-filter method="get" class="prototype-filters compact-filters">
       <input type="hidden" name="tab" value="{{ active_tab }}">
       <input type="hidden" name="cost_method" value="{{ cost_method }}">
       <label class="prototype-currency">展示币种
-        <select name="currency" onchange="this.form.submit()">
+        <select name="currency">
           {% for item in currency_options %}<option value="{{ item.code }}"{% if item.code == selected_currency %} selected{% endif %}>{{ item }}</option>{% endfor %}
         </select>
       </label>
     </form>
   </div>
-  {% if missing_exchange_rates %}<p class="form-error">部分原币缺少兑 {{ selected_currency }} 的汇率，资产卡暂不合并这些金额。</p>{% endif %}
-  {% if missing_prices %}<p class="form-error">部分持仓缺少可用价格，相关市值及账户总额暂不合并。请到“行情与估值”补录价格。</p>{% elif stale_prices %}<p class="market-data-warning">部分持仓使用过期价格、刷新失败价格或到期未处理的期权价格，请核对行情状态。</p>{% endif %}
+  {% include "portfolio/_valuation_warnings.html" with base_currency=selected_currency %}
   <div class="account-detail-metrics">
     <div class="metric account-total-card"><span>账户总资产</span><strong>{{ account_row.total_asset|currency0:selected_currency }}</strong></div>
     <div class="asset-mini-grid">{% for card in asset_cards %}<div class="metric asset-mini-card asset-mini-{{ forloop.counter }}"><span>{{ card.label }}</span><strong>{{ card.amount|currency0:selected_currency }}</strong><small>{{ card.ratio|floatformat:2 }}%</small></div>{% endfor %}</div>
@@ -52,11 +51,11 @@
   {% if active_tab == "positions" %}
     <div class="section-head">
       <h2>持仓资产</h2>
-      <form method="get" class="cost-method-filter">
+      <form data-auto-filter method="get" class="cost-method-filter">
         <input type="hidden" name="tab" value="positions">
         <input type="hidden" name="currency" value="{{ selected_currency }}">
         <label>成本计量方法
-          <select name="cost_method" onchange="this.form.submit()">
+          <select name="cost_method">
             <option value="moving_average"{% if cost_method == "moving_average" %} selected{% endif %}>移动平均成本</option>
             <option value="diluted"{% if cost_method == "diluted" %} selected{% endif %}>摊薄成本</option>
           </select>
@@ -81,7 +80,7 @@
     </table></div>
   {% elif active_tab == "individual-profit" %}
     <div class="section-head"><h2>个股盈亏</h2></div>
-    <form method="get" class="prototype-filters profit-filters">
+    <form data-auto-filter method="get" class="prototype-filters profit-filters">
       <input type="hidden" name="tab" value="individual-profit"><input type="hidden" name="currency" value="{{ selected_currency }}">
       <label>开始日期<input type="date" name="date_start" value="{{ individual_profit.date_start }}"></label>
       <label>结束日期<input type="date" name="date_end" value="{{ individual_profit.date_end }}"></label>
@@ -105,7 +104,7 @@
     </table></div>
   {% elif active_tab == "transactions" %}
     <div class="section-head"><h2>交易记录</h2></div>
-    <form method="get" class="prototype-filters profit-filters">
+    <form data-auto-filter method="get" class="prototype-filters profit-filters">
       <input type="hidden" name="tab" value="transactions"><input type="hidden" name="currency" value="{{ selected_currency }}"><input type="hidden" name="cost_method" value="{{ cost_method }}">
       <label>开始日期<input type="date" name="date_start" value="{{ transaction_filters.date_start }}"></label>
       <label>结束日期<input type="date" name="date_end" value="{{ transaction_filters.date_end }}"></label>
@@ -127,6 +126,7 @@
     <div class="section-head"><h2>账户概览</h2></div>
     <div class="currency-overview-grid">{% for section in currency_sections %}<article class="currency-overview-card currency-{{ section.market_code }}"><h3>{{ section.currency }}</h3><div class="currency-totals"><span>现金<strong>{{ section.cash|currency0:section.currency }}</strong></span><span>持仓<strong>{{ section.holding|currency0:section.currency }}</strong></span></div><div class="currency-position-list">{% for item in section.positions %}<div class="currency-position-row"><span class="position-name">{{ item.security.name }}</span><span>{{ item.market_value_live|thousands }}</span><span>{{ item.base_ratio|floatformat:2 }}%</span><span class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}">{{ item.unrealized_live|signed_number0 }}</span></div>{% empty %}<span class="empty-currency-position">暂无持仓</span>{% endfor %}</div></article>{% endfor %}</div>
   {% endif %}
+  {% include "portfolio/_activity_pagination.html" %}
 </section>
 {% endblock %}
 
