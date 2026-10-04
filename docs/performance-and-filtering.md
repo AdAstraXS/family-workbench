@@ -70,3 +70,14 @@ python manage.py test option_wheel.tests.test_jobs.JobConcurrencyTests --setting
 桌面与手机验收覆盖：投研第二页搜索后回第一页、浏览器返回继续搜索、打新币种切换、账户日期筛选、新闻分类与关键词组合。IME、分页游标清理、命名按钮、无效输入与 POST 排除另有脚本回归。
 
 本次不新增数据库迁移，不更改 Python 依赖、Compose、生产配置和定时任务。
+
+## NAS 发布验收（2026-10-04）
+
+- 实际运行提交：`c20b2b1dc2ce849664378a2a171e5288e32f0c4e`，已推送 `codex/performance-filter-consistency`。
+- 发布前数据库恢复点：`backups/family-workbench-performance-filters.dump`，约 94 MB，已通过 `pg_restore -l`；SHA-256：`0a4141a28ee44049da6eefee0780f5062fad5bf4eba7cb2bb75522e4155b8799`。
+- 源码回退包：`backups/source-predeploy-09f0c4ab0a653f3cffaff53f8fe499429c18bb07-20261004-223038.tar.gz`，已验证可读；SHA-256：`82c26383847e75ffa107eaee7ea3efe3628890ede6085572e27bedb29e07a9a5`。
+- 发布包 SHA-256：`224a67ab4debc7b0cdd1a63179d45177d888e2bb46354fb97de3166f96d64cd0`。实际受限包装器从用户主目录读取已校验包，自动备份源码并将发布包移入 backups。
+- 数据基线前后相同：账户 35、持仓 483、交易 1,083、快照 2,342、快照明细 14,598、每日估值记录 83；最新快照 2026-10-04。未执行回补或估值任务。
+- 启动显示没有待执行迁移；系统检查通过，DB 与 OpenD 持续健康，生产配置哈希一致。NAS 内部 HTTP、两处外部 HTTPS 入口响应正常。
+- 线上主样式响应为 gzip、29,642 字节，带 immutable 长缓存。浏览器验证 HKD/USD 图表选择自动跳转、单位与图表同步变化，控制台没有错误。
+- 最后 360 项针对性测试与前端筛选回归通过。真实生产 p50/p95 尚需积累样本，未创建额外监控或定时任务。
