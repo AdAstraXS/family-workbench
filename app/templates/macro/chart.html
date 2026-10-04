@@ -1,9 +1,10 @@
 {% load macro_format %}
 <div class="macro-chart-tools">
-{% if geographies|length > 1 %}<form method="get" {% if theme %}action="{% url 'macro:country' country %}"{% endif %} class="macro-controls">{% if theme %}<input type="hidden" name="theme" value="{{ theme }}"><input type="hidden" name="series" value="{{ spec.code }}">{% endif %}<input type="hidden" name="range" value="{{ range }}">{% if tab %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}<label>城市<select name="geography" onchange="this.form.submit()">{% for g in geographies %}<option {% if g == geography %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></label><noscript><button type="submit">查看城市</button></noscript></form>{% endif %}
+{% if measures %}<nav class="macro-measures" aria-label="趋势计算口径">{% for item in measures %}<a href="{{ item.url }}" {% if item.key == measure %}aria-current="page"{% endif %}>{{ item.label }}</a>{% endfor %}</nav>{% endif %}
+{% if geographies|length > 1 %}<form method="get" {% if theme %}action="{% url 'macro:country' country %}"{% endif %} class="macro-controls">{% if theme %}<input type="hidden" name="theme" value="{{ theme }}"><input type="hidden" name="series" value="{{ spec.code }}">{% endif %}<input type="hidden" name="range" value="{{ range }}"><input type="hidden" name="measure" value="{{ measure }}">{% if tab %}<input type="hidden" name="tab" value="{{ tab }}">{% endif %}<label>城市<select name="geography" onchange="this.form.submit()">{% for g in geographies %}<option {% if g == geography %}selected{% endif %}>{{ g }}</option>{% endfor %}</select></label><noscript><button type="submit">查看城市</button></noscript></form>{% endif %}
 <nav class="macro-ranges" aria-label="趋势时间范围">{% for item in ranges %}<a href="{{ item.url }}" {% if item.value == range %}aria-current="page"{% endif %}>{{ item.label }}</a>{% endfor %}</nav>
 </div>
-<p class="macro-chart-caption">{{ spec.unit }} · {{ definition.basis }} · {{ definition.seasonal }}{% if geographies|length > 1 %} · {{ geography }}{% endif %}</p>
+<p class="macro-chart-caption">{{ chart_label }} · {{ chart_unit }}{% if measure == 'level' %} · {{ definition.basis }} · {{ definition.seasonal }}{% endif %}{% if geographies|length > 1 %} · {{ geography }}{% endif %}{% if growth %}<br>{{ growth.note }}{% endif %}</p>
 {% if chart_count %}
 {{ chart_data|json_script:"macro-chart-data" }}
 <div class="macro-chart" data-macro-chart><p class="macro-meta">正在绘制趋势。历史数据也可在下方表格查看。</p></div>

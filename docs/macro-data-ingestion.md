@@ -51,7 +51,8 @@ python manage.py import_macro --group nbs_release --url https://www.stats.gov.cn
 - 进出口原始金额实际上需要除以 100000 才是亿美元，采用来源前端 `zoom: -5` 的明确换算。
   AKShare 文档中的单位文字与原始示例量级不一致，不能直接照抄。
   证据：[来源页面脚本](https://data.eastmoney.com/newstatic/js/cjsj/cn/hgjck.js)。
-- 美国 CPI/PCE/GDP 等指数、非农人数水平、折年数量均按原始口径保存，此阶段不额外计算增速。
+- 美国 CPI/PCE/GDP 等指数、非农人数水平、折年数量均按原始口径保存。页面在只读展示层计算增速，
+  不改写原始观测；CPI 同比所需的未季调 `CPIAUCNS` / `CPILFENS` 与季调序列分开采集。
 - 中国制造业/非制造业 PMI 标注为季调，依据[统计局说明](https://www.stats.gov.cn/zs/tjws/tjzb/202301/t20230101_1903972.html)。
 
 ## 页面与运维

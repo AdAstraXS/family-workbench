@@ -6,6 +6,7 @@
   if (!host || !dataNode) return;
   const data = JSON.parse(dataNode.textContent);
   const points = data.points;
+  const missingLabel = data.missing_label || "来源缺值";
   const inspector = document.querySelector("[data-macro-inspector]");
   const slider = document.querySelector("[data-macro-point]");
   const ns = "http://www.w3.org/2000/svg";
@@ -25,8 +26,8 @@
     chosen = Math.max(0, Math.min(points.length - 1, index));
     slider.value = chosen;
     const point = points[chosen];
-    slider.setAttribute("aria-valuetext", point.label + " · " + (point.value === null ? "来源缺值" : exact(point.value) + " " + data.unit));
-    inspector.textContent = point.label + " · " + (point.value === null ? "来源缺值" : exact(point.value) + " " + data.unit);
+    slider.setAttribute("aria-valuetext", point.label + " · " + (point.value === null ? missingLabel : exact(point.value) + " " + data.unit));
+    inspector.textContent = point.label + " · " + (point.value === null ? missingLabel : exact(point.value) + " " + data.unit);
     if (!geometry) return;
     const x = geometry.x(chosen);
     cursor.setAttribute("x1", x); cursor.setAttribute("x2", x);
@@ -43,7 +44,7 @@
     if (ref !== null && valid) {low = Math.min(low, ref); high = Math.max(high, ref);}
     if (!valid) {
       host.replaceChildren(); const message = document.createElement("p");
-      message.className = "macro-empty"; message.textContent = "该范围全部为来源缺值，无法绘制曲线。";
+      message.className = "macro-empty"; message.textContent = "该范围全部为“" + missingLabel + "”，无法绘制曲线。";
       host.append(message); geometry = null; select(chosen); return;
     }
     const spread = high - low || Math.max(Math.abs(high) * 0.05, 1);

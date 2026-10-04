@@ -276,11 +276,11 @@ for code, pce, core in [("CPIAUCSL", False, False), ("CPILFESL", False, True), (
     put("US", code, lead="看美国" + ("个人消费支出" if pce else "居民消费") + "价格水平" + ("剔除食品和能源后的变化。" if core else "的变化。"),
         scope=("PCE 包含居民直接购买及他人代其支付的消费，例如部分医疗支出。" if pce else "CPI 关注城市消费者购买的一篮子商品与服务。") + ("核心指数剔除食品和能源，但不表示这些支出不重要。" if core else "食品与能源包含在总指数内。"),
         calculation="按分类价格及消费权重汇总。" + ("PCE 使用链式 Fisher 方法，权重随消费结构变化。" if pce else "CPI 按 BLS 指数方法编制，各层级采用相应公式。"),
-        formula="同比 =（本月指数 ÷ 去年同月指数 − 1）× 100%；页面展示指数水平",
+        formula="同比 =（本月指数 ÷ 去年同月指数 − 1）× 100%；环比 =（本月指数 ÷ 上月指数 − 1）× 100%",
         example="假设指数从去年同月 120 到 123，同比为 2.5%；123 本身不是通胀率 123%。",
         method="BEA 结合消费支出及价格资料编制，FRED 提供此季调序列。" if pce else "BLS 在样本商品、服务与住房等项目采价、加权，FRED 提供此季调序列。",
         meaning="用于观察价格趋势。指数基期只是尺度，不能用不同基期指数的数值大小判断谁更贵。",
-        pitfalls=["页面展示的是指数，不是同比。", "核心不是完全排除所有价格波动。", "CPI 与 PCE 的范围、权重和公式不同。", "季调和未季调同比可能有差异。"],
+        pitfalls=["原始指数水平不是通胀率；页面主位为计算后的同比与环比。", "核心不是完全排除所有价格波动。", "CPI 与 PCE 的范围、权重和公式不同。", "CPI 同比使用未季调指数，环比使用季调指数；PCE 按季调序列比较。"],
         related=["US:CPIAUCSL", "US:CPILFESL", "US:PCEPI", "US:PCEPILFE"], sources=["bea", "pio"] if pce else ["cpi_us"], aliases="PCE 消费 通胀 核心" if pce else "CPI 物价 通胀 核心", kind="季调价格指数")
 for code, participation in [("UNRATE", False), ("CIVPART", True)]:
     put("US", code, lead="看美国" + ("符合调查范围的人口中，有多少进入劳动市场。" if participation else "劳动力中有多少处于失业状态。"),
@@ -311,7 +311,7 @@ put("US", "GDPC1", lead="看美国剔除价格变化后的经济产出水平，�
     calculation="BEA 用数量与价格资料编制链式实际 GDP，将季度季调水平折年。", formula="折年水平 = 季调季度水平 × 4；环比折年增速 =（本季 ÷ 上季）⁴ − 1",
     example="假设季调季度产出 6000，折年水平 24000；不代表本季实际生产了全年 24000。",
     method="BEA 编制国民账户并使用链式数量方法，初报、二报、三报及年度修订可能改变历史值。",
-    meaning="观察实际经济活动；同比、环比和环比折年增速是不同计算，页面展示水平。",
+    meaning="观察实际经济活动；页面主位为同比、季度环比与季度环比折年，原始水平放在次要位置。三种增速不能混称。",
     pitfalls=["不是 GDP 增长率。", "不是本季度金额或全年已实现总量。", "链式价格分项通常不可简单相加。"], related=["US:GDPDEF", "US:PCEC96"], sources=["bea", "gdp_us"], aliases="GDP 实际 增长 经济 折年", kind="季调折年实际水平")
 put("US", "GDPDEF", lead="看美国国内生产的最终商品与服务的总体价格变化。",
     scope="覆盖 GDP 中消费、投资、政府与出口等国内生产内容，进口不是国内生产；范围不同于 CPI。",
@@ -393,6 +393,17 @@ for code, years in [("DGS2", 2), ("DGS10", 10)]:
         method="美国财政部按公布的收益率曲线方法估计，FRED 提供工作日序列，休市缺值保留。",
         meaning="反映该期限的市场资金价格与预期。不同期限差值可观察曲线形状，但不是确定的经济预测。",
         pitfalls=["不是单只债券票面利率。", "不是投资的保证收益。", "曲线倒挂不能保证衰退时间或结果。"], related=["US:DGS2", "US:DGS10", "US:EFFR"], sources=["treasury"], aliases="国债 美债 收益率 利率 曲线", kind="固定期限市场收益率")
+
+for auxiliary, primary in [("CPIAUCNS", "CPIAUCSL"), ("CPILFENS", "CPILFESL")]:
+    original = GUIDES[("US", primary)]
+    GUIDES[("US", auxiliary)] = {**original, "title": SPEC[("US", auxiliary)].name,
+        "lead": "美国 CPI 同比所用的未季调指数；月度环比优先查看对应季调序列。",
+        "scope": original["scope"] + " 本序列未做季节调整，与季调序列的值分开保存。",
+        "formula": "同比 =（本月未季调指数 ÷ 上年同月未季调指数 − 1）× 100%",
+        "calculation": "按相同未季调序列比较上年同月。季调环比采用对应季调序列，不能将两条序列混作分子与分母。",
+        "method": "BLS 按 CPI 采价及加权方法编制，FRED 提供该未季调序列。与对应季调序列独立保存。",
+        "kind": "未季调价格指数", "related": ["US:" + primary],
+        "sources": original["sources"] + [("FRED · 未季调原始序列", "https://fred.stlouisfed.org/series/" + auxiliary)]}
 
 # Fail visibly at startup instead of silently publishing a partial encyclopedia.
 if set(GUIDES) != set(SPEC):

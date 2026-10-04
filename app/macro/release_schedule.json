@@ -1,0 +1,2243 @@
+{
+  "year": 2026,
+  "verified": "2026-10-05",
+  "sources": [
+    {
+      "code": "nbs",
+      "name": "国家统计局",
+      "url": "https://www.stats.gov.cn/xw/tjxw/tzgg/202512/t20251224_1962137.html",
+      "verified": "2026-10-05",
+      "sha256": "dc4e07081e16d3c81cf7ee4e68dc42043faf14b57109b4b731fd393a4a2e5646"
+    },
+    {
+      "code": "bls",
+      "name": "美国劳工统计局 BLS",
+      "url": "https://www.bls.gov/schedule/2026/home.htm",
+      "verified": "2026-10-05",
+      "sha256": ""
+    },
+    {
+      "code": "bea",
+      "name": "美国经济分析局 BEA",
+      "url": "https://www.bea.gov/news/schedule/full",
+      "verified": "2026-10-05",
+      "sha256": "610d1699033c605d8d8ddaa4bfcd39848e571da10683f8ac6c49914fad32b843"
+    },
+    {
+      "code": "census",
+      "name": "美国人口普查局 Census",
+      "url": "https://www.census.gov/economic-indicators/calendar-listview.html",
+      "verified": "2026-10-05",
+      "sha256": "8f0648444db569d44219719abb54efe94b27a935e86083a1edf774fca8fc1de0"
+    }
+  ],
+  "events": [
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-01-09",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2025年12月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-01-09",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "October 2025"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-01-09",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "September 2025"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-01-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2025年12月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-01-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2025年12月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-01-13",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2025年12月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-01-13",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "October 2025"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-01-13",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "September 2025"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-01-14",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "November 2025"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-01-19",
+      "time": "10:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY",
+        "GDP_QUARTER",
+        "GDP_REAL_YOY_INDEX"
+      ],
+      "period": "2025年12月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-01-19",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2025年12月"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 更新估计",
+      "date": "2026-01-22",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "Gross Domestic Product, 3rd Quarter 2025 (Updated Estimate), GDP by Industry, and Corporate Profits (Revised)"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-01-22",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, October and November 2025"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-01-27",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2025年12月或年初至该月累计"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-01-31",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年1月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-02-10",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "December 2025"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-02-11",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年1月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-02-11",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年1月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-02-11",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年1月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-02-13",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年1月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-02-13",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年1月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-02-18",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "December 2025"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-02-18",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "November 2025"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 初值",
+      "date": "2026-02-20",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Advance Estimate), 4th Quarter and Year 2025"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-02-20",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, December 2025"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-02-20",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "December 2025"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-02-20",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "November 2025"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-03-04",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年2月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-03-06",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年2月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-03-06",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "January 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-03-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年2月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-03-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年2月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-03-11",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年2月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-03-12",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "January 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 二次估计",
+      "date": "2026-03-13",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Second Estimate), 4th Quarter and Year 2025"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-03-13",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, January 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-03-16",
+      "time": "10:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY"
+      ],
+      "period": "2026年2月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-03-16",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年2月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-03-19",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "January 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-03-27",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2026年2月或年初至该月累计"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-03-31",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年3月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-04-01",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "February 2026"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-04-03",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年3月"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 三次估计",
+      "date": "2026-04-09",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Third Estimate), Industries, Corporate Profits, State GDP, and State Personal Income, 4th Quarter and Year 2025"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-04-09",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, February 2026"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-04-10",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年3月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-04-10",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年3月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-04-10",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年3月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-04-16",
+      "time": "10:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY",
+        "GDP_QUARTER",
+        "GDP_REAL_YOY_INDEX"
+      ],
+      "period": "2026年3月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-04-16",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年3月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-04-21",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "March 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-04-27",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2026年3月或年初至该月累计"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-04-29",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "February 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-04-29",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "March 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 初值",
+      "date": "2026-04-30",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Advance Estimate), 1st Quarter 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-04-30",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, March 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-04-30",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年4月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-05-05",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "February 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-05-05",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "March 2026"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-05-08",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年4月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-05-11",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年4月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-05-11",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年4月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-05-12",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年4月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-05-14",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "April 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-05-18",
+      "time": "10:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY"
+      ],
+      "period": "2026年4月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-05-18",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年4月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-05-21",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "April 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-05-27",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2026年4月或年初至该月累计"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 二次估计",
+      "date": "2026-05-28",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Second Estimate) and Corporate Profits, 1st Quarter 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-05-28",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, April 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-05-28",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "April 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-05-31",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年5月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-06-05",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年5月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-06-10",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年5月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-06-10",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年5月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-06-10",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年5月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-06-16",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "May 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-06-16",
+      "time": "10:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY"
+      ],
+      "period": "2026年5月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-06-16",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年5月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-06-17",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "May 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-06-24",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "May 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 三次估计",
+      "date": "2026-06-25",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Third Estimate), Industries, Corporate Profits, State GDP, and State Personal Income, 1st Quarter 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-06-25",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, May 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-06-27",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2026年5月或年初至该月累计"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-06-30",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年6月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-07-02",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年6月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-07-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年6月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-07-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年6月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-07-14",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年6月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-07-15",
+      "time": "10:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY",
+        "GDP_QUARTER",
+        "GDP_REAL_YOY_INDEX"
+      ],
+      "period": "2026年6月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-07-15",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年6月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-07-16",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "June 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-07-17",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "June 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-07-24",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "June 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-07-27",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2026年6月或年初至该月累计"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 初值",
+      "date": "2026-07-30",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Advance Estimate), 2nd Quarter 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-07-30",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, June 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-07-31",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年7月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-08-07",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年7月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-08-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年7月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-08-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年7月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-08-12",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年7月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-08-14",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "July 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-08-17",
+      "time": "15:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年7月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-08-17",
+      "time": "15:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY"
+      ],
+      "period": "2026年7月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-08-18",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "July 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-08-25",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "July 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 二次估计",
+      "date": "2026-08-26",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Second Estimate) and Corporate Profits, 2nd Quarter 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-08-26",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, July 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-08-27",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2026年7月或年初至该月累计"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-08-31",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年8月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-09-04",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年8月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-09-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年8月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-09-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年8月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-09-11",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年8月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-09-15",
+      "time": "10:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY"
+      ],
+      "period": "2026年8月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-09-15",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年8月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-09-16",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "August 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-09-17",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "August 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-09-24",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "August 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-09-28",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2026年8月或年初至该月累计"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 三次估计",
+      "date": "2026-09-30",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Third Estimate), Industries, Corporate Profits, State GDP, and State Personal Income, 2nd Quarter 2026; State PCE, 2025"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-09-30",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, August 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-09-30",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年9月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-10-02",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年9月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-10-14",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年9月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-10-14",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年9月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-10-14",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年9月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-10-15",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "September 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-10-19",
+      "time": "10:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY",
+        "GDP_QUARTER",
+        "GDP_REAL_YOY_INDEX"
+      ],
+      "period": "2026年9月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-10-19",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年9月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-10-20",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "September 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-10-27",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "September 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-10-27",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2026年9月或年初至该月累计"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 初值",
+      "date": "2026-10-29",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Advance Estimate), 3rd Quarter 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-10-29",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, September 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-10-31",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年10月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-11-06",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年10月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-11-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年10月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-11-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年10月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-11-10",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年10月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-11-16",
+      "time": "10:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY"
+      ],
+      "period": "2026年10月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-11-16",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年10月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-11-17",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "October 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-11-18",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "October 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 二次估计",
+      "date": "2026-11-25",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Second Estimate) and Corporate Profits, 3rd Quarter 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-11-25",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, October 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-11-25",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "October 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-11-27",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2026年10月或年初至该月累计"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-11-30",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年11月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "就业报告",
+      "date": "2026-12-04",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PAYEMS",
+        "UNRATE",
+        "CIVPART",
+        "CES0500000003"
+      ],
+      "period": "2026年11月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "居民消费价格指数月度报告",
+      "date": "2026-12-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "CPI_YOY",
+        "CPI_MOM"
+      ],
+      "period": "2026年11月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业生产者价格指数月度报告",
+      "date": "2026-12-09",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PPI_YOY"
+      ],
+      "period": "2026年11月"
+    },
+    {
+      "agency": "bls",
+      "country": "US",
+      "title": "居民消费价格 CPI",
+      "date": "2026-12-10",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "CPIAUCSL",
+        "CPILFESL"
+      ],
+      "period": "2026年11月"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "国民经济运行情况",
+      "date": "2026-12-15",
+      "time": "10:00",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRY_YOY",
+        "UNEMPLOYMENT",
+        "FAI_CUM_YOY",
+        "PROPERTY_INVESTMENT_CUM_YOY",
+        "RETAIL_YOY"
+      ],
+      "period": "2026年11月及当期季度/累计数据（以发布稿为准）"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "商品住宅销售价格指数月度报告",
+      "date": "2026-12-15",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "HOUSE_NEW_MOM",
+        "HOUSE_NEW_YOY",
+        "HOUSE_USED_MOM",
+        "HOUSE_USED_YOY"
+      ],
+      "period": "2026年11月"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "零售与餐饮销售",
+      "date": "2026-12-16",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "RSAFS"
+      ],
+      "period": "November 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新屋开工与营建许可",
+      "date": "2026-12-17",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "HOUST",
+        "PERMIT"
+      ],
+      "period": "November 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "GDP · 三次估计",
+      "date": "2026-12-23",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "GDPC1",
+        "GDPDEF"
+      ],
+      "period": "GDP (Third Estimate), Industries, Corporate Profits, State GDP, and State Personal Income, 3rd Quarter 2026"
+    },
+    {
+      "agency": "bea",
+      "country": "US",
+      "title": "个人收入与支出（含 PCE）",
+      "date": "2026-12-23",
+      "time": "08:30",
+      "timezone": "America/New_York",
+      "codes": [
+        "PCEPI",
+        "PCEPILFE",
+        "PCEC96",
+        "DSPIC96",
+        "PSAVERT"
+      ],
+      "period": "Personal Income and Outlays, November 2026"
+    },
+    {
+      "agency": "census",
+      "country": "US",
+      "title": "新建住宅销售",
+      "date": "2026-12-23",
+      "time": "10:00",
+      "timezone": "America/New_York",
+      "codes": [
+        "HSN1F"
+      ],
+      "period": "November 2026"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "工业经济效益月度报告",
+      "date": "2026-12-27",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "INDUSTRIAL_PROFIT_CUM",
+        "INDUSTRIAL_PROFIT_CUM_YOY"
+      ],
+      "period": "2026年11月或年初至该月累计"
+    },
+    {
+      "agency": "nbs",
+      "country": "CN",
+      "title": "采购经理指数月度报告",
+      "date": "2026-12-31",
+      "time": "9:30",
+      "timezone": "Asia/Shanghai",
+      "codes": [
+        "PMI_MANUFACTURING",
+        "PMI_NONMANUFACTURING"
+      ],
+      "period": "2026年12月"
+    }
+  ]
+}
