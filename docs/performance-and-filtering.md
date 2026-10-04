@@ -70,4 +70,3 @@ python manage.py test option_wheel.tests.test_jobs.JobConcurrencyTests --setting
 桌面与手机验收覆盖：投研第二页搜索后回第一页、浏览器返回继续搜索、打新币种切换、账户日期筛选、新闻分类与关键词组合。IME、分页游标清理、命名按钮、无效输入与 POST 排除另有脚本回归。
 
 本次不新增数据库迁移，不更改 Python 依赖、Compose、生产配置和定时任务。
-

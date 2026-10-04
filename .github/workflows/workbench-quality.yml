@@ -39,4 +39,3 @@ jobs:
           python manage.py test ipo portfolio knowledge family_core.test_runtime investment_watch investment_research ai_analysis option_wheel.tests.test_jobs.JobTests --settings=config.settings_quality_pg_test --noinput
           python manage.py test option_wheel.tests.test_jobs.JobConcurrencyTests --settings=config.settings_quality_pg_test --noinput
       - run: git diff --check
-

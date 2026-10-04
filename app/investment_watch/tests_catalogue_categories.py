@@ -10,4 +10,3 @@ class CategoryTests(SimpleTestCase):
     def test_unknown_item_is_not_assumed_to_be_a_company(self):
         self.assertEqual(classify('不明财经动态', '', '全球')[1], '行业')
         self.assertEqual(classify('某公司发布财报', '', '全球')[1], '公司')
-

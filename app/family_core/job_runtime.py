@@ -115,4 +115,3 @@ class BoundedJobCommand(BaseCommand):
                 signal.signal(signal.SIGALRM, old_handler)
             logger.info("job_end command=%s outcome=%s elapsed_ms=%d", command, outcome,
                         (time.monotonic() - started_at) * 1000)
-

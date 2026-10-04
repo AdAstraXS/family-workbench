@@ -42,4 +42,3 @@ class RequestPerformanceMiddleware:
             logger.info("request route=%s method=%s status=%s elapsed_ms=%.1f queries=%d db_ms=%.1f bytes=%d",
                         route, request.method, response.status_code if response is not None else 500,
                         (time.perf_counter() - start) * 1000, count, database_ms, size)
-

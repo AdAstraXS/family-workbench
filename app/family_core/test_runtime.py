@@ -68,4 +68,3 @@ class JobSlotConcurrencyTests(SimpleTestCase):
         thread.join(timeout=5)
         self.assertFalse(thread.is_alive())
         self.assertEqual(outcomes, ['busy', 'entered'])
-

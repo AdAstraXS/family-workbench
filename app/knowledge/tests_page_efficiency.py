@@ -34,4 +34,3 @@ class KnowledgePageEfficiencyTests(TestCase):
         result = self.client.get(reverse('knowledge:library'), {'q':'末尾目标'})
         self.assertEqual(result.context['page_obj'].paginator.count, 25)
         self.assertIn('末尾目标', result.context['page_obj'][0].hit_snippet)
-

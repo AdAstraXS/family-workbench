@@ -16,4 +16,3 @@ for (route, method), rows in sorted(groups.items()):
         'p50_ms': percentile([r[0] for r in rows], .5), 'p95_ms': percentile([r[0] for r in rows], .95),
         'max_queries': max(r[1] for r in rows), 'p95_db_ms': percentile([r[2] for r in rows], .95),
         'max_bytes': max(r[3] for r in rows), 'errors': sum(r[4] >= 500 for r in rows)}, ensure_ascii=False))
-

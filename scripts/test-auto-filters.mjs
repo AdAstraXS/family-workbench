@@ -72,4 +72,3 @@ function fixture(method = 'get') {
   assert.equal(f.submit.hidden,false,'mutation forms must stay manual');
 }
 console.log('Auto-filter regressions passed: IME, debounce, pagination reset, named category, back navigation, validity, POST exclusion.');
-
