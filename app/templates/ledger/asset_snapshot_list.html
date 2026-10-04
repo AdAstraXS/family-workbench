@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load table_navigation %}
 {% load static %}
 {% load money %}
 
@@ -14,7 +15,10 @@
       <a class="button" href="{% url 'ledger:asset_snapshot_create' %}">新增资产快照</a>
     </div>
   </div>
-  <table>
+  {% table_page rows "asset_snapshots" "资产快照" as asset_snapshots_table %}
+<div id="{{ asset_snapshots_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=asset_snapshots_table %}
+<table>
     <thead>
       <tr>
         <th>日期</th>
@@ -27,7 +31,7 @@
       </tr>
     </thead>
     <tbody>
-      {% for row in rows %}
+      {% for row in asset_snapshots_table.page %}
         <tr>
           <td>
             {{ row.snapshot.snapshot_date }}
@@ -48,6 +52,7 @@
       {% endfor %}
     </tbody>
   </table>
+{% include "workspace/table_pagination.html" with table=asset_snapshots_table %}
 </section>
 
 <section class="panel asset-trend-panel">

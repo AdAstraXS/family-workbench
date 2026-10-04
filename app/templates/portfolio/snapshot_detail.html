@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load table_navigation %}
 {% load money %}
 
 {% block title %}{{ snapshot.snapshot_date|date:"Y-m-d" }} 快照审计{% endblock %}
@@ -85,7 +86,10 @@
     <span>{{ position_lines|length }} 条</span>
   </div>
   <div class="account-table-wrap snapshot-audit-lines-wrap">
-    <table class="snapshot-audit-lines">
+    {% table_page position_lines "snapshot_positions" "快照持仓" as snapshot_positions_table %}
+<div id="{{ snapshot_positions_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=snapshot_positions_table %}
+<table class="snapshot-audit-lines">
       <thead>
         <tr>
           <th>成员</th><th>投资账户</th><th>资产</th><th>类型</th><th>数量</th>
@@ -94,7 +98,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for line in position_lines %}
+        {% for line in snapshot_positions_table.page %}
           <tr class="{% if line.has_pricing_warning %}snapshot-line-warning{% endif %}">
             <td>{{ line.account.member.display_name }}</td>
             <td>{{ line.account.account_name }}</td>
@@ -113,6 +117,7 @@
         {% empty %}<tr><td colspan="13">该家庭快照没有资产明细。</td></tr>{% endfor %}
       </tbody>
     </table>
+{% include "workspace/table_pagination.html" with table=snapshot_positions_table %}
   </div>
 </section>
 {% endblock %}

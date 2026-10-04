@@ -6,7 +6,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site_household_name }}{% endblock %}</title>
   <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20261004-observation-navigation">
+  {% if request.resolver_match.app_name == 'knowledge' or request.resolver_match.app_name == 'knowledge_hub' or request.resolver_match.app_name == 'reading' or request.resolver_match.app_name == 'trading_journal' or request.resolver_match.app_name == 'ai_analysis' %}
+  <link rel="stylesheet" href="{% static 'css/knowledge-pages.css' %}">
+  {% endif %}
+  {% if request.resolver_match.app_name == 'option_wheel' %}<link rel="stylesheet" href="{% static 'css/option-wheel-pages.css' %}">{% endif %}
+  <link rel="stylesheet" href="{% static 'css/page-amendments.css' %}">
   <script src="{% static 'js/workspace-preferences.js' %}?v=20260925"></script>
+  <link rel="stylesheet" href="{% static 'css/table-navigation.css' %}">
   {% block extra_head %}{% endblock %}
   <link rel="stylesheet" href="{% static 'css/songting.css' %}?v=20261003-frontend-audit">
   <link rel="stylesheet" href="{% static 'css/module-motion.css' %}?v=20260925-1">
@@ -66,6 +72,7 @@
   {% include 'workspace/appearance.html' %}
   <script src="{% static 'js/workspace.js' %}?v=20261003-frontend-audit-final" defer></script>
   <script src="{% static 'js/auto-filters.js' %}" defer></script>
+  <script src="{% static 'js/table-usability.js' %}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

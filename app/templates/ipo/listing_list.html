@@ -44,7 +44,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_listing_table.html" with listings=today_listings empty_text="暂无今日上市新股。" schedule_date="listing" %}
+      {% include "ipo/_listing_table.html" with table_key="ipo_today" listings=today_listings empty_text="暂无今日上市新股。" schedule_date="listing" %}
     </div>
   </div>
 </section>
@@ -55,7 +55,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_listing_table.html" with listings=grey_market_listings empty_text="暂无今日暗盘新股。" schedule_date="listing" %}
+      {% include "ipo/_listing_table.html" with table_key="ipo_grey" listings=grey_market_listings empty_text="暂无今日暗盘新股。" schedule_date="listing" %}
     </div>
   </div>
 </section>
@@ -66,7 +66,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_listing_table.html" with listings=subscribing_listings empty_text="暂无招股中新股。" show_expected_margin=True %}
+      {% include "ipo/_listing_table.html" with table_key="ipo_subscribing" listings=subscribing_listings empty_text="暂无招股中新股。" show_expected_margin=True %}
     </div>
   </div>
 </section>
@@ -77,7 +77,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_listing_table.html" with listings=waiting_listings empty_text="暂无待上市新股。" show_expected_margin=True schedule_date="allotment" %}
+      {% include "ipo/_listing_table.html" with table_key="ipo_waiting" listings=waiting_listings empty_text="暂无待上市新股。" show_expected_margin=True schedule_date="allotment" %}
     </div>
   </div>
 </section>
@@ -85,20 +85,12 @@
 <section class="ipo-list-section">
   <div class="section-head">
     <h2>已上市</h2>
-    <span class="muted-text">共 {{ listed_count }} 条，默认显示前 10 条</span>
+    <span class="muted-text">共 {{ listed_count }} 条，每页最多 30 条</span>
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_listing_table.html" with listings=listed_visible empty_text="暂无已上市新股。" listed_mode=True %}
+      {% include "ipo/_listing_table.html" with table_key="ipo_listed" listings=listed_visible|add:listed_hidden empty_text="暂无已上市新股。" listed_mode=True %}
     </div>
-    {% if listed_hidden %}
-      <details class="ipo-more-listings">
-        <summary>展开查看剩余 {{ listed_hidden|length }} 条已上市新股</summary>
-        <div class="record-table-wrap ipo-table-wrap">
-          {% include "ipo/_listing_table.html" with listings=listed_hidden listed_mode=True %}
-        </div>
-      </details>
-    {% endif %}
   </div>
 </section>
 {% endblock %}

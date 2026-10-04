@@ -1,4 +1,5 @@
 {% extends "knowledge_hub/base.html" %}
+{% load table_navigation %}
 
 {% block title %}资料导入 · 知识中心{% endblock %}
 {% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>资料导入</span>{% endblock %}
@@ -43,11 +44,14 @@
   <div class="panel-heading">
     <div><span class="eyebrow">审计记录</span><h2>最近导入批次</h2></div>
   </div>
-  <table class="knowledge-data-table knowledge-imports-table">
+  {% table_page batches "import_batches" "导入批次" as import_batches_table %}
+<div id="{{ import_batches_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=import_batches_table %}
+<table class="knowledge-data-table knowledge-imports-table">
     <colgroup><col class="knowledge-imports-col-time"><col class="knowledge-imports-col-person"><col class="knowledge-imports-col-file"><col class="knowledge-imports-col-status"><col class="knowledge-imports-col-count"><col class="knowledge-imports-col-count"><col class="knowledge-imports-col-count"><col class="knowledge-imports-col-count"></colgroup>
     <thead><tr><th>时间</th><th>归属人物 / 来源</th><th>文件</th><th>状态</th><th>新增</th><th>更新</th><th>跳过/重复</th><th>错误</th></tr></thead>
     <tbody>
-      {% for batch in batches %}
+      {% for batch in import_batches_table.page %}
         <tr>
           <td><a href="{% url 'knowledge:import_batch_detail' batch.pk %}">{{ batch.created_at|date:"Y-m-d H:i" }}</a></td>
           <td>{% if batch.person_name %}<strong>{{ batch.person_name }}</strong><small>{{ batch.source.name }}</small>{% else %}{{ batch.source.name }}{% endif %}</td>
@@ -63,5 +67,6 @@
       {% endfor %}
     </tbody>
   </table>
+{% include "workspace/table_pagination.html" with table=import_batches_table %}
 </section>
 {% endblock %}

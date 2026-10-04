@@ -24,6 +24,7 @@
       var url = new URL(form.action, location.href), params = new URLSearchParams(new FormData(form));
       if (button && button.name) params.set(button.name, button.value);
       params.delete('page'); params.delete('cursor');
+      Array.from(params.keys()).forEach(function (name) { if (name.startsWith('table_page_')) params.delete(name); });
       url.search = params.toString();
       if (url.href === location.href) { status.textContent = '选择后自动更新'; return; }
       try {

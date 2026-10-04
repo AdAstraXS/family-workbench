@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load table_navigation %}
 {% load money %}
 
 {% block title %}申购详情{% endblock %}
@@ -52,7 +53,10 @@
 <section class="panel">
   <div class="section-head"><h2>卖出交易记录</h2></div>
   <div class="record-table-wrap ipo-table-wrap">
-    <table class="record-table ipo-trade-table">
+    {% table_page sale_transactions "sales" "卖出记录" as sales_table %}
+<div id="{{ sales_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=sales_table %}
+<table class="record-table ipo-trade-table">
       <thead>
         <tr>
           <th>卖出日期</th>
@@ -68,7 +72,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for sale in sale_transactions %}
+        {% for sale in sales_table.page %}
           <tr>
             <td>{{ sale.trade_date|date:"Y-m-d" }}</td>
             <td class="number">{{ sale.display_sold_lots|lots }}</td>
@@ -95,6 +99,7 @@
         {% endfor %}
       </tbody>
     </table>
+{% include "workspace/table_pagination.html" with table=sales_table %}
   </div>
 </section>
 {% endblock %}

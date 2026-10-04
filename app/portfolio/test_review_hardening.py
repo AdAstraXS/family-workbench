@@ -207,9 +207,9 @@ class FinancialHardeningTests(TestCase):
 
     def test_pagination_reaches_oldest_transaction(self):
         first = buy(self, 1)
-        for _ in range(100):
+        for _ in range(90):
             buy(self, 1)
-        response = self.client.get(reverse("portfolio:transaction_list"), {"page": "2"})
+        response = self.client.get(reverse("portfolio:transaction_list"), {"page": "4"})
         self.assertEqual([item.pk for item in response.context["transactions"]], [first.pk])
 
     def test_fx_queries_do_not_grow_with_holdings(self):

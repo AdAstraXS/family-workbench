@@ -10,7 +10,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.template.loader import render_to_string
-from django.test import TestCase
+from django.test import RequestFactory, TestCase
 from django.urls import reverse
 from django.utils import timezone
 
@@ -373,6 +373,8 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
             "ipo/_subscription_trade_table.html",
             {
                 "trades": [trade],
+                "table_key": "ipo_closed",
+                "request": RequestFactory().get("/ipo/subscriptions/"),
                 "closed_mode": True,
                 "amount_column": "fees",
             },

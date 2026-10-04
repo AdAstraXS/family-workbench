@@ -2639,7 +2639,7 @@ def job_detail(request, pk):
         or job.source.visibility == KnowledgeVisibility.FAMILY
     )
     items_queryset = job.items.order_by("id") if may_view_items else job.items.none()
-    items_page = Paginator(items_queryset, 50).get_page(request.GET.get("page"))
+    items_page = Paginator(items_queryset, 30).get_page(request.GET.get("page"))
     pagination_params = request.GET.copy()
     pagination_params.pop("page", None)
     return render(

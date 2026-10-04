@@ -1248,8 +1248,8 @@ class KnowledgeBaseTests(TestCase):
         first_page = self.client.get(
             reverse("knowledge:job_detail", kwargs={"pk": job.pk})
         )
-        self.assertEqual(first_page.context["items_page"].paginator.per_page, 50)
-        self.assertEqual(len(first_page.context["items_page"]), 50)
+        self.assertEqual(first_page.context["items_page"].paginator.per_page, 30)
+        self.assertEqual(len(first_page.context["items_page"]), 30)
         self.assertContains(first_page, "knowledge-job-items-table")
         self.assertContains(first_page, "第 1 / 2 页")
 
@@ -1257,7 +1257,7 @@ class KnowledgeBaseTests(TestCase):
             reverse("knowledge:job_detail", kwargs={"pk": job.pk}),
             {"page": 2},
         )
-        self.assertEqual(len(second_page.context["items_page"]), 1)
+        self.assertEqual(len(second_page.context["items_page"]), 21)
 
     def test_library_defaults_to_current_member_and_can_switch_to_all_members(self):
         private_document = self.make_document(

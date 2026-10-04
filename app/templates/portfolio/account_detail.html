@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load table_navigation %}
 {% load money static %}
 
 {% block title %}{{ account.account_name }}{% endblock %}
@@ -62,8 +63,11 @@
         </label>
       </form>
     </div>
-    <div class="account-table-wrap"><table class="account-prototype-table account-positions-table"><thead><tr><th>市场</th><th>标的</th><th>资产类别</th><th>数量</th><th>最新价</th><th>行情状态</th><th>市值</th><th>成本</th><th>持仓盈亏</th><th>累计已实现盈亏</th><th>仓位</th><th>操作</th></tr></thead>
-      <tbody>{% for item in positions %}<tr>
+    <div class="account-table-wrap">{% table_page positions "positions" "账户持仓" as positions_table %}
+<div id="{{ positions_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=positions_table %}
+<table class="account-prototype-table account-positions-table"><thead><tr><th>市场</th><th>标的</th><th>资产类别</th><th>数量</th><th>最新价</th><th>行情状态</th><th>市值</th><th>成本</th><th>持仓盈亏</th><th>累计已实现盈亏</th><th>仓位</th><th>操作</th></tr></thead>
+      <tbody>{% for item in positions_table.page %}<tr>
         <td><span class="market-badge market-{{ item.security.market|lower }}">{{ item.security.market }}</span></td><td>{% if item.security.asset_type == 'stock' %}<a href="{% url 'portfolio:stock_market_detail' item.security.pk %}">{{ item.security.name }}</a>{% else %}{{ item.security.name }}{% endif %}</td><td>{{ item.security.asset_category|default:item.security.asset_type }}</td><td>{{ item.quantity|floatformat:"-4" }}</td>
         <td>{{ item.display_price|currency2:item.original_currency }}</td><td><span class="pricing-status pricing-{{ item.pricing_status_display }}">{{ item.pricing_status_label }}</span><small class="price-meta">{{ item.price_source_label }}{% if item.price_as_of %} · {{ item.price_as_of|date:"m-d H:i" }}{% endif %}</small></td><td>{{ item.market_value_live|currency0:item.original_currency }}</td><td>{{ item.display_cost|currency2:item.original_currency }}</td>
         <td class="{% if item.unrealized_live > 0 %}positive{% elif item.unrealized_live < 0 %}negative{% endif %}"><span class="money-stack">{{ item.unrealized_live|signed_currency0:item.original_currency }}<small>本位币 {{ item.unrealized_base|signed_currency0:account.family.base_currency }}</small></span></td>
@@ -77,7 +81,8 @@
           {% if item.is_short_option and item.option_expired %}<a class="holding-action holding-action-accent" href="{% url 'portfolio:option_position_action' item.pk 'assignment' %}">到期指派</a>{% endif %}
         </span></td>
       </tr>{% empty %}<tr><td colspan="12">暂无持仓。</td></tr>{% endfor %}</tbody>
-    </table></div>
+    </table>
+{% include "workspace/table_pagination.html" with table=positions_table %}</div>
   {% elif active_tab == "individual-profit" %}
     <div class="section-head"><h2>个股盈亏</h2></div>
     <form data-auto-filter method="get" class="prototype-filters profit-filters">

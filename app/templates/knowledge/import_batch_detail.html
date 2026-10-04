@@ -1,4 +1,5 @@
 {% extends "knowledge_hub/base.html" %}
+{% load table_navigation %}
 
 {% block title %}导入批次 #{{ batch.pk }} · 知识中心{% endblock %}
 {% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:imports' %}">资料导入</a><span aria-hidden="true">›</span><span>批次 #{{ batch.pk }}</span>{% endblock %}
@@ -56,11 +57,14 @@
 <section class="panel">
   <h2>逐篇检查结果</h2>
   {% if items_redacted %}<div class="notice warning">该批次属于其他成员的私密资料；这里只显示汇总。</div>{% endif %}
-  <table class="knowledge-data-table knowledge-import-items-table">
+  {% table_page items "import_items" "导入明细" as import_items_table %}
+<div id="{{ import_items_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=import_items_table %}
+<table class="knowledge-data-table knowledge-import-items-table">
     <colgroup><col class="knowledge-import-items-col-title"><col class="knowledge-import-items-col-date"><col class="knowledge-import-items-col-result"><col class="knowledge-import-items-col-assets"><col class="knowledge-import-items-col-warning"></colgroup>
     <thead><tr><th>文章</th><th>发布日期</th><th>结论</th><th>图片</th><th>警告或错误</th></tr></thead>
     <tbody>
-      {% for item in items %}
+      {% for item in import_items_table.page %}
         <tr>
           <td>
             {% if item.document_id and item.status == "imported" %}<a href="{% url 'knowledge:document_detail' item.document_id %}">{{ item.title }}</a>{% else %}<strong>{{ item.title|default:item.relative_path }}</strong>{% endif %}
@@ -79,5 +83,6 @@
       {% endfor %}
     </tbody>
   </table>
+{% include "workspace/table_pagination.html" with table=import_items_table %}
 </section>
 {% endblock %}

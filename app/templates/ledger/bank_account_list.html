@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load table_navigation %}
 
 {% block title %}账户{% endblock %}
 
@@ -8,15 +9,19 @@
     <h1>账户</h1>
     <a class="button" href="{% url 'ledger:bank_account_create' %}?return_to={{ request.get_full_path|urlencode }}">新增账户</a>
   </div>
-  <table>
+  {% table_page accounts "bank_accounts" "银行账户" as bank_accounts_table %}
+<div id="{{ bank_accounts_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=bank_accounts_table %}
+<table>
     <thead><tr><th>成员</th><th>账户名称</th><th>账号</th><th>账户地区</th><th>账户类型</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>
-      {% for account in accounts %}
+      {% for account in bank_accounts_table.page %}
         <tr><td>{{ account.member }}</td><td>{{ account.account_name }}</td><td>{{ account.account_no_masked }}</td><td>{{ account.account_region }}</td><td>{{ account.account_type_ref }}</td><td>{{ account.is_active }}</td><td><a href="{% url 'ledger:bank_account_edit' account.id %}?return_to={{ request.get_full_path|urlencode }}">编辑</a></td></tr>
       {% empty %}
         <tr><td colspan="7">暂无数据</td></tr>
       {% endfor %}
     </tbody>
   </table>
+{% include "workspace/table_pagination.html" with table=bank_accounts_table %}
 </section>
 {% endblock %}

@@ -881,7 +881,7 @@ def snapshot_list(request):
     if date_to:
         snapshots = snapshots.filter(snapshot_date__lte=date_to)
 
-    page = Paginator(snapshots, 31).get_page(request.GET.get("page"))
+    page = Paginator(snapshots, 30).get_page(request.GET.get("page"))
     dates = [item.snapshot_date for item in page.object_list]
     scope_counts = {
         row["snapshot_date"]: row
@@ -1536,7 +1536,7 @@ def account_detail(request, pk):
                 frame=RowRange(start=None, end=0)),
         ).select_related("transaction__security", "counterparty_account__member").order_by(
             "-movement_date", "-created_at", "-pk")
-        activity_page = Paginator(movements, 50).get_page(request.GET.get("page"))
+        activity_page = Paginator(movements, 30).get_page(request.GET.get("page"))
         context["cash_movements"] = activity_page
     elif active_tab in {"transactions", "individual-profit"}:
         transactions = InvestmentTransaction.objects.filter(account=account).select_related(
@@ -1569,7 +1569,7 @@ def account_detail(request, pk):
                 root = option.underlying if option else security
                 key = f"option:{root.pk}" if option else f"security:{security.pk}"
                 options[key] = f"{root.name}（{'期权' if option else security.get_asset_type_display()}）"
-            activity_page = Paginator(transactions.order_by("-trade_date", "-created_at", "-pk"), 50).get_page(request.GET.get("page"))
+            activity_page = Paginator(transactions.order_by("-trade_date", "-created_at", "-pk"), 30).get_page(request.GET.get("page"))
             for item in activity_page:
                 item.total_fee = item.fee + item.tax
             context["transactions"] = activity_page
@@ -2373,7 +2373,7 @@ def transaction_list(request):
     transactions = InvestmentTransaction.objects.filter(
         account__in=_visible_accounts(request)
     ).select_related("account__bank_account", "security").order_by("-trade_date", "-created_at", "-pk")
-    page = Paginator(transactions, 100).get_page(request.GET.get("page"))
+    page = Paginator(transactions, 30).get_page(request.GET.get("page"))
     return render(request, "portfolio/transaction_list.html", {"transactions": page, "page_obj": page})
 
 

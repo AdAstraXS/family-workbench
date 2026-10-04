@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load table_navigation %}
 {% load static %}
 {% block title %}收盘观察清单{% endblock %}
 {% block extra_head %}<link rel="stylesheet" href="{% static 'css/option_wheel_analysis.css' %}">{% endblock %}
@@ -39,8 +40,12 @@
   {% elif request.user.is_superuser %}<p class="option-wheel-empty">尚未启用 TSLA、MSFT 或 NVDA 的家庭车轮策略。</p>{% endif %}
   <section id="recent-analysis" class="option-wheel-section">
     <h2>最近的收盘观察</h2><p>此处只展示收盘报告，与实时分析记录完全分开。报告为采集时证据，旧报告不会自动更新。</p>
-    {% if reports %}<div class="option-wheel-table-wrap"><table class="option-wheel-table"><thead><tr><th>保存时间</th><th>市场数据日</th><th>标的</th><th>报告</th></tr></thead>
-      <tbody>{% for report in reports %}<tr><td>{{ report.created_at|date:"Y-m-d H:i:s T" }}</td><td>{{ report.target_date|date:"Y-m-d" }}</td><td>{{ report.symbol }}</td><td><a href="{% url 'option_wheel:close_detail' report.pk %}">观察 #{{ report.pk }} · 待核验</a></td></tr>{% endfor %}</tbody></table></div>
+    {% if reports %}<div class="option-wheel-table-wrap">{% table_page reports "reports" "收盘报告" as reports_table %}
+<div id="{{ reports_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=reports_table %}
+<table class="option-wheel-table"><thead><tr><th>保存时间</th><th>市场数据日</th><th>标的</th><th>报告</th></tr></thead>
+      <tbody>{% for report in reports_table.page %}<tr><td>{{ report.created_at|date:"Y-m-d H:i:s T" }}</td><td>{{ report.target_date|date:"Y-m-d" }}</td><td>{{ report.symbol }}</td><td><a href="{% url 'option_wheel:close_detail' report.pk %}">观察 #{{ report.pk }} · 待核验</a></td></tr>{% endfor %}</tbody></table>
+{% include "workspace/table_pagination.html" with table=reports_table %}</div>
     {% else %}<p class="option-wheel-empty">尚无收盘观察报告。浏览本页不会抓取行情或写入数据。</p>{% endif %}
   </section>
 </div>

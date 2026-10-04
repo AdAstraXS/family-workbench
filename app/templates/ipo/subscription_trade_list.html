@@ -175,7 +175,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_subscription_trade_table.html" with trades=applying_trades amount_column="fees" empty_text="暂无申购中新股。" %}
+      {% include "ipo/_subscription_trade_table.html" with table_key="ipo_applying" trades=applying_trades amount_column="fees" empty_text="暂无申购中新股。" %}
     </div>
   </div>
 </section>
@@ -186,7 +186,7 @@
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_subscription_trade_table.html" with trades=holding_trades amount_column="holding" empty_text="暂无尚持有新股。" %}
+      {% include "ipo/_subscription_trade_table.html" with table_key="ipo_holding" trades=holding_trades amount_column="holding" empty_text="暂无尚持有新股。" %}
     </div>
   </div>
 </section>
@@ -194,20 +194,12 @@
 <section class="ipo-list-section">
   <div class="section-head">
     <h2>清仓</h2>
-    <span class="muted-text">共 {{ closed_count }} 条，默认显示前 10 条</span>
+    <span class="muted-text">共 {{ closed_count }} 条，每页最多 30 条</span>
   </div>
   <div class="panel record-panel">
     <div class="record-table-wrap ipo-table-wrap">
-      {% include "ipo/_subscription_trade_table.html" with trades=closed_visible amount_column="fees" empty_text="暂无清仓新股。" closed_mode=True %}
+      {% include "ipo/_subscription_trade_table.html" with table_key="ipo_closed" trades=closed_visible|add:closed_hidden amount_column="fees" empty_text="暂无清仓新股。" closed_mode=True %}
     </div>
-    {% if closed_hidden %}
-      <details class="ipo-more-listings">
-        <summary>展开查看剩余 {{ closed_hidden|length }} 条清仓记录</summary>
-        <div class="record-table-wrap ipo-table-wrap">
-          {% include "ipo/_subscription_trade_table.html" with trades=closed_hidden amount_column="fees" closed_mode=True %}
-        </div>
-      </details>
-    {% endif %}
   </div>
 </section>
 {% endblock %}

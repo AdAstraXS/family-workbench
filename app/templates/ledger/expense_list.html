@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load table_navigation %}
 {% load money %}
 
 {% block title %}{{ report_title }}{% endblock %}
@@ -30,7 +31,10 @@
     <h2>收入记录</h2>
   </div>
   <div class="record-table-wrap">
-    <table class="record-table year-detail-table">
+    {% table_page income_rows "income_rows" "收入明细" as income_rows_table %}
+<div id="{{ income_rows_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=income_rows_table %}
+<table class="record-table year-detail-table">
       <thead>
         <tr>
           <th>年月</th>
@@ -43,7 +47,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for row in income_rows %}
+        {% for row in income_rows_table.page %}
           <tr>
             <td>{{ row.period_label }}</td>
             <td>{{ row.member }}</td>
@@ -67,18 +71,19 @@
         {% endfor %}
         {% for total in income_member_totals %}
           <tr class="record-total-row">
-            <td colspan="3">{{ total.member }}收入合计</td>
+            <td colspan="3">{{ total.member }}收入合计（全部筛选结果）</td>
             <td class="number income">{{ total.amount|thousands }}</td>
             <td colspan="3"></td>
           </tr>
         {% endfor %}
         <tr class="record-total-row family-total-row">
-          <td colspan="3">家庭收入合计</td>
+          <td colspan="3">家庭收入合计（全部筛选结果）</td>
           <td class="number income">{{ income_family_total|thousands }}</td>
           <td colspan="3"></td>
         </tr>
       </tbody>
     </table>
+{% include "workspace/table_pagination.html" with table=income_rows_table %}
   </div>
 </section>
 
@@ -86,12 +91,15 @@
   <div class="section-head inner-head">
     <h2>支出记录</h2>
     {% if expense_filter_active %}
-      <span class="filter-status">已按条件筛选，合计已重新计算</span>
+      <span class="filter-status">已按条件筛选，合计已重新计算（涵盖全部筛选结果）</span>
     {% endif %}
   </div>
   <form data-auto-filter id="expense-filter-form" method="get" action="{{ request.path }}"></form>
-  <div class="record-table-wrap expense-record-window" tabindex="0" role="region" aria-label="支出记录，可在表格内滚动查看全部记录">
-    <table class="record-table year-detail-table expense-detail-table">
+  {% table_page expense_rows "expenses" "支出明细" as expenses_table %}
+<div id="{{ expenses_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=expenses_table %}
+  <div data-table-scroll-managed class="record-table-wrap expense-record-window" tabindex="0" role="region" aria-label="支出记录，可在表格内滚动查看全部记录">
+<table class="record-table year-detail-table expense-detail-table">
       <thead>
         <tr>
           <th>日期</th>
@@ -159,7 +167,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for row in expense_rows %}
+        {% for row in expenses_table.page %}
           <tr class="expense-record-row">
             <td>{{ row.period_label }}</td>
             <td>{{ row.member }}</td>
@@ -186,19 +194,20 @@
         {% endfor %}
         {% for total in expense_member_totals %}
           <tr class="record-total-row">
-            <td colspan="6">{{ total.member }}支出合计</td>
+            <td colspan="6">{{ total.member }}支出合计（全部筛选结果）</td>
             <td class="number expense">{{ total.amount|money2 }}</td>
             <td colspan="3"></td>
           </tr>
         {% endfor %}
         <tr class="record-total-row family-total-row">
-          <td colspan="6">家庭支出合计</td>
+          <td colspan="6">家庭支出合计（全部筛选结果）</td>
           <td class="number expense">{{ expense_family_total|money2 }}</td>
           <td colspan="3"></td>
         </tr>
       </tbody>
     </table>
   </div>
+{% include "workspace/table_pagination.html" with table=expenses_table %}
 </section>
 {% endblock %}
 

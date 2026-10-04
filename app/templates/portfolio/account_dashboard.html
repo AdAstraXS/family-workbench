@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load table_navigation %}
 {% load static %}
 {% load money %}
 
@@ -123,10 +124,13 @@
 <section class="panel" id="holdings">
   <div class="section-head"><div><h2>持仓明细</h2><p>持仓按交易原币展示，盈亏同时显示家庭本位币。</p></div></div>
   <div class="account-table-wrap dashboard-holdings-wrap">
-    <table class="account-prototype-table holdings-prototype-table dashboard-holdings-table">
+    {% table_page positions "holdings" "持仓明细" as holdings_table %}
+<div id="{{ holdings_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=holdings_table %}
+<table class="account-prototype-table holdings-prototype-table dashboard-holdings-table">
       <thead><tr><th>证券代码</th><th>证券名称</th><th>成员</th><th>券商账户</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>浮动盈亏</th><th>累计已实现盈亏</th><th>操作</th></tr></thead>
       <tbody>
-        {% for item in positions %}
+        {% for item in holdings_table.page %}
           <tr>
             <td>{{ item.security.symbol }}</td><td>{% if item.security.asset_type == 'stock' %}<a href="{% url 'portfolio:stock_market_detail' item.security.pk %}">{{ item.security.name }}</a>{% else %}{{ item.security.name }}{% endif %}</td><td>{{ item.account.member }}</td><td>{{ item.account.account_name }}</td>
             <td>{{ item.quantity|floatformat:"-4" }}</td><td>{{ item.display_price|currency2:item.original_currency }}</td><td>{{ item.market_value_live|currency0:item.original_currency }}</td><td>{{ item.display_cost|currency2:item.original_currency }}</td>
@@ -143,6 +147,7 @@
         {% empty %}<tr><td colspan="11">该统计年份暂无持仓记录。</td></tr>{% endfor %}
       </tbody>
     </table>
+{% include "workspace/table_pagination.html" with table=holdings_table %}
   </div>
 </section>
 {% endif %}

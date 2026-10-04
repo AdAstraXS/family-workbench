@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -7,12 +8,28 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
 from family_core.models import AssetCategory
+from ledger.models import ExpenseRecord
 from portfolio import tests as fixtures
 from portfolio.models import Security, InvestmentPosition, InvestmentCashMovement, InvestmentTransaction
 
 
 class PortfolioPageEfficiencyTests(TestCase):
     setUp = fixtures.PortfolioOverviewTests.setUp
+
+    def test_expense_pagination_preserves_filtered_totals(self):
+        ExpenseRecord.objects.bulk_create([
+            ExpenseRecord(family=self.member.family, member=self.member,
+                expense_date=date(2026, 10, 4), amount=Decimal('10'), currency='CNY')
+            for _ in range(65)
+        ])
+        url = reverse('ledger:expense_month_detail', args=[2026, 10])
+        for number, count in [(1, 30), (2, 30), (3, 5)]:
+            response = self.client.get(url, {'member': self.member.pk, 'table_page_expenses': number})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.content.decode().count('<tr class="expense-record-row">'), count)
+            self.assertEqual(len(response.context['expense_rows']), 65)
+            self.assertEqual(response.context['expense_family_total'], Decimal('650'))
+            self.assertContains(response, f'member={self.member.pk}')
 
     def test_missing_price_is_not_reported_as_missing_fx(self):
         self.latest_position.current_price = Decimal('0')
@@ -70,7 +87,7 @@ class PortfolioPageEfficiencyTests(TestCase):
             balances[row.currency] = balances.get(row.currency, Decimal(0)) + row.amount
             expected[row.pk] = balances[row.currency]
         url = reverse('portfolio:account_detail', args=[self.account.pk])
-        for number in (1,2,3):
+        for number in (1,2,3,4):
             response = self.client.get(url, {'tab':'cashflows','page':number})
             self.assertEqual(response.status_code, 200)
             for row in response.context['cash_movements']:
@@ -82,7 +99,7 @@ class PortfolioPageEfficiencyTests(TestCase):
             InvestmentTransaction(account=self.account,security=self.security,trade_date=self.latest_position.position_date,
                 trade_type='buy',quantity=1,price=10,amount=10,currency='HKD') for i in range(120)])
         response = self.client.get(reverse('portfolio:account_detail',args=[self.account.pk]), {'tab':'transactions','page':2,'stock':f'security:{self.security.pk}'})
-        self.assertEqual(len(response.context['transactions']), 50)
+        self.assertEqual(len(response.context['transactions']), 30)
         self.assertEqual(response.context['activity_page'].paginator.count, 120)
         self.assertLess(len(response.content), 120000)
         self.assertIn(f'stock=security%3A{self.security.pk}', response.context['pagination_query'])

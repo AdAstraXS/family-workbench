@@ -2113,7 +2113,7 @@ def expense_category_edit(request, pk):
 
 @login_required
 def income_list(request):
-    records = IncomeRecord.objects.select_related("member", "category", "category__parent").order_by("-period_start", "-income_date", "-created_at")[:100]
+    records = IncomeRecord.objects.select_related("member", "category", "category__parent").order_by("-period_start", "-income_date", "-created_at", "-pk")
     return render(request, "ledger/income_list.html", {"records": records})
 
 

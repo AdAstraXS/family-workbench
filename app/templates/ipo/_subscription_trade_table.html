@@ -1,4 +1,8 @@
 {% load money %}
+{% load table_navigation %}
+{% table_page trades table_key "申购和交易" as ipo_trades_table %}
+<div id="{{ ipo_trades_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=ipo_trades_table %}
 <table class="record-table ipo-trade-table">
   <thead>
     <tr>
@@ -32,7 +36,7 @@
     </tr>
   </thead>
   <tbody>
-    {% for trade in trades %}
+    {% for trade in ipo_trades_table.page %}
       <tr>
         {% if closed_mode %}
           <td>{{ trade.ipo_trade.listing.stock_code }}</td>
@@ -134,3 +138,4 @@
     {% endfor %}
   </tbody>
 </table>
+{% include "workspace/table_pagination.html" with table=ipo_trades_table %}

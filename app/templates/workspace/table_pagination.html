@@ -1,0 +1,9 @@
+{% if table.page.paginator.num_pages > 1 %}
+<nav class="table-pagination" aria-label="{{ table.label }}分页">
+  <span>共 {{ table.page.paginator.count }} 条 · 第 {{ table.page.number }} / {{ table.page.paginator.num_pages }} 页 · 每页 30 条</span>
+  <span class="table-pagination-links">
+    {% if table.previous_url %}<a href="{{ table.first_url }}">首页</a><a href="{{ table.previous_url }}">上一页</a>{% endif %}
+    {% if table.next_url %}<a href="{{ table.next_url }}">下一页</a><a href="{{ table.last_url }}">末页</a>{% endif %}
+  </span>
+</nav>
+{% endif %}

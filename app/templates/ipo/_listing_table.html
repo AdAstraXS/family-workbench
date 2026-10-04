@@ -1,4 +1,8 @@
 {% load money %}
+{% load table_navigation %}
+{% table_page listings table_key "新股资料" as ipo_listings_table %}
+<div id="{{ ipo_listings_table.anchor }}"></div>
+{% include "workspace/table_pagination.html" with table=ipo_listings_table %}
 <table class="record-table ipo-listing-table">
   <thead>
     <tr>
@@ -36,7 +40,7 @@
     </tr>
   </thead>
   <tbody>
-    {% for listing in listings %}
+    {% for listing in ipo_listings_table.page %}
       <tr>
         <td><a href="{% url 'ipo:listing_detail' listing.pk %}">{{ listing.stock_code }}</a></td>
         <td>{{ listing.stock_name|default:listing.company_name }}</td>
@@ -103,3 +107,4 @@
     {% endfor %}
   </tbody>
 </table>
+{% include "workspace/table_pagination.html" with table=ipo_listings_table %}

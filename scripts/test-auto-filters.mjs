@@ -13,7 +13,8 @@ function fixture(method = 'get') {
   const query = control('q', ''), market = control('market', 'HK', 'select-one', 'SELECT');
   const page = control('page', '3', 'hidden'), cursor = control('cursor', 'old', 'hidden');
   const category = control('category', 'old', 'hidden'), submit = control('', '', 'submit', 'BUTTON');
-  const fields = [query, market, page, cursor, category, submit];
+  const tablePage = control('table_page_expenses', '4', 'hidden');
+  const fields = [query, market, page, cursor, category, submit, tablePage];
   const form = {method, action: 'https://test.invalid/list/#results', elements: fields,
     valid: true, checkValidity() {return this.valid;}, appendChild() {},
     addEventListener(name, callback) {this[name] = callback;}};
@@ -44,6 +45,7 @@ function fixture(method = 'get') {
   assert.equal(f.navigations[0].searchParams.get('q'), '中文');
   assert.equal(f.navigations[0].searchParams.has('page'), false);
   assert.equal(f.navigations[0].searchParams.has('cursor'), false);
+  assert.equal(f.navigations[0].searchParams.has('table_page_expenses'), false);
   assert.equal(f.navigations[0].hash, '#results');
   assert.equal(f.submit.hidden, true);
   f.windows.pageshow();
