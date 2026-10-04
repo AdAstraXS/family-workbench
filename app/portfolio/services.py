@@ -276,6 +276,10 @@ def settle_option_position(
     remark="",
     user=None,
 ):
+    # Serialize settlement with contract corrections, before taking account locks.
+    if position.security.asset_type != position.security.TYPE_OPTION:
+        raise ValidationError("只有期权持仓可以执行到期作废、行权或指派。")
+    contract = OptionContract.objects.select_for_update().get(security_id=position.security_id)
     lock_accounts([position.account_id])
     position.refresh_from_db()
     if position.security.asset_type != position.security.TYPE_OPTION:
@@ -285,7 +289,6 @@ def settle_option_position(
     if action not in {"expire", "exercise", "assignment"}:
         raise ValidationError("不支持的期权处理方式。")
 
-    contract = position.security.option_contract
     is_long = position.quantity > 0
     if action == "exercise" and not is_long:
         raise ValidationError("空头期权不能行权，请使用到期指派。")

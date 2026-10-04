@@ -1,0 +1,5 @@
+{% if activity_page %}<nav class="research-pager" aria-label="账户记录分页">
+  {% if activity_page.has_previous %}<a href="?{{ pagination_query }}&page={{ activity_page.previous_page_number }}">上一页</a>{% endif %}
+  <span>共 {{ activity_page.paginator.count }} 条 · 第 {{ activity_page.number }} / {{ activity_page.paginator.num_pages }} 页</span>
+  {% if activity_page.has_next %}<a href="?{{ pagination_query }}&page={{ activity_page.next_page_number }}">下一页</a>{% endif %}
+</nav>{% endif %}

@@ -1,13 +1,17 @@
 """US and foreign issuer filings, exhibits and taxonomy-neutral XBRL facts."""
 import re
 import hashlib
+import gzip
 from collections import defaultdict
 from django.conf import settings
+from django.utils import timezone
+from django.db.models.functions import Length
 from .company_identity import identity_for
 from .material_store import save_material, record_failure
 from .providers.sec import filing_url, SUBMISSIONS_URL_TEMPLATE, parse_recent_filings
 from .sec_content import extract_sec_html
 from .source_sync import _default_sec_client
+from .models import CompanyMaterialVersion, OfficialResearchContentVersion
 
 
 def resolve_sec(security, client):
@@ -48,12 +52,15 @@ def download(security, cik, record, client=None):
     client = client or _default_sec_client(security)
     url = filing_url(cik, record["accession"], record["primary_document"])
     key = "sec:" + record["accession"]
-    _document(security, key, url, record["title"], record, client)
+    reused = _document(security, key, url, record["title"], record, client)
     # index.json discovers exhibits even when the cover contains no links.
     directory_url = url.rsplit("/", 1)[0] + "/index.json"
-    directory = client.get_json(directory_url)
-    save_material(security, key + ":index", "sec_index", record["title"] + " · 附件目录",
-                  source_url=directory_url, data=directory)
+    stored_index = CompanyMaterialVersion.objects.filter(material__security=security,
+        material__key=key + ':index').only('data').first()
+    directory = stored_index.data if stored_index else client.get_json(directory_url)
+    if not stored_index:
+        save_material(security, key + ":index", "sec_index", record["title"] + " · 附件目录",
+                      source_url=directory_url, data=directory)
     candidates = []
     for item in directory.get("directory", {}).get("item", []):
         name = str(item.get("name", ""))
@@ -76,17 +83,34 @@ def download(security, cik, record, client=None):
         if position >= 12:
             continue
         try:
-            _document(security, attachment_key[:180], attachment_url, record["title"] + " · " + name,
+            reused += _document(security, attachment_key[:180], attachment_url, record["title"] + " · " + name,
                       {**record, "attachment": name}, client)
         except Exception:
             record_failure(security, attachment_key[:180], "sec_document", name, "附件未能获取或提取，请单独重试。")
             failures.append(name)
     if failures:
         raise ValueError(f"主文件已保存，{len(failures)} 份附件未完成。")
-    return "主文件与附件已保存" + (f"；另有 {len(candidates) - 12} 份附件待按需获取" if len(candidates) > 12 else "")
+    return f"主文件与附件已就绪；复用 {reused} 份本地原件，补取 {1 + min(len(candidates), 12) - reused} 份" + (f"；另有 {len(candidates) - 12} 份附件待按需获取" if len(candidates) > 12 else "")
 
 
 def _document(security, key, url, title, record, client):
+    # Normal updates reuse the exact accession + URL already archived. Amendments
+    # have a separate accession; rare SEC post-acceptance corrections are distinct
+    # from daily discovery and must not silently replace the saved original.
+    stored = CompanyMaterialVersion.objects.filter(material__security=security, material__key=key,
+        source_url=url).annotate(raw_size=Length('raw_gzip')).filter(raw_size__gt=0).only('pk', 'material_id').first()
+    if stored:
+        from .models import CompanyMaterial
+        CompanyMaterial.objects.filter(pk=stored.material_id).update(last_error='', checked_at=timezone.now())
+        return 1
+    legacy = OfficialResearchContentVersion.objects.filter(document__security=security,
+        document__source='sec', source_url=url).order_by('-version_number').first()
+    if legacy and legacy.raw_gzip:
+        save_material(security, key, 'sec_document', title, source_url=url,
+            raw=gzip.decompress(bytes(legacy.raw_gzip)), media_type=legacy.media_type,
+            text=legacy.content_text or '', data=record,
+            report_date=record.get('report_date') or record.get('filing_date'))
+        return 1
     raw = client.get_document_html(url, max_bytes=settings.RESEARCH_SEC_DOCUMENT_MAX_BYTES)
     media_type = "application/pdf" if url.lower().endswith(".pdf") else "text/html"
     warning = ""
@@ -102,6 +126,7 @@ def _document(security, key, url, title, record, client):
     save_material(security, key, "sec_document", title, source_url=url, raw=raw,
         media_type=media_type, text=text, data={**record, "warning": warning},
         report_date=record.get("report_date") or record.get("filing_date"))
+    return 0
 
 
 def company_facts(security, client=None):

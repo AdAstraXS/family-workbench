@@ -1,0 +1,14 @@
+{% if valuation %}
+{% if not valuation.complete or valuation.stale_prices %}
+<section class="panel" aria-label="估值需核对事项">
+  {% if valuation.missing_prices %}<p class="form-error">部分持仓缺少价格，无法形成完整估值；已显示的金额仅供参考。</p>{% endif %}
+  {% if valuation.missing_rates %}<p class="form-error">部分资产缺少兑 {{ base_currency }} 的汇率，尚未计入估值。</p>{% endif %}
+  {% if valuation.stale_prices %}<p class="market-data-warning">部分持仓价格已过期、刷新失败或期权已到期待处理，估值仅供参考。</p>{% endif %}
+  <details><summary>查看估值缺项与价格日期</summary><ul>
+    {% for issue in valuation.issues %}<li>{% if issue.account %}{{ issue.account }} · {% elif issue.account_id %}账户 #{{ issue.account_id }} · {% endif %}{{ issue.security|default:"现金" }}：{% if issue.kind == "price" %}缺少价格{% elif issue.kind == "rate" %}缺少 {{ issue.currency }} 兑 {{ base_currency }} 汇率{% else %}{{ issue.status }} · 价格日期 {{ issue.as_of|date:"Y-m-d H:i"|default:"未知" }}{% endif %}</li>{% endfor %}
+  </ul></details>
+  <a href="{% url 'portfolio:market_data_status' %}">查看行情与估值</a>
+</section>
+{% endif %}
+
+{% endif %}

@@ -1,10 +1,11 @@
+from family_core.job_runtime import BoundedJobCommand
 from django.core.management.base import BaseCommand, CommandError
 
 from ai_analysis.global_ai_jobs import run_global_ai_request
 from ai_analysis.models import AiAnalysisRequest
 
 
-class Command(BaseCommand):
+class Command(BoundedJobCommand):
     help = "处理一份已授权的全局 AI 请求。"
 
     def add_arguments(self, parser):

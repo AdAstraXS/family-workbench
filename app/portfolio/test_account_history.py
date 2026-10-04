@@ -123,7 +123,7 @@ class HistoricalAccountTests(TestCase):
         self.assertEqual(position["realized"], 8)
         self.assertNotContains(response, "更新价格")
         self.assertNotContains(response, "action=sell")
-        self.assertContains(response, "未统计")
+        self.assertContains(response, "当年已实现盈亏")
         self.assertContains(response, "不是该年收益")
 
     def test_account_link_preserves_year_and_inactive_account_is_visible(self):
@@ -181,3 +181,76 @@ class HistoricalAccountTests(TestCase):
         response = self.page(year="2026")
         self.assertEqual(response.context["account_rows"][0]["realized"], 686)
         self.assertEqual(response.context["balance_snapshot_date"], date(2026, 9, 29))
+
+    def opening(self, *, profit=2, currency="USD", fx=6):
+        snapshot = PortfolioSnapshot.objects.create(
+            family=self.family, snapshot_date=date(2024, 12, 31), currency="CNY",
+            extra_data={"complete": True},
+        )
+        PortfolioSnapshotPositionLine.objects.create(
+            snapshot=snapshot, account=self.account, security=self.security,
+            asset_type="stock", currency=currency, market_value_original=10 + profit,
+            cost_original=10, market_value=(10 + profit) * fx, cost=10 * fx,
+            unrealized_pnl=profit * fx, fx_rate=fx,
+        )
+        return snapshot
+
+    def test_annual_profit_uses_closing_fx_for_both_endpoints(self):
+        self.opening()
+        response = self.page()
+        row = response.context["account_rows"][0]
+        self.assertEqual(row["annual_realized"], 35)
+        self.assertEqual(row["opening_unrealized"], 14)
+        self.assertEqual(row["closing_unrealized"], 28)
+        self.assertEqual(row["annual_total"], 49)
+        self.assertEqual(row["realized"], 56)
+        self.assertEqual(response.context["historical_positions"][0]["annual_realized"], 5)
+        self.assertEqual(response.context["summary_rows"][0]["annual_total"], 49)
+
+    def test_missing_opening_keeps_realized_but_not_total(self):
+        response = self.page()
+        row = response.context["account_rows"][0]
+        self.assertEqual(row["annual_realized"], 35)
+        self.assertIsNone(row["annual_total"])
+        self.assertContains(response, "缺少 2024-12-31 期初快照")
+        self.assertIsNone(response.context["summary_rows"][0]["annual_total"])
+
+    def test_disposed_opening_position_is_included_in_annual_change(self):
+        self.opening()
+        self.holding.delete()
+        row = self.page().context["account_rows"][0]
+        self.assertEqual(row["annual_total"], 21)
+
+    def test_opening_stale_price_blocks_total_even_when_complete_true(self):
+        opening = self.opening()
+        opening.extra_data = {"complete": True, "stale_prices": [{"account_id": self.account.pk}]}
+        opening.save()
+        row = self.page().context["account_rows"][0]
+        self.assertEqual(row["annual_realized"], 35)
+        self.assertIsNone(row["annual_total"])
+        self.assertIn("期初：价格需核对", row["annual_note"])
+
+    def test_new_account_zero_opening_requires_complete_prior_snapshot(self):
+        InvestmentTransaction.objects.filter(trade_date__year=2024).delete()
+        PortfolioSnapshot.objects.create(family=self.family, snapshot_date=date(2024, 12, 31), currency="CNY", extra_data={"complete": True})
+        row = self.page().context["account_rows"][0]
+        self.assertEqual(row["opening_unrealized"], 0)
+        self.assertEqual(row["annual_total"], 63)
+
+    def test_old_account_missing_opening_lines_is_not_zero(self):
+        PortfolioSnapshot.objects.create(family=self.family, snapshot_date=date(2024, 12, 31), currency="CNY", extra_data={"complete": True})
+        self.assertIsNone(self.page().context["account_rows"][0]["annual_total"])
+
+    def test_yearly_transactions_match_effective_status_and_snapshot_cutoff(self):
+        self.opening()
+        InvestmentTransaction.objects.create(account=self.account, trade_date=date(2025, 9, 1), trade_type="sell", currency="USD", realized_pnl=100, status="planned")
+        response = self.client.get(reverse("portfolio:account_detail", args=[self.account.pk]), {"year": "2025", "currency": "CNY"})
+        self.assertEqual(len(response.context["annual_transactions"]), 1)
+        self.assertContains(response, "2025 年有效交易")
+        self.assertNotContains(response, "2024-06-01")
+
+    def test_annual_cross_currency_preserves_same_closing_bridge(self):
+        self.opening()
+        AssetBalanceSnapshot.objects.create(family=self.family, snapshot_date=self.snapshot.snapshot_date, base_currency="CNY", usd_to_base=7, hkd_to_base=Decimal("0.9"), is_draft=False)
+        row = self.page("HKD").context["account_rows"][0]
+        self.assertEqual(row["annual_total"], Decimal("49") / Decimal("0.9"))

@@ -7,7 +7,7 @@
   <div class="program-manage-heading"><div><span class="intel-eyebrow">投资阅读 / 信源管理</span><h1>管理精选订阅</h1><p>所有信源放在一起管理。随时修改筛选与自动整理设置，也可以暂停或移除订阅。</p></div><a class="button" href="{% url 'intelligence:program_source_new' %}">＋ 添加信源</a></div>
   <div class="program-manage-stats"><div><strong>{{ total_count }}</strong><span>全部信源</span></div><div><strong>{{ active_count }}</strong><span>正在检查</span></div><div><strong>{{ paused_count }}</strong><span>已暂停 / 逐期添加</span></div></div>
   <section class="program-manage-card" aria-labelledby="source-list-title">
-    <div class="program-manage-card-head"><div><h2 id="source-list-title">信源列表</h2><p>每条订阅都可以编辑、暂停或删除；按名称和类型查找。</p></div><form method="get" action="{% url 'intelligence:program_settings' %}" class="program-manage-search"><input id="program-source-search" name="q" type="search" value="{{ query }}" placeholder="搜索名称或链接" aria-label="搜索信源"><select id="program-source-kind" name="kind" aria-label="按类型筛选"><option value="">全部类型</option><option value="youtube" {% if kind_filter == 'youtube' %}selected{% endif %}>YouTube</option><option value="bilibili" {% if kind_filter == 'bilibili' %}selected{% endif %}>B 站</option><option value="podcast" {% if kind_filter == 'podcast' %}selected{% endif %}>播客 RSS</option><option value="article" {% if kind_filter == 'article' %}selected{% endif %}>文章 RSS</option></select><button type="submit" class="program-search-submit">筛选</button></form></div>
+    <div class="program-manage-card-head"><div><h2 id="source-list-title">信源列表</h2><p>每条订阅都可以编辑、暂停或删除；按名称和类型查找。</p></div><form data-auto-filter method="get" action="{% url 'intelligence:program_settings' %}" class="program-manage-search"><input id="program-source-search" name="q" type="search" value="{{ query }}" placeholder="搜索名称或链接" aria-label="搜索信源"><select id="program-source-kind" name="kind" aria-label="按类型筛选"><option value="">全部类型</option><option value="youtube" {% if kind_filter == 'youtube' %}selected{% endif %}>YouTube</option><option value="bilibili" {% if kind_filter == 'bilibili' %}selected{% endif %}>B 站</option><option value="podcast" {% if kind_filter == 'podcast' %}selected{% endif %}>播客 RSS</option><option value="article" {% if kind_filter == 'article' %}selected{% endif %}>文章 RSS</option></select><button type="submit" class="program-search-submit">筛选</button></form></div>
     <div class="program-source-table-wrap"><table class="program-source-table"><thead><tr><th scope="col">信源</th><th scope="col">类型</th><th scope="col">定向筛选</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>
     {% for row in sources %}<tr class="program-source-row" data-source-name="{{ row.name }} {{ row.url }}" data-source-kind="{{ row.kind }}">
       <td><strong>{{ row.name }}</strong><a class="program-source-url" href="{{ row.url }}" target="_blank" rel="noopener noreferrer">{{ row.url }}</a></td>
@@ -44,18 +44,6 @@
 (() => {
   const editor = document.getElementById('program-source-editor');
   if (editor && !editor.open) editor.showModal();
-  const search = document.getElementById('program-source-search');
-  const kind = document.getElementById('program-source-kind');
-  const rows = [...document.querySelectorAll('.program-source-row')];
-  function filterRows() {
-    const query = search.value.trim().toLocaleLowerCase();
-    rows.forEach(row => { row.hidden = !!((query && !row.dataset.sourceName.toLocaleLowerCase().includes(query)) ||
-      (kind.value && row.dataset.sourceKind !== kind.value)); });
-    const empty = document.getElementById('program-no-filter');
-    if (empty) empty.hidden = rows.some(row => !row.hidden);
-  }
-  search?.addEventListener('input', filterRows);
-  kind?.addEventListener('change', filterRows);
   const confirm = document.getElementById('program-delete-dialog');
   let pending = null;
   document.querySelectorAll('.program-delete-form').forEach(form => form.addEventListener('submit', event => {

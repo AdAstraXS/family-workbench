@@ -1,6 +1,6 @@
 {% extends "investment_watch/base.html" %}
 {% block watch_content %}
 <h1>添加关注公司</h1><p>建立你的公司研究档案；可以先阅读，再形成投资判断。已有档案会直接复用。</p>
-<form method="get" class="iw-search"><label>搜索公司名称或代码<input name="q" value="{{ query }}" placeholder="如 Apple、苹果、AAPL"></label><button>搜索已有公司</button></form>
+<form data-auto-filter method="get" class="iw-search"><label>搜索公司名称或代码<input name="q" value="{{ query }}" placeholder="如 Apple、苹果、AAPL"></label><button>搜索已有公司</button></form>
 <form method="post" class="iw-card">{% csrf_token %}{{ form.as_p }}<p class="iw-muted">没有找到时填写新公司。新增标的不会建立持仓；不同市场的财报自动接入能力可能不同。</p><button>添加并设置关注</button></form>
 {% endblock %}

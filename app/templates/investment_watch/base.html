@@ -1,8 +1,16 @@
 {% extends "base.html" %}{% load static %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'css/investment-watch.css' %}?v=2">{% endblock %}
-{% block title %}投资动态{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/investment-watch.css' %}?v=3">{% endblock %}
+{% block title %}新闻跟踪{% endblock %}
 {% block content %}
 <div class="iw">{% if local_preview %}<p class="iw-warning">本机可用版预览 · 新闻来自公开来源；研究判断为演示数据 · 云端模型关闭 · 不连接生产数据</p>{% endif %}<nav class="iw-nav" aria-label="投资新闻导航">
-<a href="{% url 'investment_watch:news' %}">新闻浏览</a><a href="{% url 'investment_watch:topics' %}">主题</a><a href="{% url 'investment_watch:items' %}">投资动态</a><a href="{% url 'investment_research:index' %}">公司研究</a><a href="{% url 'investment_watch:rules' %}">关注设置</a><a href="{% url 'investment_watch:saved' %}">我的收藏</a><a href="{% url 'investment_watch:coverage' %}">来源与运行</a>
+{% with current=request.resolver_match.url_name %}
+<a href="{% url 'investment_watch:news' %}"{% if current == 'news' or current == 'index' or current == 'news_detail' %} aria-current="page"{% endif %}>新闻浏览</a>
+<a href="{% url 'investment_watch:topics' %}"{% if current == 'topics' %} aria-current="page"{% endif %}>主题</a>
+<a href="{% url 'investment_watch:items' %}"{% if current == 'items' or current == 'item' %} aria-current="page"{% endif %}>公司动态</a>
+<a href="{% url 'investment_research:index' %}">公司研究</a>
+<a href="{% url 'investment_watch:rules' %}"{% if current == 'rules' or current == 'company' or current == 'company_add' or current == 'research_context' %} aria-current="page"{% endif %}>关注设置</a>
+<a href="{% url 'investment_watch:saved' %}"{% if current == 'saved' %} aria-current="page"{% endif %}>我的收藏</a>
+<a href="{% url 'investment_watch:coverage' %}"{% if current == 'coverage' or current == 'runs' or current == 'source_add' or current == 'source_edit' %} aria-current="page"{% endif %}>来源与运行</a>
+{% endwith %}
 </nav>{% block watch_content %}{% endblock %}</div>
 {% endblock %}

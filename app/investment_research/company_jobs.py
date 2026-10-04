@@ -19,7 +19,7 @@ def launch(job_id):
     try:
         subprocess.Popen([sys.executable, "manage.py", "run_company_acquisition", str(job_id)],
             cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL, close_fds=True, **kwargs)
+            stderr=None, close_fds=True, **kwargs)
     except OSError:
         CompanyAcquisitionJob.objects.filter(pk=job_id, status="queued").update(
             status="failed", items=[{"title": "启动资料获取", "status": "failed", "message": "进程未启动，请重试。"}],
@@ -79,12 +79,11 @@ def execute_item(job, key):
     if key.startswith("sec:"):
         material = CompanyMaterial.objects.get(security=security, key=key, kind="sec_document")
         identity = identity_for(security)
-        latest = material.versions.first()
-        if latest and latest.text and not material.last_error and key not in job.selection:
-            return "已有该 SEC 文件原件与正文，沿用本地版本"
-        index = CompanyMaterial.objects.get(security=security, key="sec").versions.first()
+        latest = material.versions.defer('raw_gzip', 'text').first()
+        index_material = CompanyMaterial.objects.filter(security=security, key="sec").first()
+        index = index_material.versions.only('data').first() if index_material else None
         accession = key.split(":")[1]
-        record = next((r for r in index.data["filings"] if r["accession"] == accession), None)
+        record = next((r for r in index.data["filings"] if r["accession"] == accession), None) if index else None
         if not record:
             record = latest.data if latest else material.metadata
         if not record:
@@ -92,7 +91,7 @@ def execute_item(job, key):
         if len(key.split(":")) > 2:
             sec_library._document(security, key, material.source_url, material.title, record,
                                   sec_library._default_sec_client(security))
-            return "附件已更新"
+            return "已复用本地原件或补取缺失附件"
         return sec_library.download(security, identity.cik, record)
     if key == "ir":
         from .official_ir import sync_official_ir, documents_for_security, fetch_ir_content
@@ -130,7 +129,7 @@ def run(job_id):
     index = 0
     while index < len(selection) and timezone.now() < job.expires_at:
         key = selection[index]
-        title = SOURCE_TASKS.get(key, "SEC 报告及附件")
+        title = SOURCE_TASKS.get(key) or CompanyMaterial.objects.filter(security=job.dossier.security, key=key).values_list('title', flat=True).first() or "SEC 报告及附件"
         results.append({"key": key, "title": title, "status": "running", "message": "正在获取"})
         job.items = results
         job.save(update_fields=["items", "updated_at"])

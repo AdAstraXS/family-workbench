@@ -28,6 +28,7 @@ from .services import (
 )
 from ledger.models import BankAccount
 from portfolio.ipo_sync import (
+    _security_identity,
     delete_synced_ipo_transactions,
     refresh_ipo_sale_summary,
     sync_ipo_trade,
@@ -51,16 +52,12 @@ def load_current_ipo_listings():
             "stock_name",
         )
     )
-    changed = []
     for listing in listings:
         if listing.subscription_status == HkIpoListing.STATUS_LISTED:
             continue
         status = listing.calculate_subscription_status()
         if listing.subscription_status != status:
             listing.subscription_status = status
-            changed.append(listing)
-    if changed:
-        HkIpoListing.objects.bulk_update(changed, ["subscription_status"])
     collision_counts = defaultdict(int)
     for listing in listings:
         if (
@@ -90,6 +87,7 @@ def ipo_profit_queryset(queryset):
 
 def decorate_ipo_rows(trades, *, holding=False):
     for trade in trades:
+        trade.currency = _security_identity(trade.listing.stock_code)[2]
         if holding:
             remaining_lots = max((trade.allotted_lots or 0) - (trade.sold_lots or 0), 0)
             trade.display_remaining_lots = remaining_lots
@@ -140,6 +138,10 @@ class IpoProfitEvent:
     event_date: date | None
     profit: Decimal
     transaction: InvestmentTransaction | None = None
+
+    @property
+    def currency(self):
+        return (self.transaction.currency if self.transaction and self.transaction.currency else _security_identity(self.listing.stock_code)[2]).upper()
 
     @property
     def listing(self):
@@ -261,7 +263,21 @@ def save_ipo_sale_transaction(ipo_trade, form, transaction=None, user=None):
     return transaction
 
 
-def build_ipo_chart_data(events, selected_year, current_year):
+def profit_totals(events):
+    totals = defaultdict(Decimal)
+    for event in events:
+        totals[event.currency] += event.profit
+    return [{"currency": currency, "amount": amount} for currency, amount in sorted(totals.items())]
+
+
+def single_currency_profit(events):
+    totals = profit_totals(events)
+    return totals[0]["amount"] if len(totals) == 1 else (Decimal("0") if not totals else None)
+
+
+def build_ipo_chart_data(events, selected_year, current_year, *, available_years=None):
+    if len({event.currency for event in events}) > 1:
+        raise ValueError("图表必须按单一币种绘制")
     stock_totals = defaultdict(Decimal)
     account_totals = defaultdict(Decimal)
     trend_totals = defaultdict(Decimal)
@@ -298,8 +314,9 @@ def build_ipo_chart_data(events, selected_year, current_year):
         ]
 
     if selected_year == "all":
-        if trend_totals:
-            trend_keys = list(range(min(trend_totals), max(trend_totals) + 1))
+        years = available_years or list(trend_totals)
+        if years:
+            trend_keys = list(range(min(years), max(years) + 1))
         else:
             trend_keys = [current_year]
         trend_labels = [f"{year}年" for year in trend_keys]
@@ -408,13 +425,17 @@ def index(request):
         .count()
     )
     profit_events = ipo_profit_events(profit_queryset, year=profit_year)
-    realized_profit_total = sum(
-        (event.profit for event in profit_events), Decimal("0")
-    )
+    realized_profit_total = single_currency_profit(profit_events)
+    realized_profit_totals = profit_totals(profit_events)
+    profit_currencies = [row["currency"] for row in realized_profit_totals] or ["HKD"]
+    chart_currency = request.GET.get("currency", profit_currencies[0]).upper()
+    if chart_currency not in profit_currencies:
+        chart_currency = profit_currencies[0]
     chart_data = build_ipo_chart_data(
-        profit_events,
+        [event for event in profit_events if event.currency == chart_currency],
         selected_year,
         current_year,
+        available_years=[event.event_date.year for event in profit_events if event.event_date],
     )
     return render(
         request,
@@ -443,12 +464,15 @@ def index(request):
                 .count(),
                 "trade_closed": closed_trade_count,
                 "realized_profit_total": realized_profit_total,
+                "realized_profit_totals": realized_profit_totals,
             },
             "year_filter": {
                 "available_years": available_years,
                 "selected_year": selected_year,
             },
             "chart_data": chart_data,
+            "chart_currency": chart_currency,
+            "profit_currencies": profit_currencies,
         },
     )
 
@@ -715,9 +739,8 @@ def subscription_trade_list(request):
         else Decimal("0")
     )
     profit_events = ipo_profit_events(profit_queryset, year=profit_year)
-    realized_profit_total = sum(
-        (event.profit for event in profit_events), Decimal("0")
-    )
+    realized_profit_total = single_currency_profit(profit_events)
+    realized_profit_totals = profit_totals(profit_events)
     stock_latest_dates = {}
     for event in profit_events:
         previous = stock_latest_dates.get(event.listing.pk)
@@ -733,6 +756,7 @@ def subscription_trade_list(request):
         reverse=True,
     )
     selected_stock_id = request.GET.get("stock", "").strip()
+    stock_profit_totals = []
     stock_profit_total = None
     selected_stock = None
     if selected_stock_id.isdigit():
@@ -745,14 +769,9 @@ def subscription_trade_list(request):
             None,
         )
         if selected_stock:
-            stock_profit_total = sum(
-                (
-                    event.profit
-                    for event in profit_events
-                    if event.listing.pk == selected_stock.pk
-                ),
-                Decimal("0"),
-            )
+            selected_events = [event for event in profit_events if event.listing.pk == selected_stock.pk]
+            stock_profit_totals = profit_totals(selected_events)
+            stock_profit_total = single_currency_profit(selected_events)
 
     profit_account_ids = {
         event.account.pk for event in profit_events if event.account
@@ -763,6 +782,7 @@ def subscription_trade_list(request):
         .order_by("member__display_name", "account_name")
     )
     selected_account_id = request.GET.get("account", "").strip()
+    account_profit_totals = []
     account_profit_total = None
     selected_account = None
     if selected_account_id.isdigit():
@@ -775,19 +795,15 @@ def subscription_trade_list(request):
             None,
         )
         if selected_account:
-            account_profit_total = sum(
-                (
-                    event.profit
-                    for event in profit_events
-                    if event.account and event.account.pk == selected_account.pk
-                ),
-                Decimal("0"),
-            )
+            selected_events = [event for event in profit_events if event.account and event.account.pk == selected_account.pk]
+            account_profit_totals = profit_totals(selected_events)
+            account_profit_total = single_currency_profit(selected_events)
 
     date_start = request.GET.get("date_start", "").strip()
     date_end = request.GET.get("date_end", "").strip()
     period_start_date = None
     period_end_date = None
+    period_profit_totals = []
     period_profit_total = None
     period_query_error = ""
     if date_start or date_end:
@@ -798,17 +814,12 @@ def subscription_trade_list(request):
                 period_end_date = date.fromisoformat(date_end)
             if period_start_date and period_end_date and period_start_date > period_end_date:
                 raise ValueError
-            period_profit_total = sum(
-                (
-                    event.profit
-                    for event in ipo_profit_events(
-                        ipo_profit_queryset(HkIpoSubscriptionTrade.objects.all()),
-                        date_start=period_start_date,
-                        date_end=period_end_date,
-                    )
-                ),
-                Decimal("0"),
+            period_events = ipo_profit_events(
+                ipo_profit_queryset(HkIpoSubscriptionTrade.objects.all()),
+                date_start=period_start_date, date_end=period_end_date,
             )
+            period_profit_totals = profit_totals(period_events)
+            period_profit_total = single_currency_profit(period_events)
         except ValueError:
             period_query_error = "请选择有效的日期区间。"
             period_start_date = None
@@ -867,6 +878,7 @@ def subscription_trade_list(request):
         trade.price = trade.sell_price
         trade.trade_date = trade.sell_date or trade.listing.allotment_result_date
         trade.fee = trade.trading_fee
+        trade.currency = _security_identity(trade.listing.stock_code)[2]
         trade.realized_pnl = trade.realized_profit
         trade.display_gross_pnl = (
             ((trade.sell_price or Decimal("0")) - (trade.listing.final_price or Decimal("0")))
@@ -936,6 +948,7 @@ def subscription_trade_list(request):
                 .distinct()
                 .count(),
                 "realized_profit_total": realized_profit_total,
+                "realized_profit_totals": realized_profit_totals,
             },
             "year_filter": {
                 "available_years": available_years,
@@ -956,13 +969,16 @@ def subscription_trade_list(request):
                 "selected_stock": selected_stock,
                 "selected_stock_id": selected_stock_id,
                 "stock_profit_total": stock_profit_total,
+                "stock_profit_totals": stock_profit_totals,
                 "account_options": account_options,
                 "selected_account": selected_account,
                 "selected_account_id": selected_account_id,
                 "account_profit_total": account_profit_total,
+                "account_profit_totals": account_profit_totals,
                 "date_start": date_start,
                 "date_end": date_end,
                 "period_profit_total": period_profit_total,
+                "period_profit_totals": period_profit_totals,
                 "period_query_error": period_query_error,
             },
         },

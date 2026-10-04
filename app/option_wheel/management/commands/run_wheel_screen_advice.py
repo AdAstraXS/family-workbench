@@ -1,3 +1,4 @@
+from family_core.job_runtime import BoundedJobCommand
 from django.core.management.base import BaseCommand, CommandError
 
 from ai_analysis.models import AiAnalysisRequest
@@ -6,7 +7,7 @@ from option_wheel.screen_advice import SCHEMA
 from option_wheel.screen_advice_jobs import run_screen_advice
 
 
-class Command(BaseCommand):
+class Command(BoundedJobCommand):
     help = "处理一次用户明确开启的冻结合约 AI 建议批次。"
 
     def add_arguments(self, parser):

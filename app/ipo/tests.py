@@ -822,10 +822,14 @@ class HkIpoSubscriptionTradeCalculationTests(TestCase):
         self.assertEqual(
             all_years_response.context["chart_data"]["trend"]["values"],
             [
-                float(historical_trade.realized_profit),
+                0.0,
                 float(selected_trade.realized_profit),
             ],
         )
+        self.assertIsNone(all_years_response.context["metrics"]["realized_profit_total"])
+        self.assertEqual(all_years_response.context["chart_currency"], "HKD")
+        usd_response = self.client.get(reverse("ipo:index"), {"year": "all", "currency": "USD"})
+        self.assertEqual(usd_response.context["chart_data"]["trend"]["values"], [float(historical_trade.realized_profit), 0.0])
 
 
 class IpoImageRecognitionApiKeyTests(TestCase):

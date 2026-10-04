@@ -114,7 +114,7 @@
         · 单位：元 · 未细分金额自动补齐 · 点击扇区可联动下级分类
       </p>
     </div>
-    <form method="get" action="{{ request.path }}#monthly-expense-category-pies" class="cashflow-trend-filter">
+    <form data-auto-filter method="get" action="{{ request.path }}#monthly-expense-category-pies" class="cashflow-trend-filter">
       <input type="hidden" name="income_category_month" value="{{ selected_income_category_month }}">
       <input type="hidden" name="income_category_member" value="{{ selected_income_category_member }}">
       <label for="expense-category-member">查看对象</label>

@@ -73,10 +73,10 @@
         · 单位：万元
       </p>
     </div>
-    <form method="get" class="cashflow-trend-filter">
+    <form data-auto-filter method="get" class="cashflow-trend-filter">
       <input type="hidden" name="category_year" value="{{ selected_category_year }}">
       <label for="trend-year">统计范围</label>
-      <select id="trend-year" name="trend_year" onchange="this.form.submit()">
+      <select id="trend-year" name="trend_year">
         <option value="all" {% if selected_trend_year == "all" %}selected{% endif %}>全部年度</option>
         {% for available_year in available_years %}
           <option value="{{ available_year }}" {% if selected_trend_year == available_year %}selected{% endif %}>{{ available_year }}年</option>
@@ -109,10 +109,10 @@
         · 单位：万元 · 未细分金额自动补齐 · 点击扇区可联动下级分类
       </p>
     </div>
-    <form method="get" action="{{ request.path }}#expense-category-pies" class="cashflow-trend-filter">
+    <form data-auto-filter method="get" action="{{ request.path }}#expense-category-pies" class="cashflow-trend-filter">
       <input type="hidden" name="trend_year" value="{{ selected_trend_year }}">
       <label for="category-year">统计范围</label>
-      <select id="category-year" name="category_year" onchange="this.form.submit()">
+      <select id="category-year" name="category_year">
         <option value="all" {% if selected_category_year == "all" %}selected{% endif %}>全部年度</option>
         {% for available_year in available_years %}
           <option value="{{ available_year }}" {% if selected_category_year == available_year %}selected{% endif %}>{{ available_year }}年</option>

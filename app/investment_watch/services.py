@@ -162,6 +162,7 @@ def ingest(
     official_document=None,
     official_version=None,
     published_precision="time",
+    feed_body="",
 ):
     source = NewsSource.objects.select_for_update().get(pk=source.pk)
     title = re.sub(r"\s+", " ", title).strip()[:500]
@@ -186,6 +187,7 @@ def ingest(
     )
     content_hash = digest(
         [title, summary, url, published_at, occurred_at, status, published_precision]
+        + ([digest(feed_body)] if feed_body else [])
     )
     if (
         material
@@ -228,6 +230,9 @@ def ingest(
     )
     material.current_version = version
     material.save(update_fields=["current_version", "updated_at"])
+    if feed_body and status != "withdrawn":
+        from .rss_body import save_feed_body
+        save_feed_body(version, feed_body)
     return version, True
 
 
@@ -259,6 +264,13 @@ def save_rule(member, dossier_id, values, expected_version):
         key: words(values.get(key, []))
         for key in ("aliases", "topics", "include", "exclude")
     }
+    from .profiles import domains
+    cleaned["products"] = words(values.get("products", rule.products if rule else []))
+    cleaned["official_domains"] = domains(values.get("official_domains", rule.official_domains if rule else []))
+    context = values.get("business_context", rule.business_context if rule else "")
+    if not isinstance(context, str) or len(context) > 1000:
+        raise WatchError("公司业务关注说明不超过 1000 字。")
+    cleaned["business_context"] = context.strip()
     if not cleaned["aliases"] and not cleaned["topics"]:
         raise WatchError("至少填写一个公司别名或关联领域。")
     if rule is None:

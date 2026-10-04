@@ -5,7 +5,7 @@
   <header class="research-brief-top">
     <div><p class="research-eyebrow">公司研究 / 次日跟踪 · 仅自己可见</p>
       <h1>{{ dossier.security.name }} <small>{{ dossier.security.symbol }} · {% if dossier.security.market == 'US' %}美股{% elif dossier.security.market == 'HK' %}港股{% else %}{{ dossier.security.market }}{% endif %}</small></h1>
-      <p class="research-private-note">{% if digest %}{{ digest.created_at|date:"Y-m-d H:i" }} 整理 · 基于 {{ digest.scope.sources|length }} 份{% if digest.scope.initial_digest %}最近已保存{% else %}新增{% endif %}官方资料{% else %}等待官方资料 · 尚无次日跟踪简报{% endif %}</p>
+      <p class="research-private-note">{% if digest %}{{ digest.created_at|date:"Y-m-d H:i" }} 整理 · 基于 {{ digest.scope.sources|length }} 份{% if digest.scope.initial_digest %}最近已保存{% else %}新增{% endif %}官方资料{% else %}尚未生成次日跟踪简报{% endif %}</p>
     </div>
     <div class="research-brief-quote">{% if quote.price %}<strong>{% if quote.currency == 'USD' %}${% elif quote.currency == 'HKD' %}HK${% else %}{{ quote.currency }} {% endif %}{{ quote.price }}</strong><span>{{ quote.price_as_of|date:"m 月 d 日 H:i" }} 行情 · {{ quote.price_source }} · {{ quote.pricing_status }}{% if quote.is_delayed %} · 延迟{% endif %}</span>{% else %}<strong>暂无股价</strong><span>需先更新已保存行情</span>{% endif %}</div>
   </header>

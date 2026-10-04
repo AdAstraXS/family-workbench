@@ -12,7 +12,7 @@ _STATEMENTS = (
     ("comprehensive", "综合收益表", re.compile(r"^(?:consolidated\s+)?(?:statements?\s+of\s+comprehensive\s+(?:income|loss)|comprehensive\s+income\s+statements?)$", re.I)),
     ("balance", "资产负债表", re.compile(r"^(?:consolidated\s+)?balance\s+sheets?$", re.I)),
     ("cash_flow", "现金流量表", re.compile(r"^(?:consolidated\s+)?(?:statements?\s+of\s+cash\s+flows?|cash\s+flows?\s+statements?)$", re.I)),
-    ("equity", "权益变动表", re.compile(r"^(?:consolidated\s+)?(?:statements?\s+of\s+(?:(?:stockholders|shareholders)[’'\s]+equity|redeemable noncontrolling interests and equity)|(?:stockholders|shareholders)[’'\s]+equity\s+statements?)$", re.I)),
+    ("equity", "权益变动表", re.compile(r"^(?:consolidated\s+)?(?:statements?\s+of\s+(?:(?:stockholders|shareholders)[’'\s]+equity|redeemable noncontrolling interests and equity|equity)|(?:stockholders|shareholders)[’'\s]+equity\s+statements?)$", re.I)),
 )
 
 

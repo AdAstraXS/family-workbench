@@ -1,0 +1,3 @@
+{% extends "investment_research/workflow_base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block workflow_content %}<header class="research-header"><div><h1>{{ title }}</h1><p>报告期／发布：{{ date|default:"未知" }} · 获取：{{ fetched_at|date:"Y-m-d H:i" }}</p></div><a href="{% url 'investment_research:materials' dossier.pk %}">返回资料</a></header><p class="rw-notice">{{ note }}</p><div class="research-actions">{% if url %}<a href="{{ url }}" rel="noopener noreferrer" target="_blank">原始出处</a>{% endif %}{% if download %}<a href="{{ download }}">下载保存的原件</a>{% endif %}</div><pre class="rw-pre rw-original">{{ text|default:"尚无可读正文，请下载原件核对。" }}</pre>{% endblock %}

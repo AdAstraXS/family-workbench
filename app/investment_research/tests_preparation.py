@@ -62,14 +62,26 @@ class PreparationTests(TestCase):
         self.assertTrue(all(e["official_version_id"] == self.version.pk for e in p["evidence"]))
         self.assertIn(f"version={self.version.pk}", p["evidence"][0]["url"])
 
+    def test_initial_report_keeps_generation_price_after_cache_update(self):
+        from portfolio.models import StockMarketResearchSnapshot
+        cache = StockMarketResearchSnapshot.objects.create(security=self.security,
+            quote={'price': '100', 'as_of': (timezone.now() - timedelta(hours=1)).isoformat()})
+        job = self.job()
+        cache.quote['price'] = '200'
+        cache.save(update_fields=['quote'])
+        job.refresh_from_db()
+        self.assertEqual(job.sanitized_input['market_context']['price'], '100')
+        page = self.client.get(self.url, {'report': job.pk})
+        self.assertContains(page, '后续行情更新不改变此报告')
+
     def test_generation_and_get_are_private_and_do_not_create_judgments(self):
         job = self.job()
         before = AiAnalysisRequest.objects.count()
         page = self.client.get(self.url)
-        self.assertContains(page, "公司初识报告")
+        self.assertContains(page, "初识报告")
         self.assertContains(page, "Revenue grew")
-        self.assertContains(page, "不确定之处")
-        self.assertContains(page, "研究分析清单")
+        self.assertContains(page, "仍需核实")
+        self.assertContains(page, "资料核查清单")
         self.assertEqual(AiAnalysisRequest.objects.count(), before)
         self.assertEqual(ResearchThesisRevision.objects.count(), 0)
         self.client.force_login(self.outsider.user)
@@ -87,11 +99,10 @@ class PreparationTests(TestCase):
         self.assertEqual(AiAnalysisRequest.objects.count(), 1)
         self.assertEqual(ResearchThesisRevision.objects.count(), 0)
         page = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]))
-        self.assertContains(page, "关键问题与证据")
-        self.assertContains(page, "现金流可能恢复")
+        self.assertRedirects(page, reverse('investment_research:questions', args=[self.dossier.pk]))
         form = self.client.get(reverse("investment_research:first_thesis", args=[self.dossier.pk]))
-        self.assertContains(form, "现金流可能恢复")
-        self.assertContains(self.client.get(reverse("investment_research:index")), "深入研究")
+        self.assertRedirects(form, reverse('investment_research:questions', args=[self.dossier.pk]))
+        self.assertContains(self.client.get(reverse("investment_research:index")), "提出问题")
 
     def test_confirmation_validation_conflicts_and_foreign_references(self):
         job = self.job()
@@ -178,13 +189,13 @@ class PreparationTests(TestCase):
             self.job(False)
 
     def test_post_error_retains_user_edit_and_success_redirects(self):
-        job = self.job()
-        data = self.confirmation(action="confirm", report=str(job.pk), questions="我编辑的问题", falsifier_0="")
-        page = self.client.post(self.url, data)
-        self.assertContains(page, "我编辑的问题")
-        self.assertContains(page, "请填写")
-        page = self.client.post(self.url, self.confirmation(action="confirm", report=str(job.pk)))
-        self.assertRedirects(page, reverse("investment_research:company_research", args=[self.dossier.pk]))
+        self.job()
+        questions = reverse('investment_research:questions', args=[self.dossier.pk])
+        page = self.client.post(questions, {'action':'add','title':'','list_revision':'0'})
+        self.assertContains(page, '请填写待跟踪问题')
+        page = self.client.post(questions, {'action':'add','title':'我编辑的问题','list_revision':'0'})
+        self.assertRedirects(page, questions)
+        self.assertEqual(self.dossier.research_questions.get().title, '我编辑的问题')
 
     def test_same_form_cannot_charge_twice_after_completion(self):
         import uuid

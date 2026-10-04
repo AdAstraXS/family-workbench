@@ -13,7 +13,7 @@
 </section>
 
 <section class="panel">
-  <form method="get" class="snapshot-audit-filter">
+  <form data-auto-filter method="get" class="snapshot-audit-filter">
     <label>开始日期
       <input type="date" name="date_from" value="{% if date_from %}{{ date_from|date:'Y-m-d' }}{% endif %}">
     </label>

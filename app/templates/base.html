@@ -5,11 +5,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ site_household_name }}{% endblock %}</title>
-  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20261002-knowledge-navigation-v2">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=20261004-observation-navigation">
   <script src="{% static 'js/workspace-preferences.js' %}?v=20260925"></script>
   {% block extra_head %}{% endblock %}
-  <link rel="stylesheet" href="{% static 'css/songting.css' %}?v=20260925">
+  <link rel="stylesheet" href="{% static 'css/songting.css' %}?v=20261003-frontend-audit">
   <link rel="stylesheet" href="{% static 'css/module-motion.css' %}?v=20260925-1">
+  <link rel="stylesheet" href="{% static 'css/workspace-consistency.css' %}?v=20261003-final">
 </head>
 <body class="songting app-{{ request.resolver_match.app_name|default:'site' }} view-{{ request.resolver_match.url_name|default:'page' }}">
   <a class="ws-skip" href="#workspace-main">跳到页面内容</a>
@@ -28,22 +29,24 @@
   </header>
   <main class="page" id="workspace-main" tabindex="-1">
 
-    {% if user.is_authenticated and page_parent_url and request.resolver_match.app_name != "knowledge" and request.resolver_match.app_name != "reading" and request.resolver_match.app_name != "trading_journal" %}
+    {% url 'dashboard:home' as workspace_home_url %}
+    {% url 'ledger:overview' as ledger_home_url %}
+    {% url 'ipo:index' as ipo_home_url %}
+    {% url 'notes:index' as notes_home_url %}
+    {% url 'intelligence:index' as intelligence_home_url %}
+    {% if user.is_authenticated and page_parent_url and page_parent_url != workspace_home_url and request.resolver_match.app_name != "knowledge" and request.resolver_match.app_name != "reading" and request.resolver_match.app_name != "trading_journal" and request.resolver_match.app_name != "investment_research" %}
       <nav class="page-context-nav" aria-label="页面快捷导航">
         <a class="button page-nav-back" href="{{ page_parent_url }}">返回上一级</a>
-        {% if request.resolver_match.app_name == "ledger" and request.resolver_match.url_name != "overview" %}
+        {% if request.resolver_match.app_name == "ledger" and request.resolver_match.url_name != "overview" and page_parent_url != ledger_home_url %}
           <a class="button page-nav-module" href="{% url 'ledger:overview' %}">家庭账本首页</a>
-        {% elif request.resolver_match.app_name == "ipo" and request.resolver_match.url_name != "index" %}
+        {% elif request.resolver_match.app_name == "ipo" and request.resolver_match.url_name != "index" and page_parent_url != ipo_home_url %}
           <a class="button page-nav-module" href="{% url 'ipo:index' %}">港股打新首页</a>
-        {% elif request.resolver_match.app_name == "notes" and request.resolver_match.url_name != "index" %}
+        {% elif request.resolver_match.app_name == "notes" and request.resolver_match.url_name != "index" and page_parent_url != notes_home_url %}
           <a class="button page-nav-module" href="{% url 'notes:index' %}">投资笔记首页</a>
-        {% elif request.resolver_match.app_name == "intelligence" and request.resolver_match.url_name != "index" %}
+        {% elif workspace_is_programs %}
+          {% url 'intelligence:program_list' as programs_home_url %}{% if page_parent_url != programs_home_url %}<a class="button page-nav-module" href="{{ programs_home_url }}">精选订阅</a>{% endif %}
+        {% elif request.resolver_match.app_name == "intelligence" and request.resolver_match.url_name != "index" and page_parent_url != intelligence_home_url %}
           <a class="button page-nav-module" href="{% url 'intelligence:index' %}">AI 情报首页</a>
-        {% elif request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name != "index" %}
-          <a class="button page-nav-module" href="{% url 'knowledge:index' %}">知识中心首页</a>
-        {% endif %}
-        {% if request.resolver_match.app_name != "dashboard" %}
-          <a class="button page-nav-home" href="{% url 'dashboard:home' %}">工作台首页</a>
         {% endif %}
       </nav>
     {% endif %}
@@ -54,13 +57,15 @@
         {% endfor %}
       </div>
     {% endif %}
+    {% if workspace_is_legacy_intelligence %}<aside class="ws-legacy-notice" aria-label="旧方案状态"><strong>AI 情报 · 废案待处理</strong><p>保留旧方案与历史记录。当前新闻请到<a href="{% url 'investment_watch:news' %}">新闻跟踪</a>，访谈与文章请到<a href="{% url 'intelligence:program_list' %}">精选订阅</a>，人物资料请到<a href="{% url 'knowledge:people' %}">知识中心 · 关注人物</a>。</p></aside>{% endif %}
     {% if request.resolver_match.app_name == "ledger" %}<p class="muted">明细保留原币；收支汇总为人民币，单笔按发生日、按月录入按统计期末日最近可用汇率折算。</p>{% endif %}
     {% block content %}{% endblock %}
   </main>
   <footer class="ws-footer"><span>{{ site_household_name }} · 共同积累，从容生活</span><a href="{% static 'songting/credits.html' %}" target="_blank" rel="noopener">设计素材鸣谢</a></footer>
   </div>
   {% include 'workspace/appearance.html' %}
-  <script src="{% static 'js/workspace.js' %}?v=20260925" defer></script>
+  <script src="{% static 'js/workspace.js' %}?v=20261003-frontend-audit-final" defer></script>
+  <script src="{% static 'js/auto-filters.js' %}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

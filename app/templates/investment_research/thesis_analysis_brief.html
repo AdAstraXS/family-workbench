@@ -1,5 +1,6 @@
 {% extends "investment_research/base.html" %}
 {% block title %}公司研究简报 · {{ dossier.security.name }}{% endblock %}
+{% block extra_head %}{{ block.super }}{% if analysis.status == 'pending' or analysis.status == 'running' %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block research_content %}
 <div class="research-page research-brief-page">
   <header class="research-brief-top">
@@ -9,11 +10,12 @@
       <p class="research-private-note">{{ analysis.created_at|date:"Y-m-d" }} 整理{% if analysis.scope.financial_periods %} · 财报截至 {{ analysis.scope.financial_periods|last }}{% endif %} · {% if analysis.scope.research_basis == "candidate_hypotheses" %}基于候选假设 · 尚无正式判断{% else %}第 {{ analysis.scope.thesis_revision_number }} 版判断{% endif %}</p>
     </div>
     <div class="research-brief-quote">
-      {% if valuation.price %}<strong>{% if valuation.currency == 'USD' %}${% elif valuation.currency == 'HKD' %}HK${% else %}{{ valuation.currency }} {% endif %}{{ valuation.price }}</strong><span>{{ valuation.price_as_of|date:"m 月 d 日 H:i" }} 行情 · {{ valuation.price_source }} · {{ valuation.pricing_status }}{% if valuation.is_delayed %} · 延迟{% endif %}</span>
-      {% else %}<strong>暂无股价</strong><span>需先更新已保存行情</span>{% endif %}
+      {% if valuation.price %}<strong>{% if valuation.currency == 'USD' %}${% elif valuation.currency == 'HKD' %}HK${% else %}{{ valuation.currency }} {% endif %}{{ valuation.price }}</strong><span>生成时保存的{{ valuation.price_label }} · {{ valuation.as_of_label }} · {{ valuation.price_source }}{% if valuation.is_delayed %} · 延迟{% endif %}</span>
+      {% else %}<strong>生成时未保存股价</strong><span>更新行情后可生成新报告</span>{% endif %}
       <a href="{% url 'portfolio:stock_market_detail' dossier.security.pk %}">查看个股行情与估值 →</a>
     </div>
   </header>
+  {% if analysis.result %}<p class="research-private-note">本次模型用量 {{ analysis.result.tokens_used|default_if_none:"未返回" }} tokens · 按返回用量估算费用 ${{ analysis.result.cost_estimate|default_if_none:"未返回" }} · 最终账单以供应商为准。</p>{% elif analysis.scope.reported_tokens != None %}<p class="research-private-note">供应商报告用量 {{ analysis.scope.reported_tokens }} tokens · 估算费用 ${{ analysis.scope.reported_cost_usd|default_if_none:"未返回" }}。</p>{% endif %}
   {% include "investment_research/company_navigation.html" %}
   {% if not is_current_revision %}<div class="research-document-empty">这份研究基于旧版判断或候选假设，请按生成时的背景阅读。</div>{% endif %}
   <p><a href="{% url 'investment_watch:items' %}?dossier={{ dossier.pk }}">查看新闻与证据变化{% if new_candidate_count %} · 此后新增 {{ new_candidate_count }} 条候选{% endif %} →</a></p>
@@ -47,7 +49,7 @@
       {% if result.gaps %}<details><summary>本次还缺哪些证据</summary><ul>{% for item in result.gaps %}<li>{{ item }}</li>{% endfor %}</ul></details>{% endif %}
     </section>
     {% if result.suggested_revision %}<section class="research-brief-card"><h2>我可以怎样更新判断？</h2><p>AI 建议以下措辞。编辑页会保留这条建议供你对照，只有你保存的新版本才会成为正式判断。</p><blockquote>{{ result.suggested_revision|linebreaksbr }}</blockquote>{% if is_current_revision %}<a class="button" href="{% url 'investment_research:edit' dossier.pk %}">查看建议并修改我的判断</a>{% endif %}</section>{% endif %}
-  {% else %}<div class="research-document-empty"><strong>这次分析没有可展示的简报</strong><p>{{ analysis.error_message|default:"请求尚未完成。" }}</p></div>{% endif %}
-  <p><a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">更新公司研究</a> · <a href="{% url 'investment_research:research_history' dossier.pk %}">查看分析历史</a></p><footer class="research-private-note">本页根据生成时保存的资料形成；分析范围为 {{ analysis.scope.financial_count|default:0 }} 项财务指标、{{ analysis.scope.narrative_count|default:0 }} 条官方要点。每条结论可展开核查证据与出处。</footer>
+  {% elif analysis.status == 'pending' or analysis.status == 'running' %}<div class="research-document-empty"><strong>研究分析正在后台生成</strong><p>可以离开本页，稍后从历史版本查看。页面每 10 秒更新一次状态。</p></div>{% else %}<div class="research-document-empty"><strong>这次分析没有可展示的简报</strong><p>{{ analysis.error_message|default:"请求尚未完成。" }}</p></div>{% endif %}
+  <p><a href="{% url 'investment_research:thesis_analysis' dossier.pk %}">更新公司研究</a> · <a href="{% url 'investment_research:research_history' dossier.pk %}">查看分析历史</a></p><footer class="research-private-note">本页根据生成时保存的资料形成；分析范围为 {{ analysis.scope.financial_count|default:0 }} 项财务指标、{{ analysis.scope.narrative_count|default:0 }} 条官方要点。每条结论可展开核查证据与出处。{% if analysis.scope.omitted_evidence_count %}因本次输入容量限制，另有 {{ analysis.scope.omitted_evidence_count }} 条较早资料摘录未送入模型；原件仍保留在资料页。{% endif %}</footer>
 </div>
 {% endblock %}

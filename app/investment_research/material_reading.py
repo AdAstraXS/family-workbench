@@ -1,8 +1,10 @@
 """Human reading and the five-step source inventory share the same archive."""
-from .models import CompanyMaterial
+from .models import CompanyMaterial, CompanyMaterialVersion
 from .official_ir import documents_for_security
 from .number_display import money, number
-from django.db.models.functions import Length
+from django.db.models import OuterRef, Subquery, Value, TextField
+from django.db.models.functions import Length, Substr, Coalesce
+from django.db.models.fields.json import KeyTextTransform
 
 RESEARCH_SECTIONS = {
     "investment_thesis_content": "投资论点", "fundamentals_content": "基本面",
@@ -167,8 +169,19 @@ STEPS = (
 )
 
 
-def inventory(security):
+def inventory(security, lightweight=False):
     materials = list(CompanyMaterial.objects.filter(security=security).exclude(kind__in=["labels", "statement", "sec_index"]).exclude(source_url__endswith="-index-headers.html").order_by("kind", "title"))
+    if lightweight:
+        newest = CompanyMaterialVersion.objects.filter(material_id=OuterRef('material_id')).order_by('-number').values('pk')[:1]
+        versions = CompanyMaterialVersion.objects.filter(material_id__in=[m.pk for m in materials], pk=Subquery(newest)).annotate(
+            text_size=Length('text'), snippet=Substr('text', 1, 180),
+            published=Coalesce(KeyTextTransform('published_at', 'data'), KeyTextTransform('filing_date', 'data'),
+                               KeyTextTransform('filed', 'data'), Value(''), output_field=TextField())).only(
+            'id', 'material_id', 'number', 'report_date', 'fetched_at', 'source_url')
+        by_material = {version.material_id: version for version in versions}
+        for material in materials:
+            material.latest = by_material.get(material.pk)
+        return materials, {}
     refs = []
     for material in materials:
         version = material.versions.annotate(text_size=Length("text")).only("id", "number", "report_date", "fetched_at").first()

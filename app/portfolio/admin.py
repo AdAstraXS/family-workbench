@@ -18,6 +18,7 @@ from .models import (
     DailyPortfolioValuationRun,
     DailyExchangeRateFetch,
     InvestmentAccount,
+    HistoricalValuationPrice,
     InvestmentCashMovement,
     InvestmentPosition,
     InvestmentTransaction,
@@ -225,6 +226,19 @@ class SecurityPriceRecordAdmin(admin.ModelAdmin):
     list_filter = ("source", "price_type", "currency")
     search_fields = ("security__symbol", "security__name")
     readonly_fields = ("fetched_at",)
+
+
+@admin.register(HistoricalValuationPrice)
+class HistoricalValuationPriceAdmin(admin.ModelAdmin):
+    list_display = ("valuation_date", "account", "security", "price", "currency", "quote_date", "basis", "confirmed_by")
+    list_filter = ("valuation_date", "basis", "currency")
+    search_fields = ("security__symbol", "security__name", "evidence")
+    readonly_fields = ("confirmed_by", "created_at", "updated_at")
+
+    def save_model(self, request, obj, form, change):
+        obj.confirmed_by = request.user
+        obj.full_clean()
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(MarketDataRefreshRun)

@@ -152,7 +152,7 @@ def paginate(request, items):
             page_number = data["page"]
         except (signing.BadSignature, KeyError, TypeError, ValueError):
             raise WatchError("分页链接已失效，请从第一页重新浏览。")
-    page = Paginator(items, 30).get_page(page_number)
+    page = Paginator(items, 20).get_page(page_number)
 
     def cursor(number):
         return signing.dumps(
@@ -431,6 +431,12 @@ def items(request):
             ).values("event_id")
         )
     entries = []
+    from .presentation import reading_state, state_cache
+    query = list(query)
+    reading_cache = state_cache(query)
+    scope = request.GET.get("scope") or ("all" if wants_json(request) or request.GET.get("direction") or request.GET.get("assumption") or request.GET.get("saved") else "important")
+    if scope not in {"important", "all"}:
+        raise WatchError("未知阅读范围。")
     for candidate in query:
         candidate.stale = candidate_stale(candidate)
         candidate.current_evidence = current_evidence(candidate)
@@ -462,7 +468,9 @@ def items(request):
         candidate.highlight_evidence = [e for e in candidate.current_evidence if e.direction != "unknown"][:2]
         candidate.more_evidence = [e for e in candidate.current_evidence if e not in candidate.highlight_evidence]
         candidate.unknown_count = sum(e.direction == "unknown" for e in candidate.more_evidence)
-        candidate.latest_screening = max(candidate.screenings.all(), key=lambda s: s.pk, default=None)
+        reading_state(candidate, reading_cache)
+        if scope == "important" and (candidate.stale or not candidate.reading_important or not candidate.reading_recent):
+            continue
         entries.append(candidate)
     page = paginate(request, entries)
     if wants_json(request):
@@ -475,6 +483,8 @@ def items(request):
                         "stale": c.stale,
                         "material": version_json(c.material_version),
                         "reason": c.reason,
+                        "reading_status": c.reading_label,
+                        "relevance": c.relevance_label,
                         "evidence": [
                             {
                                 "id": e.pk,
@@ -500,6 +510,7 @@ def items(request):
             dossiers=accessible_dossiers(member),
             assumptions=targets(dossier.current_revision) if dossier else {},
             filters=request.GET,
+            reading_scope=scope,
             filter_query=filter_query(request),
         ),
     )
@@ -535,6 +546,8 @@ def item(request, pk):
     )
     if not candidate:
         raise Http404
+    from .presentation import reading_state
+    reading_state(candidate)
     rows = list(candidate.evidence.select_related("revision", "input_relation__target", "input_body").prefetch_related("reviews").order_by("-pk"))
     current_ids = {e.pk for e in current_evidence(candidate, rows)}
     for evidence in rows:
@@ -602,7 +615,7 @@ def item(request, pk):
             version=candidate.material_version,
             original_candidate=original_candidate,
             body_snapshot=BodySnapshot.objects.filter(material_version=candidate.material_version).first(),
-            screening=candidate.screenings.select_related("batch").order_by("-pk").first(),
+            screening=candidate.latest_screening,
             body_attempt=BodyAttempt.objects.filter(family=member.family, security=candidate.dossier.security,
                 material_version=candidate.material_version).first(),
             body_references=BodySnapshot.objects.filter(pk__in={e.input_body_id for e in rows if e.input_body_id}).select_related("material_version"),
@@ -619,6 +632,9 @@ def rules(request):
             [
                 "dossier_id",
                 "aliases",
+                "products",
+                "official_domains",
+                "business_context",
                 "topics",
                 "include",
                 "exclude",
@@ -627,7 +643,7 @@ def rules(request):
             ],
         )
         if request.content_type != "application/json":
-            for key in ("aliases", "topics", "include", "exclude"):
+            for key in ("aliases", "products", "official_domains", "topics", "include", "exclude"):
                 body[key] = [
                     w.strip()
                     for w in re.split("[,，\n]", body.get(key, ""))
@@ -673,9 +689,12 @@ def rules(request):
                         **{
                             k: getattr(d.rule, k)
                             if d.rule
-                            else ([] if k != "enabled" else False)
+                            else (False if k == "enabled" else "" if k == "business_context" else [])
                             for k in (
                                 "aliases",
+                                "products",
+                                "official_domains",
+                                "business_context",
                                 "topics",
                                 "include",
                                 "exclude",
@@ -872,6 +891,37 @@ def evidence_review(request, pk):
 
 
 @endpoint(["POST"])
+def request_reading(request, pk):
+    member = request.watch_member
+    body = payload(request, ["reason", "expected_revision", "idempotency_key"])
+    reason = body.get("reason", "")
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 500:
+        raise WatchError("请填写不超过 500 字的重要性理由。")
+
+    def action():
+        candidate = ResearchCandidate.objects.select_for_update(of=("self",)).select_related("dossier", "material_version__material").filter(
+            pk=pk, dossier__owner=member, dossier__family=member.family).first()
+        if not candidate:
+            raise Http404
+        check_revision(candidate.dossier, integer(body.get("expected_revision")))
+        if candidate_stale(candidate):
+            raise Conflict("材料已更新，请查看最新版本。")
+        candidate.reading_requested = True
+        candidate.reading_reason = reason.strip()
+        candidate.manual = True
+        candidate.save(update_fields=["reading_requested", "reading_reason", "manual", "updated_at"])
+        from .worker import queue_run
+        queue_run(candidate.dossier)
+        return {"id": candidate.pk, "requested": True}
+
+    result = idempotent(member, "request-reading", request.headers.get("Idempotency-Key") or body.get("idempotency_key", ""), body, action)
+    if wants_json(request):
+        return JsonResponse(result, status=201)
+    messages.success(request, "已加入优先阅读候选；由定时任务处理，仍遵守授权、预算与每日三次抓取上限。")
+    return redirect("investment_watch:item", pk=pk)
+
+
+@endpoint(["POST"])
 def select_research(request, pk):
     member = request.watch_member
     writer(member)
@@ -917,6 +967,14 @@ def coverage(request):
     from .body_capture import china_day, firecrawl_key
     body_enabled = getattr(settings, "INVESTMENT_WATCH_BODY_ENABLED", False)
     body_configured = bool(firecrawl_key())
+    from .capture_account import cached_usage
+    from datetime import timedelta
+    from django.utils import timezone
+    capture_usage = cached_usage() if member.role == FamilyMember.ROLE_ADMIN else None
+    source_rows = list(sources)
+    for source in source_rows:
+        source.next_check = source.last_checked_at + timedelta(minutes=max(15, source.interval_minutes)) if source.last_checked_at else None
+        source.due = source.enabled and (not source.next_check or source.next_check <= timezone.now())
     body_attempts = BodyAttempt.objects.filter(family=member.family, candidate__dossier__owner=member).select_related(
         "security", "material_version").order_by("-created_at")[:15]
     screenings = ScreeningBatch.objects.filter(dossier__owner=member, dossier__family=member.family).select_related("dossier__security").order_by("-created_at")[:10]
@@ -958,7 +1016,8 @@ def coverage(request):
         "investment_watch/coverage.html",
         context(
             request,
-            sources=sources,
+            sources=source_rows,
+            capture_usage=capture_usage,
             budget=budget,
             runs=runs,
             body_enabled=body_enabled,

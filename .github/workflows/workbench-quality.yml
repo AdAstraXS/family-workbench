@@ -1,0 +1,41 @@
+name: Workbench quality
+on:
+  pull_request:
+    paths: ['app/**', 'scripts/test-auto-filters.mjs', '.github/workflows/workbench-quality.yml']
+  push:
+    branches: ['codex/performance-filter-consistency']
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: watch_test
+          POSTGRES_USER: watch_test
+          POSTGRES_PASSWORD: watch-test-local-only
+        ports: ['55439:5432']
+        options: >-
+          --health-cmd "pg_isready -U watch_test -d watch_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r app/requirements.txt
+      - run: pip freeze
+      - run: node scripts/test-auto-filters.mjs
+      - working-directory: app
+        run: |
+          python manage.py check --settings=config.settings_quality_pg_test
+          python manage.py makemigrations --check --dry-run --settings=config.settings_quality_pg_test
+          python manage.py test ipo portfolio knowledge family_core.test_runtime investment_watch investment_research ai_analysis option_wheel.tests.test_jobs.JobTests --settings=config.settings_quality_pg_test --noinput
+          python manage.py test option_wheel.tests.test_jobs.JobConcurrencyTests --settings=config.settings_quality_pg_test --noinput
+      - run: git diff --check

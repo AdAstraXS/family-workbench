@@ -442,6 +442,8 @@ def thesis_analysis(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow:
+        return redirect('investment_research:follow', pk=pk)
     from .research_basis import research_basis
     basis = research_basis(dossier)
     can_write = is_writer(member)
@@ -459,12 +461,14 @@ def thesis_analysis(request, pk):
                 consent=request.POST.get("one_time_consent") == "yes",
                 include_news=request.POST.get("include_news") == "yes",
                 review_mode=request.POST.get("review_mode", "full"),
+                background=True,
+                allow_retry=False,
             )
         except (ResearchAiError, ResearchValidationError) as exc:
             messages.error(request, str(exc))
         else:
-            messages.success(request, "公司研究简报已生成；关键结论可展开核对原文。")
-            return redirect("investment_research:company_research", pk=pk)
+            messages.success(request, "研究分析已在后台开始，可在历史版本查看状态和结果。")
+            return redirect("investment_research:thesis_analysis_detail", pk=pk, analysis_pk=analysis.pk)
         return redirect("investment_research:thesis_analysis", pk=pk)
     sources = source_preview(dossier)
     from investment_watch.research_bridge import selected_candidates
@@ -506,7 +510,7 @@ def thesis_analysis_detail(request, pk, analysis_pk):
     if result:
         from .report_sections import source_sections
         result = source_sections(result, analysis.scope or {})
-    valuation = build_valuation_trial(dossier.security, analysis.scope, request.GET)
+    valuation = build_valuation_trial(dossier.security, analysis.scope, request.GET, frozen=True)
     from .research_basis import basis_matches
     return render(request, "investment_research/thesis_analysis_brief.html", {
         "dossier": dossier, "analysis": analysis, "result": result,
@@ -581,6 +585,8 @@ def next_day_consent(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow:
+        return redirect('investment_research:research_settings', pk=pk)
     if not is_writer(member):
         return HttpResponseForbidden("查看者角色不能修改自动分析授权。")
     action = request.POST.get("action")
@@ -604,6 +610,8 @@ def next_day_generate(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow:
+        return redirect('investment_research:follow', pk=pk)
     if not is_writer(member):
         return HttpResponseForbidden("查看者角色不能生成自动事件简报。")
     try:
@@ -767,6 +775,8 @@ def review_plan(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow and request.method == 'POST':
+        return redirect('investment_research:questions', pk=pk)
     if request.method == "POST" and not is_writer(member):
         return HttpResponseForbidden("查看者角色不能生成或确认复核计划。")
     version = latest_plan_source(dossier)
@@ -851,6 +861,8 @@ def filing_review(request, pk, document_pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow and request.method == 'POST':
+        return redirect('investment_research:follow', pk=pk)
     if dossier.current_revision_id is None:
         return redirect("investment_research:first_thesis", pk=pk)
     _, items = reviewable_filings(dossier)
@@ -1077,6 +1089,8 @@ def metric_focus(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow and request.method == 'POST':
+        return redirect('investment_research:questions', pk=pk)
     if request.method == "POST" and not is_writer(member):
         return HttpResponseForbidden("查看者角色不能修改追踪指标。")
     version = (OfficialResearchContentVersion.objects.filter(
@@ -1219,6 +1233,8 @@ def generate_draft(request, pk):
     if member is None:
         return _forbidden()
     dossier = get_accessible_dossier_or_404(member, pk)
+    if dossier.question_workflow:
+        return redirect('investment_research:questions', pk=pk)
     if not is_writer(member):
         return HttpResponseForbidden("查看者角色不能发起 AI 分析。")
     try:

@@ -78,7 +78,7 @@
             <td class="number">{{ sale.display_upfront_fee|money2 }}</td>
             <td class="number">{{ sale.fee|money2 }}</td>
             <td class="number">{{ sale.display_total_fee|money2 }}</td>
-            <td class="number {% if sale.display_net_pnl > 0 %}positive{% elif sale.display_net_pnl < 0 %}negative{% endif %}">{{ sale.display_net_pnl|money2 }}</td>
+            <td class="number {% if sale.display_net_pnl > 0 %}positive{% elif sale.display_net_pnl < 0 %}negative{% endif %}">{{ sale.display_net_pnl|money2 }} {{ sale.currency }}</td>
             <td>
               <span class="row-actions">
                 <form method="post" action="{% url 'ipo:subscription_trade_sale_cancel' trade.pk sale.pk %}" class="inline-delete-form" onsubmit="return confirm('确认撤销这笔卖出记录吗？撤销后持仓和现金流水会重新计算。');">

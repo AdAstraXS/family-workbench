@@ -1,8 +1,9 @@
 {% extends "investment_research/base.html" %}
 {% block title %}公司研究 · {{ dossier.security.name }}{% endblock %}
+{% block extra_head %}{{ block.super }}<style>.research-primary-actions{justify-content:space-between;align-items:center;margin-bottom:12px}.research-report-actions{display:flex;gap:8px;flex-wrap:wrap}</style>{% endblock %}
 {% block research_content %}<div class="research-page research-brief-page">
 <section class="research-brief-card research-brief-summary">
-<div class="research-actions">{% if can_write %}<a class="button" href="{% if basis %}{% url 'investment_research:thesis_analysis' dossier.pk %}{% else %}{% url 'investment_research:prepare' dossier.pk %}{% endif %}">分析已保存资料</a>{% endif %}<a href="{% url 'investment_research:materials' dossier.pk %}">获取与阅读资料</a></div>
+<div class="research-actions research-primary-actions"><a class="button" href="{% url 'investment_research:materials' dossier.pk %}?tab=acquisition">获取公司资料</a>{% if can_write %}<span class="research-report-actions"><a class="button" href="{% url 'investment_research:prepare' dossier.pk %}">{% if introduction %}更新初识报告{% else %}生成初识报告{% endif %}</a>{% if basis %}<a class="button" href="{% url 'investment_research:thesis_analysis' dossier.pk %}">分析研究问题</a>{% endif %}</span>{% endif %}</div>
 {% if result %}<p class="research-eyebrow">最新研究 · {{ research_report.created_at|date:"Y-m-d H:i" }} · AI 草稿</p><h2>{{ result.headline }}</h2><p>{{ result.overview }}</p>{% if not report_is_current %}<p class="research-source-error">研究问题或判断已修改。这份报告保留生成时背景，重新分析后才能对照当前判断。</p>{% endif %}{% if result.invalid_reference_count %}<p class="research-source-error">{{ result.invalid_reference_count }} 项无效引文已降为证据不足。</p>{% endif %}
 {% elif introduction_result %}<p class="research-eyebrow">初步认识 · {{ introduction.created_at|date:"Y-m-d H:i" }} · AI 草稿</p><h2>这家公司的生意与待验证问题</h2><p>{{ introduction_result.summary }}</p><p class="research-private-note">以下依据已保存的初识报告。确认问题后，可继续分析资料并形成自己的判断。</p>
 {% else %}<h2>从一个重要问题开始</h2><p>先保存公司资料，再分析它的生意、财务与风险；也可以直接记录已有判断。</p>{% endif %}

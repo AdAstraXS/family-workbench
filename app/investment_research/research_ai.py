@@ -78,7 +78,7 @@ def research_provider_policy(provider):
         raise ResearchAiError("文本模型 API 地址包含不允许的参数或端口。") from exc
     return {
         "max_input_chars": _bounded_int(data, "research_max_input_chars", 10000, 60000),
-        "max_output_tokens": _bounded_int(data, "research_max_output_tokens", 500, 4000),
+        "max_output_tokens": _bounded_int(data, "research_max_output_tokens", 500, 131072),
         "input_rate": _positive_decimal(data, "research_input_usd_per_million"),
         "output_rate": _positive_decimal(data, "research_output_usd_per_million"),
         "max_cost": _positive_decimal(data, "research_max_estimated_usd"),
@@ -86,14 +86,32 @@ def research_provider_policy(provider):
     }
 
 
+def report_policy(provider):
+    """Long reports need a separate output budget from short extraction tasks.
+
+    Preserve the owner's monetary ceiling; reject an unaffordable request before
+    transmission instead of silently shrinking the output and truncating JSON.
+    """
+    policy = research_provider_policy(provider)
+    configured = (provider.extra_data or {}).get("research_report_output_tokens", 32768)
+    if isinstance(configured, bool) or not isinstance(configured, int) or not 8192 <= configured <= 131072:
+        raise ResearchAiError("研究报告输出空间须为 8,192–131,072 tokens。")
+    policy["max_output_tokens"] = max(policy["max_output_tokens"], configured)
+    return policy
+
+
 def available_research_providers():
     available = []
     for provider in AiProvider.objects.filter(is_active=True, provider_type__in=["openai", "openai_compatible"]).order_by("name", "pk"):
         try:
-            research_provider_policy(provider)
+            policy = report_policy(provider)
         except ResearchAiError:
             continue
         if os.getenv((provider.extra_data or {})["api_key_env_var"], ""):
+            provider.report_output_tokens = policy["max_output_tokens"]
+            provider.report_output_cost = _cost(0, policy["max_output_tokens"], policy)
+            from .preparation_research import PLAN_OUTPUT_TOKENS
+            provider.diagnosis_output_cost = _cost(0, PLAN_OUTPUT_TOKENS, policy)
             available.append(provider)
     return prefer_default(available, "investment_research")
 

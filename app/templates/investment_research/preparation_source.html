@@ -1,0 +1,13 @@
+{% extends "investment_research/base.html" %}
+{% block title %}{{ original.title }} · 研究原文{% endblock %}
+{% block research_content %}
+<section class="research-page">
+  <p><a href="{% url 'investment_research:prepare' dossier.pk %}?report={{ job.pk }}">← 返回这份初识报告</a></p>
+  <h1>{{ original.title }}</h1>
+  <p>日期：{{ original.date }} · 获取时间：{{ original.fetched_at }}</p>
+  <p>这是本次研究保存的正文快照，来源网页之后的修改不会覆盖它。HTML 已移除导航和脚本，仍需结合原始出处核查。</p>
+  <p><a href="{{ original.url }}" rel="noopener noreferrer" target="_blank">查看来源网页 ↗</a></p>
+  <details><summary>正文校验信息</summary><p style="overflow-wrap:anywhere">SHA-256：{{ original.sha256 }} · {{ original.media_type }}</p></details>
+  <article class="research-current" style="white-space:pre-wrap;overflow-wrap:anywhere">{{ original.text }}</article>
+</section>
+{% endblock %}

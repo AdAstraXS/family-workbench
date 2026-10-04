@@ -97,18 +97,17 @@ class ResearchBriefTests(TestCase):
                       args=[self.dossier.pk, analysis.pk])
         response = self.client.get(url)
         self.assertContains(response, "公司研究简报")
-        self.assertContains(response, "$100.00")
+        self.assertContains(response, "生成时未保存股价")
         response = self.client.get(reverse("investment_research:valuation", args=[self.dossier.pk]))
         self.assertContains(response, "估值试算")
         self.assertContains(response, "161.05")
         self.assertContains(response, "波段辅助")
         self.assertContains(self.client.get(reverse("investment_research:detail",
                                                     args=[self.dossier.pk])),
-                            reverse("investment_research:company_research", args=[self.dossier.pk]))
+                            reverse("investment_research:questions", args=[self.dossier.pk]))
         unified = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]))
-        self.assertEqual(unified.context["analysis"].pk, analysis.pk)
-        for text in ("财报、SEC 与 IR", "相关新闻", "综合分析与判断", "财务与行情", "持续跟踪", "资料"):
-            self.assertContains(unified, text)
+        self.assertRedirects(unified, reverse('investment_research:questions', args=[self.dossier.pk]))
+        self.assertEqual(AiAnalysisRequest.objects.get(pk=analysis.pk).status, 'success')
         legacy = self.client.get(url + "?mode=audit")
         self.assertContains(legacy, "公司研究简报")
         self.assertNotContains(legacy, "逐项核查")
@@ -131,10 +130,10 @@ class ResearchBriefTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.get(reverse("investment_research:edit",
                                            args=[self.dossier.pk]))
-        self.assertContains(response, "继续核查现金。")
-        self.assertContains(response, "核查增长能否转成现金。")
-        self.assertContains(response, "以后分析以你保存的最新正式判断为准")
-        self.assertContains(response, f"/research/{self.dossier.pk}/analysis/{analysis.pk}/")
+        self.assertRedirects(response, reverse('investment_research:questions', args=[self.dossier.pk]))
+        analysis.refresh_from_db()
+        self.assertEqual(analysis.result.result_json['suggested_revision'], '继续核查现金。')
+        self.assertEqual(digest.result.result_json['events'][0]['impact'], '核查增长能否转成现金。')
 
     def test_next_day_digest_sends_only_public_material_and_is_idempotent(self):
         prior = self.analysis()

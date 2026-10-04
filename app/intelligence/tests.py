@@ -896,7 +896,7 @@ class IntelligenceKnowledgeBridgeTests(IntelligenceTestBase):
             KnowledgeDocument.KNOWLEDGE_INCLUDED,
         )
 
-    def test_subject_and_knowledge_people_pages_cross_link_through_identity(self):
+    def test_legacy_subject_link_preserves_knowledge_identity_and_archived_article(self):
         event = self.make_event(title="人物跨模块链接")
         self.client.force_login(self.member_user)
         self.client.post(
@@ -913,7 +913,8 @@ class IntelligenceKnowledgeBridgeTests(IntelligenceTestBase):
         )
 
         self.assertContains(subject_page, "历史知识（1）")
-        self.assertContains(knowledge_page, "查看最新动态")
+        self.assertContains(knowledge_page, "已关联人物档案")
+        self.assertNotContains(knowledge_page, "查看最新动态")
         self.assertContains(knowledge_page, event.title)
 
 

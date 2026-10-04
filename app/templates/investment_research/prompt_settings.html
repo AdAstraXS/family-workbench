@@ -1,0 +1,11 @@
+{% extends "investment_research/base.html" %}
+{% block title %}初识报告提示词 · {{ dossier.security.name }}{% endblock %}
+{% block research_content %}<section class="research-page"><h1>初识报告提示词</h1>
+<p>标准结构覆盖商业模式、竞争、财务质量、估值、近期变化、候选假设和资料边界。可以补充自己的研究重点。</p>
+{% if error %}<p role="alert">{{ error }}</p>{% endif %}
+<details class="research-current"><summary>查看标准提示词</summary><pre style="white-space:pre-wrap">{{ standard }}</pre></details>
+<section class="research-current"><h2>我的通用模板</h2><p>用于本人所有公司的初识报告。公司专用提示词非空时，优先使用公司设置。</p>
+<form method="post" class="research-form">{% csrf_token %}<input type="hidden" name="scope" value="default"><input type="hidden" name="revision" value="{{ default_template.revision|default:0 }}"><label>通用研究重点<textarea name="instructions" rows="8" maxlength="6000">{{ default_template.instructions }}</textarea></label>{% if can_write %}<button>保存通用模板</button>{% endif %}</form></section>
+<section class="research-current"><h2>{{ dossier.security.name }} · 专用提示词</h2><p>留空则使用通用模板。每次报告保存实际使用的提示词、模板版本与资料摘录。</p>
+<form method="post" class="research-form">{% csrf_token %}<input type="hidden" name="scope" value="company"><input type="hidden" name="revision" value="{{ company_template.revision|default:0 }}"><label>公司研究重点<textarea name="instructions" rows="8" maxlength="6000">{{ company_template.instructions }}</textarea></label>{% if can_write %}<button>保存公司设置</button>{% endif %}</form></section>
+<a class="button" href="{% url 'investment_research:prepare' dossier.pk %}">返回初识报告</a></section>{% endblock %}

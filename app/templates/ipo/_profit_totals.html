@@ -1,0 +1,2 @@
+{% load money %}
+{% for row in totals %}<span class="{% if row.amount > 0 %}positive{% elif row.amount < 0 %}negative{% endif %}">{{ row.amount|money2 }} {{ row.currency }}</span>{% if not forloop.last %}<br>{% endif %}{% empty %}暂无已实现盈亏{% endfor %}

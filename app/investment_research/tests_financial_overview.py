@@ -67,6 +67,22 @@ def filing(*, conflict=False, omit_capex=False, omit_first_cash=False,
 
 
 class FinancialOverviewTests(SimpleTestCase):
+    def test_em_dash_heading_and_equity_statement_keep_income_citations_unique(self):
+        version = filing()
+        raw = gzip.decompress(version.raw_gzip).decode().replace(
+            'ITEM 8. FINANCIAL STATEMENTS', 'Item 8—Financial Statements').replace(
+            '<h2>CASH FLOWS STATEMENTS</h2>',
+            '<h2>CONSOLIDATED STATEMENTS OF EQUITY</h2><table><tr><td>Net income</td><td>30</td></tr></table><h2>CASH FLOWS STATEMENTS</h2>')
+        version.raw_gzip = gzip.compress(raw.encode())
+        version.content_text = extract_sec_html(raw.encode())
+        periods, rows, problem = build_financial_overview(version)
+        self.assertIsNone(problem)
+        self.assertEqual(len(periods), 3)
+        cell = next(row for row in rows if row['code'] == 'net_income')['cells'][-1]
+        self.assertEqual(cell['amount'], Decimal(30))
+        cite = cell['citation']
+        self.assertEqual(version.content_text[cite['start']:cite['end']], cite['quote'])
+
     def test_three_years_and_derived_values_require_cited_base_facts(self):
         periods, rows, problem = build_financial_overview(filing())
         self.assertIsNone(problem)

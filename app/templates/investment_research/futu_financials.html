@@ -63,7 +63,7 @@
             {% empty %}<tr><td colspan="4">此报表暂没有已核对名称的字段，请更新资料后再查看。</td></tr>{% endfor %}
           </tbody>
         </table></div>
-        {% if table.raw_rows %}<p class="research-private-note">{{ table.missing_names }} 项名称待核对。新获取的原始记录和历史版本可在<a href="{% url 'investment_research:materials' dossier.pk %}">公司资料</a>中下载。</p>{% endif %}
+        {% include "investment_research/unmapped_financial_fields.html" %}
       </details>
     {% endfor %}
     <details class="research-method-note"><summary>数据来源与口径</summary><p>财务数值来自富途 OpenD 年度报表。接口缺少字段名称时，仅采用经过同源核对的名称；未核对项目保留在原始记录中。页面保留报告期、币种、会计准则和审计意见，不做货币换算。查看官方披露可进入 SEC 财务概览。</p></details>

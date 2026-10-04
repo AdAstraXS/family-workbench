@@ -24,14 +24,14 @@
       {% endif %}
     </div>
     {% endif %}
-    <form method="get" class="prototype-filters">
+    <form data-auto-filter method="get" class="prototype-filters">
       <label class="prototype-currency">展示币种
-        <select name="currency" onchange="this.form.submit()">
+        <select name="currency">
           {% for item in currency_options %}<option value="{{ item.code }}"{% if item.code == selected_currency %} selected{% endif %}>{{ item }}</option>{% endfor %}
         </select>
       </label>
-      <label class="prototype-currency">统计年份
-        <select name="year" onchange="this.form.submit()">
+      <label class="prototype-currency">查看年份
+        <select name="year">
           <option value="all"{% if selected_year == "all" %} selected{% endif %}>当前余额与持仓</option>
           {% for year in year_options %}<option value="{{ year }}"{% if selected_year == year|stringformat:"s" %} selected{% endif %}>{{ year }} 年</option>{% endfor %}
         </select>
@@ -43,15 +43,17 @@
 <section class="panel account-summary-panel">
   <div class="section-head"><div><h2>证券账户资产汇总</h2><p>资产和账户按 {{ selected_currency }} 统一折算{% if balance_snapshot_date %}，余额日期 {{ balance_snapshot_date }}{% endif %}。</p></div></div>
   {% if historical_view %}
-    <p>所选年份最后一份快照：资产、账户和持仓使用同一快照；已实现盈亏为已录入交易截至快照日期的历年累计，不是该年收益。汇率优先使用快照保存值，再使用同日正式账本及历史汇率。</p>
+    <p>{{ selected_year }} 年 · {{ annual_period_label }}（{{ annual_start|date:"Y-m-d" }} 至 {{ balance_snapshot_date|date:"Y-m-d" }}）。资产、现金和持仓均为期末快照值。</p>
+    <p>当年交易总盈亏 = 当年已实现盈亏 + 期末持仓浮盈 − 期初持仓浮盈。三项均按期末汇率折算，不包含汇率变动收益，也不是收益率。历年累计已实现盈亏不是该年收益。</p>
+    <p>汇率优先使用快照保存值，再使用同日正式账本及历史汇率。{% for fx in annual_fx_rates %}{{ fx.currency }}/{{ balance_snapshot.currency }} {{ fx.rate|default_if_none:"缺失或冲突" }}{% if not forloop.last %}；{% endif %}{% endfor %}。缺少期初或估值依据时，总盈亏显示“—”；当年已实现盈亏仍单独展示。</p>
     {% if balance_snapshot %}<p>快照保存时间 {{ balance_snapshot.created_at|date:"Y-m-d H:i" }} · <a href="{% url 'portfolio:snapshot_detail' balance_snapshot.pk %}">查看估值依据：{{ snapshot_audit.status_label }}</a>。当天之后录入的交易可能尚未反映在快照资产中。</p>{% endif %}
     {% if history_error %}<p class="form-error">{{ history_error }}</p>{% endif %}
     {% if balance_snapshot and not snapshot_audit.complete %}<p class="form-error">该快照{% if snapshot_audit.status == 'warning' %}价格需核对{% else %}存在数据缺口或未记录完整性{% endif %}：缺价 {{ snapshot_audit.missing_prices|length }}、价格需核对 {{ snapshot_audit.stale_prices|length }}、缺汇率 {{ snapshot_audit.missing_rates|length }}、流水错误 {{ snapshot_audit.valuation_errors|length }}。显示金额不代表已与券商对账。</p>{% endif %}
     {% if history_missing_rates %}<p class="form-error">缺少或冲突的历史折算汇率：{{ history_missing_rates|join:"、" }}。相关盈亏显示“—”，不会将漏算金额当成 0。</p>{% endif %}
   {% endif %}
-  {% if missing_exchange_rates %}<p class="form-error">部分原币缺少兑 {{ selected_currency }} 的汇率，相关统一币种金额暂显示“-”，未按 1:1 错误合并。</p>{% endif %}
+  {% include "portfolio/_valuation_warnings.html" with base_currency=selected_currency %}
   <div class="account-summary-grid summary-grid-head">
-    <span>统计范围</span><span>总资产</span><span>现金余额</span><span>持仓市值</span><span>{% if historical_view %}快照日盈亏{% else %}今日盈亏{% endif %}</span><span>{% if historical_view %}快照持仓浮盈{% else %}累计浮动盈亏{% endif %}</span><span>累计已实现盈亏</span>
+    <span>统计范围</span><span>{% if historical_view %}期末{% endif %}总资产</span><span>现金余额</span><span>持仓市值</span><span>{% if historical_view %}当年交易总盈亏{% else %}今日盈亏{% endif %}</span><span>{% if historical_view %}当年已实现盈亏{% else %}累计浮动盈亏{% endif %}</span><span>{% if historical_view %}历年累计{% else %}累计{% endif %}已实现盈亏</span>
   </div>
   {% for row in summary_rows %}
     <div class="account-summary-grid{% if forloop.first %} summary-family{% endif %}">
@@ -59,8 +61,9 @@
       <strong>{{ row.total_asset|currency0:selected_currency }}</strong>
       <span>{{ row.cash|currency0:selected_currency }}</span>
       <span>{{ row.market_value|currency0:selected_currency }}</span>
-      <span class="{% if row.today_pnl > 0 %}positive{% elif row.today_pnl < 0 %}negative{% endif %}">{% if historical_view %}未统计{% else %}{{ row.today_pnl|signed_currency0:selected_currency }}{% endif %}</span>
-      <span class="{% if row.unrealized > 0 %}positive{% elif row.unrealized < 0 %}negative{% endif %}">{{ row.unrealized|signed_currency0:selected_currency }}</span>
+      {% if historical_view %}<strong class="{% if row.annual_total > 0 %}positive{% elif row.annual_total < 0 %}negative{% endif %}">{{ row.annual_total|signed_currency0:selected_currency }}</strong><span class="{% if row.annual_realized > 0 %}positive{% elif row.annual_realized < 0 %}negative{% endif %}">{{ row.annual_realized|signed_currency0:selected_currency }}</span>{% else %}
+      <span class="{% if row.today_pnl > 0 %}positive{% elif row.today_pnl < 0 %}negative{% endif %}">{{ row.today_pnl|signed_currency0:selected_currency }}</span>
+      <span class="{% if row.unrealized > 0 %}positive{% elif row.unrealized < 0 %}negative{% endif %}">{{ row.unrealized|signed_currency0:selected_currency }}</span>{% endif %}
       <span class="{% if row.realized > 0 %}positive{% elif row.realized < 0 %}negative{% endif %}">{{ row.realized|signed_currency0:selected_currency }}</span>
     </div>
   {% empty %}
@@ -70,7 +73,7 @@
 
 <section class="panel account-prototype-table-panel">
   <div class="section-head">
-    <div><h2>证券账户明细</h2><p>按成员分别展示，并按账户总金额从大到小排列；人民币总金额低于 {{ low_value_account_threshold_cny|floatformat:0 }} 元的账户默认折叠。</p></div>
+    <div><h2>证券账户明细</h2><p>按成员分别展示，并按账户总金额从大到小排列；低于 {{ low_value_account_threshold_cny|floatformat:0 }} 元且没有当年已实现盈亏或缺项提示的账户默认折叠。</p></div>
   </div>
   {% for group in account_groups %}
     <section class="member-account-section" data-account-member="{{ group.member.pk }}">
@@ -90,12 +93,12 @@
       </div>
       <div class="account-table-wrap account-table-scroll">
         <table class="account-prototype-table account-list-table member-account-table">
-          <thead><tr><th>账户名称</th><th>现金余额</th><th>持仓市值</th><th>持仓占比</th><th>总资产</th><th>{% if historical_view %}快照日盈亏{% else %}今日盈亏{% endif %}</th><th>{% if historical_view %}快照持仓浮盈{% else %}累计浮动盈亏{% endif %}</th><th>累计已实现盈亏</th><th>操作</th></tr></thead>
+          <thead><tr><th>账户名称</th><th>现金余额</th><th>持仓市值</th><th>持仓占比</th><th>{% if historical_view %}期末{% endif %}总资产</th><th>{% if historical_view %}当年交易总盈亏{% else %}今日盈亏{% endif %}</th><th>{% if historical_view %}当年已实现盈亏{% else %}累计浮动盈亏{% endif %}</th><th>历年累计已实现盈亏</th></tr></thead>
           <tbody>
             {% for row in group.visible_rows %}
               {% include "portfolio/_account_dashboard_row.html" with row=row %}
             {% empty %}
-              {% if not group.collapsed_rows %}<tr><td colspan="9">暂无证券账户。</td></tr>{% endif %}
+              {% if not group.collapsed_rows %}<tr><td colspan="8">暂无证券账户。</td></tr>{% endif %}
             {% endfor %}
           </tbody>
           {% if group.collapsed_rows %}
@@ -114,11 +117,12 @@
 </section>
 
 {% if historical_view %}
+  {% include "portfolio/_annual_account_performance.html" %}
   {% include "portfolio/_historical_holdings.html" %}
 {% else %}
 <section class="panel" id="holdings">
   <div class="section-head"><div><h2>持仓明细</h2><p>持仓按交易原币展示，盈亏同时显示家庭本位币。</p></div></div>
-  <div class="account-table-wrap">
+  <div class="account-table-wrap dashboard-holdings-wrap">
     <table class="account-prototype-table holdings-prototype-table dashboard-holdings-table">
       <thead><tr><th>证券代码</th><th>证券名称</th><th>成员</th><th>券商账户</th><th>数量</th><th>最新价</th><th>市值</th><th>成本</th><th>浮动盈亏</th><th>累计已实现盈亏</th><th>操作</th></tr></thead>
       <tbody>

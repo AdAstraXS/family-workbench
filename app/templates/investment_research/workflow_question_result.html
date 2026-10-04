@@ -1,0 +1,9 @@
+<article class="rw-question"><p class="research-eyebrow">{% if question.legacy_kind == 'pillar' %}原持有判断 · {% endif %}{{ question.get_status_display }} · 第{{ question.revision }}版</p><h3><a href="{% url 'investment_research:question_detail' dossier.pk question.pk %}">{{ question.title }}</a></h3>
+{% with update=question.latest_update %}{% if update %}
+<p class="research-private-note">{% if question.legacy_answer %}历史分析 · 原核查{% else %}核查{% endif %}：{{ update.created_at|date:"Y-m-d H:i" }}{% if not question.legacy_answer %} · {{ update.get_direction_display }}{% endif %}</p>
+{% if question.legacy_answer %}<p class="rw-notice">沿用当时的分析与证据，尚未进行新问题核查。</p>{% endif %}
+{% if question.source_sections %}{% for part in question.source_sections %}{% include "investment_research/source_section.html" %}{% endfor %}{% else %}<p>{{ update.answer|linebreaksbr }}</p>{% endif %}{% if update.direction != 'unchanged' and not question.legacy_answer %}<p><strong>新增信息：</strong>{{ update.change|linebreaksbr }}</p>{% endif %}
+{% if update.gap %}<p class="rw-uncertainty"><strong>重要缺口：</strong>{{ update.gap|linebreaksbr }}</p>{% endif %}
+{% for ref in update.evidence %}<p class="research-private-note"><a href="{{ ref.url }}">{{ ref.id }} · {{ ref.title }}</a> · {{ ref.date }}<br>{{ ref.source_note }}</p>{% endfor %}
+{% else %}<p>{% if question.old_update %}问题已修改，新版本尚未核查。{% else %}尚未取得问题核查结果。{% endif %}</p>{% endif %}{% endwith %}
+<details><summary>关注指标与来源</summary><p>{{ question.metrics|linebreaksbr }}</p><p>{{ question.source_notes|linebreaksbr }}</p></details></article>

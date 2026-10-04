@@ -21,10 +21,26 @@ from .models import OfficialResearchContentVersion, OfficialResearchDocument
 from .research_ai import ResearchAiError
 from .services import create_dossier, save_thesis_revision
 from .tests_financial_overview import filing
-from .thesis_analysis import _validate_output, generate_thesis_analysis
+from .thesis_analysis import _fit_evidence, _validate_output, generate_thesis_analysis
 
 
 class ThesisAnalysisTests(TestCase):
+    def test_input_budget_preserves_latest_tables_metrics_and_selected_news(self):
+        evidence = [{"id": f"E{i}", "text": text} for i, text in enumerate([
+            "财年截至 2025: 净利润 100",
+            "管理层讨论摘录：" + "旧背景" * 500,
+            "最新财务报表原文摘录：2026 | 2025\n全年净利润 | 9226 | 8099",
+            "最新财务报表原文摘录：2026 | 2025\n经营现金流 | 15825 | 13335",
+            "旧财务报表原文摘录：" + "旧数据" * 500,
+            "新闻来源 已选择摘录",
+        ], start=1)]
+        selected, omitted = _fit_evidence(evidence, 400)
+        self.assertEqual([item["id"] for item in selected], ["E1", "E3", "E4", "E6"])
+        self.assertEqual(selected[1], evidence[2])
+        self.assertEqual(omitted, 2)
+        self.assertLessEqual(sum(len(f"\n[{i['id']}] {i['text']}") for i in selected), 400)
+        self.assertEqual(len(evidence), 6)
+
     @classmethod
     def setUpTestData(cls):
         family = Family.objects.create(name="Synthesis family")
@@ -90,6 +106,31 @@ class ThesisAnalysisTests(TestCase):
         arguments.update(changes)
         with patch.dict(os.environ, {"SYNTHESIS_TEST_KEY": "test-token"}):
             return generate_thesis_analysis(**arguments)
+
+    def test_background_freezes_input_and_worker_claims_only_once(self):
+        from .thesis_analysis import run_thesis_analysis
+        with patch('investment_research.thesis_analysis.launch_thesis_analysis') as launch:
+            with self.captureOnCommitCallbacks(execute=True):
+                queued = self.generate(background=True, allow_retry=False)
+                duplicate = self.generate(background=True, allow_retry=False)
+            self.assertEqual(duplicate.pk, queued.pk)
+            launch.assert_called_once_with(queued.pk)
+        self.assertEqual(queued.status, 'pending')
+        original = queued.scope['execution']['payload']
+        save_thesis_revision(actor=self.actor, dossier_id=self.dossier.pk,
+            expected_revision_id=self.dossier.current_revision_id,
+            thesis='后来修改的判断', pillars=['后来新增的假设'], questions=[], change_reason='检验冻结资料')
+        calls = []
+        def transport(request, **kwargs):
+            calls.append(json.loads(request.data))
+            return self.response()
+        with patch.dict(os.environ, {'SYNTHESIS_TEST_KEY': 'test-token'}):
+            result = run_thesis_analysis(queued.pk, transport=transport,
+                url_validator=lambda provider: 'https://example.ai/v1/chat/completions')
+            run_thesis_analysis(queued.pk, transport=transport)
+        self.assertEqual(result.status, 'success')
+        self.assertEqual(calls, [original])
+        self.assertNotIn('后来新增的假设', json.dumps(calls, ensure_ascii=False))
 
     @override_settings(INVESTMENT_WATCH_MODEL_ENABLED=True)
     def test_selected_news_is_a_frozen_new_analysis_input(self):

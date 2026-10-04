@@ -1,3 +1,4 @@
+from family_core.job_runtime import BoundedJobCommand
 import json
 from django.core.management.base import BaseCommand, CommandError
 from family_core.models import Family
@@ -5,7 +6,7 @@ from investment_watch.worker import run_cycle
 from investment_watch.collection import seed_sources
 
 
-class Command(BaseCommand):
+class Command(BoundedJobCommand):
     help = "Run a bounded investment news cycle; scheduled by NAS, not web reads."
 
     def add_arguments(self, parser):
@@ -20,6 +21,12 @@ class Command(BaseCommand):
             raise CommandError("家庭不存在。")
         if options["seed"]:
             seed_sources(family)
+        from django.conf import settings
+        from investment_watch.models import WatchConsent
+        if (not options["no_analyze"] and getattr(settings, "INVESTMENT_WATCH_BODY_ENABLED", False)
+                and WatchConsent.objects.filter(dossier__family=family, active=True).exists()):
+            from investment_watch.capture_account import refresh_usage
+            refresh_usage()
         result = run_cycle(
             family, collect=not options["no_collect"], analyze=not options["no_analyze"]
         )

@@ -93,7 +93,7 @@ def launch_advice(pk):
     try:
         subprocess.Popen([sys.executable, "manage.py", "run_wheel_advice", str(pk)],
             cwd=Path(__file__).resolve().parent.parent, stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, **platform)
+            stdout=subprocess.DEVNULL, stderr=None, close_fds=True, **platform)
     except OSError:
         AiAnalysisRequest.objects.filter(pk=pk, module=MODULE, status="pending").update(
             status="failed", error_message="AI 进程未启动，未自动重试。")

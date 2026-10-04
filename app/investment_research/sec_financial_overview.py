@@ -28,7 +28,8 @@ def report_info(version):
     else:
         period = version.report_date or ""
     # Never mark an entire annual filing audited merely because its form is 10-K.
-    audit = "未经审计（原文标注）" if earnings and re.search(r"\bunaudited\b|未经审计", version.text or "", re.I) else "审计状态请见原文"
+    audit_text = headline if 'text' in getattr(version, 'get_deferred_fields', lambda: set())() else version.text or ''
+    audit = "未经审计（原文标注）" if earnings and re.search(r"\bunaudited\b|未经审计", audit_text, re.I) else "审计状态请见原文"
     return {"version": version, "form": form, "earnings": earnings,
             "period": period or "正文中核对", "filed": data.get("filing_date", ""), "audit": audit,
             "title": ("全年业绩公告" if re.search(r"full.year|全年", announcement.group(), re.I) else "业绩公告") if earnings else form}

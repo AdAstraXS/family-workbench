@@ -12,7 +12,7 @@
 
 {% include "intelligence/_tabs.html" %}
 
-<form method="get" class="intel-filter-bar">
+<form data-auto-filter method="get" class="intel-filter-bar">
   <input type="search" name="q" value="{{ query }}" placeholder="搜索标题、摘要或重要性说明">
   <select name="subject"><option value="">全部主题</option>{% for subject in subjects %}<option value="{{ subject.pk }}" {% if selected_subject == subject.pk|stringformat:"s" %}selected{% endif %}>{{ subject.display_name }}</option>{% endfor %}</select>
   <select name="type"><option value="">全部类型</option>{% for value, label in event_types %}<option value="{{ value }}" {% if selected_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>

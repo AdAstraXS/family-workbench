@@ -1,0 +1,6 @@
+<h3>本次运行记录 #{{ job.pk }}</h3><p>{{ job.created_at|date:"Y-m-d H:i" }} · {{ job.get_status_display }} · {{ job.provider.name }} · {{ job.scope.model }}</p><p>单次批准上限 ${{ job.scope.approved_max_cost_usd }} · 预估上限 ${{ job.scope.estimated_max_cost_usd }}</p>
+<p>供应商报告用量：{% if job.scope.reported_tokens != None %}{{ job.scope.reported_tokens }} tokens{% else %}尚未取得完整用量{% endif %} · 估算费用：{% if job.scope.reported_cost_usd != None %}${{ job.scope.reported_cost_usd }}{% else %}未知；费用保护沿用预留值{% endif %}</p>
+{% for call in job.scope.model_calls %}<p>{{ call.stage }} · {{ call.status }} · 预留 ${{ call.reserved_cost_usd }}{% if call.cost_usd != None %} · 估算 ${{ call.cost_usd }}{% endif %}</p>{% endfor %}
+{% for receipt in job.scope.search_receipts %}<p>{{ receipt.query }} · {{ receipt.fetched_at }} · 返回 {{ receipt.returned_count }} 项</p>{% endfor %}
+{% for receipt in job.scope.candidate_receipts %}<p>{{ receipt.reason }}</p>{% endfor %}
+<details><summary>实际使用的提示词</summary><pre class="rw-pre">{{ job.prompt }}</pre></details>

@@ -394,7 +394,7 @@ class BodyPipelineTests(TestCase):
             ThesisEvidence.objects.create(candidate=c, revision=c.revision, assumption_key=f"pillar:{i}",
                 direction="unknown", explanation="没有足够证据。", input_key="a" * 64)
         self.client.force_login(self.user)
-        page = self.client.get(reverse("investment_watch:items"))
+        page = self.client.get(reverse("investment_watch:items"), {"scope": "all"})
         self.assertContains(page, 'class="iw-more-evidence"')
         self.assertContains(page, "7 项证据不足")
         self.assertNotContains(page, '<details class="iw-more-evidence" open')

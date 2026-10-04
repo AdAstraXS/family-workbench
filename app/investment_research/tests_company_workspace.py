@@ -34,11 +34,11 @@ class CompanyWorkspaceTests(TestCase):
 
     def test_original_page_and_news_entry_are_one_workspace(self):
         self.client.force_login(self.user)
-        response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]))
-        for text in ("公司研究", "持续跟踪", "资料", "我的判断", "财务与行情"):
+        response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]), follow=True)
+        for text in ("了解公司", "提出问题", "跟踪问题", "资料", "研究设置"):
             self.assertContains(response, text)
         self.assertRedirects(self.client.get(reverse("investment_watch:company", args=[self.dossier.pk])),
-                             reverse("investment_research:company_research", args=[self.dossier.pk]))
+                             reverse("investment_research:company_research", args=[self.dossier.pk]), target_status_code=302)
 
     def test_reading_all_three_views_does_not_write_or_call_model(self):
         self.news("pending")
@@ -57,23 +57,22 @@ class CompanyWorkspaceTests(TestCase):
         self.client.force_login(self.user)
         response = self.client.get(reverse("investment_research:detail", args=[self.dossier.pk]))
         self.assertTemplateUsed(response, "investment_research/detail.html")
-        for text in ("公司研究", "个人判断", "持续跟踪", "资料", "财务与行情"):
+        for text in ("个人判断", "资料"):
             self.assertContains(response, text)
         self.assertContains(response, self.dossier.current_revision.thesis)
         self.assertNotContains(response, 'css/company-research.css')
         listing = self.client.get(reverse("investment_research:index"))
-        for text in ("公司", "研究进度", "观察状态"):
+        for text in ("公司", "研究进度", "待关注问题"):
             self.assertContains(listing, text)
-        self.assertContains(listing, reverse("investment_research:company_research", args=[self.dossier.pk]))
+        self.assertContains(listing, reverse("investment_research:prepare", args=[self.dossier.pk]))
 
     def test_evidence_filter_respects_citations_and_type(self):
         self.generate()
         self.news("not-analyzed")
         self.client.force_login(self.user)
-        response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]),
-                                   {"view": "evidence", "source_type": "official", "assumption": "pillar:0"})
-        self.assertEqual(len(response.context["official_rows"]), 1)
-        self.assertEqual(response.context["news_rows"], [])
+        archived = workspace_context(self.dossier, {"view": "evidence", "source_type": "official", "assumption": "pillar:0"})
+        self.assertEqual(len(archived['official_rows']), 1)
+        self.assertEqual(archived['news_rows'], [])
 
     def test_incremental_without_same_revision_baseline_is_rejected(self):
         with self.assertRaisesMessage(ResearchAiError, "请先完整重评"):
@@ -113,7 +112,7 @@ class CompanyWorkspaceTests(TestCase):
         with self.assertRaisesMessage(ResearchAiError, "没有尚未采用"):
             self.generate(review_mode="incremental")
 
-    @override_settings(INVESTMENT_WATCH_MODEL_ENABLED=True)
+    @override_settings(INVESTMENT_WATCH_MODEL_ENABLED=True, INVESTMENT_WATCH_DAILY_CNY='10')
     def test_incremental_retains_baseline_and_does_not_repeat_news(self):
         self.provider.extra_data["watch_usd_cny"] = "7"
         self.provider.save()
@@ -133,9 +132,7 @@ class CompanyWorkspaceTests(TestCase):
         baseline.refresh_from_db()
         self.assertEqual(baseline.scope, original_scope)
         self.client.force_login(self.user)
-        response = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]),
-                                   {"view": "changes"}, follow=True)
-        self.assertEqual(response.context["pending_news_count"], 0)
+        self.assertEqual(workspace_context(self.dossier, {'view':'changes'})['pending_news_count'], 0)
 
     def test_material_selection_returns_to_original_company_page(self):
         candidate = self.news("select")

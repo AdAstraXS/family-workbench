@@ -82,7 +82,7 @@ def queue_run(dossier):
             dossier=dossier, revision=dossier.current_revision
         )
         .order_by("pk")
-        .values_list("pk", "material_version_id", "rule_version")
+        .values_list("pk", "material_version_id", "rule_version", "manual")
     )
     key = digest(
         [
@@ -94,6 +94,7 @@ def queue_run(dossier):
             PROMPT_VERSION,
             bool(getattr(settings, "INVESTMENT_WATCH_BODY_ENABLED", False)),
             pipeline_progress(dossier) if getattr(settings, "INVESTMENT_WATCH_BODY_ENABLED", False) else None,
+            ResearchCandidate.objects.filter(dossier=dossier, reading_requested=True).order_by("-updated_at").values_list("pk", "updated_at").first(),
             MaterialRelation.objects.filter(
                 source__material__source__family=dossier.family
             )
@@ -194,9 +195,17 @@ def run_cycle(family, *, collect=True, analyze=True, limit=3):
             recalled += recall(dossier)
             if (
                 analyze
+                and not dossier.question_workflow
                 and WatchConsent.objects.filter(dossier=dossier, active=True).exists()
             ):
                 queue_run(dossier)
+            if analyze and dossier.question_workflow:
+                from investment_research.question_ai import automatic_check
+                from investment_research.research_ai import ResearchAiError
+                try:
+                    automatic_check(dossier)
+                except ResearchAiError as exc:
+                    results.append({'dossier': dossier.pk, 'question_check': str(exc)})
         # Reclaim interrupted runs only after acquiring the expired family lease.
         WatchRun.objects.filter(dossier__family=family, status="running").update(
             status="queued", message="上轮中断，继续未付费的候选。"
@@ -209,7 +218,7 @@ def run_cycle(family, *, collect=True, analyze=True, limit=3):
         ).select_related("dossier__owner", "dossier__current_revision")[
             : max(1, min(limit, 3))
         ]:
-            if run.revision_id != run.dossier.current_revision_id:
+            if run.dossier.question_workflow or run.revision_id != run.dossier.current_revision_id:
                 run.status = "stale"
                 run.message = "判断已更新，请重新发起。"
             elif not analyze:
@@ -252,6 +261,9 @@ def run_cycle(family, *, collect=True, analyze=True, limit=3):
         return {
             "status": "done",
             "sources": results,
+            "collection_message": ("未到来源采集时间；按现有间隔检查。" if collect and not results
+                else "本轮未执行信源采集。" if not collect else
+                f"检查 {len(results)} 个来源，新增 {sum(r.get('added', 0) for r in results)} 个材料版本。"),
             "recalled": recalled,
             "runs": completed,
             "blocked": blocked,

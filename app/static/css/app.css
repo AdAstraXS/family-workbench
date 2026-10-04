@@ -4895,7 +4895,9 @@ textarea {
   text-align: right;
 }
 
-.account-list-table :is(th, td):nth-child(n+3):nth-child(-n+9),
+.account-list-table :is(th, td):nth-child(n+2):nth-child(-n+8),
+.annual-calculation-table :is(th, td):nth-child(n+2):nth-child(-n+5),
+.annual-transactions-table :is(th, td):nth-child(n+5),
 .dashboard-holdings-table :is(th, td):nth-child(n+5):nth-child(-n+10),
 .account-positions-table :is(th, td):nth-child(n+4),
 .individual-profit-table :is(th, td):nth-child(n+4),
@@ -4907,6 +4909,27 @@ textarea {
 .watchlist-compact-table :is(th, td):nth-child(n+4):nth-child(-n+12) {
   text-align: right;
 }
+
+/* Keep account names and explanations readable while money columns line up. */
+.account-list-table { min-width: 1000px; }
+.account-list-table :is(th, td):first-child { width: 23%; text-align: left; }
+.account-name-link { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.account-name-link:hover { text-decoration-thickness: 2px; }
+.account-name-link:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 2px; }
+.annual-calculation-table { min-width: 920px; }
+.annual-calculation-table :is(th, td):first-child { width: 22%; text-align: left; }
+.annual-calculation-table :is(th, td):last-child { width: 24%; text-align: left; }
+.annual-transactions-table { min-width: 850px; }
+.annual-transactions-table :is(th, td):nth-child(2) { width: 30%; }
+.annual-transactions-table :is(th, td):nth-child(-n+4) { text-align: left; }
+.account-list-table td:nth-child(n+2),
+.annual-calculation-table td:nth-child(n+2):nth-child(-n+5),
+.annual-transactions-table td:nth-child(n+5) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.account-table-scroll { overflow-x: auto; }
+.dashboard-holdings-wrap { overflow-x: auto; }
+.dashboard-holdings-table { min-width: 1300px; }
+.dashboard-holdings-table :is(th, td):nth-child(2) { width: 18%; }
+.dashboard-holdings-table td:nth-child(n+5):nth-child(-n+10) { font-variant-numeric: tabular-nums; }
 
 .individual-profit-table .table-total-row td {
   border-top: 2px solid var(--line);
@@ -9647,6 +9670,22 @@ textarea {
 .web-capture-detail .action-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
 .web-capture-detail details { margin: 20px 0; }
 .web-capture-detail summary { cursor: pointer; }
+.songting .ws-nav-legacy:not(.active) { color: var(--ws-muted, #667085); }
+.songting .ws-nav-legacy small { display: block; font-size: 10px; line-height: 1.5; font-weight: 400; }
+.ws-legacy-notice { margin: 0 0 24px; padding: 16px 20px; border: 1px solid var(--line, #e5e7eb); border-radius: 12px; background: var(--ws-surface, #fff); }
+.ws-legacy-notice p { margin: 6px 0 0; line-height: 1.8; }
+.ws-legacy-notice a { margin: 0 4px; }
+.knowledge-person-profile-summary { margin: 12px 0 20px; overflow-wrap: anywhere; }
+.knowledge-person-profile-summary summary { cursor: pointer; }
+.knowledge-person-profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: 20px; margin-top: 24px; }
+.knowledge-person-profile-grid .panel { margin: 0; overflow-wrap: anywhere; }
+.knowledge-person-profile-grid h2 { margin-top: 0; }
+.knowledge-person-profile-grid .action-row, .knowledge-person-form .action-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.knowledge-person-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.knowledge-person-form-grid .wide { grid-column: 1 / -1; }
+.knowledge-person-form-grid label, .knowledge-person-form-grid small { display: block; margin: 6px 0; }
+.knowledge-person-form-grid input, .knowledge-person-form-grid select, .knowledge-person-form-grid textarea { width: 100%; box-sizing: border-box; }
+@media (max-width: 600px) { .knowledge-person-form-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 1000px) {
   .web-capture-grid { grid-template-columns: minmax(0, 1fr); }
   .songting.app-knowledge .knowledge-hub-shell { grid-template-columns: minmax(0, 1fr); }

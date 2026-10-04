@@ -1,0 +1,7 @@
+{% extends "knowledge_hub/base.html" %}
+{% block title %}{% if editing %}编辑人物资料{% else %}新增人物{% endif %} · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:people' %}">关注人物</a><span aria-hidden="true">›</span><a href="{% url 'knowledge:person_profiles' %}">人物资料</a>{% endblock %}
+{% block hub_content %}
+<section class="knowledge-page-heading"><div><h1>{% if editing %}编辑人物资料{% else %}新增人物{% endif %}</h1><p>明确关联同一人物的历史署名，原文和来源保持完整。</p></div></section>
+<section class="panel"><form method="post" class="knowledge-person-form">{% csrf_token %}{{ form.non_field_errors }}<div class="knowledge-person-form-grid">{% for field in form %}<div class="{% if field.name == 'profile_summary' or field.name == 'knowledge_author_names' or field.name == 'aliases' %}wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}{{ field.errors }}</div>{% endfor %}</div><div class="action-row"><button class="button" type="submit">保存人物资料</button><a class="button ghost" href="{{ cancel_url }}">取消</a></div></form></section>
+{% endblock %}

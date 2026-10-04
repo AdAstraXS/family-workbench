@@ -1,0 +1,23 @@
+{% if job.scope.research_pipeline %}
+<section class="research-current" aria-label="资料补充过程">
+  <h2>本次资料补充</h2>
+  {% if active %}<p role="status">当前：{{ job.scope.research_stage }}。完成后会说明补充结果，期间可以离开页面。</p>{% elif job.status == 'failed' %}<p>流程已停止，下面保留已完成的诊断、来源和用量；未自动重试。</p>{% endif %}
+  {% with review=job.sanitized_input.local_review %}<p>本地检索检查了 {{ review.source_count }} 份已保存正文，选入 {{ review.added_refs|length }} 条补充摘录。{{ review.boundary }}</p>{% endwith %}
+  {% if job.sanitized_input.research_plan %}
+  <h3>初步诊断</h3><p>{{ job.sanitized_input.research_plan.summary }}</p>
+  <ol>{% for gap in job.sanitized_input.research_plan.gaps %}<li><strong>{{ gap.id }} · {{ gap.question }}</strong><p>{{ gap.why_missing }} · 期间：{% if gap.period == 'latest' %}近期{% else %}{{ gap.period }}{% endif %}</p></li>{% empty %}<li>未提出重要资料缺口，已跳过联网搜索。</li>{% endfor %}</ol>
+  {% endif %}
+  {% if result.supplement_review %}<h3>补充后的结论</h3>{% for item in result.supplement_review %}<p><strong>{{ item.id }} · {{ item.status }}</strong> · {{ item.conclusion }} {% for ref in item.refs %}<a href="#source-{{ ref }}">[{{ ref }}]</a> {% endfor %}</p>{% endfor %}{% endif %}
+  {% if job.scope.search_problem %}<p>{{ job.scope.search_problem }}</p>{% endif %}
+  <details><summary>查看查询、原文与筛选记录</summary>
+    {% for plan in job.scope.search_plans %}<p style="overflow-wrap:anywhere">查询 {{ forloop.counter }}：{{ plan.query }}</p>{% endfor %}
+    {% for receipt in job.scope.candidate_receipts %}<p><strong>{{ receipt.title }}</strong> · {{ receipt.status }} · {{ receipt.reason }}{% if receipt.included_refs %} · 采用 {{ receipt.included_refs|join:", " }}{% endif %}</p>{% empty %}<p>尚无候选原文记录。</p>{% endfor %}
+    {% for original in job.sanitized_input.web_originals %}<p><a href="{% url 'investment_research:preparation_source' dossier.pk job.pk original.number %}">阅读已保存原文 · {{ original.title }}</a></p>{% endfor %}
+  </details>
+  <details><summary>查看分阶段模型用量</summary>
+    {% for call in job.scope.model_calls %}<p>{{ call.stage }} · {{ call.status }}{% if call.tokens != None %} · {{ call.tokens }} tokens · 估算 ${{ call.cost_usd }}{% else %} · 供应商用量未确认，不能按零计费{% endif %}</p>{% endfor %}
+    <p>两阶段合计上限 ${{ job.scope.approved_max_cost_usd }}；已知费用 ${{ job.scope.known_cost_usd|default:"尚未返回" }}。最终账单以供应商为准。</p>
+  </details>
+  <details><summary>查看生成时的诊断规则</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{ job.scope.diagnosis_prompt }}</pre></details>
+</section>
+{% endif %}

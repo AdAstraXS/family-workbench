@@ -7,7 +7,7 @@
     <a href="{% url 'knowledge:library' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "library" or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "inbox" or request.resolver_match.app_name == "knowledge" and "review" in request.resolver_match.url_name or request.resolver_match.app_name == "knowledge" and "proposal_bulk" in request.resolver_match.url_name or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "document_detail" or request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "document_organize" %} class="active"{% endif %}>
       <span aria-hidden="true">知</span><strong>资料库</strong>
     </a>
-    <a href="{% url 'knowledge:people' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "people" %} class="active"{% endif %}>
+    <a href="{% url 'knowledge:people' %}"{% if request.resolver_match.app_name == "knowledge" and request.resolver_match.url_name == "people" or request.resolver_match.app_name == "knowledge" and "person_" in request.resolver_match.url_name %} class="active"{% endif %}>
       <span aria-hidden="true">人</span><strong>关注人物</strong><small>历史知识</small>
     </a>
     <a href="{% url 'knowledge:topics' %}"{% if request.resolver_match.url_name == "topics" %} class="active"{% endif %}>

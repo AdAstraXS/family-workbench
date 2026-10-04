@@ -4,13 +4,14 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db.models import F
+from django.db.models.functions import Coalesce
 
 from .citations import quote_digest
 from .financial_overview import build_financial_overview
 from .models import OfficialResearchContentVersion
 from .official_ir import documents_for_security
 from .tenk_chapters import tenk_chapter_coverage
-from portfolio.models import SecurityMarketSnapshot
+from portfolio.research_quotes import saved_research_quote, freeze_research_quote
 
 
 NARRATIVE_TERMS = ("revenue", "growth", "demand", "cash", "margin", "cloud",
@@ -30,14 +31,14 @@ def source_preview(dossier):
     recent = []
     seen = set()
     versions = (base.filter(document__document_type__in=NARRATIVE_TYPES)
-                .order_by(F("document__period_end").desc(nulls_last=True),
+                .order_by(Coalesce("document__period_end", "document__published_at").desc(nulls_last=True),
                           F("document__published_at").desc(nulls_last=True), "-pk")[:20])
     for version in versions:
         if version.document_id in seen:
             continue
         seen.add(version.document_id)
         recent.append(version)
-        if len(recent) == 2:
+        if len(recent) == 3:
             break
     return ([annual] if annual else []) + recent
 
@@ -82,15 +83,7 @@ def prepare_analysis_materials(dossier):
                    and v.document.document_type == "10-k"), None)
     evidence, sources, periods = [], [], []
     valuation_basis = {}
-    market_context = {}
-    quote = SecurityMarketSnapshot.objects.filter(security=dossier.security).first()
-    if quote and quote.last_price and quote.last_price > 0 and quote.price_as_of:
-        market_context = {"price": str(quote.last_price),
-                          "currency": dossier.security.currency,
-                          "price_as_of": quote.price_as_of.isoformat(),
-                          "price_source": quote.get_price_source_display()}
-        if quote.pe_ttm_ratio and quote.pe_ttm_ratio > 0:
-            market_context["pe_ttm"] = str(quote.pe_ttm_ratio)
+    market_context = freeze_research_quote(saved_research_quote(dossier.security))
     problem = ""
 
     def add(version, text, citations):
@@ -155,6 +148,12 @@ def prepare_analysis_materials(dossier):
                         "document_title": version.document.title,
                         "source": version.document.get_source_display(),
                         "period_end": str(version.document.period_end or "")})
+        from .financial_excerpts import statement_excerpts
+        for quote, start in statement_excerpts(version.content_text):
+            add(version, f"{version.document.title} 财务报表原文摘录（按表头日期、期间与单位逐列阅读）：{quote}", [{
+                "version_id": version.pk, "document_id": version.document_id,
+                "start": start, "end": start + len(quote), "hash": quote_digest(quote),
+            }])
         for _, start, quote in _narrative(version, start=0,
                                           end=min(len(version.content_text), 20000), count=4):
             source_date = version.document.period_end or version.document.published_at or "日期未标明"

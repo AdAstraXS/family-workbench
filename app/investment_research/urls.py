@@ -1,16 +1,25 @@
 from django.urls import path
 
-from . import views, ir_views, material_views, preparation_views, navigation_views
+from . import views, ir_views, material_views, preparation_views, navigation_views, workflow_views
 
 app_name = "investment_research"
 
 urlpatterns = [
-    path('<int:pk>/follow/', navigation_views.follow, name='follow'),
+    path('<int:pk>/questions/', workflow_views.questions, name='questions'),
+    path('<int:pk>/questions/<int:question_pk>/', workflow_views.question_detail, name='question_detail'),
+    path('<int:pk>/settings/', workflow_views.settings, name='research_settings'),
+    path('<int:pk>/supplement/', workflow_views.supplement, name='supplement'),
+    path('<int:pk>/supplement/<int:supplement_pk>/', workflow_views.supplement_read, name='supplement_read'),
+    path('<int:pk>/news-source/<int:version_pk>/', workflow_views.news_source, name='question_news_source'),
+    path('<int:pk>/prepare/prompts/', workflow_views.settings, name='prompt_settings'),
+    path('<int:pk>/follow/', workflow_views.tracking, name='follow'),
     path('<int:pk>/follow/observation/', navigation_views.observation, name='observation'),
     path('<int:pk>/company/history/', navigation_views.history, name='research_history'),
     path('<int:pk>/materials/news/', navigation_views.library_news, name='library_news'),
     path('<int:pk>/valuation/', navigation_views.valuation, name='valuation'),
-    path('<int:pk>/prepare/', preparation_views.prepare, name='prepare'),
+    path('<int:pk>/valuation/refresh/', navigation_views.refresh_quote, name='refresh_quote'),
+    path('<int:pk>/prepare/', workflow_views.introduction, name='prepare'),
+    path('<int:pk>/prepare/<int:report_pk>/sources/<int:number>/', preparation_views.source, name='preparation_source'),
     path('materials/start/', material_views.start, name='material_start'),
     path('<int:pk>/materials/', material_views.library, name='materials'),
     path('<int:pk>/materials/version/<int:version_pk>/', material_views.read, name='material_read'),
@@ -20,11 +29,11 @@ urlpatterns = [
     path('<int:pk>/documents/ir/sync/', ir_views.sync, name='sync_ir'),
     path('<int:pk>/documents/<int:document_pk>/ir/fetch/', ir_views.fetch, name='fetch_ir'),
     path('<int:pk>/documents/<int:document_pk>/original/<int:version_pk>/', ir_views.original, name='original_document'),
-    path("", views.index, name="index"),
-    path("new/", views.create, name="create"),
-    path("explore/new/", views.explore, name="explore"),
+    path("", workflow_views.index, name="index"),
+    path("new/", material_views.start, name="create"),
+    path("explore/new/", material_views.start, name="explore"),
     path("<int:pk>/", views.detail, name="detail"),
-    path("<int:pk>/company/", views.company_research, name="company_research"),
+    path("<int:pk>/company/", workflow_views.legacy_redirect, name="company_research"),
     path("<int:pk>/metric-focus/", views.metric_focus, name="metric_focus"),
     path("<int:pk>/review-plan/", views.review_plan, name="review_plan"),
     path("<int:pk>/financials/", views.financials, name="financials"),
@@ -38,13 +47,13 @@ urlpatterns = [
          name="next_day_consent"),
     path("<int:pk>/analysis/next-day/generate/", views.next_day_generate,
          name="next_day_generate"),
-    path("<int:pk>/first/", views.first_thesis, name="first_thesis"),
+    path("<int:pk>/first/", workflow_views.legacy_redirect, name="first_thesis"),
     path("<int:pk>/reviews/", views.filing_reviews, name="filing_reviews"),
     path("<int:pk>/reviews/<int:document_pk>/", views.filing_review, name="filing_review"),
     path("<int:pk>/drafts/generate/", views.generate_draft, name="generate_draft"),
     path("<int:pk>/drafts/<int:request_pk>/", views.draft_detail, name="draft_detail"),
     path("<int:pk>/documents/sync/", views.sync_documents, name="sync_documents"),
-    path("<int:pk>/edit/", views.edit, name="edit"),
+    path("<int:pk>/edit/", workflow_views.legacy_redirect, name="edit"),
     path("<int:pk>/history/", views.history, name="history"),
     path("<int:pk>/documents/", views.documents, name="documents"),
     path(

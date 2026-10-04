@@ -23,6 +23,16 @@
   </div>
 </section>
 
+{% if snapshot.extra_data.historical_price_reviews %}
+<section class="panel">
+  <div class="section-head"><h2>历史估值价格确认</h2></div>
+  {% for item in snapshot.extra_data.historical_price_reviews %}
+  <p><strong>{{ item.account_name }} · {{ item.security_name }}</strong>：{{ item.price }} {{ item.currency }} · 原始报价日期 {{ item.quote_date }} · 用于 {{ item.valuation_date }} 估值。</p>
+  <p>{{ item.evidence }}</p>
+  {% endfor %}
+</section>
+{% endif %}
+
 {% if audit.status != "complete" %}
 <section class="panel snapshot-audit-issues">
   <div class="section-head"><h2>完整性与价格提示</h2></div>

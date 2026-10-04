@@ -137,18 +137,15 @@ class SimplificationTests(TestCase):
         self.archive()
         self.client.force_login(self.user)
         before = AiAnalysisRequest.objects.count()
-        for route in ["company_research", "follow", "research_history"]:
+        for route in ["prepare", "questions", "follow", "research_history"]:
             with CaptureQueriesContext(connection) as queries:
                 page = self.client.get(reverse("investment_research:" + route, args=[self.dossier.pk]))
             self.assertEqual(page.status_code, 200)
             self.assertFalse(any(q["sql"].lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")) for q in queries))
-            if route != "research_history":
-                self.assertContains(page, "季度订单与现金流")
-                self.assertContains(page, "需求连续下降")
-            if route == "company_research":
+            if route == "prepare":
                 self.assertContains(page, "Existing introduction")
                 stages = page.content.decode().split('aria-label="公司研究流程"')[1].split("</nav>")[0]
-                self.assertEqual(stages.count("<a "), 2)
+                self.assertEqual(stages.count("<a "), 3)
         self.assertEqual(AiAnalysisRequest.objects.count(), before)
         self.client.force_login(self.other_user)
         self.assertEqual(self.client.get(reverse("investment_research:research_history", args=[self.dossier.pk])).status_code, 404)
@@ -173,7 +170,7 @@ class SimplificationTests(TestCase):
     def test_evidence_tab_alias_displays_evidence(self):
         self.client.force_login(self.user)
         page = self.client.get(reverse("investment_research:company_research", args=[self.dossier.pk]), {"tab": "evidence"})
-        self.assertContains(page, "按假设与来源核对依据")
+        self.assertRedirects(page, reverse('investment_research:questions', args=[self.dossier.pk]))
 
     def test_legal_boilerplate_is_not_selected_as_business_evidence(self):
         legal = "Forward-looking statements about revenue, risk and customers. " * 10

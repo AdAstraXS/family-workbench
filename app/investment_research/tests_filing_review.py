@@ -57,12 +57,9 @@ class FilingReviewJourneyTests(TestCase):
         return document, version
 
     def first_thesis(self):
-        url = reverse("investment_research:first_thesis", args=[self.dossier.pk])
-        response = self.client.post(url, {
-            "thesis": "服务收入有望持续增长。", "pillars": "服务收入增长",
-            "questions": "增长是否转化为现金？",
-        })
-        self.assertEqual(response.status_code, 302)
+        from .services import save_first_thesis
+        save_first_thesis(actor=self.member, dossier_id=self.dossier.pk, thesis='服务收入有望持续增长。',
+                         pillars=['服务收入增长'], questions=['增长是否转化为现金？'])
         self.dossier.refresh_from_db()
         return self.dossier.current_revision
 
@@ -87,9 +84,7 @@ class FilingReviewJourneyTests(TestCase):
         reviews_url = reverse("investment_research:filing_reviews", args=[self.dossier.pk])
         review_url = reverse("investment_research:filing_review",
                              args=[self.dossier.pk, future.pk])
-        self.assertContains(self.client.get(reverse("investment_research:follow", args=[self.dossier.pk])), "1 份新财报待复核")
-        self.assertContains(self.client.get(reverse("investment_research:index")),
-                            "1 份新财报待复核")
+        self.assertContains(self.client.get(reverse("investment_research:follow", args=[self.dossier.pk])), "请先整理并确认新的问题清单")
         self.assertContains(self.client.get(reviews_url), future.title)
         self.assertNotContains(self.client.get(reviews_url), old_document.title)
         self.assertContains(self.client.get(review_url), "查看保存的正文")
@@ -104,9 +99,7 @@ class FilingReviewJourneyTests(TestCase):
             version, review.citation["start"], review.citation["end"],
             review.citation["hash"],
         )[1])
-        self.assertContains(self.client.get(reverse("investment_research:follow", args=[self.dossier.pk])), "待修订判断")
-        self.assertContains(self.client.get(reverse("investment_research:index")),
-                            "1 份复核提示修订判断")
+        self.assertNotContains(self.client.get(reverse("investment_research:follow", args=[self.dossier.pk])), "待修订判断")
         self.assertContains(self.client.get(review_url), "核对本次引用的原文")
         save_thesis_revision(
             actor=self.member, dossier_id=self.dossier.pk,

@@ -1,8 +1,9 @@
+from family_core.job_runtime import BoundedJobCommand
 from django.core.management.base import BaseCommand, CommandError
 from investment_research.preparation import run
 
 
-class Command(BaseCommand):
+class Command(BoundedJobCommand):
     help = "Run one explicitly requested company introduction."
 
     def add_arguments(self, parser):

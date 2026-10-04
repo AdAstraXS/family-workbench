@@ -31,10 +31,10 @@
       </form>
     {% endif %}
   </div>
-  <form method="get" class="portfolio-member-filter">
+  <form data-auto-filter method="get" class="portfolio-member-filter">
     <input type="hidden" name="snapshot_view" value="{{ trend_view }}">
     <label>成员
-      <select name="member" onchange="this.form.submit()">
+      <select name="member">
         <option value="all"{% if selected_member_value == "all" %} selected{% endif %}>全部成员</option>
         {% for member in members %}
           <option value="{{ member.pk }}"{% if selected_member_value == member.pk|stringformat:"s" %} selected{% endif %}>{{ member.display_name }}</option>
@@ -98,25 +98,25 @@
   {% endwith %}
 {% endif %}
 
-{% if missing_rates %}
-  <p class="form-error">部分资产缺少兑换人民币的汇率，暂未计入下列图表。</p>
-{% endif %}
+{% include "portfolio/_valuation_warnings.html" %}
 
 <section class="panel portfolio-trend-card">
   <div class="portfolio-card-head">
     <div>
-      <span>{{ selected_scope_label|default:"家庭成员" }} · 投资账户总资产</span>
+      <span>{{ selected_scope_label|default:"家庭成员" }} · {% if valuation.complete %}投资账户总资产{% else %}已知部分估值{% endif %}</span>
       <strong>{{ total_asset|currency0:base_currency }}</strong>
-      <small class="{% if change_amount > 0 %}positive{% elif change_amount < 0 %}negative{% endif %}">
-        较首个快照 {{ change_amount|signed_currency0:base_currency }}
+      <small>估值日期 {{ valuation_date|date:"Y-m-d" }}{% if not valuation.complete %} · 有缺项，不能作为完整总资产{% elif valuation.stale_prices %} · 含需核对价格{% endif %}</small>
+      {% if has_comparable_snapshots %}<small class="{% if change_amount > 0 %}positive{% elif change_amount < 0 %}negative{% endif %}">
+        快照资产变化 {{ change_amount|signed_currency0:base_currency }}
         （{{ change_ratio|floatformat:2 }}%）
       </small>
+      <small>比较 {{ trend_start|date:"Y-m-d" }} 至 {{ trend_end|date:"Y-m-d" }}；包含出入金，不代表投资收益率。</small>{% else %}<small>至少需要两个历史快照才能比较资产变化。</small>{% endif %}
     </div>
     <div class="portfolio-trend-controls">
-      <form method="get">
+      <form data-auto-filter method="get">
         <input type="hidden" name="member" value="{{ selected_member_value }}">
         <label>快照视图
-          <select name="snapshot_view" onchange="this.form.submit()">
+          <select name="snapshot_view">
             {% for value, label in trend_view_options %}
               <option value="{{ value }}"{% if trend_view == value %} selected{% endif %}>{{ label }}</option>
             {% endfor %}

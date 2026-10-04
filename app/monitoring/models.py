@@ -6,7 +6,7 @@ from django.utils import timezone
 
 VENDORS = [('deepseek', 'DeepSeek'), ('zhipu', '智谱'), ('volcano', '火山方舟'), ('ali', '阿里百炼'), ('other', '其他')]
 MODULES = {'global_ai': 'AI 检索与问答', 'knowledge': '知识整理', 'reading': '在线阅读',
-           'investment_research': '投资研究', 'intelligence': 'AI 情报', 'programs': '精选订阅',
+           'investment_research': '投资研究', 'investment_watch': '财经资讯', 'intelligence': 'AI 情报', 'programs': '精选订阅',
            'option_wheel': '期权分析', 'ipo': '图片识别'}
 
 

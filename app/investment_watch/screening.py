@@ -20,7 +20,7 @@ from .catalogue import match_rule
 from .models import WatchConsent, WatchRule, CandidateScreening, ScreeningBatch, WatchPipelineState, ResearchCandidate
 from .services import WatchError, writer, digest, candidate_stale, dossier_for
 
-SCREEN_VERSION = "watch-screen-v1"
+SCREEN_VERSION = "watch-screen-v2"
 
 
 def authorized_provider(dossier):
@@ -38,11 +38,38 @@ def authorized_provider(dossier):
     return consent.provider
 
 
-def screening_key(candidate, provider):
-    rule = WatchRule.objects.filter(dossier=candidate.dossier).first()
+def screening_key(candidate, provider, rule_version=None):
+    if rule_version is None:
+        rule = WatchRule.objects.filter(dossier=candidate.dossier).first()
+        rule_version = rule.version if rule else 0
     return digest([SCREEN_VERSION, candidate.pk, candidate.revision_id,
-                   candidate.material_version_id, rule.version if rule else 0,
+                   candidate.material_version_id, rule_version,
                    provider_signature(provider)])
+
+
+def chosen(candidate, screening):
+    return bool(screening and screening.batch.status == "completed" and
+                (candidate.reading_requested or screening.selected and not screening.duplicate_of_id))
+
+
+def recent_context(dossier):
+    """Private, bounded history used for reading deduplication, not event merging."""
+    from .profiles import profile, official
+    company = profile(dossier)
+    rows = []
+    candidates = ResearchCandidate.objects.filter(dossier=dossier, revision=dossier.current_revision,
+        material_version__found_at__gte=timezone.now() - timedelta(days=3)).select_related(
+        "material_version__material__source").prefetch_related("screenings__batch").order_by("-pk")
+    for c in candidates:
+        s = max(c.screenings.all(), key=lambda row: row.pk, default=None)
+        if not candidate_stale(c) and chosen(c, s):
+            v = c.material_version
+            rows.append({"candidate_id": c.pk, "title": v.title, "summary": v.summary[:600],
+                         "published_at": str(v.published_at) if v.published_at else None,
+                         "official": official(v, company)})
+            if len(rows) == 12:
+                break
+    return rows
 
 
 def eligible(candidate, state):
@@ -50,7 +77,8 @@ def eligible(candidate, state):
         return False
     # History stays readable. Enabling collection never drains the historical backlog.
     if not candidate.manual and (candidate.material_version.found_at < state.started_at
-            or candidate.material_version.found_at < timezone.now() - timedelta(hours=48)):
+            or candidate.material_version.found_at < timezone.now() - timedelta(hours=48)
+            or candidate.material_version.published_at and candidate.material_version.published_at < timezone.now() - timedelta(hours=48)):
         return False
     rule = WatchRule.objects.filter(dossier=candidate.dossier, enabled=True).first()
     if candidate.manual:
@@ -62,7 +90,7 @@ def latest_screening(candidate, provider):
     return CandidateScreening.objects.filter(input_key=screening_key(candidate, provider)).first()
 
 
-def validate_screening(raw, candidates):
+def validate_screening(raw, candidates, recent_ids=()):
     try:
         value = json.loads(raw)
     except (ValueError, TypeError):
@@ -82,9 +110,25 @@ def validate_screening(raw, candidates):
             raise WatchError("初筛选择或优先级无效。")
         if not isinstance(row.get("reason"), str) or not row["reason"].strip() or len(row["reason"]) > 500:
             raise WatchError("初筛必须提供简短理由。")
+        relation = row.get("relevance", "unknown")
+        duplicate = row.get("duplicate_of")
+        if not isinstance(relation, str) or relation not in {"direct", "industry", "unknown"}:
+            raise WatchError("初筛关联类型无效。")
+        if duplicate is not None and (type(duplicate) is not int or duplicate == pk or duplicate not in set(recent_ids) | allowed):
+            raise WatchError("初筛重复引用超出本公司可见候选。")
+        if duplicate is not None and row["selected"]:
+            raise WatchError("重复报道不能同时入选正文。")
         seen.add(pk)
     if seen != allowed:
         raise WatchError("初筛没有覆盖本批全部候选。")
+    selected = {r["candidate_id"] for r in rows if r["selected"]}
+    for row in rows:
+        if row.get("duplicate_of") is not None and row["duplicate_of"] not in set(recent_ids) | selected:
+            # A model may group two rejected stories. This is not a usable reading
+            # deduplication reference, but must not discard unrelated valid choices.
+            # Keep the rejection; never turn an invalid reference into a paid read.
+            row["duplicate_of"] = None
+            row["reason"] = "判重引用未通过已选材料校验，未建立关联；保留候选，暂不抓取。"
     return rows
 
 
@@ -98,8 +142,13 @@ def screen_candidates(dossier, candidates, *, transport=None, url_validator=None
     state, _ = WatchPipelineState.objects.get_or_create(family=dossier.family)
     prepared = []
     prompt = (Path(__file__).parent / "prompts" / "screening.txt").read_text(encoding="utf-8")
-    base = {"company": dossier.security.name, "symbol": dossier.security.symbol,
-            "targets": targets(dossier.current_revision), "candidates": []}
+    from .profiles import profile, official
+    company = profile(dossier)
+    recent = recent_context(dossier)
+    while recent and len(json.dumps(recent, ensure_ascii=False)) > policy["max_input_chars"] // 4:
+        recent.pop()
+    base = {"company_profile": company, "targets": targets(dossier.current_revision),
+            "recent_selected": recent, "candidates": []}
     from .events import canonical_candidate
     seen = set()
     for incoming in candidates:
@@ -115,7 +164,7 @@ def screen_candidates(dossier, candidates, *, transport=None, url_validator=None
         v = c.material_version
         item = {"candidate_id": c.pk, "title": v.title, "summary": v.summary,
                 "source": v.material.source.name, "published_at": str(v.published_at) if v.published_at else None,
-                "official": bool(v.official_version_id or urlsplit(v.url).hostname in {"blogs.microsoft.com", "news.microsoft.com", "www.microsoft.com"})}
+                "official": official(v, company)}
         trial = {**base, "candidates": base["candidates"] + [item]}
         if len(prompt) + len(json.dumps(trial, ensure_ascii=False)) > policy["max_input_chars"]:
             if not prepared:
@@ -168,14 +217,15 @@ def screen_candidates(dossier, candidates, *, transport=None, url_validator=None
         choice = result["choices"][0]
         if choice.get("finish_reason") not in (None, "stop"):
             raise WatchError("初筛结果未完整返回。")
-        rows = validate_screening(choice["message"]["content"], [c for c, _ in prepared])
+        rows = validate_screening(choice["message"]["content"], [c for c, _ in prepared], [r["candidate_id"] for r in recent])
         with transaction.atomic():
             locked = dossier_for(dossier.owner, dossier.pk, lock=True)
             current = locked.current_revision_id == dossier.current_revision_id
             batch.status = "completed" if current else "stale"
             for row in rows:
                 CandidateScreening.objects.filter(batch=batch, candidate_id=row["candidate_id"]).update(
-                    selected=row["selected"] if current else False, priority=row["priority"], reason=row["reason"])
+                    selected=row["selected"] if current else False, priority=row["priority"], reason=row["reason"],
+                    relevance=row.get("relevance", "unknown"), duplicate_of_id=row.get("duplicate_of"))
             batch.save(update_fields=["status", "updated_at"])
         settle(receipt, actual)
         return len(rows)
@@ -192,9 +242,11 @@ def ready_candidates(dossier):
     provider = authorized_provider(dossier)
     state, _ = WatchPipelineState.objects.get_or_create(family=dossier.family)
     rows = []
+    from .profiles import profile, official
+    company = profile(dossier)
     for c in ResearchCandidate.objects.filter(dossier=dossier, revision=dossier.current_revision).select_related(
         "dossier__owner", "dossier__security", "dossier__current_revision", "material_version__material__source"):
         screening = latest_screening(c, provider)
-        if eligible(c, state) and screening and screening.selected and screening.batch.status == "completed":
-            rows.append((screening.priority, bool(c.material_version.official_version_id or urlsplit(c.material_version.url).hostname in {"blogs.microsoft.com", "news.microsoft.com", "www.microsoft.com"}), c))
+        if eligible(c, state) and chosen(c, screening):
+            rows.append((101 if c.reading_requested else screening.priority, official(c.material_version, company), c))
     return [c for _, _, c in sorted(rows, key=lambda row: (row[0], row[1], row[2].material_version.found_at), reverse=True)]

@@ -164,7 +164,7 @@ def collect_financials(security, code, context):
     missing = sum(t["missing_names"] for t in tables)
     _, changed = save_material(security, "financials", "financials", SOURCE_TASKS["financials"],
         data={**data, "original_breakdown": breakdown_payload, "missing_names": missing},
-        report_date=breakdown.get("period", "") if breakdown else "")
+        report_date=max((r.get('period_end', '') for t in tables for r in t['reports']), default=''))
     if len(statements) != 4 or breakdown_error:
         raise ValueError("已保存取得的财务资料，部分报表或主营构成仍待补充。")
     return f"已保存，{missing} 项字段名称待补充" if missing else "财务资料已保存，字段名称已核对"

@@ -644,6 +644,8 @@ class GlobalAiWorkbenchTests(TestCase):
         )
 
     def test_get_is_read_only_and_hides_other_members_private_data(self):
+        AiProvider.objects.create(name='页面授权测试模型', provider_type='openai_compatible', model_name='test',
+                                  extra_data={'global_ai_enabled': True})
         self.client.force_login(self.alice_user)
         counts_before = (
             AiConversation.objects.count(),
@@ -794,6 +796,8 @@ class GlobalAiWorkbenchTests(TestCase):
         )
 
     def test_authorization_explains_and_counts_persistently_allowed_sources(self):
+        AiProvider.objects.create(name='来源授权测试模型', provider_type='openai_compatible', model_name='test',
+                                  extra_data={'global_ai_enabled': True})
         KnowledgeSource.objects.create(
             family=self.family,
             owner=self.alice,

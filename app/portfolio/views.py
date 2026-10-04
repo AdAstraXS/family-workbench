@@ -8,7 +8,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core import signing
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Q, Sum, F, Window, RowRange
 from django.http import HttpResponseRedirect, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -85,6 +85,7 @@ from .services import (
     settle_option_position,
 )
 from .valuation import (
+    valuation_status,
     exchange_rate_cache,
     convert_currency as _convert_currency,
     refresh_position_valuations,
@@ -176,6 +177,8 @@ def _summary_rows(account_rows):
             "today_pnl": _sum_or_none(row["today_pnl"] for row in rows),
             "unrealized": _sum_or_none(row["unrealized"] for row in rows),
             "realized": _sum_or_none(row["realized"] for row in rows),
+            "annual_realized": _sum_or_none(row.get("annual_realized") for row in rows),
+            "annual_total": _sum_or_none(row.get("annual_total") for row in rows),
         }
         for label, rows in scopes
     ]
@@ -212,6 +215,9 @@ def _account_member_groups(account_rows, family, *, include_inactive=False):
             for row in rows
             if row["total_asset_cny"] is not None
             and row["total_asset_cny"] < LOW_VALUE_ACCOUNT_THRESHOLD_CNY
+            and not row.get("annual_note")
+            and not row.get("annual_realized")
+            and not row.get("annual_total")
         ]
         collapsed_ids = {row["account"].id for row in collapsed_rows}
         groups.append(
@@ -326,6 +332,7 @@ def _account_dashboard_data(request, account=None):
         cost_method = "moving_average"
     positions = _latest_positions(accounts, year)
     price_resolutions = resolve_position_prices(positions, date.today())
+    valuation_issues = []
 
     transaction_filter = InvestmentTransaction.objects.filter(
         account__in=accounts,
@@ -357,6 +364,11 @@ def _account_dashboard_data(request, account=None):
     for item in positions:
         snapshot = getattr(item.security, "market_snapshot", None)
         price_resolution = price_resolutions[item.pk]
+        if price_resolution.price is None:
+            valuation_issues.append({"kind": "price", "security": item.security, "account": item.account})
+        elif price_resolution.status in {PricingStatusChoices.STALE, PricingStatusChoices.ERROR, PricingStatusChoices.EXPIRED_UNRESOLVED}:
+            valuation_issues.append({"kind": "stale", "security": item.security, "account": item.account,
+                "as_of": price_resolution.price_as_of, "status": PricingStatusChoices(price_resolution.status).label})
         item.display_price = price_resolution.price
         item.price_source = price_resolution.source
         item.price_as_of = price_resolution.price_as_of
@@ -421,12 +433,19 @@ def _account_dashboard_data(request, account=None):
             _convert_currency(amount, currency, selected_currency)
             for currency, amount in cash_entries
         ]
+        for (currency, amount), converted in zip(cash_entries, cash_display_values):
+            if converted is None:
+                valuation_issues.append({"kind": "rate", "currency": currency, "account": item})
         cash_display = _sum_or_none(cash_display_values)
         item_positions = positions_by_account[item.pk]
         market_values = [
             _convert_currency(p.market_value_live, p.original_currency, selected_currency)
             for p in item_positions
         ]
+        for position, converted in zip(item_positions, market_values):
+            if position.market_value_live is not None and converted is None:
+                valuation_issues.append({"kind": "rate", "currency": position.original_currency,
+                    "security": position.security, "account": item})
         market_display = _sum_or_none(market_values)
         unrealized_values = [
             _convert_currency(p.unrealized_live, p.original_currency, selected_currency)
@@ -494,24 +513,11 @@ def _account_dashboard_data(request, account=None):
         "currency_options": Currency.objects.filter(is_active=True),
         "year_options": [],
         "family": family,
-        "missing_exchange_rates": any(
-            row[field] is None
-            for row in account_rows
-            for field in ("cash", "market_value", "total_asset")
-        ),
-        "stale_prices": any(
-            item.pricing_status_display
-            in {
-                PricingStatusChoices.STALE,
-                PricingStatusChoices.ERROR,
-                PricingStatusChoices.EXPIRED_UNRESOLVED,
-            }
-            for item in positions
-        ),
-        "missing_prices": any(
-            item.pricing_status_display == PricingStatusChoices.MISSING
-            for item in positions
-        ),
+        "valuation": valuation_status(valuation_issues),
+        "valuation_date": date.today(),
+        "missing_exchange_rates": any(issue["kind"] == "rate" for issue in valuation_issues),
+        "stale_prices": any(issue["kind"] == "stale" for issue in valuation_issues),
+        "missing_prices": any(issue["kind"] == "price" for issue in valuation_issues),
     }
 
 
@@ -615,7 +621,6 @@ def overview(request):
         market_cny = item.valuation_market_value
         cost_cny = item.valuation_cost
         if market_cny is None or cost_cny is None:
-            missing_rates = True
             continue
         category = (
             item.security.asset_category.name
@@ -844,7 +849,10 @@ def overview(request):
             ),
             "change_amount": change_amount,
             "change_ratio": change_ratio,
+            "has_comparable_snapshots": len(values) > 1,
             "missing_rates": missing_rates,
+            "valuation": valuation,
+            "valuation_date": today,
             "can_reconcile": _can_reconcile_portfolio(request.user, login_member),
             "can_run_daily_valuation": can_run_daily_valuation,
             "latest_daily_valuation_run": latest_daily_valuation_run,
@@ -1510,67 +1518,70 @@ def account_detail(request, pk):
     context = _account_dashboard_data(request, account)
     context["rate_info"] = rate_info
     context["account"] = account
-    context["active_tab"] = request.GET.get("tab", "overview")
-
-    movements = list(
-        InvestmentCashMovement.objects.filter(account=account)
-        .select_related("transaction", "transaction__security")
-        .order_by("movement_date", "created_at", "pk")
-    )
-    balances = defaultdict(Decimal)
-    display_movements = []
-    for movement in movements:
-        balances[movement.currency] += movement.amount
-        movement.balance_after = balances[movement.currency]
-        display_movements.append(movement)
-    context["cash_movements"] = list(reversed(display_movements))
-    symbols = {
-        item.code: item.symbol or item.code
-        for item in Currency.objects.filter(is_active=True)
-    }
-    balance_currencies = ["HKD", "USD", "CNY"] + sorted(
-        set(balances) - {"HKD", "USD", "CNY"}
-    )
-    context["cash_balances"] = [
-        {
-            "currency": currency,
-            "symbol": symbols.get(currency, currency),
-            "amount": balances[currency],
-        }
-        for currency in balance_currencies
-    ]
-
-    transactions = list(
-        InvestmentTransaction.objects.filter(account=account)
-        .select_related(
-            "security",
-            "security__asset_category",
-            "security__option_contract__underlying",
-            "ipo_subscription_trade",
+    active_tab = request.GET.get("tab", "overview")
+    if active_tab not in {"overview", "positions", "individual-profit", "cashflows", "transactions"}:
+        active_tab = "overview"
+    context["active_tab"] = active_tab
+    balances = defaultdict(Decimal, {
+        row["currency"]: row["amount"] or ZERO
+        for row in InvestmentCashMovement.objects.filter(account=account)
+        .order_by().values("currency").annotate(amount=Sum("amount"))
+    })
+    activity_page = None
+    if active_tab == "cashflows":
+        # Window runs over the complete account history BEFORE LIMIT/OFFSET.
+        movements = InvestmentCashMovement.objects.filter(account=account).annotate(
+            balance_after=Window(Sum("amount"), partition_by=[F("currency")],
+                order_by=[F("movement_date").asc(), F("created_at").asc(), F("pk").asc()],
+                frame=RowRange(start=None, end=0)),
+        ).select_related("transaction__security", "counterparty_account__member").order_by(
+            "-movement_date", "-created_at", "-pk")
+        activity_page = Paginator(movements, 50).get_page(request.GET.get("page"))
+        context["cash_movements"] = activity_page
+    elif active_tab in {"transactions", "individual-profit"}:
+        transactions = InvestmentTransaction.objects.filter(account=account).select_related(
+            "security__asset_category", "security__option_contract__underlying", "ipo_subscription_trade",
         )
-        .order_by("trade_date", "created_at", "pk")
-    )
-    individual_profit = _individual_profit_data(request, account, transactions)
-    transaction_date_start = parse_date(request.GET.get("date_start", ""))
-    transaction_date_end = parse_date(request.GET.get("date_end", ""))
-    transaction_stock = request.GET.get("stock", "")
-    filtered_transactions = []
-    for item in transactions:
-        option = getattr(item.security, "option_contract", None) if item.security else None
-        root = option.underlying if option else item.security
-        stock_key = (
-            f"option:{root.pk}" if option else f"security:{root.pk}"
-        ) if root else ""
-        if transaction_date_start and item.trade_date < transaction_date_start:
-            continue
-        if transaction_date_end and item.trade_date > transaction_date_end:
-            continue
-        if transaction_stock and stock_key != transaction_stock:
-            continue
-        filtered_transactions.append(item)
-    context["transactions"] = list(reversed(filtered_transactions))
-    for item in context["transactions"]:
-        item.total_fee = item.fee + item.tax
+        if active_tab == "individual-profit":
+            context["individual_profit"] = _individual_profit_data(
+                request, account, list(transactions.order_by("trade_date", "created_at", "pk")))
+        else:
+            start_date = parse_date(request.GET.get("date_start", ""))
+            end_date = parse_date(request.GET.get("date_end", ""))
+            stock = request.GET.get("stock", "")
+            if start_date:
+                transactions = transactions.filter(trade_date__gte=start_date)
+            if end_date:
+                transactions = transactions.filter(trade_date__lte=end_date)
+            if stock:
+                kind, _, raw_id = stock.partition(":")
+                if raw_id.isdigit() and kind in {"option", "security"}:
+                    transactions = transactions.filter(**{
+                        "security__option_contract__underlying_id" if kind == "option" else "security_id": int(raw_id)
+                    })
+                else:
+                    transactions = transactions.none()
+            options = {}
+            securities = Security.objects.filter(transactions__account=account).select_related(
+                "option_contract__underlying").distinct()
+            for security in securities:
+                option = getattr(security, "option_contract", None)
+                root = option.underlying if option else security
+                key = f"option:{root.pk}" if option else f"security:{security.pk}"
+                options[key] = f"{root.name}（{'期权' if option else security.get_asset_type_display()}）"
+            activity_page = Paginator(transactions.order_by("-trade_date", "-created_at", "-pk"), 50).get_page(request.GET.get("page"))
+            for item in activity_page:
+                item.total_fee = item.fee + item.tax
+            context["transactions"] = activity_page
+            context["transaction_filters"] = {
+                "date_start": request.GET.get("date_start", ""),
+                "date_end": request.GET.get("date_end", ""),
+                "selected_stock": stock, "stock_options": sorted(options.items(), key=lambda row: row[1]),
+            }
+    params = request.GET.copy()
+    params.pop("page", None)
+    context["activity_page"] = activity_page
+    context["pagination_query"] = params.urlencode()
     account_row = context["account_rows"][0] if context["account_rows"] else None
     context["account_row"] = account_row
     for item in context["positions"]:
@@ -1592,13 +1603,6 @@ def account_detail(request, pk):
     context["currency_sections"] = _currency_sections(
         account, context["positions"], balances
     )
-    context["individual_profit"] = individual_profit
-    context["transaction_filters"] = {
-        "date_start": request.GET.get("date_start", ""),
-        "date_end": request.GET.get("date_end", ""),
-        "selected_stock": transaction_stock,
-        "stock_options": individual_profit["stock_options"],
-    }
     return render(request, "portfolio/account_detail.html", context)
 
 
@@ -1683,7 +1687,8 @@ def stock_market_detail(request, pk):
         from investment_research.models import ResearchDossier
 
         dossier = ResearchDossier.objects.filter(owner=member, security=security).first()
-    quote = snapshot.quote if snapshot else {}
+    from .research_quotes import saved_research_quote
+    quote = saved_research_quote(security, stock_snapshot=snapshot)
     candles = snapshot.candles if snapshot else []
     observations = technical_observations(candles, quote.get("price"))
     selected_metric = request.GET.get("metric", "pe")
@@ -2211,9 +2216,13 @@ def option_contract_edit(request, pk):
         instance=security,
     )
     if request.method == "POST" and form.is_valid():
-        form.save(member)
-        messages.success(request, "期权合约已更新。")
-        return redirect("portfolio:security_list")
+        try:
+            form.save(member, user=request.user)
+        except ValidationError as exc:
+            form.add_error(None, exc)
+        else:
+            messages.success(request, "期权合约已更新，关联行权/指派流水的现金和盈亏已重算；历史快照需另行重算。")
+            return redirect("portfolio:security_list")
     return render(
         request,
         "form.html",
@@ -2619,5 +2628,11 @@ def save_transaction_form(request, title, instance=None):
     return render(
         request,
         "portfolio/transaction_form.html",
-        {"form": form, "title": title},
+        {
+            "form": form, "title": title,
+            "option_contract_edit_url": reverse("portfolio:option_contract_edit", args=[instance.security_id])
+            if instance and instance.security_id
+            and instance.security.asset_type == Security.TYPE_OPTION
+            and instance.security.data_source == "manual" else "",
+        },
     )
