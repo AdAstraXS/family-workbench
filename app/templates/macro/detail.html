@@ -1,0 +1,14 @@
+{% extends "macro/base.html" %}
+{% load macro_format %}
+{% block content %}
+<a href="{% url 'macro:index' %}?country={{ mapping.indicator.country }}">返回指标列表</a>
+<h1>{{ mapping.indicator.name }}</h1>
+<p class="macro-meta">{{ mapping.indicator.unit }} · {{ mapping.indicator.frequency }} · {{ mapping.definition.seasonal }}<br>{{ mapping.definition.basis }}<br>来源：{{ mapping.provider }} · 统计期采用期初日期标记，发布日期未知时不作推算。</p>
+{% if geographies|length > 1 %}
+<form method="get"><label for="geography">城市</label><select name="geography" id="geography">{% for city in geographies %}<option {% if city == geography %}selected{% endif %}>{{ city }}</option>{% endfor %}</select><button>查看</button></form>
+{% endif %}
+<div class="macro-table"><table><thead><tr><th>统计期</th><th>数值</th><th>发布日期</th><th>最近核验</th><th>记录</th></tr></thead><tbody>
+{% for point in page %}<tr><td>{{ point.period_date|date:"Y-m-d" }}</td><td>{{ point.value|macro_number }}</td><td>{{ point.release_date|date:"Y-m-d"|default:"未提供" }}</td><td>{{ point.last_seen_at|date:"Y-m-d H:i" }}</td><td><a href="{% url 'macro:revisions' point.pk %}">第 {{ point.revision }} 版</a></td></tr>{% empty %}<tr><td colspan="5">暂无数据</td></tr>{% endfor %}
+</tbody></table></div>
+{% include "macro/pagination.html" %}
+{% endblock %}

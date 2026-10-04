@@ -1,0 +1,25 @@
+{% extends "macro/base.html" %}
+{% load macro_format %}
+{% block content %}
+<h1>宏观数据</h1>
+<p class="macro-meta">按国家查看经济指标。每个数值保留统计期、来源与修订记录。</p>
+<nav class="macro-nav" aria-label="国家与来源">
+  <a href="?country=CN" {% if country == "CN" %}aria-current="page"{% endif %}>中国</a>
+  <a href="?country=US" {% if country == "US" %}aria-current="page"{% endif %}>美国</a>
+  <a href="{% url 'macro:status' %}">数据来源与更新记录</a>
+</nav>
+<p class="macro-notice">当前为数据接入预览。不同指标发布节奏不同，请核对统计期；“尚未接入”不表示数值为零。趋势图将在后续页面阶段加入。</p>
+<div class="macro-grid">
+{% for row in rows %}
+  <article class="macro-card">
+    <small>{{ row.spec.category }} · {{ row.spec.frequency }}</small>
+    <h2>{% if row.mapping %}<a href="{% url 'macro:detail' row.mapping.pk %}">{{ row.spec.name }}</a>{% else %}{{ row.spec.name }}{% endif %}</h2>
+    {% if row.mapping.latest_date %}
+      {% if row.spec.provider == "nbs_city" %}<p class="macro-value">70 城数据</p>{% else %}<p class="macro-value">{{ row.mapping.latest_value|macro_number }}</p>{% endif %}
+      <p>统计期：{{ row.mapping.latest_date|date:"Y-m-d" }}{% if row.spec.frequency == "月度" or row.spec.frequency == "季度" or row.spec.frequency == "年度" %}（期初标记）{% endif %}</p>
+    {% else %}<p class="macro-value">尚未接入</p>{% endif %}
+    <p class="macro-meta">{{ row.spec.unit }} · {{ row.spec.seasonal }}<br>{{ row.spec.basis }}</p>
+  </article>
+{% endfor %}
+</div>
+{% endblock %}

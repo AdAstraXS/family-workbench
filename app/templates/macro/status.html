@@ -1,0 +1,10 @@
+{% extends "macro/base.html" %}
+{% block content %}
+<a href="{% url 'macro:index' %}">返回宏观数据</a><h1>数据来源与更新记录</h1>
+<p class="macro-meta">中国采用统计局、央行、商务部公开数据及 AKShare 接口，美国采用 FRED 公开 CSV。更新失败时保留上次数据；“成功”只表示本次读取通过校验，不保证来源已发布最新一期。</p>
+<p class="macro-notice">采集由后台命令执行。NAS 定时任务尚未启用；官方发布稿目前按明确地址导入。长时间显示“运行中”可能是任务被中断，需管理员检查日志。</p>
+<div class="macro-table"><table><thead><tr><th>采集组</th><th>开始时间</th><th>状态</th><th>结果</th></tr></thead><tbody>
+{% for run in page %}<tr><td>{{ run.group }}</td><td>{{ run.started_at|date:"Y-m-d H:i" }}</td><td>{{ run.get_status_display }}</td><td>{% if run.error %}{{ run.error }}{% elif run.status == "success" %}最新统计期 {{ run.summary.latest_period }} · 新增 {{ run.summary.created }} · 修订 {{ run.summary.revised }} · 缺值 {{ run.summary.missing }}{% else %}等待完成{% endif %}</td></tr>{% empty %}<tr><td colspan="4">尚无写入任务记录。只读试算不写入此处。</td></tr>{% endfor %}
+</tbody></table></div>
+{% include "macro/pagination.html" %}
+{% endblock %}
