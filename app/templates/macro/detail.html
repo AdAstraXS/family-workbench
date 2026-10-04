@@ -1,14 +1,10 @@
-{% extends "macro/base.html" %}
-{% load macro_format %}
-{% block content %}
-<a href="{% url 'macro:index' %}?country={{ mapping.indicator.country }}">返回指标列表</a>
-<h1>{{ mapping.indicator.name }}</h1>
-<p class="macro-meta">{{ mapping.indicator.unit }} · {{ mapping.indicator.frequency }} · {{ mapping.definition.seasonal }}<br>{{ mapping.definition.basis }}<br>来源：{{ mapping.provider }} · 统计期采用期初日期标记，发布日期未知时不作推算。</p>
-{% if geographies|length > 1 %}
-<form method="get"><label for="geography">城市</label><select name="geography" id="geography">{% for city in geographies %}<option {% if city == geography %}selected{% endif %}>{{ city }}</option>{% endfor %}</select><button>查看</button></form>
-{% endif %}
-<div class="macro-table"><table><thead><tr><th>统计期</th><th>数值</th><th>发布日期</th><th>最近核验</th><th>记录</th></tr></thead><tbody>
-{% for point in page %}<tr><td>{{ point.period_date|date:"Y-m-d" }}</td><td>{{ point.value|macro_number }}</td><td>{{ point.release_date|date:"Y-m-d"|default:"未提供" }}</td><td>{{ point.last_seen_at|date:"Y-m-d H:i" }}</td><td><a href="{% url 'macro:revisions' point.pk %}">第 {{ point.revision }} 版</a></td></tr>{% empty %}<tr><td colspan="5">暂无数据</td></tr>{% endfor %}
-</tbody></table></div>
-{% include "macro/pagination.html" %}
+{% extends "macro/base.html" %}{% load macro_format %}
+{% block macro_content %}
+<nav class="macro-breadcrumb" aria-label="当前位置"><a href="{% url 'macro:country' country %}?theme={{ spec.category|urlencode }}">{{ country_name }} · {{ spec.category }}</a><span>/</span><span>{{ spec.name }}</span></nav>
+<header class="macro-heading macro-detail-heading"><div><p class="macro-eyebrow">{{ spec.code }} · {{ source_name }}</p><h1>{{ spec.name }}</h1><p class="macro-meta">{{ guide.lead }}</p></div><a class="macro-action" href="{{ guide_url }}">读懂这个指标 →</a></header>
+<section class="macro-panel"><div class="macro-detail-value"><div><small>最新统计期{% if geographies|length > 1 %} · {{ geography }}{% endif %}</small><p class="macro-value">{% if latest %}{{ latest.value|macro_number }}{% else %}尚无数据{% endif %}</p>{% if latest and latest.value is not None %}<span class="macro-unit">{{ spec.unit }}</span>{% endif %}</div><div class="macro-right"><strong>{{ latest.period_date|macro_period:spec.frequency }}</strong><small>{{ definition.basis }}</small><small>{{ definition.seasonal }}</small></div></div>{% include "macro/chart.html" %}</section>
+<nav class="macro-tabs" aria-label="详情栏目"><a href="?range={{ range }}&amp;geography={{ geography|urlencode }}&amp;tab=history" {% if tab == 'history' %}aria-current="page"{% endif %}>历史数据</a><a href="?range={{ range }}&amp;geography={{ geography|urlencode }}&amp;tab=definition" {% if tab == 'definition' %}aria-current="page"{% endif %}>统计口径与来源</a></nav>
+{% if tab == 'definition' %}<section class="macro-panel"><h2>统计口径</h2><dl class="macro-definition"><dt>单位</dt><dd>{{ definition.unit }}</dd><dt>频率</dt><dd>{{ definition.frequency }}</dd><dt>时期口径</dt><dd>{{ definition.basis }}</dd><dt>季节调整</dt><dd>{{ definition.seasonal }}</dd><dt>来源字段</dt><dd>{{ definition.field }}</dd><dt>口径版本</dt><dd>{{ definition.version }}</dd></dl><p class="macro-meta">{% if mapping %}这里展示数据入库时记录的口径。{% else %}这里展示计划接入的指标口径。{% endif %}统计期与发布日期分别记录；没有官方发布日期时显示“未提供”。</p><a href="{{ guide_url }}">查看计算方法、含义和常见误读 →</a>
+<h2>统计方法参考</h2><ul class="macro-source-list">{% for source in guide.sources %}<li><a href="{{ source.1 }}" target="_blank" rel="noopener noreferrer">{{ source.0 }} ↗</a></li>{% endfor %}</ul>{% if latest %}<a href="{% url 'macro:revisions' latest.pk %}">查看最新统计期的采集来源与修订记录 →</a>{% endif %}</section>
+{% else %}<section class="macro-panel"><div class="macro-panel-title"><h2>历史数据</h2><span class="macro-meta">与趋势图使用相同地区和时间范围</span></div><div class="macro-table"><table><thead><tr><th>统计期</th><th>值 · {{ spec.unit }}</th><th>官方发布日期</th><th>来源与修订</th></tr></thead><tbody>{% for point in page %}<tr><td>{{ point.period_date|macro_period:spec.frequency }}</td><td>{{ point.value|macro_number }}</td><td>{{ point.release_date|date:'Y-m-d'|default:'未提供' }}</td><td><a href="{% url 'macro:revisions' point.pk %}">第 {{ point.revision }} 版 · 查看</a></td></tr>{% empty %}<tr><td colspan="4">尚无该范围的历史数据。</td></tr>{% endfor %}</tbody></table></div>{% include "macro/pagination.html" %}</section>{% endif %}
 {% endblock %}

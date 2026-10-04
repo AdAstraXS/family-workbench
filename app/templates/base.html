@@ -40,7 +40,7 @@
     {% url 'ipo:index' as ipo_home_url %}
     {% url 'notes:index' as notes_home_url %}
     {% url 'intelligence:index' as intelligence_home_url %}
-    {% if user.is_authenticated and page_parent_url and page_parent_url != workspace_home_url and request.resolver_match.app_name != "knowledge" and request.resolver_match.app_name != "reading" and request.resolver_match.app_name != "trading_journal" and request.resolver_match.app_name != "investment_research" %}
+    {% if user.is_authenticated and page_parent_url and page_parent_url != workspace_home_url and request.resolver_match.app_name != "knowledge" and request.resolver_match.app_name != "reading" and request.resolver_match.app_name != "trading_journal" and request.resolver_match.app_name != "investment_research" and request.resolver_match.app_name != "macro" %}
       <nav class="page-context-nav" aria-label="页面快捷导航">
         <a class="button page-nav-back" href="{{ page_parent_url }}">返回上一级</a>
         {% if request.resolver_match.app_name == "ledger" and request.resolver_match.url_name != "overview" and page_parent_url != ledger_home_url %}
