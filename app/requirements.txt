@@ -13,3 +13,4 @@ pypdf==6.19.0
 beautifulsoup4==4.15.0
 yt-dlp==2026.8.19
 tinytag==2.3.2
+akshare==1.19.1
