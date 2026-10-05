@@ -188,7 +188,7 @@ class ImportTests(TestCase):
                 self.assertEqual(self.client.post(path).status_code, 403)
         self.assertEqual(MacroImportRun.objects.count(), before)
         self.assertNotContains(self.client.get(paths[0]), "核心个人消费支出价格指数")
-        self.assertContains(self.client.get(paths[0] + "?country=US"), "核心个人消费支出价格指数")
+        self.assertContains(self.client.get(paths[0] + "?country=US"), "美国宏观数据")
         self.assertNotContains(self.client.get(paths[0] + "?country=US"), "民间固定资产投资")
         member.is_active = False
         member.save()
