@@ -21,6 +21,7 @@ def schedule():
 
 
 def current_schedule():
+    from django.utils import timezone
     from .models import MacroCalendarSnapshot
     original = schedule()
     sources = {s["code"]: s.copy() for s in original["sources"]}
@@ -30,7 +31,7 @@ def current_schedule():
         latest.setdefault(snapshot.agency, snapshot)
     for agency, snapshot in latest.items():
         source = sources[agency]
-        source.update(url=snapshot.source_url, verified=snapshot.checked_at.strftime("%Y-%m-%d %H:%M"), sha256=snapshot.content_hash)
+        source.update(url=snapshot.source_url, verified=timezone.localtime(snapshot.checked_at).strftime("%Y-%m-%d %H:%M"), sha256=snapshot.content_hash)
         events = [e for e in events if e["agency"] != agency]
         for item in snapshot.payload["events"]:
             local = datetime.fromisoformat(item["date"] + "T" + item["time"]).replace(tzinfo=ZoneInfo(item["timezone"]))
