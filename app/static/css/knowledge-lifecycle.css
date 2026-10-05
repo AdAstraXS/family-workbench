@@ -9,6 +9,16 @@
 .knowledge-lifecycle summary { cursor: pointer; }
 .knowledge-lifecycle .knowledge-system-details > form { margin-top: 14px; }
 .knowledge-lifecycle p { overflow-wrap: anywhere; }
+.knowledge-lifecycle .knowledge-version-cleanup { display: block; }
+.knowledge-lifecycle .knowledge-version-choice {
+  display: inline-flex; flex-basis: auto; align-items: center; gap: 8px; cursor: pointer;
+}
+.knowledge-lifecycle .knowledge-version-choice input[type="checkbox"] {
+  width: 18px; height: 18px; margin: 0; flex: 0 0 auto;
+}
+.knowledge-lifecycle .knowledge-version-confirm {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px;
+}
 @media (max-width: 600px) {
   .knowledge-lifecycle .web-capture-row a { flex-basis: 100%; }
   .knowledge-lifecycle .button { white-space: normal; text-align: center; }

@@ -1694,10 +1694,11 @@ def document_manage(request, pk):
                 phrase = "彻底删除" if action == "purge" else "清理旧版本"
                 if request.POST.get("confirmation", "").strip() != phrase:
                     raise ValidationError(f"请输入“{phrase}”确认；尚未删除任何内容。")
-                task = request_cleanup(pk, member, whole_document=action == "purge")
+                task = request_cleanup(pk, member, whole_document=action == "purge",
+                    revision_ids=request.POST.getlist("revision_ids") if action == "versions" else None)
                 completed = process_cleanup(task.pk)
                 if completed:
-                    messages.success(request, "内容及独占文件已清理。外部原文、共享导入包和备份不受影响。")
+                    messages.success(request, "已清理选中的旧版本，未选中的版本保留。外部原文、共享导入包和备份不受影响。" if action == "versions" else "内容及独占文件已清理。外部原文、共享导入包和备份不受影响。")
                 else:
                     messages.warning(request, "内容已删除，但文件清理未完成；请在本页重试文件清理。")
             elif action == "retry_files":
@@ -2984,7 +2985,10 @@ def proposal_review(request, pk):
     if not _can_write(member):
         return HttpResponseForbidden("只读成员不能确认整理建议。")
     proposal = get_object_or_404(_manageable_proposals(member), pk=pk)
-    form = ProposalReviewForm(request.POST, proposal=proposal)
+    review_data = request.POST.copy()
+    if f"value_{pk}" in request.POST:
+        review_data["value"] = request.POST[f"value_{pk}"]
+    form = ProposalReviewForm(review_data, proposal=proposal)
     if not form.is_valid():
         messages.error(request, "建议未处理：" + "；".join(form.non_field_errors() or ["请检查确认内容。"]))
         if request.POST.get("return_to") == "review":
@@ -3018,6 +3022,22 @@ def _bulk_proposals(member, ids):
     return proposals
 
 
+def _bulk_edited_values(proposals, data):
+    """Validate the values actually edited, without changing AI suggestions or DB."""
+    values = {}
+    for proposal in proposals:
+        key = f"value_{proposal.pk}"
+        if data.get("use_edited_values") == "yes" and key not in data:
+            raise ValueError("部分编辑内容未提交，请重新预览；正式结果尚未改变。")
+        default = _proposal_value(proposal)
+        raw_value = data.get(key, "，".join(default) if isinstance(default, list) else default)
+        value_form = ProposalReviewForm({"action": "accept", "value": raw_value}, proposal=proposal)
+        if not value_form.is_valid():
+            raise ValueError(f"{proposal.get_proposal_type_display()}的确认内容不能为空，请修改后重新预览。")
+        values[proposal.pk] = value_form.cleaned_data["value"]
+    return values
+
+
 @login_required
 @require_POST
 def proposal_bulk_preview(request):
@@ -3033,6 +3053,9 @@ def proposal_bulk_preview(request):
         return redirect("knowledge:review")
     try:
         proposals = _bulk_proposals(member, form.cleaned_data["proposal_ids"])
+        values = _bulk_edited_values(proposals, request.POST)
+        for proposal in proposals:
+            proposal.preview_value = values[proposal.pk]
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect("knowledge:review")
@@ -3061,8 +3084,9 @@ def proposal_bulk_apply(request):
     try:
         with transaction.atomic():
             proposals = _bulk_proposals(member, form.cleaned_data["proposal_ids"])
+            values = _bulk_edited_values(proposals, request.POST)
             for proposal in proposals:
-                _apply_proposal(proposal, member, accept=True)
+                _apply_proposal(proposal, member, accept=True, value=values[proposal.pk])
     except ValueError as exc:
         messages.error(request, str(exc))
     else:

@@ -138,7 +138,7 @@ class DocumentLifecycleTests(TestCase):
                 with self.assertRaises(ValidationError):
                     change_document(self.doc.pk, self.owner, action)
             with self.assertRaises(ValidationError):
-                request_cleanup(self.doc.pk, self.owner)
+                request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
             job.delete()
 
     def test_active_capture_without_source_blocks_trash(self):
@@ -166,7 +166,7 @@ class DocumentLifecycleTests(TestCase):
 
     def test_cleanup_retains_current_files_summary_and_version_numbers(self):
         name = self.old.raw_file.name
-        task = request_cleanup(self.doc.pk, self.owner)
+        task = request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
         self.old.refresh_from_db(); self.doc.refresh_from_db()
         self.assertTrue(self.old.purged_at)
         self.assertEqual(self.old.plain_text, "")
@@ -182,7 +182,7 @@ class DocumentLifecycleTests(TestCase):
     def test_referenced_private_evidence_blocks_old_version_cleanup(self):
         self.cite(self.old)
         with self.assertRaises(ValidationError):
-            request_cleanup(self.doc.pk, self.owner)
+            request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
         self.assertContains(self.client.get(self.url()), "被专题引用")
         self.assertNotContains(self.client.get(self.url()), "专题</")  # No private artifact title.
 
@@ -228,7 +228,7 @@ class DocumentLifecycleTests(TestCase):
             change_document(self.doc.pk, self.owner, "restore")
 
     def test_cleanup_failure_can_retry_idempotently(self):
-        task = request_cleanup(self.doc.pk, self.owner)
+        task = request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
         with patch.object(protected_knowledge_storage, "delete", side_effect=OSError("test")):
             self.assertFalse(process_cleanup(task.pk))
         task.refresh_from_db()
@@ -245,26 +245,26 @@ class DocumentLifecycleTests(TestCase):
                 validate_file(self.doc, name)
         self.old.raw_file = "../outside"; self.old.save()
         with self.assertRaises(ValidationError):
-            request_cleanup(self.doc.pk, self.owner)
+            request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
         self.old.refresh_from_db()
         self.assertIsNone(self.old.purged_at)
         self.assertFalse(KnowledgeFileCleanup.objects.exists())
 
     def test_cleanup_checks_all_shared_files_before_deleting_any(self):
         name = self.old.raw_file.name
-        task = request_cleanup(self.doc.pk, self.owner)
+        task = request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
         self.current.raw_file = name; self.current.save()
         self.assertFalse(process_cleanup(task.pk))
         self.assertTrue(Path(self.tmp.name, name).exists())
 
     def test_reading_original_is_never_deleted(self):
         self.old.raw_file = "reading/artifacts/example.html"; self.old.save()
-        task = request_cleanup(self.doc.pk, self.owner)
+        task = request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
         self.assertEqual(task.files, [])
         self.assertTrue(process_cleanup(task.pk))
 
     def test_purged_hash_can_be_captured_again_as_new_number(self):
-        request_cleanup(self.doc.pk, self.owner)
+        request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
         new = KnowledgeRevision.objects.create(document=self.doc, revision_number=3, content_hash=self.old.content_hash)
         self.assertNotEqual(new.pk, self.old.pk)
 
@@ -272,7 +272,7 @@ class DocumentLifecycleTests(TestCase):
         self.assertContains(self.client.get(reverse("knowledge:document_detail", args=[self.doc.pk])), "打开资料管理")
 
     def test_confirmation_post_really_cleans_only_old_versions(self):
-        response = self.client.post(self.url(), {"action": "versions", "confirmation": "清理旧版本"})
+        response = self.client.post(self.url(), {"action": "versions", "confirmation": "清理旧版本", "revision_ids": [self.old.pk]})
         self.assertEqual(response.status_code, 302)
         self.old.refresh_from_db(); self.current.refresh_from_db()
         self.assertIsNotNone(self.old.purged_at)
@@ -289,7 +289,7 @@ class DocumentLifecycleTests(TestCase):
     def test_partial_cleanup_preserves_referenced_version_and_cleans_other_old(self):
         self.cite(self.old)
         extra = self.revision(3)
-        task = request_cleanup(self.doc.pk, self.owner)
+        task = request_cleanup(self.doc.pk, self.owner, revision_ids=[extra.pk])
         self.assertTrue(process_cleanup(task.pk))
         extra.refresh_from_db(); self.old.refresh_from_db()
         self.assertTrue(extra.purged_at)
@@ -313,7 +313,7 @@ class DocumentLifecycleTests(TestCase):
         run = KnowledgeProposalRun.objects.create(document=self.doc, revision=self.old, sequence=1, analysis_request=request, model_name="test", prompt_version="test", content_hash=self.old.content_hash)
         KnowledgeProposal.objects.create(document=self.doc, revision=self.old, run=run, proposal_type="summary", suggested_value={"text": "旧 AI 内容"}, model_name="test", prompt_version="test", content_hash=self.old.content_hash)
         human = KnowledgeCurationRevision.objects.create(document=self.doc, sequence=1, summary="已确认的结果", proposal_run=run, change_type="ai_confirmed")
-        task = request_cleanup(self.doc.pk, self.owner)
+        task = request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
         self.assertTrue(process_cleanup(task.pk))
         result.refresh_from_db(); human.refresh_from_db(); self.doc.refresh_from_db()
         self.assertEqual((result.result_text, result.tokens_used), ("", 10))
@@ -322,7 +322,7 @@ class DocumentLifecycleTests(TestCase):
         self.assertEqual(self.doc.confirmed_summary, "人工确认的摘要")
 
     def test_retry_cannot_access_other_documents_task(self):
-        task = request_cleanup(self.doc.pk, self.owner)
+        task = request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
         self.client.force_login(self.other.user)
         self.assertEqual(self.client.post(self.url(), {"action": "retry_files", "task_id": task.pk}).status_code, 403)
 
@@ -338,6 +338,69 @@ class DocumentLifecycleTests(TestCase):
             self.assertContains(response, "文件清理记录无效")
         self.doc.refresh_from_db()
         self.assertIsNone(self.doc.purged_at)
+
+    def test_only_selected_version_is_cleaned_unselected_body_files_and_audit_remain(self):
+        retained = self.revision(3)
+        retained_name = retained.raw_file.name
+        deleted_name = self.old.raw_file.name
+        task = request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk])
+        self.assertTrue(process_cleanup(task.pk))
+        retained.refresh_from_db(); self.current.refresh_from_db(); self.old.refresh_from_db()
+        self.assertIsNone(retained.purged_at)
+        self.assertEqual(retained.plain_text, "测试正文 3")
+        self.assertTrue(Path(self.tmp.name, retained_name).exists())
+        self.assertFalse(Path(self.tmp.name, deleted_name).exists())
+        self.assertIsNone(self.current.purged_at)
+        self.assertEqual(self.doc.lifecycle_events.get(action="versions").revision_numbers, [1])
+
+    def test_missing_selection_never_means_all_versions(self):
+        for selection in [None, [], "1"]:
+            with self.subTest(selection=selection), self.assertRaises(ValidationError):
+                request_cleanup(self.doc.pk, self.owner, revision_ids=selection)
+        response = self.client.post(self.url(), {"action": "versions", "confirmation": "清理旧版本"}, follow=True)
+        self.assertContains(response, "请先勾选")
+        self.assertFalse(KnowledgeFileCleanup.objects.exists())
+        self.assertFalse(self.doc.revisions.filter(purged_at__isnull=False).exists())
+
+    def test_mixed_invalid_selection_is_atomic_and_never_cleans_valid_part(self):
+        alien_doc = KnowledgeDocument.objects.create(family=self.family, owner=self.other, source=self.source, external_id="alien", title="其他资料")
+        alien = KnowledgeRevision.objects.create(document=alien_doc, revision_number=1, content_hash="d" * 64)
+        cited = self.revision(3)
+        self.cite(cited)
+        stale = self.revision(4)
+        request_cleanup(self.doc.pk, self.owner, revision_ids=[stale.pk])
+        before = (self.doc.file_cleanups.count(), self.doc.lifecycle_events.count())
+        for value in [self.current.pk, alien.pk, cited.pk, stale.pk, 999999999, "bad", "-1", "0", "1" * 100]:
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                request_cleanup(self.doc.pk, self.owner, revision_ids=[self.old.pk, value])
+            self.old.refresh_from_db()
+            self.assertIsNone(self.old.purged_at)
+            self.assertTrue(self.old.raw_file.storage.exists(self.old.raw_file.name))
+            self.assertEqual(before, (self.doc.file_cleanups.count(), self.doc.lifecycle_events.count()))
+
+    def test_duplicate_selection_creates_one_audited_cleanup(self):
+        task = request_cleanup(self.doc.pk, self.owner, revision_ids=[str(self.old.pk), self.old.pk])
+        self.assertTrue(process_cleanup(task.pk))
+        self.assertEqual(self.doc.lifecycle_events.get(action="versions").revision_numbers, [1])
+
+    def test_post_selecting_one_of_two_old_versions_preserves_the_other(self):
+        retained = self.revision(3)
+        response = self.client.post(self.url(), {"action": "versions", "confirmation": "清理旧版本", "revision_ids": [self.old.pk]}, follow=True)
+        self.assertContains(response, "未选中的版本保留")
+        retained.refresh_from_db(); self.old.refresh_from_db()
+        self.assertIsNone(retained.purged_at)
+        self.assertTrue(self.old.purged_at)
+
+    def test_selector_is_unchecked_and_protected_versions_disabled(self):
+        self.cite(self.revision(3))
+        response = self.client.get(self.url())
+        self.assertContains(response, 'aria-label="选择清理旧版本 v1"')
+        self.assertContains(response, 'disabled aria-label="v2，受保护不能选择"')
+        self.assertContains(response, 'disabled aria-label="v3，受保护不能选择"')
+        from bs4 import BeautifulSoup
+        choices = BeautifulSoup(response.content, "html.parser").select('input[name="revision_ids"]')
+        self.assertTrue(choices)
+        self.assertTrue(all(not choice.has_attr("checked") for choice in choices))
 
 
 class LifecycleConcurrencyTests(TransactionTestCase):

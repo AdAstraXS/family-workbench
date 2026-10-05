@@ -1,0 +1,5 @@
+<div class="proposal-form">
+  <label for="proposal-value-{{ proposal.pk }}">确认内容 · {{ proposal.get_proposal_type_display }}</label>
+  <textarea id="proposal-value-{{ proposal.pk }}" class="form-control" name="value_{{ proposal.pk }}" form="knowledge-bulk-review" rows="{% if proposal.proposal_type == 'summary' %}7{% else %}2{% endif %}">{% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}</textarea>
+  <div><button class="button primary" type="submit" form="knowledge-bulk-review" formaction="{% url 'knowledge:proposal_review' proposal.pk %}" name="action" value="accept">修改并确认</button><button class="button danger-outline" type="submit" form="knowledge-bulk-review" formaction="{% url 'knowledge:proposal_review' proposal.pk %}" name="action" value="reject">拒绝此项</button></div>
+</div>

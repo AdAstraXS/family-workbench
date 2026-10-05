@@ -116,7 +116,7 @@ def _clear_revisions(document, revisions):
 
 
 @transaction.atomic
-def request_cleanup(pk, member, *, whole_document=False):
+def request_cleanup(pk, member, *, whole_document=False, revision_ids=None):
     document = _locked_document(pk, member)
     if whole_document:
         if document.purged_at or not document.trashed_at:
@@ -127,9 +127,20 @@ def request_cleanup(pk, member, *, whole_document=False):
     else:
         if document.trashed_at or document.purged_at:
             raise ValidationError("请先恢复资料，再清理旧版本。")
-        revisions = list(document.revisions.filter(purged_at__isnull=True).exclude(pk=document.current_revision_id).filter(artifact_evidence_links__isnull=True))
-        if not revisions:
-            raise ValidationError("没有可清理的旧版本；当前版本和被专题引用的版本会保留。")
+        # Fail closed: missing selection (including an old browser form) never means all.
+        if not isinstance(revision_ids, (list, tuple, set)) or not revision_ids:
+            raise ValidationError("请先勾选要清理的旧版本；未选择时不会清理任何内容。")
+        selected_ids = set()
+        for value in revision_ids:
+            token = str(value)
+            if not token.isascii() or not token.isdigit() or len(token) > 18 or int(token) < 1:
+                raise ValidationError("所选版本无效，请刷新页面后重新选择；尚未清理任何内容。")
+            selected_ids.add(int(token))
+        revisions = list(document.revisions.filter(pk__in=selected_ids, purged_at__isnull=True)
+            .exclude(pk=document.current_revision_id).filter(artifact_evidence_links__isnull=True)
+            .order_by("revision_number"))
+        if len(revisions) != len(selected_ids):
+            raise ValidationError("所选版本已变化、已清理、不属于这篇资料或受到保护。请刷新后重新选择；尚未清理任何内容。")
     files = _files_for(document, revisions)
     task = KnowledgeFileCleanup.objects.create(document=document, files=files)
     numbers = [r.revision_number for r in revisions]

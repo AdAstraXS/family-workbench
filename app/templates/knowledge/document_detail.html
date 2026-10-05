@@ -1,4 +1,6 @@
 {% extends "knowledge_hub/base.html" %}
+{% load static %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/knowledge-detail-controls.css' %}">{% endblock %}
 
 {% block title %}{{ document.title }} · 知识中心{% endblock %}
 {% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{{ return_to|default:page_parent_url }}">返回资料列表</a><span aria-hidden="true">›</span><span>{{ document.title|truncatechars:24 }}</span>{% endblock %}
@@ -111,10 +113,10 @@
     </section>
   </section>
 
-  <aside class="knowledge-detail-sidebar">
+  <aside class="knowledge-detail-sidebar" tabindex="0" aria-label="文档信息与整理建议">
     {% if can_organize %}<section class="panel"><details><summary>资料管理 · 版本与删除</summary><p class="muted">查看旧版本、移出精选或移入回收站。</p><a class="button" href="{% url 'knowledge:document_manage' document.pk %}">打开资料管理</a></details></section>{% endif %}
     <section class="panel knowledge-property-panel">
-      <header><span class="eyebrow">Document</span><h2>文档信息</h2></header>
+      <details class="knowledge-detail-section"><summary>文档信息</summary>
       <div class="knowledge-document-state">
         <span>当前状态</span>
         <strong class="status-pill{% if document.knowledge_status == 'pending' or document.curation_status == 'pending_review' %} warning{% endif %}">{% if document.curation_status == "pending_ai" %}AI 整理中{% elif document.curation_status == "pending_review" and document.library_tier == "knowledge" %}精选知识 · 新建议待确认{% elif document.curation_status == "pending_review" %}待整理 · 等待确认{% elif document.knowledge_status == "pending" %}待整理 · 尚未整理{% elif document.library_tier == "knowledge" %}精选知识{% elif document.knowledge_status == "included" %}归档资料{% else %}仅同步归档{% endif %}</strong>
@@ -125,10 +127,11 @@
         <div><dt>所属成员</dt><dd>{{ document.owner|default:"已转交家庭" }}</dd></div>
       </dl>
       {% if document.sync_status == "source_deleted" %}<p class="notice warning">来源已删除或不可访问；NAS 已保存副本继续保留。</p>{% endif %}
+      </details>
     </section>
 
     <section class="panel knowledge-provenance-panel">
-      <header><span class="eyebrow">Source</span><h2>来源与原文</h2></header>
+      <details class="knowledge-detail-section"><summary>来源与原文</summary>
       <dl class="knowledge-property-list">
         <div><dt>来源</dt><dd>{{ document.source.name }}</dd></div>
         {% if document.section_name %}<div><dt>原始位置</dt><dd>{{ document.source.name }}{% if document.hierarchy.section_group %} / {{ document.hierarchy.section_group }}{% endif %} / {{ document.section_name }}</dd></div>{% endif %}
@@ -143,11 +146,13 @@
           <div><dt>同步版本</dt><dd>{% if revision %}v{{ revision.revision_number }} · {{ revision.created_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</dd></div>
         </dl>
       </details>
+      </details>
     </section>
 
     {% if pending_proposals %}
     <section class="panel knowledge-ai-panel knowledge-ai-pending-panel">
-      <header><span class="knowledge-content-label ai">AI 新建议 · 等待确认</span><h2>本次整理建议{% include "knowledge/_help_tip.html" with text="当前正式结果不会自动改变；请对照原文逐项确认、修改或拒绝。" %}</h2></header>
+      <details class="knowledge-detail-section" open><summary>本次整理建议</summary>
+      <p><span class="knowledge-content-label ai">AI 新建议 · 等待确认</span>{% include "knowledge/_help_tip.html" with text="当前正式结果不会自动改变；请对照原文逐项确认、修改或拒绝。整篇预览会包含编辑框里的修改。" %}</p>
       {% for proposal in pending_proposals %}
         <article class="proposal-card status-{{ proposal.status }}">
           <header><strong>{{ proposal.get_proposal_type_display }}</strong><span class="status-pill status-{{ proposal.status }}">{{ proposal.get_status_display }}</span></header>
@@ -155,15 +160,13 @@
           {% if proposal.proposal_type == "category" and proposal.suggested_value.is_new %}<small class="knowledge-new-taxonomy">建议新增分类；确认后才会加入目录</small>{% elif proposal.proposal_type == "tags" and proposal.suggested_value.new_items %}<small class="knowledge-new-taxonomy">建议新增：{{ proposal.suggested_value.new_items|join:"、" }}；确认后才会加入目录</small>{% endif %}
           <small>第 {{ proposal.run.sequence }} 次 AI 整理 · {{ proposal.model_name }} · {{ proposal.created_at|date:"Y-m-d H:i" }}</small>
           {% if can_organize %}
-            <form method="post" action="{% url 'knowledge:proposal_review' proposal.pk %}" class="proposal-form">
-              {% csrf_token %}
-              <textarea class="form-control" name="value" rows="{% if proposal.proposal_type == 'summary' %}6{% else %}2{% endif %}">{% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}</textarea>
-              <div><button class="button primary" type="submit" name="action" value="accept">修改并确认</button><button class="button danger-outline" type="submit" name="action" value="reject">拒绝</button></div>
-            </form>
+            {% include "knowledge/_proposal_editor.html" %}
           {% endif %}
         </article>
       {% endfor %}
+      {% if can_organize %}<form id="knowledge-bulk-review" method="post" action="{% url 'knowledge:proposal_bulk_preview' %}" class="knowledge-review-all-form">{% csrf_token %}<input type="hidden" name="use_edited_values" value="yes">{% for proposal in pending_proposals %}<input type="hidden" name="selected" value="{{ proposal.pk }}">{% endfor %}<button class="button primary" type="submit">预览并确认本篇全部建议</button></form>{% endif %}
       <a class="button knowledge-review-entry" href="{% url 'knowledge:review' %}?document={{ document.pk }}">进入左右对照确认</a>
+      </details>
     </section>
     {% endif %}
 
