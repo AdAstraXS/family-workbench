@@ -1,2 +1,10 @@
 {% load macro_format %}
-{% if growth %}<div class="macro-growth-metrics">{% for metric in growth.metrics %}<div class="{% if metric.key == growth.default %}macro-primary-metric{% endif %}"><small>{{ metric.label }}</small><strong>{% if metric.value is not None %}{{ metric.value|macro_number }}<span>{{ metric.unit }}</span>{% else %}暂无可比数据{% endif %}</strong></div>{% endfor %}</div><p class="macro-original"><span>原始值</span> {% if latest %}{{ latest.value|macro_number }}{% else %}尚无数据{% endif %} <small>{{ spec.unit }} · {{ definition.basis }} · {{ definition.seasonal }}</small></p>{% endif %}
+{% if growth %}
+<div class="macro-growth-metrics">
+{% if growth.default == 'level' %}<div class="macro-primary-metric"><small>原始值</small><strong>{% if latest %}{{ latest.value|macro_number }}<span>{{ spec.unit }}</span>{% else %}尚无数据{% endif %}</strong></div>
+{% else %}{% for metric in growth.metrics %}<div class="{% if metric.key == growth.default %}macro-primary-metric{% endif %}"><small>{{ metric.label }}</small><strong>{% if metric.value is not None %}{{ metric.value|macro_number }}<span>{{ metric.unit }}</span>{% else %}暂无可比数据{% endif %}</strong></div>{% endfor %}{% endif %}
+</div>
+{% if growth.default != 'level' %}<p class="macro-original"><span>原始值</span> {% if latest %}{{ latest.value|macro_number }}{% else %}尚无数据{% endif %} <small>{{ spec.unit }} · {{ definition.basis }} · {{ definition.seasonal }}</small></p>
+{% elif growth.paired %}<p class="macro-meta">同比请查看同主题的对应增速指标；趋势可切换为增速。</p>
+{% else %}<p class="macro-meta">暂无可靠的可比基数，当前展示原始值。{{ definition.basis }}</p>{% endif %}
+{% endif %}

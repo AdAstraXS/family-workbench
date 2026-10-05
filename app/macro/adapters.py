@@ -80,7 +80,10 @@ def parse_frame(rows, series):
                 raise SourceError(f"统计局字段缺失或重复：{spec.code}")
             for label, value in selected[0].items():
                 if label != "index":
-                    points.append(Point(spec.code, period_date(label), number(value), evidence={"field": spec.field, "period": label, "value": value}))
+                    period = period_date(label)
+                    if spec.selector.startswith("from:") and period < date.fromisoformat(spec.selector[5:]):
+                        continue
+                    points.append(Point(spec.code, period, number(value), evidence={"field": spec.field, "period": label, "value": value}))
         elif spec.provider == "nbs_city":
             cities = set()
             for row in rows:
@@ -137,7 +140,7 @@ def parse_official(html, group):
     parser.feed(html)
     text = re.sub(r"\s+", "", " ".join(parser.parts)).replace("％", "%")
     # Read publication metadata separately. Never use the fetch date as release date.
-    published = re.search(r'(?:name=["\'](?:PubDate|publishdate)["\'][^>]*content=["\'])(\d{4}-\d{2}-\d{2})', html, re.I)
+    published = re.search(r'(?:name=["\'](?:PubDate|publishdate|firstpublishedtime)["\'][^>]*content=["\'])(\d{4}-\d{2}-\d{2})', html, re.I)
     if not published:
         published = re.search(r"(?:来源：.{0,40}?)?(\d{4}-\d{2}-\d{2})\s*\d{2}:\d{2}", " ".join(parser.parts))
     release = date.fromisoformat(published[1]) if published else None
@@ -156,7 +159,26 @@ def parse_official(html, group):
             value = -value
         points.append(Point(code, period, value, release_date=release, evidence={"excerpt": match[0], "source_notes": notes}))
 
-    if group == "mofcom":
+    if group in {"ism_manufacturing", "ism_services"}:
+        sector = "Manufacturing" if group == "ism_manufacturing" else "Services"
+        months = {name: n for n, name in enumerate(["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], 1)}
+        title = re.search(r"(" + "|".join(months) + r")(20\d{2})ISM[^a-zA-Z]{0,4}" + sector + r"PMI", text, re.I)
+        if not title:
+            raise SourceError("ISM报告统计月份或部门未核验")
+        period = date(int(title[2]), months[title[1].title()], 1)
+        code = "PMI_ISM_MANUFACTURING" if sector == "Manufacturing" else "PMI_ISM_SERVICES"
+        value = re.search(sector + r"PMI[^a-zA-Z\d]{0,8}at(?P<value>\d+(?:\.\d+)?)%", text, re.I)
+        if not value:
+            raise SourceError("ISM报告总指数未匹配")
+        return [Point(code, period, number(value["value"]), release_date=release,
+                      evidence={"excerpt": value[0], "source_notes": "官方报告当月总指数；不将发布日期当成统计月份，不以商业接口的无统计期数据回填历史。"})]
+    if group == "gov_budget":
+        if not release or f"{release.year}年政府工作任务" not in text or "政府工作报告" not in text:
+            raise SourceError("年度预算报告年份或发布日期未核验")
+        period = date(release.year, 1, 1)
+        notes = "官方年度预算安排约数；不等于月度财政收支缺口或实际执行赤字率。"
+        extract("DEFICIT_BUDGET_RATIO", r"今年赤字率拟按(?P<value>\d+(?:\.\d+)?)%左右安排")
+    elif group == "mofcom":
         m = re.search(r"(\d{4})年1[-—–－至](\d{1,2})月.{0,15}(?:全国吸收外资|全国新设立外商投资企业)", text)
         if not m:
             raise SourceError("商务部累计统计期未匹配")

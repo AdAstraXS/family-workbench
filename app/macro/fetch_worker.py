@@ -8,7 +8,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .registry import GROUPS, OFFICIAL_GROUPS
 
-OFFICIAL_HOSTS = {"pbc": "www.pbc.gov.cn", "mofcom": "www.mofcom.gov.cn", "nbs_release": "www.stats.gov.cn"}
+OFFICIAL_HOSTS = {"pbc": "www.pbc.gov.cn", "mofcom": "www.mofcom.gov.cn", "nbs_release": "www.stats.gov.cn",
+                  "ism_manufacturing": "www.ismworld.org", "ism_services": "www.ismworld.org", "gov_budget": "www.gov.cn"}
 
 
 def validate_url(url, group):

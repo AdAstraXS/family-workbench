@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 {% block title %}宏观数据 · {{ site_household_name }}{% endblock %}
-{% block extra_head %}<link rel="stylesheet" href="{% static 'macro/macro.css' %}?v=20261005b"><link rel="stylesheet" href="{% static 'macro/presentation.css' %}?v=20261005b">{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'macro/macro.css' %}?v=20261005c"><link rel="stylesheet" href="{% static 'macro/presentation.css' %}?v=20261005c">{% endblock %}
 {% block content %}
 <div class="macro-shell">
   <aside class="macro-sidebar">
@@ -13,7 +13,7 @@
       <a href="{% url 'macro:encyclopedia' %}" {% if section == 'learn' %}aria-current="page"{% endif %}>指标百科</a>
       <a href="{% url 'macro:calendar' %}" {% if section == 'calendar' %}aria-current="page"{% endif %}>发布日历</a>
     </nav>
-    <div class="macro-secondary"><a href="{% url 'macro:housing_cities' %}">70城房价总表</a><a href="{% url 'macro:sources' %}" {% if section == 'sources' %}aria-current="page"{% endif %}>数据来源与更新</a></div>
+    <div class="macro-secondary"><a href="{% url 'macro:sources' %}" {% if section == 'sources' %}aria-current="page"{% endif %}>数据来源与更新</a></div>
   </aside>
   <div class="macro-main">{% block macro_content %}{% endblock %}</div>
 </div>

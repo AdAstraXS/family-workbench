@@ -19,7 +19,7 @@ from .tests import fred_payload
 class GuideContentTests(SimpleTestCase):
     def test_every_registered_indicator_has_complete_source_backed_guide(self):
         self.assertEqual(set(GUIDES), {(s.country, s.code) for s in SERIES})
-        self.assertEqual(len(GUIDES), 81)
+        self.assertEqual(len(GUIDES), len(SERIES))
         for key, guide in GUIDES.items():
             with self.subTest(indicator=key):
                 for field in ["title", "lead", "scope", "calculation", "formula", "example", "method", "meaning", "kind", "aliases"]:

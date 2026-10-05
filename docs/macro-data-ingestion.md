@@ -55,6 +55,23 @@ python manage.py import_macro --group nbs_release --url https://www.stats.gov.cn
   不改写原始观测；CPI 同比所需的未季调 `CPIAUCNS` / `CPILFENS` 与季调序列分开采集。
 - 中国制造业/非制造业 PMI 标注为季调，依据[统计局说明](https://www.stats.gov.cn/zs/tjws/tjzb/202301/t20230101_1903972.html)。
 
+## 新增就业、财政及美国观察项的来源约束
+
+- 中国就业细分取国家统计局“城镇调查失业率 > 城镇调查失业率”结构化字段，31个大城市指标
+  是合并调查率，户籍分为本地和外来。年龄段为16—24、25—29、30—59岁，不含在校生。
+  新分年龄序列只接入2023年12月起的数据，解析器过滤同名字段中早期含在校生数据，不能直接连接。
+- 年度预算赤字率取中国政府网政府工作报告的公布约数。必须核验报告中的年度工作任务及正式
+  发布日期；不从月度财政收入与支出推算，不把预算安排标为实际执行。
+- 美国新增 `DGS30`（日度固定期限30年国债）、`PPIFIS`/`PPIFID`（季调/未季调最终需求PPI）、
+  `DGORDER`（季调耐用品订单、百万美元、含运输设备）、`UMCSENT`（密歇根信心调查、非季调）。
+  FRED无需API Key；密歇根数据延迟一个月，早期缺月、国债停发阶段等缺值保留，不填补。
+- ISM制造业/服务业PMI按指定官方月度报告的标题取统计月份及当月总指数，仅导入报告明确的点。
+  标题的月份不能替换为发布日期，第三方接口只有发布日的历史不得自动挪到上月。
+  公开程序下载当前会转登录页或返回错误页，禁止把错误页面解析为数据。完整历史和稳定自动更新
+  尚未接入；已核验的公开标题摘录须在采集证据中标为摘录，不冒充完整HTML，发布日期未知保留空值。
+  方法来源见[制造业官方报告](https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/pmi/september/)
+  和[服务业官方报告](https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/services/august/)。
+
 ## 页面与运维
 
 `/macro/` 提供中国/美国独立入口、主题趋势、城市选择、分页历史、指标百科和修订证据；页面与
@@ -68,15 +85,16 @@ python manage.py import_macro --group nbs_release --url https://www.stats.gov.cn
 
 ## 延后项
 
-M1 的新旧口径及官方回溯、LPR/RRR 政策日期、ISM 当前数据源、GDP 平减指数测算、官方文章自动发现
+M1 的新旧口径及官方回溯、LPR/RRR 政策日期、ISM 完整历史及稳定自动获取、GDP 平减指数测算、官方文章自动发现
 和历史回补仍属后续范围。此阶段不要求用户申请 FRED API Key。
 
 ## 本地验证
 
-使用独立 `test_macro_ingestion` PostgreSQL 数据库；不使用本地应用库或生产库作为测试库。
+使用独立 `test_macro_frontend` PostgreSQL 数据库；不使用本地应用库或生产库作为测试库。
+`test_macro_ingestion` 现用于实际公开样本的本地预览回放，不再作为测试运行库，以免清空已有预览数据。
 
 ```text
-docker compose exec -T -e DJANGO_SETTINGS_MODULE=config.test_settings -e WORKBENCH_TEST_DB=test_macro_ingestion web python manage.py test macro --keepdb
+docker compose exec -T -e DJANGO_SETTINGS_MODULE=config.test_settings -e WORKBENCH_TEST_DB=test_macro_frontend web python manage.py test macro --keepdb
 docker compose exec -T web python manage.py check
 docker compose exec -T web python manage.py makemigrations --check --dry-run
 git diff --check
