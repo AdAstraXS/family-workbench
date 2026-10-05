@@ -78,7 +78,7 @@ class ParserTests(SimpleTestCase):
     def test_pbc_negative_loans_and_unit_conversion(self):
         html = '''2025年8月金融统计数据报告。社会融资规模存量为464.8万亿元，同比增长7.2%。
         社会融资规模增量累计为23.91万亿元。政府债券余额103.69万亿元。政府债券净融资8.77万亿元。
-        住户贷款减少1.03万亿元，其中，短期贷款减少1.05万亿元，中长期贷款增加188亿元；
+        前八个月人民币贷款增加13万亿元。住户贷款减少1.03万亿元，其中，短期贷款减少1.05万亿元，中长期贷款增加188亿元；
         企（事）业单位贷款增加11.26万亿元，其中，短期贷款增加4.18万亿元，中长期贷款增加5.64万亿元，票据融资增加1.29万亿元。'''
         values = {p.code: p.value for p in parse_official(html, "pbc")}
         self.assertEqual(values["HOUSEHOLD_LOANS_CUM"], Decimal("-10300"))

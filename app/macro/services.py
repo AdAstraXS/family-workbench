@@ -10,6 +10,22 @@ from .models import MacroImportRun, MacroIndicator, MacroObservation, MacroObser
 from .registry import GROUPS, OFFICIAL_GROUPS
 
 
+def fetch_page(url):
+    from .http_worker import validate_page_url
+    try:
+        validate_page_url(url)
+    except ValueError as exc:
+        raise SourceError("官方目录或日历地址不在登记范围") from exc
+    for attempt in range(2):
+        try:
+            result = subprocess.run([sys.executable, "-m", "macro.http_worker"], input=json.dumps({"url": url}),
+                capture_output=True, encoding="utf-8", timeout=45, check=True)
+            return json.loads(result.stdout)["text"]
+        except (subprocess.SubprocessError, json.JSONDecodeError, KeyError) as exc:
+            if attempt:
+                raise SourceError("官方目录或日历请求失败或超时，已重试一次；保留上次数据") from exc
+
+
 def fetch_source(group, url=""):
     for attempt in range(2):
         try:
@@ -50,6 +66,8 @@ def prepare(group, payload):
             raise SourceError("统计期与登记频率不一致")
         if point.release_date and point.release_date < point.period:
             raise SourceError("发布日期早于统计期，请核验来源")
+        if point.release_date and point.release_date > timezone.localdate():
+            raise SourceError("发布日期为未来日期，不能标记为已发布")
         seen.add(key)
     return points
 

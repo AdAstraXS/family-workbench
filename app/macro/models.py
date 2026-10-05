@@ -104,3 +104,40 @@ class MacroObservationRevision(models.Model):
             fields=["observation", "number"], name="unique_macro_revision",
         )]
         ordering = ["-number"]
+
+
+class MacroMaintenanceRun(models.Model):
+    mode = models.CharField("任务", max_length=20)
+    status = models.CharField("状态", max_length=20, default="running", choices=[
+        ("running", "运行中"), ("success", "成功"), ("failed", "失败"), ("interrupted", "已中断"),
+    ])
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True)
+    summary = models.JSONField(default=dict)
+    error = models.CharField(max_length=500, blank=True)
+
+
+class MacroOfficialReport(models.Model):
+    group = models.CharField("来源", max_length=80)
+    url = models.URLField("官方报告", max_length=1000, unique=True)
+    title = models.CharField(max_length=300)
+    period_date = models.DateField(null=True)
+    release_date = models.DateField(null=True)
+    content_hash = models.CharField(max_length=64, blank=True)
+    status = models.CharField(max_length=20, default="pending")
+    error = models.CharField(max_length=500, blank=True)
+    summary = models.JSONField(default=dict)
+    checked_at = models.DateTimeField(null=True)
+    imported_at = models.DateTimeField(null=True)
+
+
+class MacroCalendarSnapshot(models.Model):
+    agency = models.CharField(max_length=30)
+    source_url = models.URLField(max_length=1000)
+    content_hash = models.CharField(max_length=64)
+    payload = models.JSONField("已核验计划日历")
+    checked_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["agency", "content_hash"], name="unique_macro_calendar_snapshot")]

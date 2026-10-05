@@ -121,10 +121,16 @@ class PageText(HTMLParser):
         super().__init__()
         self.parts = []
         self.skip = 0
+        self.publication = {}
 
     def handle_starttag(self, tag, attrs):
         if tag in {"script", "style"}:
             self.skip += 1
+        if tag == "meta":
+            fields = dict(attrs)
+            name = (fields.get("name") or "").lower()
+            if name in {"pubdate", "publishdate", "firstpublishedtime"}:
+                self.publication[name] = fields.get("content", "")
 
     def handle_endtag(self, tag):
         if tag in {"script", "style"}:
@@ -140,10 +146,14 @@ def parse_official(html, group):
     parser.feed(html)
     text = re.sub(r"\s+", "", " ".join(parser.parts)).replace("％", "%")
     # Read publication metadata separately. Never use the fetch date as release date.
-    published = re.search(r'(?:name=["\'](?:PubDate|publishdate|firstpublishedtime)["\'][^>]*content=["\'])(\d{4}-\d{2}-\d{2})', html, re.I)
+    metadata = next((parser.publication[key] for key in ["pubdate", "publishdate", "firstpublishedtime"] if parser.publication.get(key)), "")
+    published = re.match(r"(\d{4}[-/]\d{2}[-/]\d{2})", metadata)
     if not published:
-        published = re.search(r"(?:来源：.{0,40}?)?(\d{4}-\d{2}-\d{2})\s*\d{2}:\d{2}", " ".join(parser.parts))
-    release = date.fromisoformat(published[1]) if published else None
+        published = re.search(r"(?:来源：.{0,40}?)?(\d{4}[-/]\d{2}[-/]\d{2})\s*\d{2}:\d{2}", " ".join(parser.parts))
+    try:
+        release = date.fromisoformat(published[1].replace("/", "-")) if published else None
+    except ValueError as exc:
+        raise SourceError("官方发布日期格式无效") from exc
     points = []
 
     def extract(code, pattern, *, monetary=False, signed=False, required=True):
@@ -179,7 +189,12 @@ def parse_official(html, group):
         notes = "官方年度预算安排约数；不等于月度财政收支缺口或实际执行赤字率。"
         extract("DEFICIT_BUDGET_RATIO", r"今年赤字率拟按(?P<value>\d+(?:\.\d+)?)%左右安排")
     elif group == "mofcom":
-        m = re.search(r"(\d{4})年1[-—–－至](\d{1,2})月.{0,15}(?:全国吸收外资|全国新设立外商投资企业)", text)
+        m = re.search(r"(\d{4})年1[-—–－至](\d{1,2})月.{0,25}(?:全国吸收外资|全国新设立外商投资企业)", text)
+        if not m:
+            m = re.search(r"(\d{4})年(1)月.{0,25}(?:全国吸收外资|全国新设立外商投资企业)", text)
+        if not m:
+            annual = re.search(r"(\d{4})年(?:全年)?全国吸收外资", text)
+            m = (annual[0], annual[1], "12") if annual else None
         if not m:
             raise SourceError("商务部累计统计期未匹配")
         period = date(int(m[1]), int(m[2]), 1)
@@ -190,32 +205,64 @@ def parse_official(html, group):
         for code, label in [("FDI_MANUFACTURING_CUM", "制造业"), ("FDI_SERVICES_CUM", "服务业"), ("FDI_HIGHTECH_CUM", "高技术产业")]:
             extract(code, label + r"实际使用外资(?P<value>[\d.]+)亿元人民币", required=False)
     elif group == "nbs_release":
-        m = re.search(r"(\d{4})年1[—－至-](\d{1,2})月份?固定资产投资", text)
+        m = re.search(r"(\d{4})年1[—－至-](\d{1,2})月份?(?:全国)?固定资产投资", text)
+        if not m:
+            annual = re.search(r"(\d{4})年(上半年|前三季度|全年)?(?:全国)?固定资产投资", text)
+            m = (annual[0], annual[1], {"上半年": "6", "前三季度": "9"}.get(annual[2], "12")) if annual else None
         if not m:
             raise SourceError("统计局投资发布稿统计期未匹配")
         period = date(int(m[1]), int(m[2]), 1)
-        definition = re.search(r"基础设施投资[：:].{20,1500}?基础设施投资增速按可比口径计算。", text)
+        growth = re.search(r"基础设施投资(?:（(?P<scope>[^）]{0,80})）)?(?:同比|比上年)(?:增长|下降)[\d.]+%", text)
+        exclusion = growth if growth and growth["scope"] == "不含电力、热力、燃气及水生产和供应业" else None
+        if growth and growth["scope"] and "不含" in growth["scope"] and not exclusion:
+            raise SourceError("基建统计范围发生未登记变化，请先核验")
+        definition = exclusion or re.search(r"基础设施投资[：:].{20,1500}?基础设施投资增速按可比口径计算。", text)
         if not definition:
             raise SourceError("基建投资统计范围未匹配，不能沿用旧口径")
         notes = definition[0]
-        extract("INFRASTRUCTURE_CUM_YOY", r"基础设施投资(?:（[^）]{0,80}）)?同比(?P<direction>增长|下降)(?P<value>[\d.]+)%", signed=True)
+        code = "INFRASTRUCTURE_EX_UTILITIES_CUM_YOY" if exclusion else "INFRASTRUCTURE_CUM_YOY"
+        extract(code, r"基础设施投资(?:（[^）]{0,80}）)?(?:同比|比上年)(?P<direction>增长|下降)(?P<value>[\d.]+)%", signed=True)
     elif group == "pbc":
-        m = re.search(r"(\d{4})年(\d{1,2})月(?:金融统计数据报告|末社会融资规模存量)", text)
+        m = re.search(r"(\d{4})年(\d{1,2})月(?:金融统计数据报告|社会融资规模(?:存量|增量)统计数据报告|末社会融资规模存量)", text)
+        if not m:
+            quarter = re.search(r"(\d{4})年(一季度|上半年|前三季度|全年)?(?:金融统计数据报告|社会融资规模(?:存量|增量)统计数据报告)", text)
+            m = (quarter[0], quarter[1], {"一季度": "3", "上半年": "6", "前三季度": "9"}.get(quarter[2], "12")) if quarter else None
         if not m:
             raise SourceError("央行报告统计期未匹配")
         period = date(int(m[1]), int(m[2]), 1)
         notes = "初步统计；报告累计增量不等于当月；企事业单位为非金融企业及机关团体。"
         amount = r"(?P<value>[\d.]+)(?P<unit>万亿元|亿元)"
         direction = r"(?P<direction>增加|减少)"
-        extract("TSF_STOCK", "社会融资规模存量为" + amount, monetary=True)
-        extract("TSF_STOCK_YOY", r"社会融资规模存量为[\d.]+万亿元，同比(?P<direction>增长|下降)(?P<value>[\d.]+)%", signed=True)
-        extract("TSF_CUM", "社会融资规模增量累计为" + amount, monetary=True)
-        extract("GOVERNMENT_BONDS_STOCK", "政府债券余额" + amount, monetary=True)
-        extract("GOVERNMENT_BONDS_CUM", r"政府债券净融资" + amount, monetary=True)
-        for code, label in [("HOUSEHOLD", "住户"), ("COMPANY", r"企（事）业单位")]:
+        # Older releases publish finance, stock and cumulative flow separately.
+        # Each recognised section remains complete; absent sections are never filled with zero.
+        stock = "社会融资规模存量为" in text
+        flow_phrase = "社会融资规模增量累计为"
+        if period.month == 1 and flow_phrase not in text:
+            # January monthly flow is exactly the year-to-date flow, with explicit period proof.
+            flow_phrase = "社会融资规模增量为"
+        flow = flow_phrase in text
+        loans = "金融统计数据报告" in text
+        if not any((stock, flow, loans)):
+            raise SourceError("央行报告未包含登记的统计对象")
+        if stock:
+            extract("TSF_STOCK", "社会融资规模存量为" + amount, monetary=True)
+            extract("TSF_STOCK_YOY", r"社会融资规模存量为[\d.]+万亿元，同比(?P<direction>增长|下降)(?P<value>[\d.]+)%", signed=True)
+            extract("GOVERNMENT_BONDS_STOCK", "政府债券余额(?:为)?" + amount, monetary=True)
+        if flow:
+            # The first paragraph is cumulative; later paragraphs may be monthly.
+            original = text
+            chunks = [re.split(r"\d{1,2}月份?社会融资规模增量", text[match.start():], maxsplit=1)[0]
+                      for match in re.finditer(re.escape(flow_phrase), text)]
+            text = next((chunk for chunk in chunks if re.search(r"政府债券净融资[\d.]+(?:万亿元|亿元)", chunk)), "")
+            extract("TSF_CUM", flow_phrase + amount, monetary=True)
+            extract("GOVERNMENT_BONDS_CUM", r"政府债券净融资" + amount, monetary=True)
+            text = original
+        for code, label in ([("HOUSEHOLD", "住户"), ("COMPANY", r"企（事）业单位")] if loans else []):
             section = re.search(label + r"贷款(?:增加|减少)[^；。]+", text)
             if not section:
                 raise SourceError("央行贷款部门字段未匹配")
+            if period.month != 1 and not re.search(r"(?:前[一二两三四五六七八九十\d]+个?月|上半年|一季度|前三季度|全年)[^。]{0,60}人民币贷款", text):
+                raise SourceError("央行贷款累计范围未核验，不能用当月增量回填累计指标")
             extract(code + "_LOANS_CUM", label + "贷款" + direction + amount, monetary=True, signed=True)
             original = text
             text = section[0]

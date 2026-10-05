@@ -64,7 +64,7 @@ class GrowthTests(SimpleTestCase):
         self.assertEqual(values(spec("HOUSE_NEW_MOM", "CN"), date(2025, 8, 1), Decimal("99.5"), {}), {"index_rate": Decimal("-0.5")})
 
 
-class ScheduleTests(SimpleTestCase):
+class ScheduleTests(TestCase):
     def test_snapshot_integrity_and_timezone(self):
         data = schedule()
         self.assertEqual(len(data["events"]), 163)
@@ -144,7 +144,7 @@ class AddedPagesTests(TestCase):
         self.assertNotContains(response, "2026-09-15 00:00")
         unknown = self.client.get(reverse("macro:calendar"), {"month": "2027-01"})
         self.assertEqual(unknown.context["planned_count"], 0)
-        self.assertContains(unknown, "尚未录入官方计划")
+        self.assertContains(unknown, "尚无已核验官方日程")
         for month in ["bad", "2026-13", "0000-01", "2026-01-02"]:
             self.assertEqual(self.client.get(reverse("macro:calendar"), {"month": month}).status_code, 404)
 

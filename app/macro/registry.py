@@ -162,6 +162,7 @@ for code, name, unit, basis in [
 ]:
     SERIES.append(Series(code, name, "CN", "投资", unit, "月度", "mofcom", "mofcom", code, basis))
 SERIES.append(Series("INFRASTRUCTURE_CUM_YOY", "基础设施投资累计同比", "CN", "投资", "%", "月度", "nbs_release", "nbs_release", "INFRASTRUCTURE_CUM_YOY", "年初至今累计；范围以当期发布稿附注为准"))
+SERIES.append(Series("INFRASTRUCTURE_EX_UTILITIES_CUM_YOY", "基础设施投资累计同比（不含电力等）", "CN", "投资", "%", "月度", "nbs_release", "nbs_release", "INFRASTRUCTURE_EX_UTILITIES_CUM_YOY", "年初至今累计；不含电力、热力、燃气及水生产和供应业；与包含该行业的口径分开"))
 for code, name, unit, basis in [
     ("TSF_STOCK", "社会融资规模存量", "亿元", "月末"),
     ("TSF_STOCK_YOY", "社会融资规模存量同比", "%", "月末"),

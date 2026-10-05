@@ -17,7 +17,8 @@ from django.utils import timezone
 from .guides import BASICS, GUIDES
 from .models import MacroImportRun, MacroObservation, MacroSourceMapping, MacroIndicator
 from .registry import SERIES
-from .calendar import schedule, planned_events
+from .calendar import current_schedule, planned_events
+from .health import update_health
 from .housing import CITIES, HOUSING_COLUMNS
 from .presentation import AUXILIARY, PRESENTATION_CODES, CPI_BASES, CN_PAIRS, profile, shifted, presentation, values
 
@@ -302,13 +303,14 @@ def revisions(request, pk):
 @login_required
 @require_safe
 def status(request):
-    return render(request, "macro/status.html", {"section": "sources", "page": Paginator(MacroImportRun.objects.order_by("-started_at"), 30).get_page(request.GET.get("page"))})
+    return render(request, "macro/status.html", {"section": "sources", "health": update_health(),
+        "page": Paginator(MacroImportRun.objects.order_by("-started_at"), 30).get_page(request.GET.get("page"))})
 
 
 SOURCE_METHODS = {
     "nbs": ("国家统计局", "https://data.stats.gov.cn/", "国家数据历史表，经 AKShare 读取；按指标、时期和城市映射。", "返回的统计期决定实际历史范围，发布库与新闻稿更新时间可能不同。"),
-    "pbc": ("中国人民银行", "https://www.pbc.gov.cn/", "读取并核对指定官方报告页面。", "社融、信贷按报告逐期积累；当前尚未自动发现新报告。"),
-    "mofcom": ("商务部", "https://www.mofcom.gov.cn/", "读取并核对指定吸收外资发布稿。", "累计金额、同比、行业及企业数量分别记录；当前尚未自动发现新报告。"),
+    "pbc": ("中国人民银行", "https://www.pbc.gov.cn/", "从官方统计目录发现报告，核验正文后导入。", "兼容分开及合并发布；累计与当月数据分别核验。任务执行情况见更新记录。"),
+    "mofcom": ("商务部", "https://www.mofcom.gov.cn/", "从日常新闻发布目录发现吸收外资报告。", "累计金额、同比、行业及企业数量分别记录；未披露的字段保留缺期。任务执行情况见更新记录。"),
     "fred": ("FRED · 圣路易斯联储", "https://fred.stlouisfed.org/", "公开 CSV 序列；原始发布机构见指标百科及 FRED 系列说明。", "FRED 是数据分发平台；来源缺值保留，统计期不是官方发布日期。"),
     "akshare": ("东方财富 · AKShare", "https://data.eastmoney.com/cjsj/", "AKShare 读取东方财富的宏观历史表。", "第三方转发数据；原统计机构和方法参考见指标百科，不能把采集日当作发布日期。"),
     "ism": ("ISM官方报告", "https://www.ismworld.org/", "核对指定月度官方报告的总PMI。", "官方自动下载当前受限；需核验报告样本，完整历史未接入，不将商业接口发布日期推算为统计期。"),
@@ -409,8 +411,9 @@ def release_calendar(request):
              for week in Calendar(firstweekday=0).monthdatescalendar(month.year, month.month)]
     prev = (month - timedelta(days=1)).replace(day=1)
     following = (end + timedelta(days=1))
+    snapshot = current_schedule()
     return render(request, "macro/calendar.html", {"section": "calendar", "month": month, "country": country, "kind": kind,
         "weeks": weeks, "days": [{"date": d, "events": es} for d, es in sorted(by_day.items()) if es and month <= d <= end],
-        "planned_count": len(plans), "actual_count": len(actual), "snapshot": schedule(), "verified_year": month.year == schedule()["year"],
+        "planned_count": len(plans), "actual_count": len(actual), "snapshot": snapshot, "verified_year": month.year in snapshot["years"],
         "previous_url": query_url(request.path, month=prev.strftime("%Y-%m"), country=country, kind=kind),
         "next_url": query_url(request.path, month=following.strftime("%Y-%m"), country=country, kind=kind)})

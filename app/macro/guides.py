@@ -68,6 +68,7 @@ INVESTMENT_SCOPES = {
     "EXPAND_FAI_CUM_YOY": "按建设性质归为扩建的项目投入，体现扩大既有生产或服务能力的建设活动。",
     "RENOVATE_FAI_CUM_YOY": "按建设性质归为改建的项目投入，涉及原有设施改造；不能把它只理解成住宅装修。",
     "INFRASTRUCTURE_CUM_YOY": "基础设施项目投入。包含哪些行业、是否包含电力等领域必须以该统计期发布稿附注为准。不同基础设施口径不可混接。",
+    "INFRASTRUCTURE_EX_UTILITIES_CUM_YOY": "基础设施投资中不包含电力、热力、燃气及水生产和供应业的累计同比。单独保存官方旧口径历史，不能与包含这些行业的指标拼接或直接相减。",
     "PROPERTY_INVESTMENT_CUM_YOY": "房地产开发企业的开发投资完成额，包括开发建设相关投入；不等于房屋销售额或购房者支付的房款。",
 }
 for code, scope in INVESTMENT_SCOPES.items():
@@ -75,7 +76,7 @@ for code, scope in INVESTMENT_SCOPES.items():
     guide.update(title=SPEC[("CN", code)].name, scope=scope,
                  lead=f"看{SPEC[('CN', code)].name.replace('累计同比', '')}从年初到现在，比去年同期投入多了还是少了。",
                  related=["CN:FAI_CUM_YOY", "CN:FAI_CUM"], sources=[SOURCES["fai"]], aliases=code + " 投资 FAI")
-    if code == "INFRASTRUCTURE_CUM_YOY":
+    if code.startswith("INFRASTRUCTURE_"):
         guide["pitfalls"] = ["先核对当期基础设施范围附注。", "不能将多个行业增速简单平均得出基建增速。"] + guide["pitfalls"][:2]
     GUIDES[("CN", code)] = guide
 

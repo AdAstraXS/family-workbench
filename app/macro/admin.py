@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from .models import (MacroDataPoint, MacroIndicator, MacroSourceMapping, MacroImportRun,
-                     MacroObservation, MacroObservationRevision)
+                     MacroObservation, MacroObservationRevision, MacroMaintenanceRun, MacroOfficialReport, MacroCalendarSnapshot)
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -50,3 +50,20 @@ class ObservationAdmin(ReadOnlyAdmin):
 @admin.register(MacroObservationRevision)
 class RevisionAdmin(ReadOnlyAdmin):
     list_display = ("observation", "number", "value", "observed_at")
+
+
+@admin.register(MacroMaintenanceRun)
+class MaintenanceAdmin(ReadOnlyAdmin):
+    list_display = ("mode", "status", "started_at", "finished_at")
+    list_filter = ("mode", "status")
+
+
+@admin.register(MacroOfficialReport)
+class ReportAdmin(ReadOnlyAdmin):
+    list_display = ("title", "group", "period_date", "release_date", "status", "checked_at")
+    list_filter = ("group", "status")
+
+
+@admin.register(MacroCalendarSnapshot)
+class CalendarAdmin(ReadOnlyAdmin):
+    list_display = ("agency", "source_url", "created_at", "checked_at")
