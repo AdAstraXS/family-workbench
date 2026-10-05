@@ -1,0 +1,16 @@
+{% extends "macro/base.html" %}
+{% load macro_format %}
+{% block macro_content %}
+<a href="{% url 'macro:detail' point.mapping.pk %}?geography={{ point.geography|urlencode }}">返回指标</a>
+<h1>{{ point.mapping.indicator.name }} · 修订记录</h1>
+<p>{{ point.geography }} · {{ point.period_date|date:"Y-m-d" }}</p>
+<p class="macro-notice">这里记录系统从接入日起观察到的版本。第一版表示首次采集值，不代表历史首次公布值。</p>
+{% for revision in page %}<article class="macro-card"><h2>第 {{ revision.number }} 版 · {{ revision.value|macro_number }} {% if revision.value is not None %}{{ point.mapping.indicator.unit }}{% endif %}</h2>
+<p>采集于 {{ revision.observed_at|date:"Y-m-d H:i" }} · 官方发布日期：{{ revision.release_date|date:"Y-m-d"|default:"未提供" }}</p>
+<p class="macro-source"><a href="{{ revision.source_url }}" target="_blank" rel="noopener noreferrer">查看来源</a></p>
+<p class="macro-meta">{{ revision.evidence.definition.basis }} · {{ revision.evidence.definition.seasonal }}</p>
+{% if revision.evidence.row.source_notes %}<p>{{ revision.evidence.row.source_notes }}</p>{% endif %}
+{% if revision.evidence.row.excerpt %}<blockquote>{{ revision.evidence.row.excerpt }}</blockquote>{% endif %}
+</article>{% endfor %}
+{% include "macro/pagination.html" %}
+{% endblock %}

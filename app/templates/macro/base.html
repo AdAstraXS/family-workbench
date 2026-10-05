@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}宏观数据 · {{ site_household_name }}{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'macro/macro.css' %}?v=20261005c"><link rel="stylesheet" href="{% static 'macro/presentation.css' %}?v=20261005c">{% endblock %}
+{% block content %}
+<div class="macro-shell">
+  <aside class="macro-sidebar">
+    <a class="macro-brand" href="{% url 'macro:index' %}">宏观数据<span>读数据，也读懂数据</span></a>
+    <nav aria-label="宏观栏目">
+      <a href="{% url 'macro:index' %}" {% if section == 'overview' %}aria-current="page"{% endif %}>总览</a>
+      <a href="{% url 'macro:country' 'CN' %}" {% if section == 'CN' %}aria-current="page"{% endif %}>中国</a>
+      <a href="{% url 'macro:country' 'US' %}" {% if section == 'US' %}aria-current="page"{% endif %}>美国</a>
+      <a href="{% url 'macro:encyclopedia' %}" {% if section == 'learn' %}aria-current="page"{% endif %}>指标百科</a>
+      <a href="{% url 'macro:calendar' %}" {% if section == 'calendar' %}aria-current="page"{% endif %}>发布日历</a>
+    </nav>
+    <div class="macro-secondary"><a href="{% url 'macro:sources' %}" {% if section == 'sources' %}aria-current="page"{% endif %}>数据来源与更新</a></div>
+  </aside>
+  <div class="macro-main">{% block macro_content %}{% endblock %}</div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'macro/chart.js' %}?v=20261005b" defer></script>{% endblock %}

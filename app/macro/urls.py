@@ -7,4 +7,14 @@ app_name = "macro"
 
 urlpatterns = [
     path("", views.index, name="index"),
+    path("country/<str:country>/", views.country, name="country"),
+    path("indicators/<str:country>/<str:code>/", views.indicator, name="indicator"),
+    path("encyclopedia/", views.encyclopedia, name="encyclopedia"),
+    path("encyclopedia/<str:country>/<str:code>/", views.guide, name="guide"),
+    path("sources/", views.sources, name="sources"),
+    path("sources/runs/", views.status, name="status"),
+    path("calendar/", views.release_calendar, name="calendar"),
+    path("housing/cities/", views.housing_cities, name="housing_cities"),
+    path("series/<int:pk>/", views.detail, name="detail"),
+    path("observations/<int:pk>/revisions/", views.revisions, name="revisions"),
 ]

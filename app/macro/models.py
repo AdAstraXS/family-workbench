@@ -43,3 +43,64 @@ class MacroDataPoint(models.Model):
 
     def __str__(self):
         return f"{self.indicator} {self.period_date}"
+
+
+class MacroSourceMapping(models.Model):
+    """Versioned dictionary entry; legacy MacroDataPoint rows remain untouched."""
+
+    indicator = models.OneToOneField(MacroIndicator, on_delete=models.PROTECT, related_name="mapping")
+    provider = models.CharField("来源", max_length=30)
+    group = models.CharField("采集组", max_length=80)
+    definition = models.JSONField("口径及字段映射")
+    definition_hash = models.CharField(max_length=64)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return str(self.indicator)
+
+
+class MacroImportRun(models.Model):
+    group = models.CharField("采集组", max_length=80)
+    status = models.CharField("状态", max_length=20, default="running", choices=[
+        ("running", "运行中"), ("success", "成功"), ("failed", "失败"),
+    ])
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True)
+    summary = models.JSONField("统计", default=dict)
+    error = models.CharField("错误", max_length=500, blank=True)
+
+
+class MacroObservation(models.Model):
+    mapping = models.ForeignKey(MacroSourceMapping, on_delete=models.PROTECT, related_name="observations")
+    geography = models.CharField("地区", max_length=50, default="全国")
+    period_date = models.DateField("统计期（期初）")
+    value = models.DecimalField("数值", max_digits=24, decimal_places=8, null=True)
+    release_date = models.DateField("官方发布日期", null=True)
+    first_seen_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField()
+    revision = models.PositiveIntegerField(default=1)
+    fingerprint = models.CharField(max_length=64)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["mapping", "geography", "period_date"], name="unique_macro_observation",
+        )]
+        ordering = ["-period_date", "geography"]
+
+
+class MacroObservationRevision(models.Model):
+    observation = models.ForeignKey(MacroObservation, on_delete=models.PROTECT, related_name="revisions")
+    run = models.ForeignKey(MacroImportRun, on_delete=models.PROTECT)
+    number = models.PositiveIntegerField()
+    value = models.DecimalField(max_digits=24, decimal_places=8, null=True)
+    release_date = models.DateField(null=True)
+    observed_at = models.DateTimeField(auto_now_add=True)
+    source_url = models.URLField(max_length=1000)
+    source_hash = models.CharField("响应校验值", max_length=64)
+    evidence = models.JSONField("来源字段及口径")
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=["observation", "number"], name="unique_macro_revision",
+        )]
+        ordering = ["-number"]
