@@ -1,0 +1,8 @@
+{% extends "knowledge_hub/base.html" %}
+{% block title %}回收站 · 知识中心{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><span>回收站</span>{% endblock %}
+{% block hub_content %}
+<section class="panel"><h1>资料回收站</h1><p>恢复后保留原来的精选、待整理或归档状态。不会自动清空；彻底删除需逐篇确认，专题引用会受到保护。</p><p class="muted">这里管理知识中心的保存副本；随手记、图书和来源原件仍在各自模块中管理。</p>
+<div class="knowledge-compact-list">{% for document in page_obj %}<article class="web-capture-row"><a href="{% url 'knowledge:document_manage' document.pk %}"><strong>{{ document.title }}</strong></a><p class="muted">{{ document.trashed_at|date:'Y-m-d H:i' }} · {{ document.source.name }} · {{ document.owner }} · {{ document.get_visibility_display }}</p><a class="button" href="{% url 'knowledge:document_manage' document.pk %}">恢复或彻底删除</a></article>{% empty %}<p>回收站是空的，或没有你可以管理的资料。</p>{% endfor %}</div>{% include 'knowledge/_pagination.html' %}</section>
+{% if cleanup_documents %}<section class="panel"><h2>文件清理需要重试</h2>{% for document in cleanup_documents %}<p><a href="{% url 'knowledge:document_manage' document.pk %}">{{ document.title }}</a></p>{% endfor %}</section>{% endif %}
+{% endblock %}

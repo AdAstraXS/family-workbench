@@ -362,6 +362,8 @@ class KnowledgeTag(TimestampedModel):
 
 
 class KnowledgeDocument(TimestampedModel):
+    trashed_at = models.DateTimeField("移入回收站时间", null=True, blank=True, db_index=True)
+    purged_at = models.DateTimeField("内容彻底删除时间", null=True, blank=True)
     SYNC_AVAILABLE = "available"
     SYNC_ERROR = "error"
     SYNC_SOURCE_DELETED = "source_deleted"
@@ -499,7 +501,33 @@ class KnowledgeDocument(TimestampedModel):
         return self.title
 
 
+class KnowledgeLifecycleEvent(models.Model):
+    document = models.ForeignKey(KnowledgeDocument, on_delete=models.CASCADE, related_name="lifecycle_events")
+    actor = models.ForeignKey(FamilyMember, on_delete=models.SET_NULL, null=True)
+    action = models.CharField(max_length=30, choices=[("trash", "移入回收站"), ("restore", "恢复资料"), ("unfeature", "移出精选"), ("purge", "彻底删除内容"), ("versions", "清理旧版本")])
+    revision_numbers = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        verbose_name = "资料管理记录"
+        verbose_name_plural = verbose_name
+
+
+class KnowledgeFileCleanup(TimestampedModel):
+    document = models.ForeignKey(KnowledgeDocument, on_delete=models.PROTECT, related_name="file_cleanups")
+    files = models.JSONField(default=list)
+    status = models.CharField(max_length=20, default="pending", choices=[("pending", "等待清理"), ("failed", "清理未完成"), ("success", "清理完成")])
+    error = models.CharField(max_length=300, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "资料文件清理回执"
+        verbose_name_plural = verbose_name
+
+
 class KnowledgeRevision(models.Model):
+    purged_at = models.DateTimeField("内容清理时间", null=True, blank=True)
     document = models.ForeignKey(
         KnowledgeDocument,
         verbose_name="知识文档",
@@ -532,6 +560,7 @@ class KnowledgeRevision(models.Model):
             ),
             models.UniqueConstraint(
                 fields=["document", "content_hash"],
+                condition=Q(purged_at__isnull=True),
                 name="unique_knowledge_revision_content_hash",
             ),
         ]

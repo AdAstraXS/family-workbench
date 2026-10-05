@@ -47,6 +47,8 @@ def archive_program(revision, member, *, include_summary=None, include_transcrip
             document = None
             if revision.archived_document_id:
                 document = KnowledgeDocument.objects.select_for_update().get(pk=revision.archived_document_id)
+                if document.trashed_at or document.purged_at:
+                    raise ProgramError('知识资料已在回收站或已彻底删除，不能通过重新保存覆盖。')
                 if document.current_revision.content_hash == digest:
                     return document
                 if document.owner_id != member.pk and member.role != 'admin':

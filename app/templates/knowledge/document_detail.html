@@ -69,7 +69,7 @@
 
     {% if document.confirmed_summary or document.category or document.tags %}
       <aside class="knowledge-confirmed-summary">
-        <header><div><span class="knowledge-content-label confirmed">当前精选结果</span><strong>已由家庭成员确认</strong></div>{% if can_organize %}<a href="{% url 'knowledge:document_organize' document.pk %}">重新编辑</a>{% endif %}</header>
+        <header><div><span class="knowledge-content-label confirmed">{% if document.library_tier == 'knowledge' %}当前精选结果{% else %}保留的整理结果{% endif %}</span><strong>已由家庭成员确认</strong></div>{% if can_organize and document.library_tier == 'knowledge' %}<a href="{% url 'knowledge:document_organize' document.pk %}">重新编辑</a>{% endif %}</header>
         {% if document.confirmed_summary %}<p>{{ document.confirmed_summary|linebreaksbr }}</p>{% endif %}
         {% if document.category or document.tags %}<div class="knowledge-tags">{% if document.category %}<span>{{ document.category }}</span>{% endif %}{% for tag in document.tags %}<a href="{% url 'knowledge:library' %}?collection=curated&amp;tag={{ tag|urlencode }}">#{{ tag }}</a>{% endfor %}</div>{% endif %}
         {% if confirmed_summary_proposal %}<small>摘要由 {{ confirmed_summary_proposal.confirmed_by }} 于 {{ confirmed_summary_proposal.confirmed_at|date:"Y-m-d H:i" }} 确认</small>{% endif %}
@@ -112,6 +112,7 @@
   </section>
 
   <aside class="knowledge-detail-sidebar">
+    {% if can_organize %}<section class="panel"><details><summary>资料管理 · 版本与删除</summary><p class="muted">查看旧版本、移出精选或移入回收站。</p><a class="button" href="{% url 'knowledge:document_manage' document.pk %}">打开资料管理</a></details></section>{% endif %}
     <section class="panel knowledge-property-panel">
       <header><span class="eyebrow">Document</span><h2>文档信息</h2></header>
       <div class="knowledge-document-state">

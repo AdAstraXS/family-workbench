@@ -124,13 +124,14 @@ def category_usage(item):
     return KnowledgeDocument.objects.filter(
         family=item.family,
         category=item.name,
+        trashed_at__isnull=True, purged_at__isnull=True,
     ).count()
 
 
 def tag_usage(item):
     return sum(
         1
-        for values in KnowledgeDocument.objects.filter(family=item.family).values_list(
+        for values in KnowledgeDocument.objects.filter(family=item.family, trashed_at__isnull=True, purged_at__isnull=True).values_list(
             "tags", flat=True
         )
         if item.name in (values or [])
@@ -237,12 +238,12 @@ def merge_tag(source, target):
 
 def taxonomy_usage_counts(family):
     category_counts = Counter(
-        KnowledgeDocument.objects.filter(family=family)
+        KnowledgeDocument.objects.filter(family=family, trashed_at__isnull=True, purged_at__isnull=True)
         .exclude(category="")
         .values_list("category", flat=True)
     )
     tag_counts = Counter()
-    for values in KnowledgeDocument.objects.filter(family=family).values_list(
+    for values in KnowledgeDocument.objects.filter(family=family, trashed_at__isnull=True, purged_at__isnull=True).values_list(
         "tags", flat=True
     ):
         tag_counts.update(values or [])

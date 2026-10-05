@@ -187,8 +187,11 @@ def _candidate_documents(family, owner, person_name, visibility):
                 KnowledgeSource.KIND_MARKDOWN_IMPORT,
             ],
             current_revision__isnull=False,
+            trashed_at__isnull=True,
+            purged_at__isnull=True,
         )
-        .select_related("current_revision")
+          .select_related("current_revision")
+          .select_for_update(of=("self",))
         .order_by("id")
     )
     if visibility == KnowledgeVisibility.FAMILY:

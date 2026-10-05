@@ -6,6 +6,8 @@ from . import views
 app_name = "knowledge"
 
 urlpatterns = [
+    path("trash/", views.trash, name="trash"),
+    path("documents/<int:pk>/manage/", views.document_manage, name="document_manage"),
     path("web/", views.web_captures, name="web_captures"),
     path("web/<int:pk>/", views.web_capture_detail, name="web_capture_detail"),
     path("web/<int:pk>/retry/", views.web_capture_retry, name="web_capture_retry"),

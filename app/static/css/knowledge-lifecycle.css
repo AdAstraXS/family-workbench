@@ -1,0 +1,15 @@
+.knowledge-lifecycle { display: grid; gap: 18px; min-width: 0; }
+.knowledge-lifecycle .panel { margin: 0; min-width: 0; }
+.knowledge-lifecycle-actions, .knowledge-lifecycle form {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+}
+.knowledge-lifecycle form label { flex-basis: 100%; }
+.knowledge-lifecycle input:not([type="hidden"]) { width: min(100%, 320px); min-width: 0; }
+.knowledge-lifecycle .web-capture-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.knowledge-lifecycle summary { cursor: pointer; }
+.knowledge-lifecycle .knowledge-system-details > form { margin-top: 14px; }
+.knowledge-lifecycle p { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .knowledge-lifecycle .web-capture-row a { flex-basis: 100%; }
+  .knowledge-lifecycle .button { white-space: normal; text-align: center; }
+}
