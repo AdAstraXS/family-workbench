@@ -1,4 +1,6 @@
 from django.db import models
+from django.conf import settings
+from django.utils import timezone
 
 
 class MacroIndicator(models.Model):
@@ -141,3 +143,49 @@ class MacroCalendarSnapshot(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["agency", "content_hash"], name="unique_macro_calendar_snapshot")]
+
+
+class MacroPublication(models.Model):
+    agency = models.CharField(max_length=30)
+    country = models.CharField(max_length=20)
+    key = models.CharField(max_length=80)
+    title = models.CharField(max_length=300)
+    period_date = models.DateField()
+    release_date = models.DateField(null=True)
+    codes = models.JSONField(default=list)
+    source_url = models.URLField(max_length=1000)
+    source_hash = models.CharField(max_length=64)
+    evidence = models.JSONField(default=dict)
+    verified_at = models.DateTimeField()
+    first_seen_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["agency", "key", "period_date"], name="unique_macro_publication")]
+
+
+class MacroAlert(models.Model):
+    key = models.CharField(max_length=180)
+    title = models.CharField(max_length=200)
+    message = models.CharField(max_length=500)
+    details = models.JSONField(default=dict)
+    opened_at = models.DateTimeField(auto_now_add=True)
+    last_seen_at = models.DateTimeField()
+    resolved_at = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["key"], condition=models.Q(resolved_at__isnull=True), name="unique_open_macro_alert")]
+        ordering = ["-opened_at"]
+
+
+class MacroAlertRead(models.Model):
+    alert = models.ForeignKey(MacroAlert, on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    read_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["alert", "user"], name="unique_macro_alert_read")]
+
+
+class MacroOperationsSnapshot(models.Model):
+    checked_at = models.DateTimeField()
+    payload = models.JSONField(default=dict)

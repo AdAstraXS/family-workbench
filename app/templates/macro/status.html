@@ -4,8 +4,18 @@
 {% include "macro/source_tabs.html" with source_tab='runs' %}
 <p class="macro-meta">中国采用统计局、央行、商务部公开数据及 AKShare 接口，美国采用 FRED 公开 CSV。更新失败时保留上次数据；“成功”只表示本次读取通过校验，不保证来源已发布最新一期。</p>
 <div class="macro-source-grid">{% for job in health.jobs %}<section class="macro-card"><h2>{{ job.name }}</h2><p>{{ job.message }}</p><p class="macro-meta">{% if job.run %}最近开始 {{ job.run.started_at|date:'Y-m-d H:i' }} · {{ job.run.get_status_display }}{% else %}等待首次执行{% endif %}</p>{% if job.failures %}<details><summary>查看本次问题</summary>{% for failure in job.failures %}<p>{{ failure.group }} · {{ failure.error }}</p>{% endfor %}</details>{% endif %}</section>{% endfor %}</div>
-<p class="macro-notice">自动维护由 NAS 定时任务执行。此页根据真实执行记录检查任务间隔；首次成功不能证明后续定时执行。失败保留此前数据，下次任务会重新检查。ISM 自动下载仍受限，年度预算报告须单独核验。</p>
+<p class="macro-notice">自动维护由 NAS 定时任务执行。此页根据真实执行记录检查任务间隔；首次成功不能证明后续定时执行。失败保留此前数据，下次任务会重新检查。ISM 从官方当前报告目录发现更新；年度预算报告维持单独核验。</p>
+<section class="macro-panel" id="macro-alerts">
+  <h2>站内通知</h2><p class="macro-meta">超过官方计划发布日48小时、接口漏更或任务失败时提醒；同一问题持续存在不重复新增，恢复后保留处理记录。已读只影响个人提醒，不改变数据或问题状态。</p>
+  {% for alert in alerts %}<article>
+    <h3>{{ alert.title }}{% if alert.resolved_at %} · 已恢复{% else %} · 待处理{% endif %}</h3>
+    <p>{{ alert.message }}</p><p class="macro-meta">首次发现 {{ alert.opened_at|date:'Y-m-d H:i' }}{% if alert.resolved_at %} · 恢复 {{ alert.resolved_at|date:'Y-m-d H:i' }}{% endif %}</p>
+    {% if alert.personally_read %}<p class="macro-meta">你已读</p>{% elif not alert.resolved_at %}<form method="post" action="{% url 'macro:read_alert' alert.pk %}">{% csrf_token %}<button>标为已读</button></form>{% endif %}
+  </article>{% empty %}<p>尚无站内提醒。</p>{% endfor %}
+</section>
+{% if operations %}<section class="macro-panel"><h2>定时运行与备份检查</h2><p class="macro-meta">NAS只读核验 {{ operations.checked_at|date:'Y-m-d H:i' }}；来自定时监控采样。</p>{% for task in operations.payload.tasks %}<p>{{ task.name }} · {% if task.enabled %}已启用{% else %}未确认启用{% endif %} · {{ task.schedule }} · {{ task.result }}</p>{% endfor %}<p>宏观定时备份 {{ operations.payload.backups.count }} 份 · {{ operations.payload.backups.size_mb }} MB · 保留近30天及每月恢复点。超期候选 {{ operations.payload.backups.candidates|length }} 份。</p><p class="macro-meta">本次只报告清理候选，部署/回补恢复点保留；未自动删除备份。</p></section>{% endif %}
 <p class="macro-meta">{{ health.dates.released }} / {{ health.dates.total }} 条观测有已核验发布日期。FRED CSV 未提供的日期不以计划日或采集日补填。基建投资历史范围有调整，请同时核对当期报告口径。</p>
+{% if publications %}<section class="macro-panel"><h2>近期官方发布核验</h2><p class="macro-meta">BLS就业、CPI、PPI从发布稿核验实际日期；ISM核验当前报告统计期，未明确标注日期时保留空值。</p>{% for publication in publications %}<p><a href="{{ publication.source_url }}" target="_blank" rel="noopener noreferrer">{{ publication.title }} ↗</a> · 统计期 {{ publication.period_date|date:'Y-m' }} · {% if publication.release_date %}发布 {{ publication.release_date|date:'Y-m-d' }}{% else %}实际发布日期待核验{% endif %}</p>{% endfor %}</section>{% endif %}
 {% if health.reports %}<section class="macro-panel"><h2>待处理官方报告</h2>{% for report in health.reports %}<p><a href="{{ report.url }}" target="_blank" rel="noopener noreferrer">{{ report.title }} ↗</a> · {{ report.error }}</p>{% endfor %}</section>{% endif %}
 <div class="macro-table"><table><thead><tr><th>采集组</th><th>开始时间</th><th>状态</th><th>结果</th></tr></thead><tbody>
 {% for run in page %}<tr><td>{{ run.group }}</td><td>{{ run.started_at|date:"Y-m-d H:i" }}</td><td>{{ run.get_status_display }}</td><td>{% if run.error %}{{ run.error }}{% elif run.status == "success" %}最新统计期 {{ run.summary.latest_period }} · 新增 {{ run.summary.created }} · 修订 {{ run.summary.revised }} · 缺值 {{ run.summary.missing }}{% else %}等待完成{% endif %}</td></tr>{% empty %}<tr><td colspan="4">尚无写入任务记录。只读试算不写入此处。</td></tr>{% endfor %}

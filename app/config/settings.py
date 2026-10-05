@@ -90,6 +90,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "family_core.context_processors.page_navigation",
                 "family_core.context_processors.site_identity",
+                "macro.alerts.unread_count",
             ],
         },
     },

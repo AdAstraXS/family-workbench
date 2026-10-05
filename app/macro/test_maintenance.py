@@ -127,7 +127,7 @@ class OfficialUpdateTests(TestCase):
         MacroCalendarSnapshot.objects.create(agency="bea", source_url="https://www.bea.gov/calendar.ics", content_hash="a"*64,
             payload={"events": parse_ics(ICS, "bea")}, checked_at=timezone.now())
         result = refresh_calendars(write=True, reader=lambda _: 'not a calendar')
-        self.assertEqual(len(result["failures"]), 4)
+        self.assertEqual(len(result["failures"]), 5)
         self.assertEqual(MacroCalendarSnapshot.objects.count(), 1)
         self.assertTrue(any(e["agency"] == "bea" and e["period"].endswith("August 2026") for e in current_schedule()["events"]))
 
@@ -159,7 +159,9 @@ class OfficialUpdateTests(TestCase):
 class MaintenanceLockTests(TransactionTestCase):
     def test_interrupted_run_is_retained_and_new_run_succeeds(self):
         previous = MacroMaintenanceRun.objects.create(mode="official")
-        with patch("macro.maintenance.update_official", return_value={"failures": [], "reports": []}):
+        with patch("macro.maintenance.update_official", return_value={"failures": [], "reports": []}), \
+                patch("macro.publications.update_ism", return_value={"failures": [], "reports": []}), \
+                patch("macro.publications.refresh_publications", return_value={"failures": [], "sources": []}):
             maintain("official", write=True)
         previous.refresh_from_db()
         self.assertEqual(previous.status, "interrupted")

@@ -13,6 +13,7 @@ urlpatterns = [
     path("encyclopedia/<str:country>/<str:code>/", views.guide, name="guide"),
     path("sources/", views.sources, name="sources"),
     path("sources/runs/", views.status, name="status"),
+    path("sources/alerts/<int:pk>/read/", views.read_alert, name="read_alert"),
     path("calendar/", views.release_calendar, name="calendar"),
     path("housing/cities/", views.housing_cities, name="housing_cities"),
     path("series/<int:pk>/", views.detail, name="detail"),

@@ -1,7 +1,8 @@
 from django.contrib import admin
 
 from .models import (MacroDataPoint, MacroIndicator, MacroSourceMapping, MacroImportRun,
-                     MacroObservation, MacroObservationRevision, MacroMaintenanceRun, MacroOfficialReport, MacroCalendarSnapshot)
+                     MacroObservation, MacroObservationRevision, MacroMaintenanceRun, MacroOfficialReport, MacroCalendarSnapshot,
+                     MacroPublication, MacroAlert, MacroAlertRead, MacroOperationsSnapshot)
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -67,3 +68,18 @@ class ReportAdmin(ReadOnlyAdmin):
 @admin.register(MacroCalendarSnapshot)
 class CalendarAdmin(ReadOnlyAdmin):
     list_display = ("agency", "source_url", "created_at", "checked_at")
+
+
+@admin.register(MacroPublication)
+class PublicationAdmin(ReadOnlyAdmin):
+    list_display = ("agency", "title", "period_date", "release_date", "verified_at")
+    list_filter = ("agency",)
+
+
+@admin.register(MacroAlert)
+class AlertAdmin(ReadOnlyAdmin):
+    list_display = ("title", "opened_at", "last_seen_at", "resolved_at")
+
+
+admin.site.register(MacroAlertRead, ReadOnlyAdmin)
+admin.site.register(MacroOperationsSnapshot, ReadOnlyAdmin)

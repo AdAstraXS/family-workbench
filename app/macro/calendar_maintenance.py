@@ -18,6 +18,7 @@ CALENDARS = {
     "bea": "https://www.bea.gov/news/schedule/ics/online-calendar-subscription.ics",
     "census": "https://www.census.gov/economic-indicators/calendar-listview.html",
     "bls": "https://www.bls.gov/schedule/news_release/bls.ics",
+    "ism": "https://www.ismworld.org/supply-management-news-and-reports/reports/rob-report-calendar/",
 }
 
 
@@ -67,6 +68,10 @@ def parse_ics(text, agency):
         try:
             when = datetime.strptime(value.rstrip("Z"), "%Y%m%dT%H%M%S")
             tz = "UTC" if value.endswith("Z") else re.search(r"TZID=([^;:]+)", key)[1]
+            # BLS defines this local VTIMEZONE with US Eastern DST rules; it is
+            # not an IANA key. Use the equivalent reviewed IANA zone.
+            if agency == "bls" and tz == "US-Eastern":
+                tz = "America/New_York"
             when = when.replace(tzinfo=ZoneInfo(tz))
         except (ValueError, TypeError, KeyError) as exc:
             raise SourceError("日历发布时间或时区格式改变") from exc
@@ -93,6 +98,38 @@ def parse_census(text):
         except ValueError as exc:
             raise SourceError("Census 日历日期格式改变") from exc
         events.append(event("census", title, when, codes, cells[3]))
+    return events
+
+
+def parse_ism_calendar(text):
+    soup = BeautifulSoup(text, "html.parser")
+    from .publications import MONTHS
+    events = []
+    for table in soup.find_all("table"):
+        heading = table.find_previous(["h2", "h3"])
+        year = re.search(r"(20\d{2})\s+ISM", heading.get_text(" ", strip=True)) if heading else None
+        if not year:
+            continue
+        for row in table.find_all("tr"):
+            cells = [c.get_text(" ", strip=True) for c in row.find_all(["td", "th"])]
+            if len(cells) != 3:
+                continue
+            month = re.fullmatch(r"([A-Za-z]+)\s+(20\d{2})", cells[0])
+            if not month or month[1].lower() not in MONTHS:
+                continue
+            if month[2] != year[1]:
+                raise SourceError("ISM日历年份不一致")
+            release_month = date(int(year[1]), MONTHS[month[1].lower()], 1)
+            from .presentation import shifted
+            period = shifted(release_month, -1).strftime("%B %Y")
+            for column, code, title in [(1, "PMI_ISM_MANUFACTURING", "ISM制造业PMI"), (2, "PMI_ISM_SERVICES", "ISM服务业PMI")]:
+                day = re.match(r"(\d{1,2})", cells[column])
+                if not day:
+                    raise SourceError("ISM发布时间缺失")
+                when = datetime.combine(release_month.replace(day=int(day[1])), datetime.strptime("10:00", "%H:%M").time()).replace(tzinfo=ZoneInfo("America/New_York"))
+                events.append(event("ism", title, when, [code], period))
+    if not events:
+        raise SourceError("ISM官方日历表未匹配")
     return events
 
 
@@ -159,7 +196,7 @@ def refresh_calendars(*, write=False, reader=download):
                 if not url.startswith("https://www.stats.gov.cn/"):
                     raise SourceError("统计局日历地址异常")
             text = reader(url)
-            events = parse_nbs(text) if agency == "nbs" else parse_census(text) if agency == "census" else parse_ics(text, agency)
+            events = parse_nbs(text) if agency == "nbs" else parse_census(text) if agency == "census" else parse_ism_calendar(text) if agency == "ism" else parse_ics(text, agency)
             if not events:
                 raise SourceError("日历为空或未匹配登记指标，保留上一版本")
             known = {(s.country, s.code) for s in SERIES}

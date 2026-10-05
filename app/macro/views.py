@@ -7,11 +7,11 @@ from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
-from django.db.models import OuterRef, Subquery, Count, Min, Max
+from django.db.models import OuterRef, Subquery, Count, Min, Max, Exists, F
 from django.http import Http404
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, render, redirect
 from django.urls import reverse
-from django.views.decorators.http import require_safe
+from django.views.decorators.http import require_safe, require_POST
 from django.utils import timezone
 
 from .guides import BASICS, GUIDES
@@ -20,7 +20,7 @@ from .registry import SERIES
 from .calendar import current_schedule, planned_events
 from .health import update_health
 from .housing import CITIES, HOUSING_COLUMNS
-from .presentation import AUXILIARY, PRESENTATION_CODES, CPI_BASES, CN_PAIRS, profile, shifted, presentation, values
+from .presentation import AUXILIARY, PRESENTATION_CODES, CPI_BASES, CN_PAIRS, profile, shifted, presentation, values, chart_reference
 
 
 COUNTRIES = {"CN": "中国", "US": "美国"}
@@ -166,13 +166,12 @@ def series_context(request, spec, mapping):
         if measure != "level":
             chart = [{**p, "value": str(v) if (v := values(spec, date.fromisoformat(p["date"]),
                 None if p["value"] is None else Decimal(p["value"]), history).get(measure)) is not None else None} for p in chart]
-    reference = "50" if spec.code.startswith("PMI_") else ("100" if spec.code.startswith("HOUSE_") else None)
+    reference = chart_reference(spec, measure)
     chart_unit = spec.unit
     chart_label = "原始值"
     if growth_profile and measure != "level":
         mode = next(m for m in growth_profile["modes"] if m.key == measure)
         chart_unit, chart_label = mode.unit, mode.label
-        reference = "0" if mode.unit == "%" else None
     urls = [{"label": label, "value": value,
              "url": query_url(request.path, **{**request.GET.dict(), "range": value, "page": None, "geography": geography})}
             for value, label in [("1", "1年"), ("3", "3年"), ("5", "5年"), ("all", "全部")]]
@@ -303,8 +302,21 @@ def revisions(request, pk):
 @login_required
 @require_safe
 def status(request):
+    from .models import MacroAlert, MacroAlertRead, MacroOperationsSnapshot, MacroPublication
     return render(request, "macro/status.html", {"section": "sources", "health": update_health(),
+        "alerts": MacroAlert.objects.annotate(personally_read=Exists(MacroAlertRead.objects.filter(alert=OuterRef('pk'), user=request.user))).order_by(F('resolved_at').desc(nulls_first=True), '-opened_at')[:50],
+        "operations": MacroOperationsSnapshot.objects.order_by("-checked_at").first(),
+        "publications": MacroPublication.objects.order_by("-period_date", "key")[:15],
         "page": Paginator(MacroImportRun.objects.order_by("-started_at"), 30).get_page(request.GET.get("page"))})
+
+
+@login_required
+@require_POST
+def read_alert(request, pk):
+    from .models import MacroAlert, MacroAlertRead
+    alert = get_object_or_404(MacroAlert, pk=pk)
+    MacroAlertRead.objects.get_or_create(alert=alert, user=request.user)
+    return redirect("macro:status")
 
 
 SOURCE_METHODS = {
@@ -313,7 +325,7 @@ SOURCE_METHODS = {
     "mofcom": ("商务部", "https://www.mofcom.gov.cn/", "从日常新闻发布目录发现吸收外资报告。", "累计金额、同比、行业及企业数量分别记录；未披露的字段保留缺期。任务执行情况见更新记录。"),
     "fred": ("FRED · 圣路易斯联储", "https://fred.stlouisfed.org/", "公开 CSV 序列；原始发布机构见指标百科及 FRED 系列说明。", "FRED 是数据分发平台；来源缺值保留，统计期不是官方发布日期。"),
     "akshare": ("东方财富 · AKShare", "https://data.eastmoney.com/cjsj/", "AKShare 读取东方财富的宏观历史表。", "第三方转发数据；原统计机构和方法参考见指标百科，不能把采集日当作发布日期。"),
-    "ism": ("ISM官方报告", "https://www.ismworld.org/", "核对指定月度官方报告的总PMI。", "官方自动下载当前受限；需核验报告样本，完整历史未接入，不将商业接口发布日期推算为统计期。"),
+    "ism": ("ISM官方报告", "https://www.ismworld.org/", "从官方当前目录发现制造业及服务业报告，核验统计期和总PMI。", "随官方报告任务自动检查最新一期；完整历史仍待补充。未明确提供实际发布日期的报告保留空值，计划日单独展示。"),
     "gov_budget": ("国务院政府工作报告", "https://www.gov.cn/", "从指定年度报告读取预算赤字率约数。", "年度预算安排，不能用月度收支缺口代替；报告变化须重新核验。"),
 }
 

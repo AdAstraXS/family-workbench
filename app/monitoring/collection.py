@@ -52,4 +52,7 @@ def ingest_host(payload):
     else:
         row.gap=True
     row.save()
+    if payload.get('macro_operations'):
+        from macro.nas_operations import ingest
+        ingest(payload['macro_operations'], when)
     return row

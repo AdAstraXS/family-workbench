@@ -89,6 +89,11 @@ def maintain(mode, *, write=False, start=None, end=None, pages=5, groups=None):
                 result = update_official(start or recent_start(today), end or today, write=write, pages=pages, groups=groups)
                 summary["official"] = result
                 summary["failures"] += result["failures"]
+                if not groups and not start:
+                    from .publications import update_ism, refresh_publications
+                    summary["ism"] = update_ism(write=write)
+                    summary["publications"] = refresh_publications(write=write)
+                    summary["failures"] += summary["ism"]["failures"] + summary["publications"]["failures"]
             if mode in {"structured", "all"}:
                 summary["structured"] = {}
                 for group in sorted(set(GROUPS) - OFFICIAL_GROUPS):
@@ -105,6 +110,9 @@ def maintain(mode, *, write=False, start=None, end=None, pages=5, groups=None):
                 run.status = "failed" if summary["failures"] else "success"
                 run.error = f'{len(summary["failures"])} 项来源未完成；详见来源记录' if summary["failures"] else ""
                 run.save()
+                from .alerts import synchronize_alerts
+                summary["alerts"] = synchronize_alerts()
+                run.save(update_fields=["summary"])
             return summary
         except Exception as exc:
             if run:

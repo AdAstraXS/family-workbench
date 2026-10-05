@@ -34,6 +34,7 @@
     <div class="ws-top-actions">{% if user.is_authenticated %}<button type="button" class="ws-search-button" data-ws-open="ws-launcher" aria-label="查找模块">{% workspace_icon 'search' %}<span>查找模块</span><kbd>Ctrl K</kbd></button>{% endif %}<button type="button" class="ws-icon-button" data-ws-open="ws-appearance" aria-label="色系与动效设置" title="色系与动效设置">{% workspace_icon 'palette' %}</button>{% if user.is_authenticated %}<span class="ws-avatar" title="{{ user.get_username }}">{{ user.get_username|slice:':1' }}</span>{% endif %}</div>
   </header>
   <main class="page" id="workspace-main" tabindex="-1">
+    {% if macro_unread_alerts %}<aside class="app-message warning" aria-label="宏观数据站内通知"><a href="{% url 'macro:status' %}#macro-alerts">宏观数据有 {{ macro_unread_alerts }} 项待查看提醒</a></aside>{% endif %}
 
     {% url 'dashboard:home' as workspace_home_url %}
     {% url 'ledger:overview' as ledger_home_url %}

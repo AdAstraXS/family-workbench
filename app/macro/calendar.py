@@ -25,6 +25,7 @@ def current_schedule():
     from .models import MacroCalendarSnapshot
     original = schedule()
     sources = {s["code"]: s.copy() for s in original["sources"]}
+    sources["ism"] = {"code": "ism", "name": "ISM", "url": "https://www.ismworld.org/supply-management-news-and-reports/reports/rob-report-calendar/", "verified": "", "sha256": ""}
     events = list(original["events"])
     latest = {}
     for snapshot in MacroCalendarSnapshot.objects.order_by("agency", "-checked_at", "-pk"):

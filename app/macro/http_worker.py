@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from .fetch_worker import download
 
 HOSTS = {"www.pbc.gov.cn", "www.mofcom.gov.cn", "www.stats.gov.cn", "www.gov.cn",
-         "www.bea.gov", "www.bls.gov", "www.census.gov"}
+         "www.bea.gov", "www.bls.gov", "www.census.gov", "www.ismworld.org"}
 
 
 def validate_page_url(url):

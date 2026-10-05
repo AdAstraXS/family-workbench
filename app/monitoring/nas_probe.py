@@ -42,6 +42,12 @@ def api(path, key):
 def collect():
     now=datetime.now(timezone.utc)
     result={'sampled_at':now.isoformat(), 'proxy_ok':False}
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    try:
+        from macro.nas_operations import collect as collect_macro_operations
+        result['macro_operations'] = collect_macro_operations(BASE)
+    except Exception:
+        result['macro_operations_error'] = True
     disk=shutil.disk_usage(BASE)
     result.update(disk_total=disk.total,disk_free=disk.free)
     backups=[p for p in (BASE/'backups').glob('*.dump') if p.is_file() and p.stat().st_size>0]

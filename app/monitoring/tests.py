@@ -267,6 +267,8 @@ class MonitorTests(TestCase):
     def test_account_card_filters_chart_and_shows_model_usage(self):
         BalanceAccount.objects.create(family=self.family,vendor='deepseek',label='DeepSeek')
         BalanceAccount.objects.create(family=self.family,vendor='zhipu',label='智谱')
+        AiProvider.objects.get_or_create(name='智谱测试', defaults={'provider_type':'openai_compatible',
+            'base_url':'https://open.bigmodel.cn/api/paas/v4', 'model_name':'glm-5.3-flashx'})
         self.call({'usage':{'prompt_tokens':1000,'completion_tokens':200}})
         self.client.force_login(self.user)
         page=self.client.get(reverse('monitoring:index'),{'vendor':'deepseek','period':'week'})

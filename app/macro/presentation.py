@@ -17,6 +17,18 @@ CN_INDEX_RATES = {"GDP_REAL_YOY_INDEX", "HOUSE_NEW_MOM", "HOUSE_NEW_YOY", "HOUSE
 PRESENTATION_CODES = US_GROWTH | set(CN_PAIRS) | set(CN_PAIRS.values()) | CN_LEVELS | CN_INDEX_RATES
 
 
+def chart_reference(spec, measure):
+    if measure != "level":
+        return "0"
+    if spec.code.startswith("PMI_"):
+        return "50"
+    if spec.code in CN_INDEX_RATES:
+        return "100"
+    if spec.unit == "%" or "增量" in spec.name or "净融资" in spec.name:
+        return "0"
+    return None
+
+
 @dataclass(frozen=True)
 class Metric:
     key: str

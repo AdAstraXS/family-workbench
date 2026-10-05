@@ -28,6 +28,8 @@ class Command(BaseCommand):
             sync_due_accounts()
             UsageRecord.objects.filter(status='pending').exclude(vendor='ali').filter(started_at__lt=timezone.now()-timedelta(minutes=10)).update(status='unknown',outcome='interrupted')
             UsageRecord.objects.filter(status='pending',started_at__lt=timezone.now()-timedelta(hours=24)).update(status='unknown',outcome='interrupted')
+            from macro.alerts import synchronize_alerts
+            synchronize_alerts()
         except Exception:
             state.status='error';state.message='采集失败，请检查任务日志与连接配置。';state.finished_at=timezone.now();state.save()
             raise CommandError(state.message) from None

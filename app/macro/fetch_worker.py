@@ -1,10 +1,14 @@
 """One bounded subprocess per request: third-party libraries cannot hang the job."""
 import contextlib
+from http.cookiejar import CookieJar
 import io
 import json
+import os
+import socket
 import sys
 from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, HTTPCookieProcessor, ProxyHandler, Request, build_opener
 
 from .registry import GROUPS, OFFICIAL_GROUPS
 
@@ -26,8 +30,55 @@ class SameHostRedirect(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+class ISMPublicSession(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        old, new = urlparse(req.full_url), urlparse(newurl)
+        bridge = ((old.hostname == "www.ismworld.org" and new.hostname == "ecommerce.ismworld.org" and new.path == "/SSO/Login.aspx")
+                  or (old.hostname == "ecommerce.ismworld.org" and new.hostname == "www.ismworld.org"))
+        if (new.scheme != "https" or new.port not in (None, 443) or new.username or new.password
+                or new.hostname not in {"www.ismworld.org", "ecommerce.ismworld.org"}
+                or (new.hostname != old.hostname and not bridge)):
+            raise ValueError("ISM会话跳转地址未登记")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def download(url):
-    with build_opener(SameHostRedirect()).open(Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=25) as response:
+    headers = {"User-Agent": "Mozilla/5.0 FamilyWorkbenchMacro/1.0 (+https://adastrax.top/macro/sources/)",
+               "Accept": "text/html,text/calendar,text/csv,application/json;q=0.9,*/*;q=0.5"}
+    request = Request(url, headers=headers)
+    is_ism = urlparse(url).hostname == "www.ismworld.org"
+    handlers = [ISMPublicSession(), HTTPCookieProcessor(CookieJar())] if is_ism else [SameHostRedirect()]
+    opener = build_opener(*handlers)
+    if is_ism and not url.endswith("/reports/ism-pmi-reports/"):
+        # Public report pages share the anonymous session established by their
+        # index. Initialising it avoids the site's first-visit SSO/404 response.
+        with opener.open(Request("https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/", headers=headers), timeout=25):
+            pass
+    try:
+        response = opener.open(request, timeout=25)
+    except HTTPError as exc:
+        # Reuse the existing NAS outbound proxy only for public US sources.
+        # Do not change proxy rules, disable TLS, or route household data.
+        if exc.code != 403 or urlparse(url).hostname not in {"www.bls.gov", "www.census.gov", "www.ismworld.org"}:
+            raise
+        proxy = os.environ.get("MACRO_SOURCE_PROXY", "")
+        if not proxy:
+            try:
+                socket.gethostbyname("family-workbench-proxy")
+                proxy = "http://family-workbench-proxy:7890"
+            except OSError:
+                raise exc
+        opener = build_opener(ProxyHandler({"https": proxy}), *handlers)
+        response = opener.open(request, timeout=25)
+    if is_ism and urlparse(response.url).hostname != "www.ismworld.org":
+        # The public site may first initialise an anonymous session. No account
+        # credentials are supplied, stored or scraped from an interactive form.
+        response.close()
+        response = opener.open(request, timeout=25)
+        if urlparse(response.url).hostname != "www.ismworld.org":
+            response.close()
+            raise ValueError("ISM需要交互登录，保留原数据")
+    with response:
         raw = response.read(20_000_001)
         if len(raw) > 20_000_000:
             raise ValueError("响应超过大小限制")

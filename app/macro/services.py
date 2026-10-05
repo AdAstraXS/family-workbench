@@ -19,7 +19,7 @@ def fetch_page(url):
     for attempt in range(2):
         try:
             result = subprocess.run([sys.executable, "-m", "macro.http_worker"], input=json.dumps({"url": url}),
-                capture_output=True, encoding="utf-8", timeout=45, check=True)
+                capture_output=True, encoding="utf-8", timeout=70, check=True)
             return json.loads(result.stdout)["text"]
         except (subprocess.SubprocessError, json.JSONDecodeError, KeyError) as exc:
             if attempt:
@@ -110,22 +110,26 @@ def import_group(group, *, write=False, url="", fetcher=None):
             if MacroImportRun.objects.filter(group=group, status="success", started_at__gt=run.started_at).exists():
                 raise SourceError("较新的采集已完成，本次较早启动的任务不再覆盖数据")
             existing = {(p.mapping_id, p.geography, p.period_date): p for p in MacroObservation.objects.filter(mapping__in=mappings.values())}
+            from .publications import verified_release_dates
+            publications = {code: verified_release_dates(mapping) for code, mapping in mappings.items()}
             now = timezone.now()
             for point in points:
                 mapping = mappings[point.code]
                 if not mapping.indicator.is_active:
                     raise SourceError(f"指标已停用：{point.code}")
-                fingerprint = digest({"value": str(point.value), "release": str(point.release_date),
-                                      "definition": mapping.definition_hash, "notes": point.evidence.get("source_notes", "")})
                 current = existing.get((mapping.pk, point.geography, point.period))
+                publication = publications[point.code].get(point.period)
+                release_date = point.release_date or (publication.release_date if publication else None) or (current.release_date if current else None)
+                fingerprint = digest({"value": str(point.value), "release": str(release_date),
+                                      "definition": mapping.definition_hash, "notes": point.evidence.get("source_notes", "")})
                 if current is None:
                     current = MacroObservation.objects.create(mapping=mapping, geography=point.geography,
-                        period_date=point.period, value=point.value, release_date=point.release_date,
+                        period_date=point.period, value=point.value, release_date=release_date,
                         last_seen_at=now, fingerprint=fingerprint)
                     summary["created"] += 1
                 elif current.fingerprint != fingerprint:
                     current.value = point.value
-                    current.release_date = point.release_date
+                    current.release_date = release_date
                     current.revision += 1
                     current.fingerprint = fingerprint
                     current.last_seen_at = now
@@ -135,9 +139,11 @@ def import_group(group, *, write=False, url="", fetcher=None):
                     summary["unchanged"] += 1
                     continue
                 MacroObservationRevision.objects.create(observation=current, run=run, number=current.revision,
-                    value=point.value, release_date=point.release_date, source_url=payload["url"], source_hash=source_hash,
+                    value=point.value, release_date=release_date, source_url=payload["url"], source_hash=source_hash,
                     evidence={"row": point.evidence, "definition": mapping.definition,
-                              "library_version": payload.get("library_version", "")})
+                              "library_version": payload.get("library_version", ""),
+                              **({"publication": {"url": publication.source_url, "hash": publication.source_hash,
+                                   "evidence": publication.evidence}} if publication else {})})
             # Only returned observations were verified, not omitted historical rows.
             checked_ids = [existing[(mappings[p.code].pk, p.geography, p.period)].pk for p in points
                            if (mappings[p.code].pk, p.geography, p.period) in existing]
