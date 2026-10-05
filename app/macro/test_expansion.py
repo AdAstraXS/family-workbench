@@ -80,7 +80,8 @@ class ExpansionPagesTests(TestCase):
 
     def test_all_page_has_one_representative_for_each_theme(self):
         for country in ["CN", "US"]:
-            response = self.client.get(reverse("macro:country", args=[country]), {"theme": "全部"})
+            response = self.client.get(reverse("macro:country", args=[country]))
+            self.assertEqual(response.context["theme"], "全部")
             self.assertContains(response, "经济全景")
             self.assertNotContains(response, "macro-summary-grid")
             self.assertNotContains(response, 'name="series"')

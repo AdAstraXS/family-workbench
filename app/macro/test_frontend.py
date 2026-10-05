@@ -175,9 +175,9 @@ class FrontendTests(TestCase):
         self.assertNotIn("CPI_MOM", codes)
 
     def test_country_focus_and_separation(self):
-        response = self.client.get(reverse("macro:country", args=["CN"]))
+        response = self.client.get(reverse("macro:country", args=["CN"]), {"theme": "投资"})
         self.assertEqual(response.context["spec"].code, "FAI_CUM_YOY")
         self.assertNotContains(response, "核心个人消费支出价格指数")
-        response = self.client.get(reverse("macro:country", args=["US"]))
+        response = self.client.get(reverse("macro:country", args=["US"]), {"theme": "通胀"})
         self.assertContains(response, "核心个人消费支出价格指数")
         self.assertNotContains(response, "民间固定资产投资")
