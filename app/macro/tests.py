@@ -1,4 +1,6 @@
 from datetime import date
+from dataclasses import replace
+from importlib import import_module
 from decimal import Decimal
 from io import StringIO
 from unittest.mock import patch
@@ -6,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
 from django.contrib.auth import get_user_model
+from django.apps import apps
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import close_old_connections, connection
@@ -155,6 +158,31 @@ class ImportTests(TestCase):
         mapping.save()
         with self.assertRaises(SourceError):
             self.ingest()
+
+    def test_reviewed_legacy_pmi_migration_preserves_values_and_evidence(self):
+        payload = {"url": "https://www.stats.gov.cn/", "rows": [
+            {"月份": "2025年08月份", "制造业-指数": "50.1", "非制造业-指数": "50.5"}]}
+        old_specs = [replace(spec, seasonal="未季调") for spec in GROUPS["cn_pmi"]]
+        with patch.dict("macro.services.GROUPS", {"cn_pmi": old_specs}):
+            import_group("cn_pmi", write=True, fetcher=lambda *_: payload)
+        before = list(MacroObservation.objects.order_by("pk").values_list("pk", "value"))
+        migrate = import_module("macro.migrations.0004_correct_reviewed_pmi_seasonal").correct_reviewed_pmi
+        with connection.schema_editor(atomic=False) as editor:
+            migrate(apps, editor)
+            migrate(apps, editor)
+        self.assertEqual(import_group("cn_pmi", write=True, fetcher=lambda *_: payload)["revised"], 2)
+        self.assertEqual(list(MacroObservation.objects.order_by("pk").values_list("pk", "value")), before)
+        self.assertEqual(MacroObservationRevision.objects.count(), 4)
+        for observation in MacroObservation.objects.all():
+            self.assertEqual(observation.revisions.get(number=1).evidence["definition"]["seasonal"], "未季调")
+            self.assertEqual(observation.revisions.get(number=2).evidence["definition"]["seasonal"], "季调")
+        self.assertEqual(import_group("cn_pmi", write=True, fetcher=lambda *_: payload)["unchanged"], 2)
+        mapping = MacroSourceMapping.objects.first()
+        mapping.definition["unit"] = "unreviewed"
+        mapping.save(update_fields=["definition"])
+        with connection.schema_editor(atomic=False) as editor:
+            with self.assertRaises(RuntimeError):
+                migrate(apps, editor)
 
     def test_disabled_indicator_rejected(self):
         self.ingest()

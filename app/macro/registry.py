@@ -111,7 +111,7 @@ for code, age in [("UNEMPLOYMENT_16_24", "16—24"), ("UNEMPLOYMENT_25_29", "25�
 for suffix, label in [("NEW_MOM", "新建商品住宅销售价格指数(上月=100)"), ("NEW_YOY", "新建商品住宅销售价格指数(上年同月=100)"),
                       ("USED_MOM", "二手住宅销售价格指数(上月=100)"), ("USED_YOY", "二手住宅销售价格指数(上年同月=100)")]:
     SERIES.append(Series("HOUSE_" + suffix, label, "CN", "房地产", "指数（基期=100）", "月度", "nbs_city",
-                         "nbs_house_" + suffix.lower(), label, "分城市；指数水平", params={
+                         "nbs_house_" + suffix.lower(), label, "分城市；保留指数，不冒充涨幅", params={
                              "function": "macro_china_nbs_region", "kind": "主要城市月度价格",
                              "path": "价格 > 70个大中城市住宅销售价格指数", "region": None, "indicator": label, "period": "2011-",
                          }))
