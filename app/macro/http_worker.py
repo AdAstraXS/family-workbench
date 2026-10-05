@@ -3,7 +3,7 @@ import json
 import sys
 from urllib.parse import urlparse
 
-from .fetch_worker import download
+from .fetch_worker import download, safe_failure_label
 
 HOSTS = {"www.pbc.gov.cn", "www.mofcom.gov.cn", "www.stats.gov.cn", "www.gov.cn",
          "www.bea.gov", "www.bls.gov", "www.census.gov", "www.ismworld.org"}
@@ -23,5 +23,5 @@ if __name__ == "__main__":
         validate_page_url(request["url"])
         print(json.dumps({"text": download(request["url"])}, ensure_ascii=False))
     except Exception as exc:
-        print(json.dumps({"error": type(exc).__name__}))
+        print(json.dumps({"error": safe_failure_label(exc)}))
         sys.exit(1)

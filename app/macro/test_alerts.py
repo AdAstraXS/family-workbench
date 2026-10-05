@@ -35,6 +35,17 @@ def publication():
 
 
 class AlertParserTests(SimpleTestCase):
+    def test_public_source_errors_show_status_without_worker_output(self):
+        import subprocess
+        from .services import fetch_page
+        for label, expected in [('HTTP_403', 'HTTP_403'), ('private-worker-output', '响应异常')]:
+            failure = subprocess.CalledProcessError(1, [], output='{"error":"' + label + '"}')
+            with patch('macro.services.subprocess.run', side_effect=failure):
+                with self.assertRaises(SourceError) as caught:
+                    fetch_page('https://www.bls.gov/news.release/empsit.nr0.htm')
+                self.assertIn(expected, str(caught.exception))
+                self.assertNotIn('private-worker-output', str(caught.exception))
+
     def test_bls_monthly_expectation_does_not_require_a_title_period(self):
         spec = next(s for s in SERIES if s.code == 'PAYEMS')
         event = {'agency':'bls', 'period':'Employment Situation', 'day':date(2026, 10, 2)}

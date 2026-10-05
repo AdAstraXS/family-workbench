@@ -16,6 +16,18 @@ OFFICIAL_HOSTS = {"pbc": "www.pbc.gov.cn", "mofcom": "www.mofcom.gov.cn", "nbs_r
                   "ism_manufacturing": "www.ismworld.org", "ism_services": "www.ismworld.org", "gov_budget": "www.gov.cn"}
 
 
+class PublicProxyUnavailable(ValueError):
+    pass
+
+
+class UnregisteredRedirect(ValueError):
+    pass
+
+
+def safe_failure_label(exc):
+    return "HTTP_" + str(exc.code) if isinstance(exc, HTTPError) else type(exc).__name__
+
+
 def validate_url(url, group):
     parsed = urlparse(url)
     if (parsed.scheme != "https" or parsed.hostname != OFFICIAL_HOSTS.get(group)
@@ -26,7 +38,7 @@ def validate_url(url, group):
 class SameHostRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if urlparse(newurl).netloc != urlparse(req.full_url).netloc or urlparse(newurl).scheme != "https":
-            raise ValueError("不允许跨站重定向")
+            raise UnregisteredRedirect("不允许跨站重定向")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -67,7 +79,7 @@ def download(url):
                 socket.gethostbyname("family-workbench-proxy")
                 proxy = "http://family-workbench-proxy:7890"
             except OSError:
-                raise exc
+                raise PublicProxyUnavailable("既有公开来源代理不可用") from exc
         opener = build_opener(ProxyHandler({"https": proxy}), *handlers)
         response = opener.open(request, timeout=25)
     if is_ism and urlparse(response.url).hostname != "www.ismworld.org":
@@ -116,5 +128,5 @@ if __name__ == "__main__":
         print(json.dumps(result, ensure_ascii=False))
     except Exception as exc:
         # Do not leak proxy credentials, environment values or HTML error bodies.
-        print(json.dumps({"error": type(exc).__name__}))
+        print(json.dumps({"error": safe_failure_label(exc)}))
         sys.exit(1)

@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import re
 
 from django.db import transaction
 from django.utils import timezone
@@ -8,6 +9,19 @@ from django.utils import timezone
 from .adapters import SourceError, digest, parse_frame, parse_fred, parse_official
 from .models import MacroImportRun, MacroIndicator, MacroObservation, MacroObservationRevision, MacroSourceMapping
 from .registry import GROUPS, OFFICIAL_GROUPS
+
+
+def request_failure(exc):
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "TimeoutExpired"
+    if isinstance(exc, subprocess.CalledProcessError):
+        try:
+            label = json.loads(exc.stdout).get("error", "")
+            if label in {"PublicProxyUnavailable", "UnregisteredRedirect", "URLError", "TimeoutError", "ValueError", "UnicodeDecodeError"} or re.fullmatch(r"HTTP_[1-5]\d{2}", label):
+                return label
+        except (ValueError, TypeError, AttributeError):
+            pass
+    return "响应异常"
 
 
 def fetch_page(url):
@@ -23,7 +37,7 @@ def fetch_page(url):
             return json.loads(result.stdout)["text"]
         except (subprocess.SubprocessError, json.JSONDecodeError, KeyError) as exc:
             if attempt:
-                raise SourceError("官方目录或日历请求失败或超时，已重试一次；保留上次数据") from exc
+                raise SourceError("官方页面请求失败（" + request_failure(exc) + "），已重试一次；保留上次数据") from exc
 
 
 def fetch_source(group, url=""):
