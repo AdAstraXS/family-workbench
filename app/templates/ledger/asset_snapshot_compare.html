@@ -28,7 +28,7 @@
 {% block content %}
 <section class="panel">
   <div class="section-head"><h1>资产快照对比</h1><a class="button ghost" href="{% url 'ledger:asset_snapshot_list' %}">返回资产快照</a></div>
-  <form data-auto-filter method="get">
+  <form method="get">
     <div class="snapshot-compare-filters">
       <fieldset><legend>{{ form.snapshots.label }}</legend>
         <div class="snapshot-compare-periods">{{ form.snapshots }}</div>
