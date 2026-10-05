@@ -26,7 +26,15 @@ COUNTRIES = {"CN": "中国", "US": "美国"}
 SPECS = {(s.country, s.code): s for s in SERIES}
 THEMES = ["投资", "增长", "通胀", "景气", "就业", "房地产", "金融", "利率", "消费", "生产", "外贸", "财政"]
 SOURCES = {"nbs": "国家统计局", "nbs_city": "国家统计局", "nbs_release": "国家统计局",
-           "pbc": "中国人民银行", "mofcom": "商务部", "fred": "FRED", "akshare": "东方财富 · AKShare"}
+           "pbc": "中国人民银行", "mofcom": "商务部", "fred": "FRED", "akshare": "东方财富 · AKShare",
+           "ism": "ISM官方报告", "gov_budget": "国务院政府工作报告"}
+PANORAMA = {
+    "CN": {"增长": "GDP_REAL_YOY_INDEX", "通胀": "CPI_YOY", "景气": "PMI_MANUFACTURING", "就业": "UNEMPLOYMENT",
+           "投资": "FAI_CUM_YOY", "房地产": "PROPERTY_INVESTMENT_CUM_YOY", "金融": "M2_YOY", "消费": "RETAIL",
+           "生产": "INDUSTRY_YOY", "外贸": "EXPORTS", "财政": "DEFICIT_BUDGET_RATIO"},
+    "US": {"增长": "GDPC1", "通胀": "CPIAUCSL", "景气": "PMI_ISM_MANUFACTURING", "就业": "PAYEMS",
+           "房地产": "HOUST", "利率": "DGS10", "消费": "RSAFS", "生产": "INDPRO"},
+}
 
 
 def catalog(country=None, geography="北京市", with_presentation=False):
@@ -148,8 +156,8 @@ def series_context(request, spec, mapping):
         history = observation_history(spec.country, geography, codes={spec.code, CPI_BASES.get(spec.code, spec.code), CN_PAIRS.get(spec.code, spec.code)})
         growth = presentation(spec, latest.period_date if latest else None, latest.value if latest else None, history)
         allowed = {m.key: m for m in growth_profile["modes"]}
-        requested = request.GET.get("measure", growth_profile["default"])
-        measure = requested if requested in allowed or requested == "level" else growth_profile["default"]
+        requested = request.GET.get("measure", growth["default"])
+        measure = requested if requested in allowed or requested == "level" else growth["default"]
         measures = [{"key": m.key, "label": m.label, "url": query_url(request.path, **{**request.GET.dict(), "measure": m.key, "page": None})} for m in growth_profile["modes"]]
         measures.append({"key": "level", "label": "原始值", "url": query_url(request.path, **{**request.GET.dict(), "measure": "level", "page": None})})
         for point in page:
@@ -208,12 +216,14 @@ def country(request, country):
     rows = [r for r in all_rows if theme == "全部" or r["spec"].category == theme]
     if country == "CN" and theme == "投资":
         rows.sort(key=lambda r: 0 if r["spec"].code == "FAI_CUM_YOY" else 1)
-    selected = next((r for r in rows if r["spec"].code == request.GET.get("series")), rows[0] if rows else None)
+    selected = next((r for r in rows if r["spec"].code == request.GET.get("series")), rows[0] if rows else None) if theme != "全部" else None
     context = {"country": country, "country_name": COUNTRIES[country], "section": country,
                "rows": rows, "theme": theme, "themes": ["全部"] + [t for t in THEMES if t in available],
                "selected": selected, "summary_rows": rows[:3]}
     if country == "CN" and theme == "投资":
         context["summary_rows"] = [r for code in ["FAI_CUM_YOY", "MANUFACTURING_FAI_CUM_YOY", "FDI_CUM"] for r in rows if r["spec"].code == code]
+    context["panorama"] = [{**row, "theme_url": query_url(reverse("macro:country", args=[country]), theme=t)}
+                           for t, code in PANORAMA[country].items() for row in all_rows if row["spec"].code == code]
     if selected:
         context.update(series_context(request, selected["spec"], selected["mapping"]))
     return render(request, "macro/index.html", context)
@@ -301,6 +311,8 @@ SOURCE_METHODS = {
     "mofcom": ("商务部", "https://www.mofcom.gov.cn/", "读取并核对指定吸收外资发布稿。", "累计金额、同比、行业及企业数量分别记录；当前尚未自动发现新报告。"),
     "fred": ("FRED · 圣路易斯联储", "https://fred.stlouisfed.org/", "公开 CSV 序列；原始发布机构见指标百科及 FRED 系列说明。", "FRED 是数据分发平台；来源缺值保留，统计期不是官方发布日期。"),
     "akshare": ("东方财富 · AKShare", "https://data.eastmoney.com/cjsj/", "AKShare 读取东方财富的宏观历史表。", "第三方转发数据；原统计机构和方法参考见指标百科，不能把采集日当作发布日期。"),
+    "ism": ("ISM官方报告", "https://www.ismworld.org/", "核对指定月度官方报告的总PMI。", "官方自动下载当前受限；需核验报告样本，完整历史未接入，不将商业接口发布日期推算为统计期。"),
+    "gov_budget": ("国务院政府工作报告", "https://www.gov.cn/", "从指定年度报告读取预算赤字率约数。", "年度预算安排，不能用月度收支缺口代替；报告变化须重新核验。"),
 }
 
 

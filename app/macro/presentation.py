@@ -4,10 +4,10 @@ from datetime import date
 from decimal import Decimal, localcontext, ROUND_HALF_UP
 
 
-CPI_BASES = {"CPIAUCSL": "CPIAUCNS", "CPILFESL": "CPILFENS"}
+CPI_BASES = {"CPIAUCSL": "CPIAUCNS", "CPILFESL": "CPILFENS", "PPIFIS": "PPIFID"}
 AUXILIARY = set(CPI_BASES.values())
 US_GROWTH = {"CPIAUCSL", "CPILFESL", "CPIAUCNS", "CPILFENS", "PCEPI", "PCEPILFE", "GDPC1", "GDPDEF",
-             "INDPRO", "RSAFS", "PCEC96", "DSPIC96", "CES0500000003", "HOUST", "PERMIT", "HSN1F", "PAYEMS"}
+             "INDPRO", "RSAFS", "PCEC96", "DSPIC96", "CES0500000003", "HOUST", "PERMIT", "HSN1F", "PAYEMS", "PPIFIS", "PPIFID", "DGORDER"}
 CN_PAIRS = {"FAI_CUM": "FAI_CUM_YOY", "PROPERTY_INVESTMENT_CUM": "PROPERTY_INVESTMENT_CUM_YOY",
             "INDUSTRIAL_PROFIT_CUM": "INDUSTRIAL_PROFIT_CUM_YOY", "FDI_CUM": "FDI_CUM_YOY",
             "RETAIL": "RETAIL_YOY", "M2": "M2_YOY", "TSF_STOCK": "TSF_STOCK_YOY", "GDP_QUARTER": "GDP_REAL_YOY_INDEX"}
@@ -38,7 +38,7 @@ def profile(spec):
             default = "change"
         note = "按当前已入库指数或水平值计算；与官方发布稿的舍入值可能存在差异。环比比较相邻月份，同比比较上年同月。"
         if spec.code in CPI_BASES:
-            note += " CPI 同比采用对应未季调序列，环比采用季调序列；缺少未季调基数时不以季调同比替代。"
+            note += " 价格指数同比采用对应未季调序列，环比采用季调序列；缺少未季调基数时不以季调同比替代。"
         if spec.frequency == "季度":
             note = "同比比较上年同季，季度环比比较上季。GDP 季度环比折年 =（本季 ÷ 上季的比值⁴ − 1）× 100%，与普通季度环比分开。按当前已入库版本计算，可能与官方舍入值略有差异。"
         if spec.code == "PAYEMS":
@@ -52,7 +52,7 @@ def profile(spec):
         modes = [Metric("yoy", label)]
         if spec.code in {"M2", "TSF_STOCK", "RETAIL"}:
             modes.append(Metric("mom", "环比（未季调）"))
-        return {"modes": modes, "default": "yoy", "note": "同比优先使用同统计期的来源发布增速，缺少该期增速时不以金额强算替代。" +
+        return {"modes": modes, "default": "level", "paired": True, "note": "同比优先使用同统计期的来源发布增速，缺少该期增速时不以金额强算替代。" +
                 ("本页原始 GDP 为现价金额；实际同比来自可比价格指数。实际季度环比尚未接入，不能用未季调名义金额冒充。" if spec.code == "GDP_QUARTER" else "累计指标不计算相邻累计值的环比；月度未季调环比受季节因素影响。")}
     if spec.country == "CN" and spec.code in CN_LEVELS:
         modes = [Metric("yoy", "累计同比" if "累计" in spec.basis else "名义同比" if spec.code == "GDP_ANNUAL" else "同比")]
@@ -102,4 +102,10 @@ def presentation(spec, period, current, history):
         return None
     computed = values(spec, period, current, history)
     metrics = [{"key": m.key, "label": m.label, "unit": m.unit, "value": computed.get(m.key)} for m in p["modes"]]
-    return {**p, "metrics": metrics, "primary": next(m for m in metrics if m["key"] == p["default"])}
+    default = p["default"]
+    if default == "level" or (current is not None and all(m["value"] is None for m in metrics)):
+        default = "level"
+        primary = {"key": "level", "label": "原始值", "unit": spec.unit, "value": current}
+    else:
+        primary = next(m for m in metrics if m["key"] == default)
+    return {**p, "default": default, "metrics": metrics, "primary": primary}

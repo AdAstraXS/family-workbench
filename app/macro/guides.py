@@ -385,7 +385,7 @@ put("US", "EFFR", lead="看美国联邦基金市场实际隔夜交易的代表�
     method="纽约联储依据 FR 2420 报告交易资料计算，工作日发布，非工作日或来源缺值不补造。",
     meaning="反映隔夜市场实际资金价格，可与政策目标区间一起观察。",
     pitfalls=["不是加权算术平均。", "不是贷款给家庭的报价。", "休市缺值不能自动沿用当日利率。"], related=["US:DFEDTARL", "US:DFEDTARU", "US:DGS2"], sources=["effr"], aliases="隔夜 联邦基金 有效利率", kind="成交量加权中位利率")
-for code, years in [("DGS2", 2), ("DGS10", 10)]:
+for code, years in [("DGS2", 2), ("DGS10", 10), ("DGS30", 30)]:
     put("US", code, lead=f"看美国国债收益率曲线上 {years} 年固定期限的市场利率。",
         scope="固定期限国债收益率，是由市场报价拟合的期限曲线读取值；不是某一只债券的票息。",
         calculation="财政部用国债市场报价构建收益率曲线，从对应期限读取收益率。", formula=f"{years} 年固定期限收益率 = 当日拟合国债曲线在 {years} 年处的收益率",
@@ -404,6 +404,64 @@ for auxiliary, primary in [("CPIAUCNS", "CPIAUCSL"), ("CPILFENS", "CPILFESL")]:
         "method": "BLS 按 CPI 采价及加权方法编制，FRED 提供该未季调序列。与对应季调序列独立保存。",
         "kind": "未季调价格指数", "related": ["US:" + primary],
         "sources": original["sources"] + [("FRED · 未季调原始序列", "https://fred.stlouisfed.org/series/" + auxiliary)]}
+
+SOURCES.update({
+    "unemployment_new": ["国家统计局：分年龄组失业率新口径", "https://www.stats.gov.cn/xxgk/sjfb/zxfb2020/202401/t20240117_1946644.html"],
+    "unemployment_detail": ["国家统计局：就业调查分层数据", "https://www.stats.gov.cn/sj/zxfbhjd/202609/t20260915_1965307.html"],
+    "ppi_us": ["BLS · FRED 最终需求 PPI", "https://fred.stlouisfed.org/series/PPIFIS"],
+    "orders_us": ["Census · FRED 耐用品订单", "https://fred.stlouisfed.org/series/DGORDER"],
+    "sentiment_us": ["密歇根大学 · FRED 消费者信心", "https://fred.stlouisfed.org/series/UMCSENT"],
+    "ism": ["ISM：制造业与服务业调查方法", "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports/services/august/"],
+    "budget": ["国务院：2026年政府工作报告", "https://www.gov.cn/yaowen/liebiao/202603/content_7062625.htm"],
+})
+for code, scope in [
+    ("UNEMPLOYMENT_CITIES31", "31个大城市城镇劳动力的合并调查比率；不是31条单城市失业率，也不是简单平均。"),
+    ("UNEMPLOYMENT_LOCAL", "调查地本地户籍的城镇劳动力，不按每个人出生地判断。"),
+    ("UNEMPLOYMENT_MIGRANT", "调查地外来户籍的城镇劳动力，包含农业与非农业户籍，不等于全部农民工。"),
+    ("UNEMPLOYMENT_16_24", "全国城镇16—24岁劳动力，不包含在校生；新口径自2023年12月起。"),
+    ("UNEMPLOYMENT_25_29", "全国城镇25—29岁劳动力，不包含在校生；新口径自2023年12月起。"),
+    ("UNEMPLOYMENT_30_59", "全国城镇30—59岁劳动力，不包含在校生；不能与旧25—59岁指标混接。"),
+]:
+    put("CN", code, lead="观察特定劳动力群体的就业压力。", scope=scope,
+        calculation="按月度劳动力抽样调查，将符合失业定义的人数除以对应群体劳动力人数。", formula="调查失业率 = 失业人数 ÷（就业人数 + 失业人数）× 100%",
+        example="假设某群体劳动力100人、失业5人，失业率为5%，分母不是该群体全部人口。",
+        method="国家统计局劳动力调查；新分年龄序列排除在校生，旧口径历史不拼接。",
+        meaning="帮助区分年龄、户籍与大城市就业压力，和全国总体率一起看。",
+        pitfalls=["失业率的变化用百分点表达，不把比率再算成就业增长率。", "群体分母与覆盖范围不同，不能直接相加或简单平均。", "2023年12月前含在校生青年失业率不能与新口径连接。"],
+        related=["CN:UNEMPLOYMENT"], sources=["unemployment_cn", "unemployment_new", "unemployment_detail"], aliases="就业 青年 年龄 户籍 31城", kind="月度调查比率")
+for code in ["PPIFIS", "PPIFID"]:
+    put("US", code, lead="观察美国生产者出售最终需求商品与服务的价格变化。",
+        scope="最终需求商品、服务及建筑等，区别于中国工业出厂价格PPI；2009年11月=100。",
+        calculation="BLS按生产者收到的销售价格调查和交易权重编制指数。同比用未季调基数，环比用季调基数。",
+        formula="同比 =（本月未季调指数 ÷ 上年同月未季调指数 − 1）×100%；环比使用季调指数比较上月",
+        example="假设去年同月100、本月103，同比为3%，不是指数103本身等于103%涨幅。",
+        method="BLS最终需求PPI由FRED分发，季调与未季调序列独立入库，历史值可能修订。",
+        meaning="观察上游与服务生产者价格压力，配合CPI了解消费端价格。",
+        pitfalls=["不是只有制造业商品。", "指数水平不是同比；季调与未季调基数不可混用。"],
+        related=["US:CPIAUCSL", "US:PCEPI"], sources=["ppi_us"], aliases="生产者 物价 PPI 最终需求", kind="价格指数")
+put("US", "DGORDER", lead="观察制造商收到的耐用品新订单。", scope="耐用品为通常可使用三年及以上的产品，包含汽车、飞机等运输设备；名义金额、百万美元。",
+    calculation="Census制造业出货、库存和订单调查汇总新订单，按月季调。", formula="增长率 =（本期订单金额 ÷ 对比期订单金额 − 1）×100%",
+    example="假设订单从100到105，增长5%；大型飞机订单可能使当月明显波动。",
+    method="Census M3调查经FRED提供季调金额；初值和历史可能修订。", meaning="作为制造业后续生产与投资需求的扩展观察项。",
+    pitfalls=["订单不是已经完成的出货。", "名义金额受价格与运输设备大单影响，不等于实际产量。"], related=["US:INDPRO", "US:GDPC1"], sources=["orders_us"], aliases="耐用品 新订单 制造业", kind="季调名义订单金额")
+put("US", "UMCSENT", lead="观察美国消费者对自身财务和经济前景的信心。", scope="密歇根大学消费者调查，1966年一季度=100；与谘商会消费者信心指数不同，FRED延迟一个月提供。",
+    calculation="按调查问题的积极与消极回答构成相对评分，汇总并按基期归一化。", formula="信心指数 = 调查回答综合评分按基期尺度归一化；不是消费支出增速",
+    example="假设指数从60降到55，下降5个指数点，不能说消费者支出下降5%。",
+    method="Surveys of Consumers, University of Michigan，经FRED分发；非季调，以来源实际统计期显示。", meaning="补充零售和收入数据，观察主观预期与实际支出的关系。",
+    pitfalls=["不是谘商会指数，不能拼接。", "调查情绪不等于真实消费金额，延迟数据不冒充即时数据。"], related=["US:RSAFS", "US:DSPIC96"], sources=["sentiment_us"], aliases="消费者 信心 情绪 密歇根", kind="调查信心指数")
+for code, sector in [("PMI_ISM_MANUFACTURING", "制造业"), ("PMI_ISM_SERVICES", "服务业")]:
+    put("US", code, lead=f"观察ISM调查中美国{sector}活动的扩张或收缩。", scope=f"美国{sector}采购与供应管理人员月度调查，50为行业扩张与收缩的分界；不是S&P Global PMI。",
+        calculation="分项扩散指数结合回答变好、不变、变差的占比；制造业五个分项各占20%，服务业四个分项等权。",
+        formula="分项扩散指数 = 改善回答占比 + 0.5×不变回答占比；总PMI按规定权重合成",
+        example="假设30%改善、50%不变，分项为55；不是生产同比增长55%。",
+        method="ISM月度官方报告，部分组成项季调；只按报告明确统计月份接入，完整历史另需核验可用来源。",
+        meaning="补充GDP和工业生产，观察企业景气方向。", pitfalls=["50是调查扩张分界，不是50%的经济增长。", "不能与中国PMI或其他供应商PMI直接混成同一序列。"],
+        related=["US:GDPC1", "US:INDPRO"], sources=["ism"], aliases="ISM PMI 景气 采购经理", kind="月度扩散指数")
+put("CN", "DEFICIT_BUDGET_RATIO", lead="观察政府为一个年度安排的预算赤字强度。", scope="政府工作报告公布的年度官方预算赤字率约数；不是月度财政支出减收入，也不是实际执行或广义赤字率。",
+    calculation="引用官方报告给出的年度预算安排，不用已公布GDP或月度收支自行替换该口径。", formula="官方预算赤字率 = 年度预算赤字 ÷ 预算对应GDP口径 ×100%（采用公布约数）",
+    example="假设官方安排约4%，页面保留约数含义，不能据此说全年实际结果已经是4%。",
+    method="按年度政府工作报告及其明确发布日期核验，变化记录保留来源证据。", meaning="判断年度财政政策安排，并与月度预算收支分别阅读。",
+    pitfalls=["不是实际执行值。", "不把地方专项债和特别国债任意相加后仍叫官方赤字率。"], related=["CN:FISCAL_REVENUE_CUM", "CN:GDP_ANNUAL"], sources=["budget"], aliases="财政 预算 赤字率 政策", kind="年度预算安排约数")
 
 # Fail visibly at startup instead of silently publishing a partial encyclopedia.
 if set(GUIDES) != set(SPEC):

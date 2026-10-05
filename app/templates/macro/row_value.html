@@ -1,0 +1,9 @@
+{% load macro_format %}
+{% if row.presentation %}
+<small>{{ row.presentation.primary.label }}</small>
+<b>{% if row.presentation.primary.value is not None %}{{ row.presentation.primary.value|macro_number }} {{ row.presentation.primary.unit }}{% else %}暂无可比数据{% endif %}</b>
+{% if not compact and not row.presentation.paired and row.presentation.default != 'level' %}
+{% for metric in row.presentation.metrics %}{% if metric.key != row.presentation.default %}<small>{{ metric.label }}：{% if metric.value is not None %}{{ metric.value|macro_number }} {{ metric.unit }}{% else %}暂无可比数据{% endif %}</small>{% endif %}{% endfor %}
+<small class="macro-original">原始值：{% if row.latest_date %}{{ row.latest_value|macro_number }} {{ row.spec.unit }}{% else %}尚未接入{% endif %}</small>
+{% endif %}
+{% else %}<b>{% if row.latest_date %}{{ row.latest_value|macro_number }} {{ row.spec.unit }}{% else %}尚未接入{% endif %}</b>{% endif %}

@@ -98,6 +98,16 @@ nbs("nbs_gdp_index", "国民经济核算 > 国内生产总值指数", [
 nbs("nbs_gdp_annual", "国民经济核算 > 国内生产总值", [
     ("GDP_ANNUAL", "现价 GDP（年度）", "国内生产总值(亿元)", "亿元", "增长"),
 ], kind="年度数据", basis="全年，现价")
+nbs("nbs_unemployment_detail", "城镇调查失业率 > 城镇调查失业率", [
+    ("UNEMPLOYMENT_CITIES31", "31个大城市城镇调查失业率", "31个大城市城镇调查失业率(%)", "%", "就业"),
+    ("UNEMPLOYMENT_LOCAL", "本地户籍劳动力调查失业率", "全国城镇本地户籍劳动力失业率(%)", "%", "就业"),
+    ("UNEMPLOYMENT_MIGRANT", "外来户籍劳动力调查失业率", "全国城镇外来户籍劳动力失业率(%)", "%", "就业"),
+], period="2018-", basis="全国城镇月度比率；31城为合并调查指标")
+for code, age in [("UNEMPLOYMENT_16_24", "16—24"), ("UNEMPLOYMENT_25_29", "25—29"), ("UNEMPLOYMENT_30_59", "30—59")]:
+    SERIES.append(Series(code, f"{age}岁劳动力失业率（不含在校生）", "CN", "就业", "%", "月度", "nbs",
+        "nbs_unemployment_age", f"全国城镇{age}岁劳动力失业率(%)", "不含在校生；2023年12月起新口径",
+        params={"function": "macro_china_nbs_nation", "kind": "月度数据", "path": "城镇调查失业率 > 城镇调查失业率", "period": "2023-"},
+        selector="from:2023-12-01"))
 for suffix, label in [("NEW_MOM", "新建商品住宅销售价格指数(上月=100)"), ("NEW_YOY", "新建商品住宅销售价格指数(上年同月=100)"),
                       ("USED_MOM", "二手住宅销售价格指数(上月=100)"), ("USED_YOY", "二手住宅销售价格指数(上年同月=100)")]:
     SERIES.append(Series("HOUSE_" + suffix, label, "CN", "房地产", "指数（基期=100）", "月度", "nbs_city",
@@ -134,6 +144,11 @@ for code, name, unit, freq, category, seasonal, basis in [
     ("EFFR", "有效联邦基金利率", "%", "日度", "利率", "未季调", "工作日；缺值保留"),
     ("DGS2", "2年期国债收益率", "%", "日度", "利率", "未季调", "固定期限；缺值保留"),
     ("DGS10", "10年期国债收益率", "%", "日度", "利率", "未季调", "固定期限；缺值保留"),
+    ("DGS30", "30年期国债收益率", "%", "日度", "利率", "未季调", "固定期限；缺值保留"),
+    ("PPIFIS", "最终需求生产者价格指数 PPI", "2009年11月=100", "月度", "通胀", "季调", "最终需求；涵盖商品与服务"),
+    ("PPIFID", "最终需求 PPI（未季调，对比基数）", "2009年11月=100", "月度", "通胀", "未季调", "PPI同比计算基数"),
+    ("DGORDER", "耐用品新增订单", "百万美元", "月度", "生产", "季调", "名义订单金额；包含运输设备"),
+    ("UMCSENT", "密歇根大学消费者信心指数", "1966年一季度=100", "月度", "消费", "未季调", "调查信心指数；FRED延迟一个月"),
 ]:
     SERIES.append(Series(code, name, "US", category, unit, freq, "fred", "fred_" + code, code, basis, seasonal))
 
@@ -163,5 +178,10 @@ for code, name, unit, basis in [
 ]:
     SERIES.append(Series(code, name, "CN", "金融", unit, "月度", "pbc", "pbc", code, basis))
 
+for code, name, group in [("PMI_ISM_MANUFACTURING", "ISM制造业 PMI", "ism_manufacturing"), ("PMI_ISM_SERVICES", "ISM服务业 PMI", "ism_services")]:
+    SERIES.append(Series(code, name, "US", "景气", "指数（50为荣枯线）", "月度", "ism", group, code,
+                         "官方月度报告；部分组成项季调", "部分季调"))
+SERIES.append(Series("DEFICIT_BUDGET_RATIO", "官方年度预算赤字率", "CN", "财政", "%", "年度", "gov_budget", "gov_budget",
+                     "DEFICIT_BUDGET_RATIO", "年度预算安排，约数；不是月度收支差额或实际执行赤字率"))
 GROUPS = {s.group: [entry for entry in SERIES if entry.group == s.group] for s in SERIES}
-OFFICIAL_GROUPS = {"mofcom", "pbc", "nbs_release"}
+OFFICIAL_GROUPS = {"mofcom", "pbc", "nbs_release", "ism_manufacturing", "ism_services", "gov_budget"}
