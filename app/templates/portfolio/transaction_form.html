@@ -12,7 +12,7 @@
   {% if option_contract_edit_url %}
     <p class="transaction-section-intro">行权价属于期权合约。<a href="{{ option_contract_edit_url }}">修改合约行权价</a>（会同步更正关联的行权/指派流水）。</p>
   {% endif %}
-  <form method="post" class="data-form transaction-data-form">
+  <form method="post" class="data-form transaction-data-form" data-transaction-classification>
     {% csrf_token %}
     {% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}">{% endif %}
     {% for field in form.hidden_fields %}{{ field }}{% endfor %}
@@ -25,6 +25,7 @@
         {% include "includes/form_field.html" with field=form.family %}
         {% include "includes/form_field.html" with field=form.member %}
         {% include "includes/form_field.html" with field=form.bank_account %}
+        {% include "includes/form_field.html" with field=form.asset_primary %}
         {% include "includes/form_field.html" with field=form.asset_category %}
         {% include "includes/form_field.html" with field=form.asset_type %}
         {% include "includes/form_field.html" with field=form.security %}
@@ -61,6 +62,7 @@
         {% include "includes/form_field.html" with field=form.bond_coupon_rate %}
         {% include "includes/form_field.html" with field=form.bond_coupon_frequency %}
         {% include "includes/form_field.html" with field=form.bond_maturity_date %}
+        {% include "includes/form_field.html" with field=form.bond_original_issue_date %}
         {% include "includes/form_field.html" with field=form.bond_redemption_price %}
         {% include "includes/form_field.html" with field=form.bond_quote_basis %}
         {% include "includes/form_field.html" with field=form.bond_accrued_interest %}
@@ -113,6 +115,7 @@
     const member = document.getElementById("id_member");
     const account = document.getElementById("id_bank_account");
     const category = document.getElementById("id_asset_category");
+    const primary = document.getElementById("id_asset_primary");
     const assetType = document.getElementById("id_asset_type");
     const security = document.getElementById("id_security");
     const createOption = document.getElementById("id_create_option_contract");
@@ -153,18 +156,22 @@
       "id_bond_coupon_rate",
       "id_bond_coupon_frequency",
       "id_bond_maturity_date",
+      "id_bond_original_issue_date",
       "id_bond_redemption_price",
       "id_bond_quote_basis",
       "id_bond_accrued_interest",
     ].map((id) => document.getElementById(id));
 
     const assetTypesByCategory = {
-      equity: ["stock"],
-      fixed_income: ["bond"],
+      equity: ["stock", "etf", "fund"],
+      fixed_income: ["bond", "etf", "fund"],
       fund: ["etf", "fund"],
       derivatives: ["option"],
-      commodities: ["other"],
-      alternatives: ["other"],
+      cash: ["other", "etf", "fund"],
+      commodities: ["other", "etf", "fund"],
+      alternatives: ["other", "etf", "fund"],
+      insurance: ["other"],
+      liabilities: ["other"],
     };
     const assetTypeLabels = {
       stock: "股票",
@@ -175,6 +182,14 @@
       other: "其他",
     };
     let categoryRows = [];
+    const instrumentTypesBySecondary = {
+      cash_balance: ["other"], money_market: ["etf", "fund", "other"],
+      government_short: ["bond"], government_long: ["bond", "etf", "fund"],
+      bond_fund: ["etf", "fund", "other"], equity_index: ["etf", "fund"],
+      equity_fund: ["etf", "fund"], equity_stock: ["stock"], option: ["option"],
+      crypto: ["etf", "fund", "other"], gold: ["etf", "fund", "other"],
+      savings_insurance: ["other"], credit_card: ["other"],
+    };
     let securityRows = [];
 
     const rowFor = (field) => field?.closest(".form-row");
@@ -200,10 +215,22 @@
       const selected = category.options[category.selectedIndex];
       return selected?.dataset.code || "";
     };
+    const updateCategories = () => {
+      const leaves = categoryRows.filter(row => String(row.parent_id) === primary.value);
+      const legacy = categoryRows.filter(row => !row.parent_id && String(row.id) === primary.value);
+      replaceOptions(category, leaves.length ? leaves : legacy, "请选择二级资产类别", (option, row) => {
+        option.dataset.code = row.primary_code || row.code;
+      });
+    };
 
+    const allowedInstrumentTypes = () => {
+      const selected = categoryRows.find(row => String(row.id) === category.value);
+      return instrumentTypesBySecondary[selected?.code] || assetTypesByCategory[selectedCategoryCode()] || [];
+    };
     const updateAssetTypes = (reset = false) => {
-      const current = reset ? "" : assetType.value;
-      const allowed = assetTypesByCategory[selectedCategoryCode()] || [];
+      const currentSecurity = securityRows.find(row => String(row.id) === security.value);
+      const current = reset ? "" : (assetType.value || currentSecurity?.asset_type);
+      const allowed = allowedInstrumentTypes();
       assetType.replaceChildren(new Option("请选择金融品种", ""));
       allowed.forEach((value) => assetType.add(new Option(assetTypeLabels[value], value)));
       assetType.value = allowed.includes(current) ? current : "";
@@ -211,15 +238,15 @@
     };
     const updateSecurities = (reset = false) => {
       const current = reset ? "" : security.value;
-      const rows = assetType.value
-        ? securityRows.filter((row) => row.asset_type === assetType.value)
-        : [];
+      const allowed = allowedInstrumentTypes();
+      const rows = securityRows.filter(row => (!allowed.length || allowed.includes(row.asset_type)) && (!assetType.value || row.asset_type === assetType.value));
       security.replaceChildren(new Option("---------", ""));
       rows.forEach((row) => {
         const option = new Option(row.name, row.id);
         option.dataset.currency = row.currency;
         option.dataset.assetType = row.asset_type;
         option.dataset.multiplier = row.multiplier;
+        option.dataset.categoryId = row.asset_category_id || "";
         security.add(option);
       });
       if ([...security.options].some((option) => option.value === current)) {
@@ -266,10 +293,10 @@
       bondSection.style.display = bondMode && createBond.checked ? "" : "none";
       setFieldVisible(positionEffect, optionMode, true);
       setFieldVisible(optionPurpose, optionMode && positionEffect.value === "open", true);
-      setFieldVisible(security, Boolean(assetType.value));
+      setFieldVisible(security, true);
 
       const creatingSecurity = createOption.checked || createBond.checked;
-      security.disabled = creatingSecurity || !assetType.value;
+      security.disabled = creatingSecurity;
       rowFor(security)?.classList.toggle("muted-form-row", creatingSecurity);
       updateAmount();
     };
@@ -288,9 +315,10 @@
       replaceOptions(account, data.accounts, "---------");
       categoryRows = data.categories || [];
       securityRows = data.securities || [];
-      replaceOptions(category, categoryRows, "---------", (option, row) => {
-        option.dataset.code = row.code;
-      });
+      const selectedCategory = category.value;
+      replaceOptions(primary, categoryRows.filter(row => !row.parent_id && (row.code !== "fund" || String(row.id) === primary.value)), "请选择一级资产类别");
+      updateCategories();
+      if ([...category.options].some(option => option.value === selectedCategory)) category.value = selectedCategory;
       replaceOptions(optionUnderlying, data.underlyings || [], "---------");
       updateAssetTypes(false);
       updateSecurities(false);
@@ -307,9 +335,13 @@
     }
     family.addEventListener("change", () => refresh(true));
     member.addEventListener("change", () => refresh(false));
+    primary.addEventListener("change", () => {
+      category.value = "";
+      updateCategories(); updateAssetTypes(true); updateSecurities(true); updateSpecialFields();
+    });
     category.addEventListener("change", () => {
-      updateAssetTypes(true);
-      updateSecurities(true);
+      updateAssetTypes(false);
+      updateSecurities(false);
       updateSpecialFields();
     });
     assetType.addEventListener("change", () => {
@@ -317,6 +349,17 @@
       updateSpecialFields();
     });
     security.addEventListener("change", () => {
+      const row = securityRows.find(row => String(row.id) === security.value);
+      const classification = row && categoryRows.find(item => item.id === row.asset_category_id);
+      if (classification) {
+        const currentCategory = categoryRows.find(item => String(item.id) === category.value);
+        const preserveSecondary = !classification.parent_id && currentCategory?.parent_id === classification.id;
+        primary.value = String(classification.parent_id || classification.id);
+        updateCategories();
+        if (!preserveSecondary) category.value = String(classification.id);
+        updateAssetTypes(false); assetType.value = row.asset_type;
+        updateSpecialFields();
+      }
       if (!currency.value) {
         currency.value = security.options[security.selectedIndex]?.dataset.currency || "";
       }

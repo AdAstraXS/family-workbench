@@ -97,6 +97,8 @@ class Command(BaseCommand):
                 defaults={"display_order": order},
             )
 
+        from family_core.asset_classification import seed_categories
+        seed_categories(family)
         categories = [
             ("cash", "现金及现金等价物"),
             ("equity", "权益类"),

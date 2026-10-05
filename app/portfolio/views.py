@@ -302,7 +302,7 @@ def _latest_positions(accounts, year):
             "account__bank_account__member",
             "account__bank_account__family",
             "security",
-            "security__asset_category",
+            "security__asset_category__parent",
             "security__market_snapshot",
             "security__option_contract",
             "security__bond_detail",
@@ -623,7 +623,7 @@ def overview(request):
         if market_cny is None or cost_cny is None:
             continue
         category = (
-            item.security.asset_category.name
+            item.security.asset_category.primary.name
             if item.security.asset_category
             else default_category_names.get(
                 item.security.asset_type,
@@ -972,6 +972,7 @@ def snapshot_detail(request, pk):
         snapshot.position_lines.select_related(
             "account__bank_account__member",
             "security",
+            "asset_category__parent",
         ).order_by(
             "account__bank_account__member__display_order",
             "account__bank_account__account_name",
@@ -1540,7 +1541,7 @@ def account_detail(request, pk):
         context["cash_movements"] = activity_page
     elif active_tab in {"transactions", "individual-profit"}:
         transactions = InvestmentTransaction.objects.filter(account=account).select_related(
-            "security__asset_category", "security__option_contract__underlying", "ipo_subscription_trade",
+            "security__asset_category__parent", "security__option_contract__underlying", "ipo_subscription_trade",
         )
         if active_tab == "individual-profit":
             context["individual_profit"] = _individual_profit_data(
@@ -2446,7 +2447,7 @@ def transaction_form_options(request):
     categories = AssetCategory.objects.filter(
         Q(family_id=family_id) | Q(family=None),
         is_active=True,
-    ).order_by("display_order", "name")
+    ).select_related("parent").order_by("display_order", "name")
     securities = Security.objects.filter(
         Q(
             watchlist_items__family_id=family_id,
@@ -2466,7 +2467,8 @@ def transaction_form_options(request):
                 for item in accounts
             ],
             "categories": [
-                {"id": item.pk, "name": item.name, "code": item.code}
+                {"id": item.pk, "name": item.name, "code": item.code,
+                 "parent_id": item.parent_id, "primary_code": item.primary.code}
                 for item in categories
             ],
             "securities": [
@@ -2475,6 +2477,7 @@ def transaction_form_options(request):
                     "name": f"{item.symbol} {item.name}",
                     "currency": item.currency,
                     "asset_type": item.asset_type,
+                    "asset_category_id": item.asset_category_id,
                     "multiplier": str(item.contract_multiplier),
                 }
                 for item in securities
@@ -2577,7 +2580,7 @@ def save_transaction_form(request, title, instance=None):
                         )
                         .exclude(quantity=0)
                         .select_related(
-                            "security__asset_category",
+                            "security__asset_category__parent",
                             "security__option_contract",
                             "security__market_snapshot",
                         )

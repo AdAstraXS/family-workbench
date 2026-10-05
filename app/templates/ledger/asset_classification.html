@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% load table_navigation %}
+{% block title %}资产分类与历史映射{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="section-head"><h1>资产分类与历史映射</h1></div>
+  <p>投资组合和家庭账本共用以下分类。金融品种继续用于交易和估值。此页只读，不修改快照或流水。</p>
+  <div class="table-wrap"><table><thead><tr><th>一级资产类别</th><th>二级资产类别</th></tr></thead><tbody>
+    {% for category in categories %}<tr><td>{{ category.parent.name }}</td><td>{{ category.name }}</td></tr>{% empty %}<tr><td colspan="2">两级分类字典尚未安装。</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<section class="panel">
+  <h2>历史调整预览</h2>
+  <form method="get" class="filter-form">{{ form.as_p }}<button type="submit">生成映射预览</button></form>
+  <p class="muted">选择日期范围后点击按钮生成。范围适用于历史交易、账本及快照；证券主数据不分日期。无法确定的项目保留原分类。</p>
+  {% if report %}
+    <p>可调整 {{ report.counts.ready }} 条 · 已一致 {{ report.counts.unchanged }} 条 · 待确认 {{ report.counts.unresolved }} 条</p>
+    <details><summary>预览摘要与校验依据</summary><p>映射摘要：<code>{{ report.digest }}</code></p><p>非分类字段校验：<code>{{ report.financial_digest }}</code></p></details>
+    {% table_page report.rows "asset_classification" "分类映射" as mapping_table %}
+    {% include "workspace/table_pagination.html" with table=mapping_table %}
+    <div class="table-wrap"><table><thead><tr><th>记录</th><th>日期</th><th>旧分类</th><th>新分类</th><th>依据／待确认原因</th></tr></thead><tbody>
+    {% for row in mapping_table.page %}<tr><td>{{ row.label }}<small>{{ row.source }} · 编号 {{ row.id }}</small></td><td>{{ row.date|default:"主数据" }}</td><td>{{ row.old }}</td><td>{{ row.new }}</td><td>{{ row.reason }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% include "workspace/table_pagination.html" with table=mapping_table %}
+  {% endif %}
+</section>
+{% endblock %}

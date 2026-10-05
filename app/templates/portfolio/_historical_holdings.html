@@ -11,7 +11,7 @@
       <tbody>
         {% for item in historical_positions_table.page %}
           <tr>
-            <td>{{ item.security.symbol|default:"—" }}</td><td>{{ item.name }}</td><td>{{ item.account.member }}</td><td>{{ item.account.account_name }}</td>
+            <td>{{ item.security.symbol|default:"—" }}</td><td>{{ item.name }}<small>{{ item.asset_category|default:"历史分类待确认" }}</small></td><td>{{ item.account.member }}</td><td>{{ item.account.account_name }}</td>
             <td>{{ item.quantity|floatformat:"-4" }}</td><td>{{ item.price|currency2:item.currency }}</td><td>{{ item.market_value|currency0:item.currency }}</td><td>{{ item.cost|currency0:item.currency }}</td>
             <td>{{ item.unrealized|signed_currency0:item.currency }}</td><td>{{ item.annual_realized|signed_currency0:item.currency }}<small>历年累计 {{ item.realized|signed_currency0:item.currency }}</small></td>
             <td>{{ item.price_as_of|date:"Y-m-d"|default:"日期未记录" }}<small>{{ item.pricing_status }}</small></td>

@@ -75,16 +75,22 @@ def homepage_details(family, member, latest_snapshot, today):
                       trend_start=snapshots[0].snapshot_date, trend_end=snapshots[-1].snapshot_date)
     # Match ledger's family allocation: omit non-positive entries BEFORE grouping.
     # Net snapshot totals and historical trend values remain unchanged.
-    groups = list(latest_snapshot.entries.filter(base_amount__gt=0).order_by().values("asset_category__name").annotate(amount=Sum("base_amount")).order_by("-amount", "asset_category__name"))
+    from django.db.models.functions import Coalesce
+    groups = list(latest_snapshot.entries.filter(base_amount__gt=0).order_by().annotate(
+        classification_name=Coalesce("asset_category__parent__name", "asset_category__name")
+    ).values("classification_name").annotate(amount=Sum("base_amount")).order_by("-amount", "classification_name"))
+    groups = [{"asset_category__name": g["classification_name"], "amount": g["amount"]} for g in groups]
     total = sum((g["amount"] or ZERO for g in groups), ZERO)
     can_draw = total > 0
     result["allocation_total"] = total
     result["allocation_total_wan"] = total / Decimal("10000")
     result["allocation_liabilities"] = list(
         latest_snapshot.entries.filter(base_amount__lt=0).order_by()
-        .values("asset_category__name").annotate(amount=Sum("base_amount"))
-        .order_by("asset_category__name")
+        .annotate(classification_name=Coalesce("asset_category__parent__name", "asset_category__name"))
+        .values("classification_name").annotate(amount=Sum("base_amount"))
+        .order_by("classification_name")
     )
+    result["allocation_liabilities"] = [{"asset_category__name": g["classification_name"], "amount": g["amount"]} for g in result["allocation_liabilities"]]
     offset = ZERO
     for i, group in enumerate(groups):
         amount = group["amount"] or ZERO

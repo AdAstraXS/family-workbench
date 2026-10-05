@@ -42,7 +42,7 @@
           <tr>
             <th>成员</th>
             <th>账户名称</th>
-            <th>账户资产类别</th>
+            <th>一级资产类别</th><th>二级资产类别</th>
             <th>币种</th>
             <th>原币余额</th>
             <th>备注</th>
@@ -55,7 +55,7 @@
             <tr>
               <td>{{ entry_form.id }}{{ entry_form.display_order }}{{ entry_form.member }}{{ entry_form.member.errors }}</td>
               <td>{{ entry_form.account }}{{ entry_form.account.errors }}</td>
-              <td>{{ entry_form.asset_category }}{{ entry_form.asset_category.errors }}</td>
+              <td>{{ entry_form.asset_primary }}{{ entry_form.asset_primary.errors }}</td><td>{{ entry_form.asset_category }}{{ entry_form.asset_category.errors }}</td>
               <td>{{ entry_form.currency }}{{ entry_form.currency.errors }}</td>
               <td>{{ entry_form.original_amount }}{{ entry_form.original_amount.errors }}</td>
               <td>{{ entry_form.remark }}{{ entry_form.remark.errors }}</td>
@@ -78,7 +78,7 @@
       <tr>
         <td>{{ formset.empty_form.id }}{{ formset.empty_form.display_order }}{{ formset.empty_form.member }}</td>
         <td>{{ formset.empty_form.account }}</td>
-        <td>{{ formset.empty_form.asset_category }}</td>
+        <td>{{ formset.empty_form.asset_primary }}</td><td>{{ formset.empty_form.asset_category }}</td>
         <td>{{ formset.empty_form.currency }}</td>
         <td>{{ formset.empty_form.original_amount }}</td>
         <td>{{ formset.empty_form.remark }}</td>

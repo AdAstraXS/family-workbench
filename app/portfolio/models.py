@@ -266,6 +266,10 @@ class SecurityExchange(TimestampedModel):
 
 
 class Security(TimestampedModel):
+    def clean(self):
+        super().clean()
+        from family_core.asset_classification import validate_assignment
+        validate_assignment(self.asset_category, instrument=self.asset_type)
     TYPE_STOCK = "stock"
     TYPE_ETF = "etf"
     TYPE_BOND = "bond"
@@ -282,7 +286,7 @@ class Security(TimestampedModel):
     ]
     asset_category = models.ForeignKey(
         AssetCategory,
-        verbose_name="一级资产类别",
+        verbose_name="二级资产类别",
         on_delete=models.SET_NULL,
         related_name="securities",
         null=True,
@@ -320,6 +324,13 @@ class Security(TimestampedModel):
 
     @classmethod
     def default_asset_category(cls, family, asset_type):
+        from family_core.asset_classification import categories_for_family
+        from django.db.models import F
+        leaf_code = {cls.TYPE_STOCK: "equity_stock", cls.TYPE_OPTION: "option"}.get(asset_type)
+        if leaf_code:
+            leaf = categories_for_family(family).filter(code=leaf_code, parent__isnull=False, is_active=True).order_by(F("family_id").desc(nulls_last=True)).first()
+            if leaf:
+                return leaf
         code = {
             cls.TYPE_STOCK: "equity",
             cls.TYPE_ETF: "fund",
@@ -336,7 +347,7 @@ class Security(TimestampedModel):
                 code=code,
                 is_active=True,
             )
-            .order_by("-family_id", "display_order", "pk")
+            .order_by(F("family_id").desc(nulls_last=True), "display_order", "pk")
             .first()
         )
 
@@ -436,6 +447,7 @@ class BondDetail(TimestampedModel):
     coupon_rate = models.DecimalField("票面利率（%）", max_digits=10, decimal_places=6, default=0)
     coupon_frequency = models.PositiveSmallIntegerField("每年付息次数", default=2)
     maturity_date = models.DateField("到期日", null=True, blank=True)
+    original_issue_date = models.DateField("原始发行日", null=True, blank=True)
     redemption_price = models.DecimalField("到期兑付价格", max_digits=20, decimal_places=6, default=100)
     quote_basis = models.CharField(
         "报价方式", max_length=20, choices=QUOTE_BASIS_CHOICES, default=PER_100
@@ -855,6 +867,11 @@ class InvestmentPosition(TimestampedModel):
 
 
 class InvestmentTransaction(TimestampedModel):
+    def clean(self):
+        super().clean()
+        from family_core.asset_classification import validate_assignment
+        if self.account_id:
+            validate_assignment(self.asset_category, family=self.account.family, instrument=self.security.asset_type if self.security_id else None)
     EFFECT_OPEN = "open"
     EFFECT_CLOSE = "close"
     POSITION_EFFECT_CHOICES = [(EFFECT_OPEN, "开仓"), (EFFECT_CLOSE, "平仓")]
@@ -1275,6 +1292,10 @@ class PortfolioSnapshot(models.Model):
 
 
 class PortfolioSnapshotPositionLine(models.Model):
+    asset_category = models.ForeignKey(
+        AssetCategory, verbose_name="快照资产类别", on_delete=models.PROTECT,
+        null=True, blank=True, related_name="snapshot_position_lines",
+    )
     snapshot = models.ForeignKey(
         PortfolioSnapshot,
         verbose_name="组合快照",

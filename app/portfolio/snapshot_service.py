@@ -5,6 +5,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from ledger.models import AssetBalanceSnapshot
+from family_core.asset_classification import categories_for_family
 
 from .historical_valuation import slice_valuation, value_historical_portfolio
 from .models import PortfolioSnapshot, PortfolioSnapshotPositionLine
@@ -86,11 +87,14 @@ def create_portfolio_snapshot(
     )
     snapshot.position_lines.all().delete()
     account_map = {item.pk: item for item in accounts}
+    from django.db.models import F
+    cash_category = categories_for_family(family).filter(code="cash_balance", is_active=True).order_by(F("family_id").desc(nulls_last=True)).first()
     lines = [
         PortfolioSnapshotPositionLine(
             snapshot=snapshot,
             account=account_map[row["account_id"]],
             asset_type="cash",
+            asset_category=cash_category,
             asset_name=f"{row['currency']} 现金",
             quantity=row["amount"] or ZERO,
             price=Decimal("1"),
@@ -113,6 +117,7 @@ def create_portfolio_snapshot(
             snapshot=snapshot,
             account=position.account,
             security=position.security,
+            asset_category=position.security.asset_category,
             asset_type=position.security.asset_type,
             asset_name=position.security.name,
             quantity=position.quantity,

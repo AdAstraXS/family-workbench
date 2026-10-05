@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.core.exceptions import ValidationError
 from django.utils.text import slugify
 
 
@@ -174,6 +175,31 @@ class AccountType(BaseLookup):
 
 class AssetCategory(BaseLookup):
     code = models.SlugField("稳定代码", max_length=50, blank=True)
+    parent = models.ForeignKey(
+        "self", verbose_name="所属一级类别", on_delete=models.PROTECT,
+        related_name="children", null=True, blank=True,
+    )
+
+    @property
+    def primary(self):
+        return self.parent if self.parent_id else self
+
+    @property
+    def full_name(self):
+        return f"{self.parent.name} → {self.name}" if self.parent_id else self.name
+
+    def __str__(self):
+        return self.full_name
+
+    def clean(self):
+        super().clean()
+        if self.parent_id:
+            if self.parent_id == self.pk or self.parent.parent_id:
+                raise ValidationError({"parent": "资产类别只允许一级、二级，不能循环或增加第三级。"})
+            if self.family_id != self.parent.family_id:
+                raise ValidationError({"parent": "一级和二级类别必须属于同一家庭。"})
+            if self.pk and self.children.exists():
+                raise ValidationError({"parent": "已有二级类别的一级类别不能改为二级。"})
 
     class Meta(BaseLookup.Meta):
         verbose_name = "资产类别"
@@ -200,6 +226,23 @@ class AssetCategory(BaseLookup):
                 or f"asset-category-{uuid.uuid4().hex[:12]}"
             )
         super().save(*args, **kwargs)
+
+
+class AssetClassificationAudit(TimestampedModel):
+    family = models.ForeignKey(Family, on_delete=models.PROTECT)
+    batch_id = models.UUIDField(default=uuid.uuid4, db_index=True)
+    model_label = models.CharField(max_length=100)
+    object_id = models.PositiveBigIntegerField()
+    old_category = models.JSONField(default=dict)
+    new_category = models.JSONField(default=dict)
+    plan_digest = models.CharField(max_length=64)
+    start_date = models.DateField()
+    end_date = models.DateField()
+
+    class Meta:
+        verbose_name = "资产分类调整记录"
+        verbose_name_plural = verbose_name
+        ordering = ["-created_at", "pk"]
 
 
 class AccountRegion(BaseLookup):

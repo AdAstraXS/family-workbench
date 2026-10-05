@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import views
+from family_core.classification_views import classification_preview
 
 
 app_name = "ledger"
@@ -17,6 +18,7 @@ urlpatterns = [
     path("investment-goals/settings/", views.investment_goal_settings, name="investment_goal_settings"),
     path("investment-goals/actual-override/", views.investment_goal_actual_override, name="investment_goal_actual_override"),
     path("asset-snapshots/", views.asset_snapshot_list, name="asset_snapshot_list"),
+    path("asset-classification/", classification_preview, name="asset_classification"),
     path("asset-snapshots/compare/", views.asset_snapshot_compare, name="asset_snapshot_compare"),
     path("asset-snapshots/export/", views.asset_snapshot_export, name="asset_snapshot_export"),
     path("asset-snapshots/create/", views.asset_snapshot_create, name="asset_snapshot_create"),

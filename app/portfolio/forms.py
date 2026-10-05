@@ -7,6 +7,8 @@ from django.db.models import Q
 from django.utils import timezone
 
 from family_core.models import AssetCategory, Currency, Family, FamilyMember
+from family_core.asset_forms import AssetClassificationFormMixin
+from family_core.asset_classification import primary_code
 from family_core.form_widgets import apply_decimal_widgets
 from ledger.models import BankAccount
 
@@ -116,12 +118,13 @@ def clean_market_exchange(form, cleaned):
 
 
 ASSET_TYPES_BY_CATEGORY = {
-    "equity": {Security.TYPE_STOCK},
-    "fixed_income": {Security.TYPE_BOND},
+    "equity": {Security.TYPE_STOCK, Security.TYPE_ETF, Security.TYPE_FUND},
+    "fixed_income": {Security.TYPE_BOND, Security.TYPE_ETF, Security.TYPE_FUND},
     "fund": {Security.TYPE_ETF, Security.TYPE_FUND},
     "derivatives": {Security.TYPE_OPTION},
-    "commodities": {Security.TYPE_OTHER},
-    "alternatives": {Security.TYPE_OTHER},
+    "cash": {Security.TYPE_OTHER, Security.TYPE_ETF, Security.TYPE_FUND},
+    "commodities": {Security.TYPE_OTHER, Security.TYPE_ETF, Security.TYPE_FUND},
+    "alternatives": {Security.TYPE_OTHER, Security.TYPE_ETF, Security.TYPE_FUND},
 }
 
 
@@ -153,7 +156,7 @@ class InvestmentAccountForm(BaseModelForm):
         fields = ["bank_account", "extra_data"]
 
 
-class SecurityForm(BaseModelForm):
+class SecurityForm(AssetClassificationFormMixin, BaseModelForm):
     date_fields = ("listing_date",)
 
     class Meta:
@@ -201,6 +204,7 @@ class SecurityForm(BaseModelForm):
         self.fields["asset_category"].queryset = AssetCategory.objects.filter(
             Q(family=self.family) | Q(family=None), is_active=True
         ).order_by("display_order", "name")
+        self.setup_asset_classification(self.family)
 
     def clean_asset_type(self):
         asset_type = self.cleaned_data["asset_type"]
@@ -598,6 +602,7 @@ def save_bond_security(
     clean_price,
     accrued_interest,
     valuation_date,
+    original_issue_date=None,
     asset_category=None,
     security=None,
 ):
@@ -606,7 +611,7 @@ def save_bond_security(
     security = security or Security()
     security.asset_category = (
         asset_category
-        if asset_category and asset_category.code == "fixed_income"
+        if asset_category and primary_code(asset_category) == "fixed_income"
         else Security.default_asset_category(member.family, Security.TYPE_BOND)
     )
     security.symbol = symbol.strip().upper()
@@ -627,6 +632,7 @@ def save_bond_security(
             "coupon_rate": coupon_rate,
             "coupon_frequency": coupon_frequency,
             "maturity_date": maturity_date,
+            "original_issue_date": original_issue_date,
             "redemption_price": redemption_price,
             "quote_basis": quote_basis,
             "accrued_interest": accrued_interest,
@@ -673,7 +679,8 @@ def save_bond_security(
     return security
 
 
-class BondForm(forms.Form):
+class BondForm(AssetClassificationFormMixin, forms.Form):
+    asset_category = forms.ModelChoiceField(label="二级资产类别", queryset=AssetCategory.objects.none(), required=False)
     symbol = forms.CharField(label="债券代码", max_length=30)
     name = forms.CharField(label="债券名称", max_length=200)
     market = forms.ChoiceField(label="市场")
@@ -688,6 +695,7 @@ class BondForm(forms.Form):
     maturity_date = forms.DateField(
         label="到期日", required=False, widget=forms.DateInput(attrs={"type": "date"})
     )
+    original_issue_date = forms.DateField(label="原始发行日", required=False, widget=forms.DateInput(attrs={"type": "date"}))
     redemption_price = forms.DecimalField(label="到期兑付价格", max_digits=20, decimal_places=6, initial=100)
     quote_basis = forms.ChoiceField(label="报价方式", choices=BondDetail.QUOTE_BASIS_CHOICES)
     clean_price = forms.DecimalField(label="最新净价", max_digits=20, decimal_places=6)
@@ -721,6 +729,8 @@ class BondForm(forms.Form):
                 "coupon_rate": bond.coupon_rate,
                 "coupon_frequency": bond.coupon_frequency,
                 "maturity_date": bond.maturity_date,
+                "original_issue_date": bond.original_issue_date,
+                "asset_category": instance.asset_category_id,
                 "redemption_price": bond.redemption_price,
                 "quote_basis": bond.quote_basis,
                 "clean_price": quote.last_price if quote else 0,
@@ -728,6 +738,7 @@ class BondForm(forms.Form):
                 "valuation_date": bond.valuation_date,
             }
         super().__init__(*args, **kwargs)
+        self.setup_asset_classification(family)
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
         current_market = self.instance.market if self.instance else ""
@@ -756,12 +767,27 @@ class BondForm(forms.Form):
             duplicate = duplicate.exclude(pk=self.instance.pk)
         if symbol and market and duplicate.exists():
             self.add_error("symbol", "该市场已存在相同代码。")
+        from family_core.asset_classification import government_term_category
+        category = cleaned.get('asset_category')
+        if category and category.parent_id:
+            from family_core.asset_classification import validate_assignment
+            validate_assignment(category, family=self.family, instrument='bond')
+            if category.code in ('government_short', 'government_long') and cleaned.get('bond_type') != BondDetail.GOVERNMENT:
+                self.add_error('bond_type', '国债类别只能用于国债。')
+            term = government_term_category(cleaned.get('original_issue_date'), cleaned.get('maturity_date'))
+            if cleaned.get('bond_type') == BondDetail.GOVERNMENT and category.code in ('government_short', 'government_long'):
+                if not term:
+                    self.add_error('original_issue_date', '国债分类需核对原始发行日和到期日。')
+                elif term != category.code:
+                    self.add_error('asset_category', '所选国债类别与原始发行期限不一致。')
         return cleaned
 
     def save(self, member):
         return save_bond_security(
             member=member,
             security=self.instance,
+            asset_category=self.cleaned_data.get("asset_category"),
+            original_issue_date=self.cleaned_data.get("original_issue_date"),
             symbol=self.cleaned_data["symbol"],
             name=self.cleaned_data["name"],
             market=self.cleaned_data["market"],
@@ -803,7 +829,7 @@ class InvestmentPositionForm(BaseModelForm):
         ]
 
 
-class InvestmentTransactionForm(BaseModelForm):
+class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
     family = forms.ModelChoiceField(label="家庭", queryset=Family.objects.none())
     member = forms.ModelChoiceField(label="用户", queryset=FamilyMember.objects.none())
     bank_account = forms.ModelChoiceField(
@@ -883,6 +909,7 @@ class InvestmentTransactionForm(BaseModelForm):
         required=False,
         widget=forms.DateInput(attrs={"type": "date", "class": "form-control"}),
     )
+    bond_original_issue_date = forms.DateField(label="原始发行日", required=False, widget=forms.DateInput(attrs={"type": "date", "class": "form-control"}))
     bond_redemption_price = forms.DecimalField(
         label="到期兑付价格", max_digits=20, decimal_places=6, initial=100, required=False
     )
@@ -1056,6 +1083,7 @@ class InvestmentTransactionForm(BaseModelForm):
             Q(family_id=family_id) | Q(family=None),
             is_active=True,
         ).order_by("display_order", "name")
+        self.setup_asset_classification(family_id)
         selected_asset_type = (
             self.data.get("asset_type")
             or self.initial.get("asset_type")
@@ -1111,7 +1139,7 @@ class InvestmentTransactionForm(BaseModelForm):
         creating_bond = cleaned_data.get("create_bond")
         asset_category = cleaned_data.get("asset_category")
         asset_type = cleaned_data.get("asset_type")
-        category_code = asset_category.code if asset_category else ""
+        category_code = primary_code(asset_category)
         if creating_option and creating_bond:
             raise forms.ValidationError("一笔交易不能同时新增期权和债券。")
         if creating_option and (
@@ -1146,6 +1174,15 @@ class InvestmentTransactionForm(BaseModelForm):
                 )
             cleaned_data["security"] = None
         if creating_bond:
+            from family_core.asset_classification import government_term_category
+            if asset_category and asset_category.code in ('government_short', 'government_long') and cleaned_data.get('bond_type') != BondDetail.GOVERNMENT:
+                self.add_error('bond_type', '国债类别只能用于国债。')
+            if asset_category and asset_category.code in ('government_short', 'government_long') and cleaned_data.get('bond_type') == BondDetail.GOVERNMENT:
+                term = government_term_category(cleaned_data.get('bond_original_issue_date'), cleaned_data.get('bond_maturity_date'))
+                if not term:
+                    self.add_error('bond_original_issue_date', '国债分类需核对原始发行日和到期日。')
+                elif term != asset_category.code:
+                    self.add_error('asset_category', '所选国债类别与原始发行期限不一致。')
             required_bond_fields = {
                 "bond_symbol": "请输入债券代码。",
                 "bond_name": "请输入债券名称。",
@@ -1273,6 +1310,7 @@ class InvestmentTransactionForm(BaseModelForm):
                 coupon_rate=self.cleaned_data.get("bond_coupon_rate") or Decimal("0"),
                 coupon_frequency=self.cleaned_data["bond_coupon_frequency"],
                 maturity_date=self.cleaned_data.get("bond_maturity_date"),
+                original_issue_date=self.cleaned_data.get("bond_original_issue_date"),
                 redemption_price=self.cleaned_data["bond_redemption_price"],
                 quote_basis=self.cleaned_data["bond_quote_basis"],
                 clean_price=self.cleaned_data["price"],

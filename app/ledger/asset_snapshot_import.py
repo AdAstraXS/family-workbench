@@ -216,6 +216,7 @@ def _lookup_objects(family):
     account_types = {item.name: item for item in AccountType.objects.filter(family=family)}
     regions = {item.name: item for item in AccountRegion.objects.filter(family=family)}
     categories = {item.name: item for item in AssetCategory.objects.filter(family=family)}
+    categories.update({str(item): item for item in AssetCategory.objects.filter(family=family).select_related("parent")})
     categories_by_code = {
         item.code: item
         for item in AssetCategory.objects.filter(family=family, is_active=True)

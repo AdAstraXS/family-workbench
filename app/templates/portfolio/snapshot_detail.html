@@ -102,7 +102,7 @@
           <tr class="{% if line.has_pricing_warning %}snapshot-line-warning{% endif %}">
             <td>{{ line.account.member.display_name }}</td>
             <td>{{ line.account.account_name }}</td>
-            <td><strong>{{ line.asset_name }}</strong>{% if line.security %}<small class="price-meta">{{ line.security.market }}:{{ line.security.symbol }}</small>{% endif %}</td>
+            <td><strong>{{ line.asset_name }}</strong>{% if line.security %}<small class="price-meta">{{ line.security.market }}:{{ line.security.symbol }}</small>{% endif %}<small class="price-meta">{{ line.asset_category|default:"历史分类待确认" }}</small></td>
             <td>{% if line.asset_type == "cash" %}现金{% else %}{{ line.asset_type }}{% endif %}</td>
             <td class="numeric">{{ line.quantity|floatformat:"-6" }}</td>
             <td>{{ line.price|currency2:line.currency }}</td>

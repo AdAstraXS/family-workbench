@@ -419,9 +419,21 @@ class AssetBalanceSnapshotForm(BaseModelForm):
         return "CNY"
 
 
-class AssetBalanceEntryForm(CurrencyChoiceMixin, BaseModelForm):
+from family_core.asset_forms import AssetClassificationFormMixin
+
+
+class AssetBalanceEntryForm(AssetClassificationFormMixin, CurrencyChoiceMixin, BaseModelForm):
     def __init__(self, *args, **kwargs):
+        family = kwargs.pop("family", None)
         super().__init__(*args, **kwargs)
+        if family is None:
+            from family_core.models import Family
+            if self.instance.snapshot_id:
+                family = self.instance.snapshot.family
+            else:
+                selected_snapshot = AssetBalanceSnapshot.objects.filter(pk=self.data.get(self.add_prefix("snapshot"))).select_related("family").first()
+                family = selected_snapshot.family if selected_snapshot else get_household_family()
+        self.setup_asset_classification(family)
         self.apply_currency_choices()
         self.fields["remark"].widget.attrs.update({"rows": 1})
         self.fields["remark"].widget.attrs["class"] = "form-control compact-textarea"
@@ -445,10 +457,20 @@ class AssetBalanceEntryForm(CurrencyChoiceMixin, BaseModelForm):
         account = cleaned_data.get("account")
         if member and account and account.member_id != member.id:
             raise forms.ValidationError("账户必须属于当前选择的成员。")
+        if member and self.classification_family and member.family_id != getattr(self.classification_family, 'pk', self.classification_family):
+            self.add_error("member", "成员不属于当前家庭。")
         return cleaned_data
 
 
 class AssetBalanceEntryBaseFormSet(forms.BaseInlineFormSet):
+    def get_form_kwargs(self, index):
+        kwargs = super().get_form_kwargs(index)
+        family = self.instance.family if self.instance.family_id else None
+        if family is None and self.is_bound:
+            family = Family.objects.filter(pk=self.data.get("family")).first()
+        kwargs["family"] = family or get_household_family()
+        return kwargs
+
     def clean(self):
         super().clean()
         if any(self.errors):

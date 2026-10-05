@@ -243,7 +243,7 @@ def ledger_asset_snapshot(actor, *, scope=SCOPE_PERSONAL, snapshot_id=None):
     entries = snapshot.entries.select_related(
         "member",
         "account__account_type_ref",
-        "asset_category",
+        "asset_category__parent",
     )
     if scope == SCOPE_PERSONAL:
         entries = entries.filter(member=actor)
@@ -287,7 +287,9 @@ def ledger_asset_snapshot(actor, *, scope=SCOPE_PERSONAL, snapshot_id=None):
                     if entry.account_id and entry.account.account_type_ref_id
                     else None
                 ),
-                "asset_category": entry.asset_category.name if entry.asset_category_id else None,
+                "asset_category": str(entry.asset_category) if entry.asset_category_id else None,
+                "asset_primary": entry.asset_category.primary.name if entry.asset_category_id else None,
+                "asset_secondary": entry.asset_category.name if entry.asset_category_id and entry.asset_category.parent_id else None,
                 "currency": entry.currency,
                 "original_amount": _decimal(entry.original_amount),
                 "base_amount": _decimal(entry.base_amount),

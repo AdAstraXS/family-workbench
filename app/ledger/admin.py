@@ -7,6 +7,7 @@ from datetime import datetime, time
 
 from family_core.models import Family
 from family_core.household import get_household_family
+from .forms import AssetBalanceEntryForm
 
 from .models import (
     AnnualBudget,
@@ -438,13 +439,14 @@ class AnnualBudgetLineAdmin(admin.ModelAdmin):
 
 class AssetBalanceEntryInline(admin.TabularInline):
     model = AssetBalanceEntry
+    form = AssetBalanceEntryForm
     formset = AssetBalanceEntryBaseFormSet
-    fields = ("member", "account", "asset_category", "currency", "original_amount", "remark")
+    fields = ("member", "account", "asset_primary", "asset_category", "currency", "original_amount", "remark")
     extra = 3
 
     class Media:
         css = {"all": ("css/admin_ledger.css",)}
-        js = ("js/admin_asset_entry.js",)
+        js = ("js/admin_asset_entry.js", "js/asset-categories.js")
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "account":
@@ -514,14 +516,19 @@ class AssetBalanceSnapshotAdmin(admin.ModelAdmin):
 
 @admin.register(AssetBalanceEntry)
 class AssetBalanceEntryAdmin(admin.ModelAdmin):
-    fields = ("snapshot", "member", "account", "asset_category", "currency", "original_amount", "remark")
+    class EntryForm(AssetBalanceEntryForm):
+        class Meta(AssetBalanceEntryForm.Meta):
+            fields = '__all__'
+
+    form = EntryForm
+    fields = ("snapshot", "member", "account", "asset_primary", "asset_category", "currency", "original_amount", "remark")
     list_display = ("snapshot", "member", "account", "asset_category", "currency", "original_amount", "base_amount")
     list_filter = ("snapshot", "member", "currency", "asset_category")
     search_fields = ("account__account_name", "account_name", "asset_category__name", "remark")
 
     class Media:
         css = {"all": ("css/admin_ledger.css",)}
-        js = ("js/admin_asset_entry.js",)
+        js = ("js/admin_asset_entry.js", "js/asset-categories.js")
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "account":

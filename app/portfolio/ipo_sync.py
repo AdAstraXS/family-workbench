@@ -1,9 +1,8 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Sum
 
-from family_core.models import AssetCategory
 from ipo.date_rules import ipo_accounting_date
 from ipo.models import HkIpoSubscriptionTrade
 
@@ -34,15 +33,7 @@ def _security_identity(stock_code):
 
 
 def _stock_category(family):
-    return (
-        AssetCategory.objects.filter(
-            Q(family=family) | Q(family__isnull=True),
-            code="equity",
-            is_active=True,
-        )
-        .order_by("-family_id", "display_order", "pk")
-        .first()
-    )
+    return Security.default_asset_category(family, "stock")
 
 
 def _portfolio_account(ipo_trade):

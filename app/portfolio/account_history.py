@@ -79,7 +79,7 @@ class SnapshotRates:
 def snapshot_account_data(snapshot, accounts, selected_currency):
     """Use saved lines for holdings; transaction P&L is cumulative to cutoff."""
     lines = list(snapshot.position_lines.select_related(
-        "account__bank_account__member", "account__bank_account__family", "security",
+        "account__bank_account__member", "account__bank_account__family", "security", "asset_category__parent",
     ))
     rates = SnapshotRates(snapshot, lines)
     scopes = {
@@ -159,6 +159,7 @@ def snapshot_account_data(snapshot, accounts, selected_currency):
             entries = by_security_profit[(account.pk, line.security_id)]
             holdings.append({
                 "account": account, "security": line.security, "name": line.asset_name,
+                "asset_category": line.asset_category,
                 "quantity": line.quantity, "price": line.price, "price_as_of": line.price_as_of,
                 "currency": line.currency, "market_value": line.market_value_original,
                 "cost": line.cost_original,

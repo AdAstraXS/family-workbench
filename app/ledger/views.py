@@ -1048,7 +1048,7 @@ def get_latest_snapshot_entry_initial():
 
 
 def build_asset_snapshot_matrix(snapshot):
-    entries = snapshot.entries.select_related("member", "account", "asset_category").order_by("display_order", "account__account_name", "asset_category__name", "currency", "member__display_name")
+    entries = snapshot.entries.select_related("member", "account", "asset_category__parent").order_by("display_order", "account__account_name", "asset_category__name", "currency", "member__display_name")
     members = []
     member_ids = set()
     rows = {}
@@ -1066,7 +1066,7 @@ def build_asset_snapshot_matrix(snapshot):
     }
     for entry in entries:
         account_name = entry.account.account_name if entry.account else entry.account_name
-        asset_category_name = entry.asset_category.name if entry.asset_category else ""
+        asset_category_name = str(entry.asset_category) if entry.asset_category else ""
         original_amount = entry.original_amount or Decimal("0")
         base_amount = entry.base_amount or Decimal("0")
         has_original_amount = original_amount != Decimal("0")
@@ -1337,20 +1337,21 @@ def build_overview_asset_charts(snapshot):
     members = list(
         FamilyMember.objects.filter(family=snapshot.family, is_active=True).order_by("id")
     )
-    dimensions = ("category", "region", "account")
+    dimensions = ("category", "subcategory", "region", "account")
     member_totals = {
         member.id: {dimension: {} for dimension in dimensions}
         for member in members
     }
     family_totals = {dimension: {} for dimension in dimensions}
     for entry in snapshot.entries.select_related(
-        "asset_category", "member", "account", "account__account_region"
+        "asset_category__parent", "member", "account", "account__account_region"
     ):
         amount = entry.base_amount or Decimal("0")
         if amount <= 0:
             continue
         names = {
-            "category": entry.asset_category.name if entry.asset_category else "未分类",
+            "category": entry.asset_category.primary.name if entry.asset_category else "未分类",
+            "subcategory": str(entry.asset_category) if entry.asset_category else "未分类",
             "region": (
                 entry.account.account_region.name
                 if entry.account and entry.account.account_region
@@ -1383,6 +1384,7 @@ def build_overview_asset_charts(snapshot):
             dimension: {
                 "label": {
                     "category": "按资产类别",
+                    "subcategory": "按二级资产类别",
                     "region": "按账户地区",
                     "account": "按账户",
                 }[dimension],

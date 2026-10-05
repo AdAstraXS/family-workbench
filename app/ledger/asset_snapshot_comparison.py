@@ -74,7 +74,7 @@ def build_snapshot_comparison(snapshots, members, amount_mode):
                 "member": entry.member.display_name,
                 "member_order": member_order[entry.member_id],
                 "account": entry.account.account_name if entry.account else entry.account_name or "未命名账户",
-                "category": entry.asset_category.name if entry.asset_category else "未分类",
+            "category": str(entry.asset_category) if entry.asset_category else "未分类",
                 "currency": entry.currency,
                 "order": entry.display_order,
                 "values": [None] * len(snapshots),

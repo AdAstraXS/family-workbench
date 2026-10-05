@@ -11,6 +11,7 @@ from .forms import (
     security_market_choices,
     validate_security_market_selection,
 )
+from family_core.asset_forms import AssetClassificationFormMixin
 
 from .models import (
     BondDetail,
@@ -95,7 +96,7 @@ class SecurityExchangeAdmin(admin.ModelAdmin):
         return ("market", "code") if obj else ()
 
 
-class SecurityAdminForm(forms.ModelForm):
+class SecurityAdminForm(AssetClassificationFormMixin, forms.ModelForm):
     class Meta:
         model = Security
         fields = "__all__"
@@ -115,6 +116,12 @@ class SecurityAdminForm(forms.ModelForm):
         )
         if current_exchange:
             self.initial["exchange"] = f"{current_market}:{current_exchange}"
+        from family_core.models import Family
+        family = self.instance.asset_category.family if self.instance.asset_category_id else Family.objects.order_by("pk").first()
+        self.setup_asset_classification(family)
+
+    class Media:
+        js = ("js/asset-categories.js",)
 
     def clean(self):
         cleaned = super().clean()
@@ -143,8 +150,8 @@ class InvestmentAccountAdmin(admin.ModelAdmin):
 @admin.register(Security)
 class SecurityAdmin(admin.ModelAdmin):
     form = SecurityAdminForm
-    list_display = ("symbol", "name", "market", "exchange", "asset_type", "currency", "lot_size", "data_source", "is_active")
-    list_filter = ("market", "exchange", "asset_type", "currency", "data_source", "is_active")
+    list_display = ("symbol", "name", "asset_category", "market", "exchange", "asset_type", "currency", "lot_size", "data_source", "is_active")
+    list_filter = ("asset_category__parent", "asset_category", "market", "exchange", "asset_type", "currency", "data_source", "is_active")
     search_fields = ("symbol", "name", "industry")
 
 
@@ -320,8 +327,26 @@ class InvestmentPositionAdmin(admin.ModelAdmin):
         return False
 
 
+class InvestmentTransactionAdminForm(AssetClassificationFormMixin, forms.ModelForm):
+    class Meta:
+        model = InvestmentTransaction
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from family_core.household import get_household_family
+        from .models import InvestmentAccount
+        account_id = self.data.get(self.add_prefix("account")) or self.instance.account_id
+        account = InvestmentAccount.objects.filter(pk=account_id).select_related("bank_account__family").first()
+        self.setup_asset_classification(account.bank_account.family if account else get_household_family())
+
+    class Media:
+        js = ("js/asset-categories.js",)
+
+
 @admin.register(InvestmentTransaction)
 class InvestmentTransactionAdmin(admin.ModelAdmin):
+    form = InvestmentTransactionAdminForm
     def has_change_permission(self, request, obj=None):
         return super().has_change_permission(request, obj) and (obj is None or can_edit_transaction(obj))
 
@@ -605,6 +630,7 @@ class PortfolioSnapshotPositionLineAdmin(admin.ModelAdmin):
         "account",
         "asset_type",
         "asset_name",
+        "asset_category",
         "quantity",
         "price",
         "price_as_of",
