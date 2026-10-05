@@ -7,25 +7,25 @@
 {% block hub_content %}
 <section class="headline">
   <h1>批量确认预览</h1>
-  {% include "knowledge/_help_tip.html" with text="以下项目将按 AI 原建议直接接受；需要修改的项目请返回原文逐项处理。" %}
+  <p>以下是本次将保存的内容，已包含你在建议区的修改。可以继续编辑，确认前正式结果不会改变。</p>
 </section>
 <section class="panel">
   <div class="proposal-list">
     {% for proposal in proposals %}
       <div class="proposal-list-row preview">
         <span><strong>{{ proposal.document.title }}</strong><small>{{ proposal.get_proposal_type_display }} · v{{ proposal.revision.revision_number }}</small></span>
-        <span class="proposal-value">
-          {% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}
-        </span>
+        <div class="proposal-value"><label for="preview-value-{{ proposal.pk }}">将保存的{{ proposal.get_proposal_type_display }}</label><textarea id="preview-value-{{ proposal.pk }}" class="form-control" name="value_{{ proposal.pk }}" form="knowledge-bulk-apply" rows="{% if proposal.proposal_type == 'summary' %}7{% else %}2{% endif %}">{{ proposal.preview_value }}</textarea></div>
       </div>
     {% endfor %}
   </div>
-  <form method="post" action="{% url 'knowledge:proposal_bulk_apply' %}" class="form-actions">
+  <form id="knowledge-bulk-apply" method="post" action="{% url 'knowledge:proposal_bulk_apply' %}" class="form-actions">
     {% csrf_token %}
     <input type="hidden" name="proposal_ids" value="{{ proposal_ids }}">
     <input type="hidden" name="confirm" value="yes">
+    <input type="hidden" name="use_edited_values" value="yes">
     <button class="button primary" type="submit">确认接受这 {{ proposals|length }} 项</button>
-    <a class="button" href="{% url 'knowledge:review' %}">返回修改选择</a>
+    <a class="button" href="{% url 'knowledge:review' %}">返回等待确认</a>
   </form>
+  <p class="muted">返回列表不会保存未确认的修改；如需调整本次内容，可直接修改上方编辑框。</p>
 </section>
 {% endblock %}

@@ -51,20 +51,17 @@
       {% for proposal in review_proposals %}
         <article class="proposal-card status-{{ proposal.status }}">
           <header><strong>{{ proposal.get_proposal_type_display }}</strong><span class="status-pill warning">待确认</span></header>
-          <form method="post" action="{% url 'knowledge:proposal_review' proposal.pk %}" class="proposal-form">
-            {% csrf_token %}
-            <input type="hidden" name="return_to" value="review">
-            <textarea class="form-control" name="value" rows="{% if proposal.proposal_type == 'summary' %}7{% else %}2{% endif %}">{% if proposal.proposal_type == "tags" %}{{ proposal.suggested_value.items|join:"，" }}{% elif proposal.proposal_type == "summary" %}{{ proposal.suggested_value.text }}{% else %}{{ proposal.suggested_value.value }}{% endif %}</textarea>
+          {% include "knowledge/_proposal_editor.html" %}
             {% if proposal.proposal_type == "category" and proposal.suggested_value.is_new %}<p class="knowledge-new-taxonomy">建议新增分类；确认后才会加入目录。</p>{% elif proposal.proposal_type == "tags" and proposal.suggested_value.new_items %}<p class="knowledge-new-taxonomy">建议新增：{{ proposal.suggested_value.new_items|join:"、" }}；确认后才会加入目录。</p>{% endif %}
             <p class="knowledge-suggestion-basis"><strong>建议依据：</strong>{% include "knowledge/_help_tip.html" with text="由当前原文版本生成；第一版不展示复杂推理，请直接对照原文判断。" %}</p>
-            <div><button class="button primary" type="submit" name="action" value="accept">修改并确认</button><button class="button danger-outline" type="submit" name="action" value="reject">拒绝此项</button></div>
-          </form>
         </article>
       {% endfor %}
 
       {% if can_write %}
-        <form method="post" action="{% url 'knowledge:proposal_bulk_preview' %}" class="knowledge-review-all-form">
+        <form id="knowledge-bulk-review" method="post" action="{% url 'knowledge:proposal_bulk_preview' %}" class="knowledge-review-all-form">
           {% csrf_token %}
+          <input type="hidden" name="return_to" value="review">
+          <input type="hidden" name="use_edited_values" value="yes">
           {% for proposal in review_proposals %}<input type="hidden" name="selected" value="{{ proposal.pk }}">{% endfor %}
           <button class="button primary" type="submit">预览并确认本篇全部建议</button>
         </form>
