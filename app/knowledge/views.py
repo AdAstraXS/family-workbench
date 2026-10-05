@@ -7,6 +7,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.paginator import Paginator
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, When
 from django.db.models.functions import Substr
@@ -120,7 +121,7 @@ def _knowledge_status_for_route(route):
 
 def _source_sections(source):
     sections = {}
-    for document in source.documents.order_by("section_name", "id").only(
+    for document in source.documents.filter(trashed_at__isnull=True, purged_at__isnull=True).order_by("section_name", "id").only(
         "section_name",
         "hierarchy",
     ):
@@ -298,7 +299,7 @@ def web_captures(request):
             capture, created = submit_capture(member, **values)
             messages.success(request, "已加入保存队列，正文归档后进入待整理。" if created else "此链接已经收藏，已打开原记录；不会重复抓取或改变可见范围。")
             return redirect("knowledge:web_capture_detail", pk=capture.pk)
-    captures = KnowledgeWebCapture.objects.filter(owner=member, family=member.family).select_related("document", "last_job")
+    captures = KnowledgeWebCapture.objects.filter(owner=member, family=member.family).filter(Q(document__isnull=True) | Q(document__trashed_at__isnull=True, document__purged_at__isnull=True)).select_related("document", "last_job")
     return render(request, "knowledge/web_captures.html", {"form": form, "page_obj": Paginator(captures, 20).get_page(request.GET.get("page")), "can_write": _can_write(member), "configured": bool(getattr(settings, "KNOWLEDGE_FIRECRAWL_API_KEY", ""))})
 
 
@@ -308,6 +309,8 @@ def web_capture_detail(request, pk):
     if member is None:
         return _membership_required_response(request)
     capture = get_object_or_404(KnowledgeWebCapture.objects.select_related("document__current_revision", "last_job"), owner=member, family=member.family, pk=pk)
+    if capture.document_id and (capture.document.trashed_at or capture.document.purged_at):
+        return redirect("knowledge:document_manage", pk=capture.document_id)
     active = bool(capture.last_job_id and capture.last_job.status in KnowledgeJob.ACTIVE_STATUSES)
     ai_ready = bool(capture.document_id and capture.document.proposal_runs.filter(revision=capture.document.current_revision).exists())
     history = KnowledgeJob.objects.filter(family=member.family, requested_by=member, job_type=KnowledgeJob.TYPE_CAPTURE_WEB, parameters__capture_id=capture.pk).order_by("-id")[:10]
@@ -1660,6 +1663,67 @@ def document_detail(request, pk):
 
 
 @login_required
+def trash(request):
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    documents = accessible_documents(member, include_trashed=True).filter(trashed_at__isnull=False).order_by("-trashed_at", "-pk")
+    if member.role != FamilyMember.ROLE_ADMIN:
+        documents = documents.filter(owner=member)
+    if not _can_write(member):
+        documents = documents.none()
+    cleanups = accessible_documents(member, include_trashed=True, include_purged=True).filter(file_cleanups__status__in=["pending", "failed"]).distinct()
+    if member.role != FamilyMember.ROLE_ADMIN:
+        cleanups = cleanups.filter(owner=member)
+    return render(request, "knowledge/trash.html", {"page_obj": Paginator(documents, 20).get_page(request.GET.get("page")), "cleanup_documents": cleanups if _can_write(member) else cleanups.none()})
+
+
+@login_required
+def document_manage(request, pk):
+    from .lifecycle import change_document, request_cleanup, process_cleanup
+    member = current_member(request)
+    if member is None:
+        return _membership_required_response(request)
+    document = get_object_or_404(accessible_documents(member, include_trashed=True, include_purged=True), pk=pk)
+    if not _can_write(member) or not can_organize_document(member, document):
+        return HttpResponseForbidden("你没有管理这篇资料的权限。")
+    if request.method == "POST":
+        action = request.POST.get("action", "")
+        try:
+            if action in {"purge", "versions"}:
+                phrase = "彻底删除" if action == "purge" else "清理旧版本"
+                if request.POST.get("confirmation", "").strip() != phrase:
+                    raise ValidationError(f"请输入“{phrase}”确认；尚未删除任何内容。")
+                task = request_cleanup(pk, member, whole_document=action == "purge")
+                completed = process_cleanup(task.pk)
+                if completed:
+                    messages.success(request, "内容及独占文件已清理。外部原文、共享导入包和备份不受影响。")
+                else:
+                    messages.warning(request, "内容已删除，但文件清理未完成；请在本页重试文件清理。")
+            elif action == "retry_files":
+                task_id = request.POST.get("task_id", "")
+                if not task_id.isascii() or not task_id.isdigit() or len(task_id) > 18:
+                    raise ValidationError("文件清理记录无效，请刷新页面后重试。")
+                task = get_object_or_404(document.file_cleanups, pk=int(task_id))
+                if process_cleanup(task.pk):
+                    messages.success(request, "文件清理已完成。")
+                else:
+                    messages.error(request, "文件清理仍未完成，请稍后重试或联系管理员。")
+            else:
+                change_document(pk, member, action)
+                messages.success(request, {"trash": "已移入回收站，可以恢复；不会自动清空。", "restore": "已恢复资料，保留删除前的整理状态。", "unfeature": "已移出精选，正文和已确认整理结果保留在归档资料中。"}[action])
+                if action == "trash":
+                    return redirect("knowledge:trash")
+                return redirect("knowledge:document_detail", pk=pk)
+        except ValidationError as exc:
+            messages.error(request, "；".join(exc.messages))
+        return redirect("knowledge:document_manage", pk=pk)
+    revisions = list(document.revisions.order_by("-revision_number").annotate(citation_count=Count("artifact_evidence_links")))
+    deletable = sum(not r.purged_at and r.pk != document.current_revision_id and not r.citation_count for r in revisions)
+    return render(request, "knowledge/document_manage.html", {"document": document, "revisions": revisions, "deletable_count": deletable, "events": document.lifecycle_events.select_related("actor")[:30], "cleanups": document.file_cleanups.exclude(status="success"), "referenced": document.artifact_evidence_links.exists()})
+
+
+@login_required
 @require_POST
 def document_reading_preferences(request, pk):
     member = current_member(request)
@@ -1684,11 +1748,12 @@ def document_reading_preferences(request, pk):
 
 @login_required
 @require_POST
+@transaction.atomic
 def document_add_to_inbox(request, pk):
     member = current_member(request)
     if member is None:
         return _membership_required_response(request)
-    document = get_object_or_404(accessible_documents(member), pk=pk)
+    document = get_object_or_404(accessible_documents(member).select_for_update(of=("self",)), pk=pk)
     if not _can_write(member) or not can_organize_document(member, document):
         return HttpResponseForbidden("只有资料所有者或家庭管理员可以整理这项资料。")
     if document.knowledge_status == KnowledgeDocument.KNOWLEDGE_ARCHIVED:
@@ -1714,11 +1779,12 @@ def document_add_to_inbox(request, pk):
 
 @login_required
 @require_POST
+@transaction.atomic
 def document_cancel_organizing(request, pk):
     member = current_member(request)
     if member is None:
         return _membership_required_response(request)
-    document = get_object_or_404(accessible_documents(member), pk=pk)
+    document = get_object_or_404(accessible_documents(member).select_for_update(of=("self",)), pk=pk)
     if not _can_write(member) or not can_organize_document(member, document):
         return HttpResponseForbidden("只有资料所有者或家庭管理员可以整理这项资料。")
     if document.knowledge_status == KnowledgeDocument.KNOWLEDGE_PENDING:
@@ -1983,6 +2049,7 @@ def document_organize(request, pk):
         )
         if form.is_valid():
             with transaction.atomic():
+                get_object_or_404(accessible_documents(member).select_for_update(of=("self",)), pk=document.pk)
                 document = form.save()
                 document.knowledge_status = KnowledgeDocument.KNOWLEDGE_INCLUDED
                 document.library_tier = KnowledgeDocument.LIBRARY_KNOWLEDGE
@@ -2075,7 +2142,7 @@ def revision_raw_download(request, pk):
     member = current_member(request)
     if member is None:
         raise Http404
-    document = get_object_or_404(accessible_documents(member), revisions__pk=pk)
+    document = get_object_or_404(accessible_documents(member), revisions__pk=pk, revisions__purged_at__isnull=True)
     revision = get_object_or_404(document.revisions, pk=pk)
     response = FileResponse(
         _open_protected_file(revision.raw_file),
@@ -2448,14 +2515,16 @@ def source_detail(request, pk):
         {
             "source": source,
             "recent_jobs": source.jobs.select_related("requested_by").order_by("-created_at")[:10],
-            "document_count": source.documents.count(),
+            "document_count": source.documents.filter(trashed_at__isnull=True, purged_at__isnull=True).count(),
             "archive_count": source.documents.filter(
+                trashed_at__isnull=True, purged_at__isnull=True,
                 knowledge_status__in=[
                     KnowledgeDocument.KNOWLEDGE_INCLUDED,
                     KnowledgeDocument.KNOWLEDGE_PENDING,
                 ],
             ).count(),
             "pending_count": source.documents.filter(
+                trashed_at__isnull=True, purged_at__isnull=True,
                 knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING,
             ).count(),
             "source_sections": _source_sections(source)
@@ -2539,7 +2608,7 @@ def source_update(request, pk):
         source.kind == KnowledgeSource.KIND_ONENOTE
         and request.POST.get("apply_existing") == "on"
     ):
-        for document in source.documents.iterator():
+        for document in source.documents.filter(trashed_at__isnull=True, purged_at__isnull=True).iterator():
             section_id = (document.hierarchy or {}).get("section_id")
             desired_status = _knowledge_status_for_route(
                 source.route_for_section(section_id)
@@ -2756,7 +2825,12 @@ def _proposal_value(proposal, raw_value=None):
 
 
 def _apply_proposal(proposal, member, *, accept, value=None):
-    document = proposal.document
+    document = accessible_documents(member).select_for_update(of=("self",)).filter(pk=proposal.document_id).first()
+    if document is None:
+        raise ValueError("资料已删除或访问权限已变化，不能确认建议。")
+    proposal = KnowledgeProposal.objects.select_related("revision", "run").filter(pk=proposal.pk).first()
+    if proposal is None:
+        raise ValueError("建议对应的旧版本已清理，请刷新页面。")
     was_curated = (
         document.knowledge_status == KnowledgeDocument.KNOWLEDGE_INCLUDED
         and document.library_tier == KnowledgeDocument.LIBRARY_KNOWLEDGE

@@ -98,8 +98,10 @@ def remove_investment_note_index(note):
     ).delete()
 
 
+@transaction.atomic
 def index_document(document):
-    if not document.owner_id or not document.current_revision_id:
+    document = KnowledgeDocument.objects.select_for_update(of=("self",)).select_related("source", "owner", "current_revision").get(pk=document.pk)
+    if document.trashed_at or document.purged_at or not document.owner_id or not document.current_revision_id:
         KnowledgeSearchEntry.objects.filter(
             family=document.family,
             item_kind=KnowledgeSearchEntry.KIND_DOCUMENT,
@@ -210,7 +212,7 @@ def rebuild_family_search(family):
         notes_count += 1
     document_count = 0
     for document in (
-        KnowledgeDocument.objects.filter(family=family, current_revision__isnull=False)
+        KnowledgeDocument.objects.filter(family=family, current_revision__isnull=False, trashed_at__isnull=True, purged_at__isnull=True)
         .select_related("source", "owner", "current_revision")
         .iterator()
     ):

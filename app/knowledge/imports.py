@@ -800,6 +800,8 @@ def _create_import_revision(batch, item, archive, names):
                 document = KnowledgeDocument.objects.select_for_update().select_related(
                     "current_revision"
                 ).get(pk=document.pk)
+                if document.trashed_at or document.purged_at:
+                    raise KnowledgeImportError("这篇资料已在回收站或已彻底删除，不能通过导入重新写入。")
                 previous_state = _snapshot_document(document)
                 previous_revision = document.current_revision
                 document.title = item.title
@@ -1012,6 +1014,8 @@ def assign_import_batch_person(batch, person_name):
         details.setdefault("source_author", item.author)
         if item.status == KnowledgeImportItem.STATUS_IMPORTED and item.document_id:
             document = KnowledgeDocument.objects.select_for_update().get(pk=item.document_id)
+            if document.trashed_at or document.purged_at:
+                raise KnowledgeImportError("资料已删除或移入回收站，不能修改人物归属。")
             expected_updated_at = details.get("document_updated_at")
             if (
                 document.current_revision_id != item.revision_id
@@ -1094,6 +1098,9 @@ def rollback_knowledge_batch(job):
             document.current_revision_id != item.revision_id
             or not expected_updated_at
             or document.updated_at.isoformat() != expected_updated_at
+            or document.trashed_at or document.purged_at
+            or item.revision.purged_at
+            or (item.previous_revision_id and item.previous_revision.purged_at)
         ):
             message = "文档在该批次后已有修改，已阻止自动回滚。"
             item.error_message = message
@@ -1105,6 +1112,9 @@ def rollback_knowledge_batch(job):
         files = _revision_file_records(item.revision)
         try:
             with transaction.atomic():
+                document = KnowledgeDocument.objects.select_for_update().get(pk=item.document_id)
+                if document.trashed_at or document.purged_at or document.updated_at.isoformat() != expected_updated_at or document.artifact_evidence_links.exists() or item.revision.artifact_evidence_links.exists():
+                    raise KnowledgeImportError("资料已变化、已删除或被专题引用，不能回滚此项。")
                 if (item.details or {}).get("created_document"):
                     if document.revisions.count() != 1:
                         raise KnowledgeImportError("新建文档已有其他版本，已阻止自动回滚。")

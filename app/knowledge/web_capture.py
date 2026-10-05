@@ -152,6 +152,8 @@ def queue_capture(capture, mode="resume"):
         raise WebCaptureError("不支持的重试方式。")
     with transaction.atomic():
         capture = KnowledgeWebCapture.objects.select_for_update().get(pk=capture.pk)
+        if capture.document_id and (capture.document.trashed_at or capture.document.purged_at):
+            raise WebCaptureError("资料已在回收站或已彻底删除，不能重新抓取。请先到回收站恢复可恢复的资料。")
         if capture.last_job_id and capture.last_job.status in KnowledgeJob.ACTIVE_STATUSES:
             return capture.last_job, False
         job = KnowledgeJob.objects.create(family=capture.family, requested_by=capture.owner, job_type=KnowledgeJob.TYPE_CAPTURE_WEB,
@@ -164,6 +166,8 @@ def queue_capture(capture, mode="resume"):
 
 def checkpoint(job, stage=None):
     capture = KnowledgeWebCapture.objects.select_for_update().get(pk=job.parameters["capture_id"])
+    if capture.document_id and (capture.document.trashed_at or capture.document.purged_at):
+        raise CaptureStopped()
     current = KnowledgeJob.objects.select_for_update().get(pk=job.pk)
     if capture.last_job_id != job.pk or current.status != KnowledgeJob.STATUS_RUNNING or current.started_at != job.started_at:
         raise CaptureStopped()
@@ -194,7 +198,7 @@ def save_snapshot(job, snapshot):
                 knowledge_status=KnowledgeDocument.KNOWLEDGE_PENDING, curation_status=KnowledgeDocument.CURATION_NORMALIZED)
             capture.document = document
             capture.save(update_fields=["document", "updated_at"])
-        revision, created = KnowledgeRevision.objects.get_or_create(document=document, content_hash=digest(raw_bytes),
+        revision, created = KnowledgeRevision.objects.get_or_create(document=document, content_hash=digest(raw_bytes), purged_at__isnull=True,
             defaults={"revision_number": (document.revisions.aggregate(n=Max("revision_number"))["n"] or 0) + 1,
                 "raw_file": "", "converter_version": CONVERTER_VERSION, "normalized_html": safe, "plain_text": text, "normalized_hash": digest(text.encode())})
         if created:

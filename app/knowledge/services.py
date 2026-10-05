@@ -135,6 +135,8 @@ def queue_knowledge_job(*, family, source, requested_by, job_type, parameters=No
     parameters = parameters or {}
     try:
         with transaction.atomic():
+            if source is not None:
+                KnowledgeSource.objects.select_for_update().get(pk=source.pk)
             return KnowledgeJob.objects.create(
                 family=family,
                 source=source,
@@ -211,6 +213,8 @@ def _stored_resource_urls(revision, raw_html):
 
 
 def rebuild_document_normalized_content(document, *, save=True):
+    if KnowledgeDocument.objects.filter(pk=document.pk).filter(Q(trashed_at__isnull=False) | Q(purged_at__isnull=False)).exists():
+        raise ValueError("回收站或已删除的资料不能重建正文。")
     revision = document.current_revision
     if revision is None:
         raise ValueError("知识文档没有可重建的当前原始版本。")
@@ -354,7 +358,9 @@ def _save_page_revision(document, raw_bytes, downloaded_resources, source_modifi
         raise
 
 
+@transaction.atomic
 def _sync_page(client, source, section, page):
+    KnowledgeSource.objects.select_for_update().get(pk=source.pk)
     external_id = str(page.get("id", ""))
     if not external_id:
         raise MicrosoftSourceUnavailableError("OneNote 页面缺少稳定 ID。")
@@ -393,6 +399,9 @@ def _sync_page(client, source, section, page):
             "library_tier": KnowledgeDocument.LIBRARY_ARCHIVE,
         },
     )
+    document = KnowledgeDocument.objects.select_for_update(of=("self",)).select_related("current_revision").get(pk=document.pk)
+    if document.trashed_at or document.purged_at:
+        return document, KnowledgeJobItem.STATUS_SKIPPED
     metadata_changed = any(
         [
             document.title != title,
@@ -488,7 +497,9 @@ def sync_onenote_source(job):
         title = str(page.get("title", ""))
         seen_ids.add(external_id)
         try:
-            _, status = _sync_page(client, source, section, page)
+            document, status = _sync_page(client, source, section, page)
+            if document.trashed_at or document.purged_at:
+                title = "已删除的资料"
             _job_item(job, external_id, title, status)
             if status == KnowledgeJobItem.STATUS_SUCCESS:
                 counters["success_count"] += 1
@@ -513,7 +524,7 @@ def sync_onenote_source(job):
     full_reconcile = bool(job.parameters.get("full_reconcile")) or existing_count == 0
     deleted_count = 0
     if full_reconcile:
-        missing = source.documents.exclude(external_id__in=seen_ids).exclude(
+        missing = source.documents.filter(trashed_at__isnull=True, purged_at__isnull=True).exclude(external_id__in=seen_ids).exclude(
             sync_status=KnowledgeDocument.SYNC_SOURCE_DELETED
         )
         deleted_count = missing.count()
@@ -577,6 +588,8 @@ def restore_ai_processing_documents(job):
             pk__in=document_ids,
             family=job.family,
             curation_status=KnowledgeDocument.CURATION_PENDING_AI,
+            trashed_at__isnull=True,
+            purged_at__isnull=True,
         ).select_related("source", "owner", "current_revision")
     )
     if not documents:
@@ -600,6 +613,8 @@ def mark_ai_processing_documents(job):
     queryset = KnowledgeDocument.objects.filter(
         pk__in=document_ids,
         family=job.family,
+        trashed_at__isnull=True,
+        purged_at__isnull=True,
     )
     if reorganization:
         queryset = queryset.filter(
@@ -641,6 +656,8 @@ def generate_source_proposals(job):
     reorganization = (job.parameters or {}).get("selection_scope") == "curated_reorganization"
     document_queryset = source.documents.filter(
         current_revision__isnull=False,
+        trashed_at__isnull=True,
+        purged_at__isnull=True,
         sync_status=KnowledgeDocument.SYNC_AVAILABLE,
     )
     if reorganization:

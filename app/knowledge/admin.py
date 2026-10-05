@@ -11,6 +11,8 @@ from .models import (
     KnowledgeCategory,
     KnowledgeCurationRevision,
     KnowledgeDocument,
+    KnowledgeFileCleanup,
+    KnowledgeLifecycleEvent,
     KnowledgeImportBatch,
     KnowledgeImportItem,
     KnowledgeJob,
@@ -32,6 +34,22 @@ class KnowledgeWebCaptureAdmin(PrivateContentAdmin):
         return KnowledgeWebCapture.objects.filter(owner=member, family=member.family)
 
     list_display = ("id", "url", "owner", "stage", "document", "updated_at")
+
+
+@admin.register(KnowledgeLifecycleEvent)
+class KnowledgeLifecycleEventAdmin(PrivateContentAdmin):
+    list_display = ("document", "actor", "action", "created_at")
+
+    def allowed_objects(self, member):
+        return KnowledgeLifecycleEvent.objects.filter(document__in=accessible_documents(member, include_trashed=True, include_purged=True))
+
+
+@admin.register(KnowledgeFileCleanup)
+class KnowledgeFileCleanupAdmin(PrivateContentAdmin):
+    list_display = ("document", "status", "finished_at", "updated_at")
+
+    def allowed_objects(self, member):
+        return KnowledgeFileCleanup.objects.filter(document__in=accessible_documents(member, include_trashed=True, include_purged=True))
 
 
 class KnowledgeArtifactVersionInline(admin.TabularInline):

@@ -17,6 +17,7 @@
 
   <section>
     <h2>来源与管理</h2>
+    <a href="{% url 'knowledge:trash' %}"{% if request.resolver_match.url_name == 'trash' or request.resolver_match.url_name == 'document_manage' %} class="active"{% endif %}><span aria-hidden="true">收</span><strong>回收站</strong><small>恢复与删除</small></a>
     <a href="{% url 'knowledge:sources' %}"{% if request.resolver_match.app_name == "knowledge" and "source" in request.resolver_match.url_name or request.resolver_match.app_name == "knowledge" and "microsoft" in request.resolver_match.url_name or request.resolver_match.app_name == "knowledge" and "notebook" in request.resolver_match.url_name %} class="active"{% endif %}>
       <span aria-hidden="true">源</span><strong>来源与同步</strong>
     </a>

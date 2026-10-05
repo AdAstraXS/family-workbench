@@ -216,6 +216,9 @@ def _parse_result(payload, *, category_names, tag_names):
 
 
 def generate_proposals(document, *, cloud_ai_consent="source", requested_by=None, before_save=None):
+    document = type(document).objects.select_related("current_revision", "source", "owner", "family").get(pk=document.pk)
+    if document.trashed_at or document.purged_at:
+        raise KnowledgeAiError("资料已在回收站或已删除，不能生成整理建议。")
     revision = document.current_revision
     if revision is None:
         raise KnowledgeAiError("文档尚无可分析的正文版本。")
@@ -311,11 +314,11 @@ def generate_proposals(document, *, cloud_ai_consent="source", requested_by=None
     with _proposal_save_guard(analysis_request):
         if before_save:
             before_save()
-            locked_document = type(document).objects.select_for_update().get(pk=document.pk)
-            if locked_document.current_revision_id != revision.pk:
-                raise KnowledgeAiError("正文版本已经变化，旧 AI 结果未应用，请重试。")
-            if locked_document.curation_status == "confirmed" and document.curation_status != "confirmed":
-                raise KnowledgeAiError("成员已完成手动整理，旧 AI 结果未应用；已确认内容保持不变。")
+        locked_document = type(document).objects.select_for_update().get(pk=document.pk)
+        if locked_document.trashed_at or locked_document.purged_at or locked_document.current_revision_id != revision.pk:
+            raise KnowledgeAiError("资料已删除或正文版本已经变化，旧 AI 结果未应用，请重试。")
+        if locked_document.curation_status == "confirmed" and document.curation_status != "confirmed":
+            raise KnowledgeAiError("成员已完成手动整理，旧 AI 结果未应用；已确认内容保持不变。")
         analysis_request.status = AiAnalysisRequest.STATUS_SUCCESS
         analysis_request.error_message = ""
         analysis_request.save(update_fields=["status", "error_message", "updated_at"])

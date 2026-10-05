@@ -193,6 +193,7 @@ def knowledge_revision(actor, *, document_id, revision_id, include_pending=False
     revision = KnowledgeRevision.objects.filter(
         pk=revision_id,
         document=document,
+        purged_at__isnull=True,
     ).first()
     if revision is None:
         raise GlobalAiReadError("知识资料不可用。")

@@ -250,7 +250,7 @@ class SelfServiceProgramTests(TestCase):
             original = self.client.get(reverse('intelligence:program_uploaded_original', args=[entry.pk]))
             self.assertEqual(b''.join(original.streaming_content), transcript)
             archived = self.client.post(reverse('intelligence:program_action', args=[entry.pk]),
-                {'action': 'archive', 'revision_id': entry.current_revision_id})
+                {'action': 'archive', 'revision_id': entry.current_revision_id, 'include_transcript': 'on'})
             self.assertEqual(archived.status_code, 302)
             self.assertEqual(KnowledgeDocument.objects.get().visibility, KnowledgeVisibility.PRIVATE)
             self.client.force_login(self.other.user)

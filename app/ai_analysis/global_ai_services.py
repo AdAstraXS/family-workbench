@@ -318,10 +318,12 @@ def _shareable_answer(actor, message_id):
                 family=actor.family,
                 visibility=KnowledgeVisibility.FAMILY,
                 source__visibility=KnowledgeVisibility.FAMILY,
+                trashed_at__isnull=True,
+                purged_at__isnull=True,
             ).first()
             if document is None:
                 raise GlobalAiServiceError("回答含有不能与家庭共享的知识依据。")
-            revision = document.revisions.filter(pk=reference.get("revision_id")).first()
+            revision = document.revisions.filter(pk=reference.get("revision_id"), purged_at__isnull=True).first()
             if revision is None:
                 raise GlobalAiServiceError("回答知识依据的版本不可用。")
             evidence_snapshot.append(

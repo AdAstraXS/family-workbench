@@ -1,0 +1,27 @@
+{% extends "knowledge_hub/base.html" %}
+{% load static %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/knowledge-lifecycle.css' %}?v=20261005">{% endblock %}
+{% block title %}资料管理 · {{ document.title }}{% endblock %}
+{% block hub_breadcrumb %}<span aria-hidden="true">›</span><a href="{% url 'knowledge:trash' %}">回收站</a><span aria-hidden="true">›</span><span>资料管理</span>{% endblock %}
+{% block hub_content %}
+<div class="knowledge-lifecycle">
+<section class="panel"><h1>资料管理</h1><h2>{{ document.title }}</h2>
+{% if document.purged_at %}<p class="notice">内容已彻底删除，不能恢复。仅保留防止来源自动重新入库的标记与操作记录。</p>
+{% elif document.trashed_at %}<p class="notice">资料已在回收站，不会出现在资料库、搜索或 AI 整理中。回收站不会自动清空。</p>
+<form method="post">{% csrf_token %}<input type="hidden" name="action" value="restore"><button class="button primary">恢复资料</button></form>
+<details class="knowledge-system-details"><summary>彻底删除这篇资料</summary><p>将删除这篇资料的全部保存版本、已确认摘要、AI 整理建议及独占图片和附件，无法撤销。外部原文、随手记、图书原件、共享导入包和系统备份不会删除；曾经分享的 AI 对话及云端服务的留存不在本次清理范围内。</p>
+{% if referenced %}<p class="notice warning">专题成果仍引用这篇资料，不能彻底删除；可以先恢复资料继续使用。</p>{% else %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="purge"><label for="purge-confirm">输入“彻底删除”确认</label><input id="purge-confirm" name="confirmation" autocomplete="off" required><button class="button">确认彻底删除</button></form>{% endif %}</details>
+{% else %}<div class="knowledge-lifecycle-actions"><a class="button" href="{% url 'knowledge:document_detail' document.pk %}">返回正文</a>
+{% if document.library_tier == 'knowledge' %}<form method="post">{% csrf_token %}<input type="hidden" name="action" value="unfeature"><button class="button">移出精选，保留归档正文</button></form>{% endif %}</div>
+{% if document.library_tier == 'knowledge' %}<p class="muted">正文、已确认摘要、分类和标签保留，不会删除任何版本。</p>{% endif %}
+<details class="knowledge-system-details"><summary>删除这篇资料</summary><p>先移入回收站，可恢复原来的整理状态。不会自动删除旧版本，也不会删除来源原件。</p><form method="post">{% csrf_token %}<input type="hidden" name="action" value="trash"><button class="button">确认移入回收站</button></form></details>
+{% endif %}</section>
+{% if not document.purged_at %}<section class="panel"><h2>正文保存版本</h2>{% if document.trashed_at %}<p>移入回收站时，这些版本尚未清理。恢复后可单独清理旧版本；彻底删除会清理全部版本，但专题引用会阻止彻底删除。</p>{% else %}<p>清理旧版本时，当前版本不能删除，专题成果引用的版本会保留；当前已确认的摘要不受影响。</p>{% endif %}
+<div class="knowledge-compact-list">{% for revision in revisions %}<article class="web-capture-row"><strong>v{{ revision.revision_number }}</strong> · {{ revision.created_at|date:'Y-m-d H:i' }}
+{% if revision.purged_at %}<span class="muted">内容已清理</span>{% elif document.trashed_at %}<span>{% if revision.pk == document.current_revision_id %}当前版本{% else %}旧版本{% endif %}{% if revision.citation_count %} · 被专题引用{% endif %} · 仍在回收站中保存</span>{% elif revision.pk == document.current_revision_id %}<span class="status-pill">当前版本 · 保留</span>{% elif revision.citation_count %}<span class="status-pill">被专题引用 · 保留</span>{% else %}<span>可清理的旧版本</span>{% endif %}
+{% if not revision.purged_at and not document.trashed_at and revision.raw_file %}<a href="{% url 'knowledge:revision_raw_download' revision.pk %}">下载此版本</a>{% endif %}</article>{% empty %}<p>暂无保存版本。</p>{% endfor %}</div>
+{% if not document.trashed_at and deletable_count %}<details class="knowledge-system-details"><summary>清理 {{ deletable_count }} 个可删除旧版本</summary><p>这些旧版本的正文、原始抓取文件、独占图片及对应 AI 建议将不可恢复。当前版本和被专题引用的版本不受影响。共享导入包、外部原件和备份仍保留。</p><form method="post">{% csrf_token %}<input type="hidden" name="action" value="versions"><label for="version-confirm">输入“清理旧版本”确认</label><input id="version-confirm" name="confirmation" autocomplete="off" required><button class="button">确认清理旧版本</button></form></details>{% endif %}</section>{% endif %}
+{% for task in cleanups %}<section class="panel"><h2>文件清理未完成</h2><p>{{ task.error|default:'清理已登记，可以安全重试。' }}</p><form method="post">{% csrf_token %}<input type="hidden" name="action" value="retry_files"><input type="hidden" name="task_id" value="{{ task.pk }}"><button class="button">重试文件清理</button></form></section>{% endfor %}
+<section class="panel"><details><summary>操作记录</summary>{% for event in events %}<p>{{ event.created_at|date:'Y-m-d H:i' }} · {{ event.actor|default:'原成员' }} · {{ event.get_action_display }}{% if event.revision_numbers %} · 版本 {{ event.revision_numbers|join:'、' }}{% endif %}</p>{% empty %}<p>暂无资料管理操作。</p>{% endfor %}</details></section>
+</div>
+{% endblock %}

@@ -14,10 +14,15 @@ from .models import (
 )
 
 
-def accessible_documents(member):
+def accessible_documents(member, *, include_trashed=False, include_purged=False):
     from reading.permissions import accessible_reading_artifacts
+    lifecycle = {}
+    if not include_trashed:
+        lifecycle["trashed_at__isnull"] = True
+    if not include_purged:
+        lifecycle["purged_at__isnull"] = True
     return (
-        KnowledgeDocument.objects.filter(family=member.family)
+        KnowledgeDocument.objects.filter(family=member.family, **lifecycle)
         .filter(~Q(source__kind=KnowledgeSource.KIND_READING) | Q(
             reading_archive__isnull=False, reading_archive__version__isnull=True) | Q(
             reading_archive__version__artifact__in=accessible_reading_artifacts(member)))
