@@ -210,7 +210,7 @@ def country(request, country):
         raise Http404
     all_rows = [r for r in catalog(country, request.GET.get("geography", "北京市"), with_presentation=True) if r["spec"].code not in AUXILIARY]
     available = {r["spec"].category for r in all_rows}
-    theme = request.GET.get("theme", "投资" if country == "CN" else "通胀")
+    theme = request.GET.get("theme", "全部")
     if theme not in available and theme != "全部":
         theme = "全部"
     rows = [r for r in all_rows if theme == "全部" or r["spec"].category == theme]
