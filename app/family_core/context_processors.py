@@ -72,6 +72,8 @@ def page_navigation(request):
             "income_category_edit",
             "expense_category_create",
             "expense_category_edit",
+            "asset_category_create",
+            "asset_category_edit",
         }:
             parent_url = reverse("ledger:category_list")
         elif url_name in {"income_create", "income_edit", "income_delete"}:

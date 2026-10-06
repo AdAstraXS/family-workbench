@@ -8,6 +8,30 @@
 </section>
 
 <section class="panel">
+  <div class="section-head"><h2>资产类别</h2>
+    <div class="form-actions">
+      <a class="button ghost" href="{% url 'ledger:asset_classification' %}">历史映射预览</a>
+      {% if can_manage_asset_categories %}<a class="button" href="{% url 'ledger:asset_category_create' %}">新增资产类别</a>{% endif %}
+    </div>
+  </div>
+  <p class="muted-note">投资组合和家庭账本共用一级、二级分类。停用保留历史记录；新增分类不会自动调整历史归属。</p>
+  <div class="basics-table-scroll"><table>
+    <thead><tr><th>一级类别</th><th>二级类别</th><th class="number">显示顺序</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>{% for category in asset_categories %}
+      <tr>
+        <td>{% if category.parent_id %}{{ category.parent.name }}{% else %}{{ category.name }}{% endif %}</td>
+        <td>{% if category.parent_id %}{{ category.name }}{% elif category.is_classification_primary %}一级类别{% else %}历史未细分{% endif %}</td>
+        <td class="number">{{ category.display_order }}</td>
+        <td>{% if not category.is_active %}停用{% elif category.parent_id and not category.parent.is_active %}随一级停用{% else %}启用{% endif %}</td>
+        <td>{% if can_manage_asset_categories and category.family_id == classification_family_id %}
+          {% if category.parent_id or category.is_classification_primary %}<a href="{% url 'ledger:asset_category_edit' category.pk %}">编辑</a>{% else %}历史保留{% endif %}
+          {% else %}只读{% endif %}</td>
+      </tr>
+    {% empty %}<tr><td colspan="5">暂无资产类别</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+
+<section class="panel">
   <div class="section-head">
     <h1>账户</h1>
     <a class="button" href="{% url 'ledger:bank_account_create' %}?return_to={{ request.get_full_path|urlencode }}">新增账户</a>

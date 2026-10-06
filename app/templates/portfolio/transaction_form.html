@@ -216,7 +216,10 @@
       return selected?.dataset.code || "";
     };
     const updateCategories = () => {
-      const leaves = categoryRows.filter(row => String(row.parent_id) === primary.value);
+      const existingSecurity = securityRows.find(row => String(row.id) === security.value);
+      const leaves = categoryRows.filter(row => String(row.parent_id) === primary.value && (
+        row.is_selectable || String(row.id) === category.value || row.id === existingSecurity?.asset_category_id
+      ));
       const legacy = categoryRows.filter(row => !row.parent_id && String(row.id) === primary.value);
       replaceOptions(category, leaves.length ? leaves : legacy, "请选择二级资产类别", (option, row) => {
         option.dataset.code = row.primary_code || row.code;
@@ -225,7 +228,7 @@
 
     const allowedInstrumentTypes = () => {
       const selected = categoryRows.find(row => String(row.id) === category.value);
-      return instrumentTypesBySecondary[selected?.code] || assetTypesByCategory[selectedCategoryCode()] || [];
+      return selected?.instrument_types || instrumentTypesBySecondary[selected?.code] || assetTypesByCategory[selectedCategoryCode()] || [];
     };
     const updateAssetTypes = (reset = false) => {
       const currentSecurity = securityRows.find(row => String(row.id) === security.value);
@@ -362,6 +365,11 @@
       if (classification) {
         const currentCategory = categoryRows.find(item => String(item.id) === category.value);
         const preserveSecondary = !classification.parent_id && currentCategory?.parent_id === classification.id;
+        const parentId = String(classification.parent_id || classification.id);
+        if (![...primary.options].some(option => option.value === parentId)) {
+          const parentRow = categoryRows.find(item => String(item.id) === parentId);
+          if (parentRow) primary.add(new Option(`${parentRow.name}（历史保留）`, parentId));
+        }
         primary.value = String(classification.parent_id || classification.id);
         updateCategories();
         if (!preserveSecondary) category.value = String(classification.id);

@@ -2,7 +2,7 @@ from django import forms
 from django.db.models import Q
 from django.core.exceptions import ValidationError
 from .models import AssetCategory
-from .asset_classification import PRIMARY_CATEGORIES, categories_for_family, validate_assignment
+from .asset_classification import categories_for_family, selectable_primary, validate_assignment
 
 class AssetCategorySelect(forms.Select):
     def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
@@ -20,15 +20,27 @@ class AssetClassificationFormMixin(forms.Form):
 
     def setup_asset_classification(self, family):
         self.classification_family = family
-        categories = categories_for_family(family).filter(is_active=True)
+        categories = categories_for_family(family).filter(is_active=True).filter(Q(parent__isnull=True) | Q(parent__is_active=True))
         self.asset_dictionary_ready = categories.filter(parent__isnull=False).exists()
         current = getattr(self.instance, 'asset_category', None)
+        security_field = self.fields.get('security')
+        if not current and security_field is not None and hasattr(security_field, 'queryset'):
+            security_id = self.data.get(self.add_prefix('security')) or self.initial.get('security')
+            if security_id:
+                security_id = getattr(security_id, 'pk', security_id)
+                security = security_field.queryset.filter(pk=security_id).select_related('asset_category').first()
+                selected = self.data.get(self.add_prefix('asset_category')) or self.initial.get('asset_category')
+                if security and security.asset_category_id and (not selected or str(getattr(selected, 'pk', selected)) == str(security.asset_category_id)):
+                    current = security.asset_category
         if not current:
             current_id = self.data.get(self.add_prefix('asset_category')) or self.initial.get('asset_category')
             if current_id:
                 current = categories.filter(pk=current_id).first()
         if current:
-            categories = categories_for_family(family).filter(Q(is_active=True) | Q(pk=current.pk))
+            categories = categories_for_family(family).filter(
+                Q(is_active=True, parent__isnull=True) | Q(is_active=True, parent__is_active=True)
+                | Q(pk__in=[current.pk, current.parent_id])
+            )
             self.initial['asset_primary'] = current.parent_id or current.pk
         primary = categories.filter(parent__isnull=True)
         self.fields['asset_primary'].queryset = primary
@@ -36,7 +48,7 @@ class AssetClassificationFormMixin(forms.Form):
             secondary = categories.filter(parent__isnull=False)
             if current and not current.parent_id:
                 secondary = categories.filter(Q(parent__isnull=False) | Q(pk=current.pk))
-            allowed = Q(code__in=[code for code, _ in PRIMARY_CATEGORIES])
+            allowed = Q(pk__in=selectable_primary(primary).values('pk'))
             if current and not current.parent_id:
                 allowed |= Q(pk=current.pk)
             primary = primary.filter(allowed)

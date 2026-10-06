@@ -30,6 +30,18 @@ INSTRUMENTS_BY_SECONDARY = {
     "credit_card": {"other"},
 }
 
+def instrument_types(category):
+    """Custom labels do not determine a financial instrument's calculation rules."""
+    return sorted(INSTRUMENTS_BY_SECONDARY.get(
+        category.code if category else '', {'stock', 'etf', 'bond', 'option', 'fund', 'other'},
+    ))
+
+def selectable_primary(categories):
+    return categories.filter(parent__isnull=True).filter(
+        Q(code__in=[code for code, _ in PRIMARY_CATEGORIES])
+        | Q(extra_data__classification_managed=True)
+    )
+
 def category_name(category):
     return category.full_name if category else "未分类"
 

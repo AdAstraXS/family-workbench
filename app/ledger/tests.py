@@ -1544,7 +1544,7 @@ class CategoryManagementTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "收入分类统一在后台按一级、二级维护")
         self.assertContains(response, "支出分类统一在后台按一级、二级、三级维护")
-        self.assertContains(response, 'class="basics-table-scroll"', count=3)
+        self.assertContains(response, 'class="basics-table-scroll"', count=4)
         self.assertNotContains(response, "新增支出分类")
         self.assertNotContains(response, ">编辑</a>")
 

@@ -1,5 +1,10 @@
 from datetime import date
 from decimal import Decimal
+from io import StringIO
+from unittest.mock import patch
+import json
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db.models.deletion import ProtectedError
@@ -35,6 +40,30 @@ class AssetClassificationTests(TestCase):
 
     def report(self):
         return build_classification_preview(self.family, self.day, self.day)
+
+    def test_complete_batch_rejects_unknowns_without_partial_writes(self):
+        self.entry('alternatives', '未知产品')
+        report=self.report()
+        before=list(Security.objects.values())
+        with self.assertRaisesMessage(ValidationError,'整批未写入'):
+            apply_classification_preview(self.family,self.day,self.day,report['digest'],require_complete=True)
+        self.assertEqual(before,list(Security.objects.values()))
+        self.assertFalse(AssetClassificationAudit.objects.exists())
+
+    def test_confirmation_stdin_is_read_only_bounded_and_same_digest(self):
+        entry=self.entry()
+        plan=self.confirmation(entry)
+        report=build_classification_preview(self.family,self.day,self.day,confirmations=plan)
+        output=StringIO()
+        with patch('sys.stdin',StringIO(json.dumps(plan))):
+            call_command('preview_asset_classification',family=self.family.pk,start=str(self.day),end=str(self.day),
+                confirmations='-',stdout=output)
+        self.assertEqual(json.loads(output.getvalue())['digest'],report['digest'])
+        self.assertFalse(AssetClassificationAudit.objects.exists())
+        for payload in ('[invalid', '中' * (2 * 1024 * 1024)):
+            with patch('sys.stdin',StringIO(payload)),self.assertRaises(CommandError):
+                call_command('preview_asset_classification',family=self.family.pk,start=str(self.day),end=str(self.day),
+                    confirmations='-',stdout=StringIO())
 
     def test_dictionary_has_exact_thirteen_leaves_and_seed_is_idempotent(self):
         self.assertEqual(AssetCategory.objects.filter(family=self.family, parent__isnull=False).count(), 13)
@@ -185,7 +214,7 @@ class AssetClassificationTests(TestCase):
             self.security.symbol = symbol
             self.assertEqual(propose_security(self.security)[0], expected)
 
-    def test_exact_legacy_treasury_alias_does_not_infer_unknown_bonds_or_tech_index(self):
+    def test_exact_legacy_treasury_alias_and_owner_confirmed_tech_fund(self):
         self.security.asset_type = 'bond'
         self.security.symbol = 'GOVT 4.75 NOV15’53 912810TV0'
         self.assertEqual(propose_security(self.security)[0], 'government_long')
@@ -194,7 +223,7 @@ class AssetClassificationTests(TestCase):
         self.assertIsNone(propose_security(self.security)[0])
         self.security.asset_type = 'etf'
         self.security.symbol = '07552'
-        self.assertIsNone(propose_security(self.security)[0])
+        self.assertEqual(propose_security(self.security)[0], 'equity_fund')
 
     def confirmation(self, entry, target='cash_balance', scope='matching_history'):
         return {'version': 1, 'ledger_rules': [{

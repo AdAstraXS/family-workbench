@@ -1083,7 +1083,6 @@ class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
             Q(family_id=family_id) | Q(family=None),
             is_active=True,
         ).order_by("display_order", "name")
-        self.setup_asset_classification(family_id)
         selected_asset_type = (
             self.data.get("asset_type")
             or self.initial.get("asset_type")
@@ -1107,6 +1106,7 @@ class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
                 Q(pk=self.instance.security_id) | Q(pk__in=security_queryset)
             )
         self.fields["security"].queryset = security_queryset
+        self.setup_asset_classification(family_id)
         self.fields["option_underlying"].queryset = Security.objects.filter(
             Q(watchlist_items__family_id=family_id, watchlist_items__is_active=True)
             | Q(positions__account__bank_account__family_id=family_id)

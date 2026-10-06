@@ -181,6 +181,14 @@ class AssetCategory(BaseLookup):
     )
 
     @property
+    def is_classification_primary(self):
+        from .asset_classification import PRIMARY_CATEGORIES
+        return not self.parent_id and (
+            self.code in dict(PRIMARY_CATEGORIES)
+            or bool((self.extra_data or {}).get('classification_managed'))
+        )
+
+    @property
     def primary(self):
         return self.parent if self.parent_id else self
 

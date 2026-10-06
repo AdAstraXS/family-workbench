@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import views
 from family_core.classification_views import classification_preview
+from family_core.asset_category_management import asset_category_edit
 
 
 app_name = "ledger"
@@ -28,6 +29,8 @@ urlpatterns = [
     path("accounts/create/", views.bank_account_create, name="bank_account_create"),
     path("accounts/<int:pk>/edit/", views.bank_account_edit, name="bank_account_edit"),
     path("categories/", views.category_list, name="category_list"),
+    path("categories/assets/create/", asset_category_edit, name="asset_category_create"),
+    path("categories/assets/<int:pk>/edit/", asset_category_edit, name="asset_category_edit"),
     path("categories/income/create/", views.income_category_create, name="income_category_create"),
     path("categories/income/<int:pk>/edit/", views.income_category_edit, name="income_category_edit"),
     path("categories/expense/create/", views.expense_category_create, name="expense_category_create"),

@@ -12,7 +12,7 @@ from .classification_confirmations import resolve_ledger_confirmations
 
 SYMBOL_RULES = {
     **dict.fromkeys(('VOO', 'SPY', 'IVV', 'QQQ', 'QQQM', 'TQQQ', 'TNA', 'IWM', '03086', '03195', '510300', '159919'), 'equity_index'),
-    **dict.fromkeys(('GGLL', 'DRAM', 'QTUM', 'XLU', 'XLV', 'NVDY', 'ALLW', 'SMH'), 'equity_fund'),
+    **dict.fromkeys(('GGLL', 'DRAM', 'QTUM', 'XLU', 'XLV', 'NVDY', 'ALLW', 'SMH', '07552'), 'equity_fund'),
     **dict.fromkeys(('IBIT', 'ETHA'), 'crypto'),
     # 03433 holds 20+ year US Treasuries. This is a product-specific rule,
     # not a default for all government bond ETFs.
@@ -99,7 +99,7 @@ def _record_facts(record):
 def build_classification_preview(family, start, end, *, confirmations=None):
     if start > end:
         raise ValidationError('开始日期不能晚于结束日期。')
-    categories = {item.code: item for item in categories_for_family(family).filter(parent__isnull=False, is_active=True).order_by(F('family_id').asc(nulls_first=True))}
+    categories = {item.code: item for item in categories_for_family(family).filter(parent__isnull=False).order_by(F('family_id').asc(nulls_first=True))}
     groups = _scoped_records(family, start, end)
     confirmed_entries = resolve_ledger_confirmations(family, groups[2], confirmations)
     rows, facts = [], []
@@ -135,8 +135,11 @@ def build_classification_preview(family, start, end, *, confirmations=None):
                     code, reason = None, '快照缺少标的，不能推定分类'
                 display, day = f'{record.account} · {record.asset_name}', record.snapshot.snapshot_date
             target = categories.get(code)
+            if target and target.pk != record.asset_category_id and (not target.is_active or not target.parent.is_active):
+                target, reason = None, '目标类别或所属一级已停用，不能调整到该类别'
             if code and not target:
-                reason = f'尚未安装二级字典：{code}；需先部署结构迁移'
+                if code not in categories:
+                    reason = f'尚未安装二级字典：{code}；需先部署结构迁移'
             if label == 'portfolio.security' and target:
                 shared = (
                     record.transactions.exclude(account__bank_account__family=family).exists()
@@ -177,7 +180,7 @@ def build_classification_preview(family, start, end, *, confirmations=None):
     return report
 
 @transaction.atomic
-def apply_classification_preview(family, start, end, expected_digest, *, confirmations=None):
+def apply_classification_preview(family, start, end, expected_digest, *, confirmations=None, require_complete=False):
     from django.apps import apps
     from .models import AssetClassificationAudit, AssetCategory
     # Serialize with other classification updates for this family.
@@ -189,6 +192,8 @@ def apply_classification_preview(family, start, end, expected_digest, *, confirm
     report = build_classification_preview(family, start, end, confirmations=confirmations)
     if report['digest'] != expected_digest:
         raise ValidationError('预览后数据或映射规则已变化，请重新预览并确认摘要。')
+    if require_complete and report['counts']['unresolved']:
+        raise ValidationError('仍有待确认项目，整批未写入。请核对实际生产预览。')
     batch = uuid.uuid4()
     for row in report['rows']:
         if row['status'] != 'ready':

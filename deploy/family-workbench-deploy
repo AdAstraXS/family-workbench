@@ -1,0 +1,358 @@
+#!/bin/sh
+set -eu
+
+umask 077
+
+BASE="/volume1/docker/family-workbench"
+UPLOAD_DIR="/volume1/homes/DX"
+BACKUP_DIR="$BASE/backups"
+DOCKER="/volume1/@appstore/ContainerManager/usr/bin/docker"
+COMPOSE_FILE="$BASE/docker-compose.yml"
+
+die() {
+    printf 'ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+require_root() {
+    [ "$(id -u)" -eq 0 ] || die "this command must run as root"
+}
+
+require_layout() {
+    [ -d "$BASE" ] || die "deployment directory is missing: $BASE"
+    [ -f "$COMPOSE_FILE" ] || die "compose file is missing: $COMPOSE_FILE"
+    [ -x "$DOCKER" ] || die "Docker is missing: $DOCKER"
+    [ -d "$BACKUP_DIR" ] || die "backup directory is missing: $BACKUP_DIR"
+}
+
+dc() {
+    "$DOCKER" compose --project-directory "$BASE" -f "$COMPOSE_FILE" "$@"
+}
+
+require_safe_label() {
+    value="$1"
+    [ -n "$value" ] || die "label cannot be empty"
+    case "$value" in
+        *[!A-Za-z0-9._-]*) die "label contains unsupported characters" ;;
+    esac
+}
+
+require_sha256() {
+    value="$1"
+    printf '%s\n' "$value" | grep -Eq '^[0-9A-Fa-f]{64}$' ||
+        die "expected SHA-256 must contain exactly 64 hexadecimal characters"
+}
+
+require_git_sha() {
+    value="$1"
+    printf '%s\n' "$value" | grep -Eq '^[0-9A-Fa-f]{40}$' ||
+        die "Git commit must contain exactly 40 hexadecimal characters"
+}
+
+require_iso_date() {
+    value="$1"
+    printf '%s\n' "$value" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' ||
+        die "date must use YYYY-MM-DD"
+}
+
+validate_app_archive() {
+    archive="$1"
+
+    [ -f "$archive" ] || die "archive is not a regular file: $archive"
+    [ ! -L "$archive" ] || die "archive cannot be a symbolic link"
+
+    tar -tzf "$archive" |
+        awk '
+            BEGIN { app_seen = 0 }
+            {
+                path = $0
+                if (path == "" || path ~ /^\// || path ~ /\\/ || path ~ /[[:space:]]/ || path ~ /(^|\/)\.\.?(\/|$)/) {
+                    exit 20
+                }
+                if (path == "app" || path == "app/" || path ~ /^app\//) {
+                    app_seen = 1
+                }
+            }
+            END {
+                if (!app_seen) {
+                    exit 21
+                }
+            }
+        ' || die "archive contains an unsafe path or has no app/ tree"
+
+    tar -tvzf "$archive" |
+        awk '
+            {
+                type = substr($1, 1, 1)
+                if (type != "-" && type != "d") {
+                    exit 22
+                }
+            }
+        ' || die "archive contains links or special filesystem entries"
+}
+
+command_status() {
+    dc ps
+    if [ -f "$BASE/DEPLOYED_COMMIT" ]; then
+        printf 'DEPLOYED_COMMIT='
+        cat "$BASE/DEPLOYED_COMMIT"
+    else
+        printf 'DEPLOYED_COMMIT=missing\n'
+    fi
+    printf 'ENV_SHA256='
+    sha256sum "$BASE/.env" | awk '{print $1}'
+}
+
+command_database_baseline() {
+    dc exec -T web python manage.py shell -c 'from portfolio.models import DailyPortfolioValuationRun, InvestmentAccount, InvestmentPosition, InvestmentTransaction, PortfolioSnapshot, PortfolioSnapshotPositionLine; latest = PortfolioSnapshot.objects.order_by("-snapshot_date").values_list("snapshot_date", flat=True).first(); print("InvestmentAccount=" + str(InvestmentAccount.objects.count())); print("InvestmentPosition=" + str(InvestmentPosition.objects.count())); print("InvestmentTransaction=" + str(InvestmentTransaction.objects.count())); print("PortfolioSnapshot=" + str(PortfolioSnapshot.objects.count())); print("PortfolioSnapshotPositionLine=" + str(PortfolioSnapshotPositionLine.objects.count())); print("latest_snapshot_date=" + (latest.isoformat() if latest else "none")); print("DailyPortfolioValuationRun=" + str(DailyPortfolioValuationRun.objects.count()))'
+}
+
+command_audit_financial_data() {
+    audit_script="/usr/local/libexec/family-workbench-financial-audit.py"
+    [ -f "$audit_script" ] && [ ! -L "$audit_script" ] || die "fixed audit script is missing"
+    [ "$(stat -c '%u:%a' "$audit_script")" = "0:644" ] || die "audit script must be root-owned mode 644"
+    dc exec -T web python - < "$audit_script"
+}
+
+command_backup_db() {
+    label="${1:-predeploy-$(date +%Y%m%d-%H%M%S)}"
+    require_safe_label "$label"
+
+    database_user="$(dc exec -T db printenv POSTGRES_USER | tr -d '\r\n')"
+    database_name="$(dc exec -T db printenv POSTGRES_DB | tr -d '\r\n')"
+    [ -n "$database_user" ] || die "POSTGRES_USER is empty"
+    [ -n "$database_name" ] || die "POSTGRES_DB is empty"
+
+    target="$BACKUP_DIR/family-workbench-$label.dump"
+    temporary="$target.tmp"
+    [ ! -e "$target" ] || die "backup already exists: $target"
+    [ ! -e "$temporary" ] || die "temporary backup already exists: $temporary"
+
+    cleanup_backup() {
+        rm -f "$temporary"
+    }
+    trap cleanup_backup EXIT HUP INT TERM
+
+    dc exec -T db \
+        pg_dump -U "$database_user" -d "$database_name" -Fc > "$temporary"
+    [ -s "$temporary" ] || die "database backup is empty"
+    dc exec -T db pg_restore -l < "$temporary" > /dev/null
+    chmod 600 "$temporary"
+    mv "$temporary" "$target"
+    trap - EXIT HUP INT TERM
+
+    sha256sum "$target"
+    ls -lh "$target"
+}
+
+command_install_app() {
+    [ "$#" -eq 2 ] || die "install-app requires <archive-name> <sha256>"
+    archive_name="$1"
+    expected_sha="$2"
+
+    require_safe_label "$archive_name"
+    require_sha256 "$expected_sha"
+    case "$archive_name" in
+        family-workbench-*.tar.gz) ;;
+        *) die "archive name must match family-workbench-*.tar.gz" ;;
+    esac
+
+    archive="$UPLOAD_DIR/$archive_name"
+    [ -f "$archive" ] || die "uploaded archive is missing: $archive"
+    [ ! -L "$archive" ] || die "uploaded archive cannot be a symbolic link"
+
+    actual_sha="$(sha256sum "$archive" | awk '{print $1}')"
+    [ "$actual_sha" = "$(printf '%s' "$expected_sha" | tr 'A-F' 'a-f')" ] ||
+        die "archive SHA-256 does not match"
+
+    validate_app_archive "$archive"
+
+    timestamp="$(date +%Y%m%d-%H%M%S)"
+    deployed="unknown"
+    if [ -f "$BASE/DEPLOYED_COMMIT" ]; then
+        deployed="$(tr -cd 'A-Za-z0-9._-' < "$BASE/DEPLOYED_COMMIT")"
+        [ -n "$deployed" ] || deployed="unknown"
+    fi
+    rollback="$BACKUP_DIR/source-predeploy-$deployed-$timestamp.tar.gz"
+    rollback_tmp="$rollback.tmp"
+    [ ! -e "$rollback" ] || die "rollback archive already exists: $rollback"
+    [ ! -e "$rollback_tmp" ] || die "temporary rollback archive exists: $rollback_tmp"
+
+    cleanup_source() {
+        rm -f "$rollback_tmp"
+    }
+    trap cleanup_source EXIT HUP INT TERM
+
+    tar -czf "$rollback_tmp" -C "$BASE" app
+    tar -tzf "$rollback_tmp" > /dev/null
+    chmod 600 "$rollback_tmp"
+    mv "$rollback_tmp" "$rollback"
+    trap - EXIT HUP INT TERM
+
+    tar -xzf "$archive" -C "$BASE" app
+
+    stored="$BACKUP_DIR/$archive_name"
+    [ ! -e "$stored" ] || die "release archive already exists in backups: $stored"
+    mv "$archive" "$stored"
+    chmod 600 "$stored"
+
+    printf 'INSTALLED_APP_ARCHIVE=%s\n' "$stored"
+    printf 'ROLLBACK_ARCHIVE=%s\n' "$rollback"
+    sha256sum "$stored" "$rollback"
+}
+
+command_build_web() {
+    dc --progress plain build web
+}
+
+command_restart_web() {
+    dc restart web
+}
+
+command_recreate_web() {
+    dc up -d --force-recreate --no-deps web
+}
+
+command_preview_snapshots() {
+    [ "$#" -eq 2 ] || die "preview-snapshots requires <start-date> <end-date>"
+    require_iso_date "$1"
+    require_iso_date "$2"
+    dc exec -T web python manage.py analyze_portfolio_snapshot_gaps \
+        --start-date "$1" \
+        --end-date "$2" \
+        --daily-status
+}
+
+command_backfill_snapshot() {
+    [ "$#" -eq 1 ] || die "backfill-snapshot requires <date>"
+    require_iso_date "$1"
+    dc exec -T web python manage.py create_portfolio_snapshots \
+        --date "$1" \
+        --require-complete
+}
+
+# Only these fixed management-command invocations are added for reviewed batches.
+# Uploaded JSON is copied into a root-only spool and checked AFTER the copy.
+command_classifications() {
+    classification_action="$1"
+    shift
+    if [ "$classification_action" = apply ]; then
+        [ "$#" -eq 6 ] || die "apply-classifications requires <family-id> <start-date> <end-date> <confirmation-name> <sha256> <preview-digest>"
+        require_sha256 "$6"
+    else
+        [ "$#" -eq 5 ] || die "preview-classifications requires <family-id> <start-date> <end-date> <confirmation-name> <sha256>"
+    fi
+    printf '%s\n' "$1" | grep -Eq '^[1-9][0-9]{0,8}$' || die "family id must be a positive integer"
+    require_iso_date "$2"
+    require_iso_date "$3"
+    require_safe_label "$4"
+    require_sha256 "$5"
+    case "$4" in
+        family-workbench-classifications-*.json) ;;
+        *) die "confirmation name must match family-workbench-classifications-*.json" ;;
+    esac
+    classification_family="$1"
+    classification_start="$2"
+    classification_end="$3"
+    classification_upload="$UPLOAD_DIR/$4"
+    classification_expected="$(printf '%s' "$5" | tr 'A-F' 'a-f')"
+    classification_digest="${6:-}"
+    [ -f "$classification_upload" ] && [ ! -L "$classification_upload" ] || die "confirmation upload must be a regular non-symlink file"
+    [ "$(wc -c < "$classification_upload")" -le 2097152 ] || die "confirmation file exceeds 2 MiB"
+    classification_spool="$(mktemp "$BACKUP_DIR/classification-confirmations.XXXXXX")"
+    cp "$classification_upload" "$classification_spool"
+    chmod 600 "$classification_spool"
+    [ "$(wc -c < "$classification_spool")" -le 2097152 ] || die "copied confirmation file exceeds 2 MiB"
+    [ "$(sha256sum "$classification_spool" | awk '{print $1}')" = "$classification_expected" ] || die "confirmation SHA-256 does not match"
+    classification_report="$(mktemp "$BACKUP_DIR/classification-$classification_action.XXXXXX")"
+    printf 'CONFIRMATIONS=%s\nREPORT=%s\n' "$classification_spool" "$classification_report"
+    if [ "$classification_action" = apply ]; then
+        command_database_baseline
+        command_backup_db "classification-$classification_family-$(date +%Y%m%d-%H%M%S)"
+        dc exec -T web python manage.py preview_asset_classification \
+            --family "$classification_family" --start "$classification_start" --end "$classification_end" \
+            --confirmations - --apply --require-complete --expected-digest "$classification_digest" \
+            < "$classification_spool" > "$classification_report"
+        command_database_baseline
+    else
+        dc exec -T web python manage.py preview_asset_classification \
+            --family "$classification_family" --start "$classification_start" --end "$classification_end" \
+            --confirmations - < "$classification_spool" > "$classification_report"
+    fi
+    sha256sum "$classification_spool" "$classification_report"
+    cat "$classification_report"
+}
+
+command_verify() {
+    dc ps
+    dc exec -T web python manage.py check
+    dc exec -T web python manage.py showmigrations portfolio | tail -8
+}
+
+command_logs() {
+    lines="${1:-100}"
+    printf '%s\n' "$lines" | grep -Eq '^[0-9]+$' ||
+        die "log line count must be numeric"
+    [ "$lines" -ge 1 ] && [ "$lines" -le 500 ] ||
+        die "log line count must be between 1 and 500"
+    dc logs --tail="$lines" web
+}
+
+command_mark_deployed() {
+    [ "$#" -eq 1 ] || die "mark-deployed requires a full 40-character Git SHA"
+    require_git_sha "$1"
+    printf '%s\n' "$1" > "$BASE/DEPLOYED_COMMIT"
+    chmod 644 "$BASE/DEPLOYED_COMMIT"
+    cat "$BASE/DEPLOYED_COMMIT"
+}
+
+usage() {
+    cat <<'EOF'
+Usage: family-workbench-deploy <command> [arguments]
+
+Commands:
+  status
+  database-baseline
+  audit-financial-data
+  backup-db [safe-label]
+  install-app <family-workbench-*.tar.gz> <sha256>
+  build-web
+  restart-web
+  recreate-web
+  preview-snapshots <start-date> <end-date>
+  backfill-snapshot <date>
+  preview-classifications <family-id> <start-date> <end-date> <confirmation-name> <sha256>
+  apply-classifications <family-id> <start-date> <end-date> <confirmation-name> <sha256> <preview-digest>
+  verify
+  logs [1-500]
+  mark-deployed <40-character-git-sha>
+EOF
+}
+
+require_root
+require_layout
+
+command="${1:-}"
+if [ "$#" -gt 0 ]; then
+    shift
+fi
+
+case "$command" in
+    status) [ "$#" -eq 0 ] || die "status takes no arguments"; command_status ;;
+    database-baseline) [ "$#" -eq 0 ] || die "database-baseline takes no arguments"; command_database_baseline ;;
+    audit-financial-data) [ "$#" -eq 0 ] || die "audit-financial-data takes no arguments"; command_audit_financial_data ;;
+    backup-db) [ "$#" -le 1 ] || die "backup-db accepts at most one label"; command_backup_db "${1:-}" ;;
+    install-app) command_install_app "$@" ;;
+    build-web) [ "$#" -eq 0 ] || die "build-web takes no arguments"; command_build_web ;;
+    restart-web) [ "$#" -eq 0 ] || die "restart-web takes no arguments"; command_restart_web ;;
+    recreate-web) [ "$#" -eq 0 ] || die "recreate-web takes no arguments"; command_recreate_web ;;
+    preview-snapshots) command_preview_snapshots "$@" ;;
+    backfill-snapshot) command_backfill_snapshot "$@" ;;
+    preview-classifications) command_classifications preview "$@" ;;
+    apply-classifications) command_classifications apply "$@" ;;
+    verify) [ "$#" -eq 0 ] || die "verify takes no arguments"; command_verify ;;
+    logs) [ "$#" -le 1 ] || die "logs accepts at most one count"; command_logs "${1:-}" ;;
+    mark-deployed) command_mark_deployed "$@" ;;
+    help|-h|--help|"") usage ;;
+    *) die "unsupported command: $command" ;;
+esac

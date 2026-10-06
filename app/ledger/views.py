@@ -38,6 +38,7 @@ from .investment_goals import (
 )
 from .models import AnnualBudget, AnnualBudgetLine, AssetBalanceSnapshot, BankAccount, ExpenseCategory, ExpenseImportBatch, ExpenseRecord, IncomeCategory, IncomeRecord, InvestmentGoalActualOverride, InvestmentGoalPlan, InvestmentGoalPoint, InvestmentGoalSetting
 from family_core.audit import stamp_actor
+from family_core.asset_category_management import dictionary_context
 from family_core.navigation import return_url
 from family_core.household import get_household_family
 from family_core.models import Family, FamilyMember
@@ -2087,7 +2088,7 @@ def category_list(request):
     return render(
         request,
         "ledger/category_list.html",
-        {"accounts": accounts, "income_categories": income_categories, "expense_categories": expense_categories},
+        {"accounts": accounts, "income_categories": income_categories, "expense_categories": expense_categories, **dictionary_context(request)},
     )
 
 
