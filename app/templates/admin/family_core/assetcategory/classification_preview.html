@@ -1,9 +1,10 @@
-{% extends "base.html" %}
+{% extends "admin/base_site.html" %}
 {% load table_navigation %}
 {% block title %}资产分类与历史映射{% endblock %}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">首页</a> &rsaquo; <a href="{% url 'admin:family_core_assetcategory_changelist' %}">资产类别</a> &rsaquo; 历史映射预览</div>{% endblock %}
 {% block content %}
 <section class="panel">
-  <div class="section-head"><h1>资产分类与历史映射</h1></div>
+  <h2>资产类别字典</h2>
   <p>投资组合和家庭账本共用以下分类。金融品种继续用于交易和估值。此页只读，不修改快照或流水。</p>
   <div class="table-wrap"><table><thead><tr><th>一级资产类别</th><th>二级资产类别</th></tr></thead><tbody>
     {% for category in categories %}<tr><td>{{ category.parent.name }}</td><td>{{ category.name }}</td></tr>{% empty %}<tr><td colspan="2">两级分类字典尚未安装。</td></tr>{% endfor %}

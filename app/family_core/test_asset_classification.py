@@ -514,9 +514,11 @@ class AssetClassificationTests(TestCase):
 
     def test_page_uses_own_family_and_does_not_write(self):
         self.entry()
+        self.user.is_staff = self.user.is_superuser = True
+        self.user.save()
         self.client.force_login(self.user)
         before = AssetClassificationAudit.objects.count()
-        response = self.client.get(reverse('ledger:asset_classification'), {'start': '2025-12-31', 'end': '2025-12-31'})
+        response = self.client.get(reverse('ledger:asset_classification'), {'start': '2025-12-31', 'end': '2025-12-31'}, follow=True)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '只读')
         self.assertContains(response, '权益类 → 股指基金')

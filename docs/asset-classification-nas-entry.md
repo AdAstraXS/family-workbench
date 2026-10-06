@@ -1,11 +1,21 @@
 # NAS 分类受限入口安装
 
 此文件仅用于已确认的全历史分类批次。应用代码与分类管理页面可通过既有包装器发布；
-批次执行前，用户需交互式安装下面的包装器扩展。不要把本地数据库上传到NAS。
+包装器扩展已于2026-10-06按用户授权安装成功。不要把本地数据库上传到NAS。
 
 新增命令仅调用固定的`preview_asset_classification`，限定家庭ID、日期、确认文件名、
 文件SHA-256以及预览摘要。应用强制`--require-complete`，先创建并验证数据库备份。
 包装器其余命令保持不变；不修改SSH公钥、sudoers、Compose或生产`.env`。
+
+## 安装结果（2026-10-06）
+
+代理执行固定安装脚本，用户仅在交互式sudo提示中输入密码。新入口哈希与本文一致，
+root755及任意命令拒绝检查通过。原入口保留为
+`/usr/local/sbin/family-workbench-deploy.before-classification-20261006`，原哈希与本文一致；
+安装回执在NAS私有备份目录，root600。入口安装前备份为
+`family-workbench-classification-entry-install-20261006.dump`，101MiB，已验证，SHA-256：
+`a05159771922ca6fa23690ddcfc7332b352112c6c5aba9639a057123115c8865`。
+7项固定安装脚本测试通过，覆盖成功、幂等、输入拒绝及验证失败恢复原入口。
 
 ## 用户一次性安装
 

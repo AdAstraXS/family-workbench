@@ -36,10 +36,81 @@ class AssetCategoryManagementTests(TestCase):
         AssetCategory.objects.create(family=other,name='其他家庭保密类别',code='other')
         before = list(AssetCategory.objects.values())
         response = self.client.get(reverse('ledger:category_list'))
-        self.assertContains(response,'新增资产类别')
+        self.assertContains(response,'资产类别统一在后台')
+        self.assertNotContains(response,'新增资产类别')
+        self.assertNotContains(response,'历史映射预览')
         self.assertContains(response,'短期国债')
         self.assertNotContains(response,'其他家庭保密类别')
         self.assertEqual(before,list(AssetCategory.objects.values()))
+
+    def admin_login(self):
+        self.user.is_staff = self.user.is_superuser = True
+        self.user.save()
+
+    def test_admin_creates_categories_used_by_both_modules_and_audits_edits(self):
+        self.admin_login()
+        url = reverse('admin:family_core_assetcategory_add')
+        response = self.client.post(url, self.data('后台一级', level='primary', parent='', _save='保存'))
+        self.assertEqual(response.status_code, 302)
+        root = AssetCategory.objects.get(family=self.family, name='后台一级')
+        response = self.client.post(url, self.data('后台二级', parent=root.pk, _save='保存'))
+        self.assertEqual(response.status_code, 302)
+        leaf = AssetCategory.objects.get(family=self.family, name='后台二级')
+        self.assertTrue(root.is_classification_primary)
+        for form in (AssetBalanceEntryForm(family=self.family), SecurityForm(family=self.family)):
+            self.assertIn(root, form.fields['asset_primary'].queryset)
+            self.assertIn(leaf, form.fields['asset_category'].queryset)
+        code = leaf.code
+        response = self.client.post(reverse('admin:family_core_assetcategory_change', args=[leaf.pk]),
+            self.data('后台更名', parent=root.pk, is_active='', _save='保存'))
+        self.assertEqual(response.status_code, 302)
+        leaf.refresh_from_db()
+        self.assertEqual(leaf.code, code)
+        self.assertFalse(leaf.is_active)
+        self.assertEqual(leaf.extra_data['classification_changes'][-1]['before']['name'], '后台二级')
+
+    def test_admin_rejects_cross_family_and_builtin_reparenting_and_member_writes(self):
+        self.admin_login()
+        other = AssetCategory.objects.create(family=Family.objects.create(name='其他家庭'), name='保密一级', code='other')
+        response = self.client.get(reverse('admin:family_core_assetcategory_changelist'))
+        self.assertNotContains(response, '保密一级')
+        response = self.client.post(reverse('admin:family_core_assetcategory_add'), self.data('非法类别', parent=other.pk))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(AssetCategory.objects.filter(name='非法类别').exists())
+        leaf = self.categories['gold']
+        response = self.client.post(reverse('admin:family_core_assetcategory_change', args=[leaf.pk]), self.data('黄金'))
+        self.assertContains(response, '不能改变层级或所属一级')
+        leaf.refresh_from_db()
+        self.assertEqual(leaf.parent_id, self.categories['commodities'].pk)
+        self.user.is_superuser = False
+        self.user.save()
+        self.member.role = 'member'
+        self.member.save()
+        self.assertEqual(self.client.post(reverse('admin:family_core_assetcategory_add'), self.data('禁止')).status_code, 403)
+
+    def test_admin_preview_requires_permission_and_valid_membership(self):
+        url = reverse('admin:family_core_assetcategory_classification_preview')
+        self.assertEqual(self.client.get(url).status_code, 302)
+        self.admin_login()
+        before = list(AssetCategory.objects.values())
+        response = self.client.get(url, {'start': '2024-01-01', 'end': '2026-10-06'})
+        self.assertContains(response, '历史调整预览')
+        self.assertTemplateUsed(response, 'admin/base_site.html')
+        self.assertEqual(before, list(AssetCategory.objects.values()))
+        self.member.is_active = False
+        self.member.save()
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_admin_legacy_and_global_categories_can_be_read_without_editing(self):
+        self.admin_login()
+        legacy = AssetCategory.objects.create(family=self.family, name='旧基金', code='old-fund')
+        shared = AssetCategory.objects.create(name='共享旧类别', code='shared-old')
+        for category in (legacy, shared):
+            url = reverse('admin:family_core_assetcategory_change', args=[category.pk])
+            self.assertEqual(self.client.get(url).status_code, 200)
+            self.assertEqual(self.client.post(url, self.data('禁止更名')).status_code, 403)
+            category.refresh_from_db()
+        self.assertIsNone(shared.family_id)
 
     def test_member_and_other_family_cannot_write_dictionary(self):
         self.member.role='member'

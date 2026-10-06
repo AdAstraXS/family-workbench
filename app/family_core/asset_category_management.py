@@ -45,6 +45,16 @@ def is_referenced(category):
     return False
 
 
+def record_dictionary_change(category, user, before):
+    metadata = dict(category.extra_data or {})
+    metadata['classification_managed'] = True
+    changes = list(metadata.get('classification_changes', []))
+    changes.append({'at': timezone.now().isoformat(), 'user_id': user.pk, 'before': before,
+        'after': {name: getattr(category, name) for name in before}})
+    metadata['classification_changes'] = changes
+    category.extra_data = metadata
+
+
 class AssetCategoryManagementForm(forms.ModelForm):
     level = forms.ChoiceField(label='分类层级', choices=[('primary','一级类别'),('secondary','二级类别')])
 
@@ -60,7 +70,8 @@ class AssetCategoryManagementForm(forms.ModelForm):
 
     def __init__(self, *args, family, **kwargs):
         super().__init__(*args, **kwargs)
-        self.instance.family = family
+        if not self.instance.pk:
+            self.instance.family = family
         self.original_parent_id = self.instance.parent_id
         if not self.instance.pk:
             self.instance.code = f'asset-category-{uuid.uuid4().hex[:12]}'
@@ -69,7 +80,8 @@ class AssetCategoryManagementForm(forms.ModelForm):
         parents = selectable_primary(AssetCategory.objects.filter(family=family)).filter(
             Q(is_active=True) | Q(pk=self.original_parent_id),
         ).exclude(pk=self.instance.pk).order_by('display_order','name')
-        self.fields['parent'].queryset = parents
+        if 'parent' in self.fields:
+            self.fields['parent'].queryset = parents
         for field in self.fields.values():
             field.widget.attrs.setdefault('class','form-control')
 
@@ -116,13 +128,7 @@ def asset_category_edit(request, pk=None):
                 form = AssetCategoryManagementForm(request.POST, family=member.family, instance=instance)
                 if form.is_valid():
                     category = form.save(commit=False)
-                    metadata = dict(category.extra_data or {})
-                    metadata['classification_managed'] = True
-                    changes = list(metadata.get('classification_changes', []))
-                    changes.append({'at':timezone.now().isoformat(),'user_id':request.user.pk,'before':before,
-                        'after':{name:getattr(category,name) for name in before}})
-                    metadata['classification_changes'] = changes
-                    category.extra_data = metadata
+                    record_dictionary_change(category, request.user, before)
                     category.save()
                     messages.success(request,'资产类别已保存，历史金额和分类归属未调整。')
                     return redirect('ledger:category_list')
