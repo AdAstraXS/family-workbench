@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from family_core.models import Family, FamilyMember
-from .program_media import _yt_command, probe_youtube_audio
+from .program_media import _yt_command, probe_youtube_audio, youtube_audio
 from .program_models import ProgramEntry, ProgramSubscription
 from .program_sources import ProgramError
 
@@ -69,6 +69,20 @@ class MediaFailureTests(SimpleTestCase):
         duration.return_value = 20
         with self.assertRaisesMessage(ProgramError, '时长与节目不符'):
             probe_youtube_audio(entry)
+
+    @patch('intelligence.program_media._yt_command')
+    def test_audio_uses_public_client_and_preserves_download_limits(self, command):
+        from pathlib import Path
+        def download(args, **kwargs):
+            Path(args[args.index('-o') + 1]).write_bytes(b'checked-audio')
+        command.side_effect = download
+        body, mime = youtube_audio(SimpleNamespace(external_id='yjp8mm4tq5g'), timeout=55)
+        args = command.call_args.args[0]
+        self.assertEqual(args[args.index('--extractor-args') + 1], 'youtube:player_client=visionos')
+        self.assertEqual(args[args.index('-f') + 1], 'bestaudio[ext=m4a]')
+        self.assertEqual(args[args.index('--max-filesize') + 1], str(60 * 1024 * 1024))
+        self.assertEqual(command.call_args.kwargs['timeout'], 55)
+        self.assertEqual((body, mime), (b'checked-audio', 'audio/mp4'))
 
 
 class ProbeActionTests(TestCase):

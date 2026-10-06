@@ -183,10 +183,10 @@ def _yt_command(args, timeout=180, *, use_proxy=True):
     proxy_args = ['--proxy', source_proxy()] if use_proxy and source_proxy() else []
     platform = 'YouTube' if use_proxy else '视频来源'
     stage = '音频下载' if '-o' in args else '节目信息获取'
+    command = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-playlist',
+               '--socket-timeout', '20', '--retries', '1', *proxy_args, *args]
     try:
-        completed = subprocess.run([sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-playlist',
-            '--socket-timeout', '20', '--retries', '1', *proxy_args, *args],
-            capture_output=True, timeout=timeout, check=True)
+        completed = subprocess.run(command, capture_output=True, timeout=timeout, check=True)
         return completed.stdout
     except subprocess.TimeoutExpired as exc:
         reason, detail = 'timeout', f'超过 {timeout} 秒未完成，请稍后检查获取或重试。'
@@ -293,7 +293,10 @@ def youtube_captions(info):
 def youtube_audio(entry, *, timeout=300):
     with tempfile.TemporaryDirectory(prefix='intelligence-audio-') as directory:
         path = Path(directory) / 'audio.m4a'
-        _yt_command(['-f', 'bestaudio[ext=m4a]', '--max-filesize', str(MAX_AUDIO_BYTES),
+        # Use the public visionOS client explicitly. It supplies direct audio
+        # formats for this source while the default web/SABR route can return 403.
+        _yt_command(['--extractor-args', 'youtube:player_client=visionos',
+                     '-f', 'bestaudio[ext=m4a]', '--max-filesize', str(MAX_AUDIO_BYTES),
                      '--fragment-retries', '1', '--no-progress', '-o', str(path),
                      'https://www.youtube.com/watch?v=' + entry.external_id], timeout=timeout)
         if not path.exists() or not 0 < path.stat().st_size <= MAX_AUDIO_BYTES:
