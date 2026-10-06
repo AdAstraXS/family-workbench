@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import math
 import re
 import subprocess
@@ -21,6 +22,7 @@ from knowledge.crypto import decrypt_json
 
 MAX_AUDIO_BYTES = 60 * 1024 * 1024
 ASR_MODEL = 'fun-asr-2025-11-07'
+logger = logging.getLogger(__name__)
 
 
 def media_duration(body):
@@ -179,13 +181,48 @@ def download_asr_result(output):
 
 def _yt_command(args, timeout=180, *, use_proxy=True):
     proxy_args = ['--proxy', source_proxy()] if use_proxy and source_proxy() else []
+    platform = 'YouTube' if use_proxy else '视频来源'
+    stage = '音频下载' if '-o' in args else '节目信息获取'
     try:
         completed = subprocess.run([sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-playlist',
-            '--no-warnings', '--socket-timeout', '20', '--retries', '1', *proxy_args, *args],
+            '--socket-timeout', '20', '--retries', '1', *proxy_args, *args],
             capture_output=True, timeout=timeout, check=True)
         return completed.stdout
-    except (subprocess.SubprocessError, OSError) as exc:
-        raise ProgramError('YouTube 获取失败，可能是网络或平台访问限制；可导入已有字幕或音频后继续。') from exc
+    except subprocess.TimeoutExpired as exc:
+        reason, detail = 'timeout', f'超过 {timeout} 秒未完成，请稍后检查获取或重试。'
+        failure = exc
+    except subprocess.CalledProcessError as exc:
+        reason, detail = _yt_failure_detail(exc.stderr)
+        failure = exc
+    except OSError as exc:
+        reason, detail = 'runtime', '抓取工具无法启动，请管理员检查运行环境。'
+        failure = exc
+    # Never log subprocess arguments/stderr: they can contain signed media URLs,
+    # proxy credentials or local file paths. Only allowlisted diagnoses leave here.
+    logger.warning('program_media_failure platform=%s stage=%s reason=%s returncode=%s',
+                   platform, stage, reason, getattr(failure, 'returncode', None))
+    raise ProgramError(f'{platform} {stage}失败：{detail}') from failure
+
+
+def _yt_failure_detail(stderr):
+    text = (stderr.decode('utf-8', errors='replace') if isinstance(stderr, bytes)
+            else str(stderr or '')).lower()
+    if 'no module named yt_dlp' in text:
+        return 'missing_tool', '运行环境缺少抓取工具，请管理员检查镜像依赖。'
+    if 'sign in to confirm' in text or 'not a bot' in text:
+        return 'login_required', 'YouTube 要求登录或验证；自动获取暂不可用，可导入已有字幕或音频。'
+    if re.search(r'(?:http(?: error)?|status(?: code)?)\s*[:=]?\s*429\b', text):
+        return 'rate_limit', '来源请求过于频繁（HTTP 429），请稍后再试。'
+    if re.search(r'(?:http(?: error)?|status(?: code)?)\s*[:=]?\s*403\b', text):
+        return 'forbidden', '来源拒绝媒体访问（HTTP 403）；网页能播放也可能无法自动下载。'
+    if 'requested format is not available' in text or 'only images are available' in text:
+        return 'format', '未取得可下载的音视频格式，请管理员检查抓取器和 JavaScript 解析环境。'
+    if 'video unavailable' in text or 'private video' in text or 'members-only' in text:
+        return 'unavailable', '视频不可用或需要额外观看权限，可核对原始来源。'
+    if any(term in text for term in ('timed out', 'connection reset', 'connection refused',
+                                     'unable to download', 'name or service not known', 'proxyerror')):
+        return 'network', '来源或代理连接失败，请稍后检查获取或重试。'
+    return 'extractor', '抓取器未能解析或下载节目，请管理员检查抓取环境；可导入已有字幕或音频。'
 
 
 def youtube_metadata(entry, max_minutes, *, timeout=180):
@@ -253,15 +290,25 @@ def youtube_captions(info):
     return []
 
 
-def youtube_audio(entry):
+def youtube_audio(entry, *, timeout=300):
     with tempfile.TemporaryDirectory(prefix='intelligence-audio-') as directory:
         path = Path(directory) / 'audio.m4a'
         _yt_command(['-f', 'bestaudio[ext=m4a]', '--max-filesize', str(MAX_AUDIO_BYTES),
                      '--fragment-retries', '1', '--no-progress', '-o', str(path),
-                     'https://www.youtube.com/watch?v=' + entry.external_id], timeout=300)
+                     'https://www.youtube.com/watch?v=' + entry.external_id], timeout=timeout)
         if not path.exists() or not 0 < path.stat().st_size <= MAX_AUDIO_BYTES:
             raise ProgramError('未取得音频，或音频超过 60 MB 上限。')
         return path.read_bytes(), 'audio/mp4'
+
+
+def probe_youtube_audio(entry):
+    """Bounded manual diagnostic; no stored media, task changes or cloud calls."""
+    info = youtube_metadata(entry, 240, timeout=30)
+    body, _ = youtube_audio(entry, timeout=55)
+    duration = media_duration(body)
+    if abs(duration - float(info['duration'])) > 10:
+        raise ProgramError('取得的音频时长与节目不符，未提交转写。')
+    return len(body), duration
 
 
 def bilibili_metadata(entry, max_minutes):
