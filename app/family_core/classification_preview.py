@@ -8,12 +8,15 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F, Q
 from .asset_classification import categories_for_family, government_term_category, validate_assignment
+from .classification_confirmations import resolve_ledger_confirmations
 
 SYMBOL_RULES = {
     **dict.fromkeys(('VOO', 'SPY', 'IVV', 'QQQ', 'QQQM', 'TQQQ', 'TNA', 'IWM', '03086', '03195', '510300', '159919'), 'equity_index'),
-    **dict.fromkeys(('GGLL', 'DRAM', 'QTUM', 'XLU', 'XLV', 'NVDY'), 'equity_fund'),
+    **dict.fromkeys(('GGLL', 'DRAM', 'QTUM', 'XLU', 'XLV', 'NVDY', 'ALLW'), 'equity_fund'),
     **dict.fromkeys(('IBIT', 'ETHA'), 'crypto'),
-    '03433': 'government_long', '912810TV0': 'government_long', 'ALLW': 'bond_fund',
+    # 03433 holds 20+ year US Treasuries. This is a product-specific rule,
+    # not a default for all government bond ETFs.
+    '03433': 'government_long', '912810TV0': 'government_long',
 }
 
 def propose_security(security):
@@ -41,7 +44,8 @@ def propose_entry(entry):
     name = entry.account.account_name if entry.account else entry.account_name
     account_type = getattr(entry.account, 'account_type_ref', None) if entry.account else None
     old = category.code if category else ''
-    if '信用卡' in name or (account_type and account_type.code == 'credit_card'):
+    if ((category and category.name in ('信用卡', '信用卡（旧分类）'))
+            or '信用卡' in name or (account_type and account_type.code == 'credit_card')):
         if entry.original_amount > 0:
             return None, '信用卡余额为正，需核对欠款与溢缴款，不能改动金额符号'
         return 'credit_card', '信用卡欠款'
@@ -49,7 +53,7 @@ def propose_entry(entry):
         return 'savings_insurance', '用户确认养老金归储蓄型保险'
     if old == 'fund' and ('支付宝' in name or (account_type and account_type.code == 'alipay')):
         return 'equity_fund', '用户确认支付宝旧基金余额全部为股票基金'
-    if old == 'cash':
+    if old == 'cash' or name == '现金':
         return 'cash_balance', '原现金余额'
     if old == 'fixed_income' and ('医保' in name or '银行' in name or (account_type and account_type.code == 'bank')):
         return 'cash_balance', '用户确认银行及医保旧固定收益余额归现金'
@@ -90,11 +94,12 @@ def _record_facts(record):
         if field.name not in ('asset_category', 'created_at', 'updated_at')
     }
 
-def build_classification_preview(family, start, end):
+def build_classification_preview(family, start, end, *, confirmations=None):
     if start > end:
         raise ValidationError('开始日期不能晚于结束日期。')
     categories = {item.code: item for item in categories_for_family(family).filter(parent__isnull=False, is_active=True).order_by(F('family_id').asc(nulls_first=True))}
     groups = _scoped_records(family, start, end)
+    confirmed_entries = resolve_ledger_confirmations(family, groups[2], confirmations)
     rows, facts = [], []
     for records in groups:
         for record in records:
@@ -104,7 +109,10 @@ def build_classification_preview(family, start, end):
                 code, reason = propose_security(record)
                 display, day = str(record), None
             elif label == 'ledger.assetbalanceentry':
-                code, reason = propose_entry(record)
+                if old and old.parent_id:
+                    code, reason = propose_entry(record)
+                else:
+                    code, reason = confirmed_entries.get(record.pk, propose_entry(record))
                 display, day = f'{record.member} · {record.account or record.account_name}', record.snapshot.snapshot_date
             elif label == 'portfolio.investmenttransaction':
                 if old and old.parent_id:
@@ -161,11 +169,13 @@ def build_classification_preview(family, start, end):
         'counts': {status: sum(row['status'] == status for row in rows) for status in ('ready', 'unchanged', 'unresolved')},
         'financial_digest': _hash(facts), 'rows': rows,
     }
+    if confirmations is not None:
+        report['confirmation_digest'] = _hash(confirmations)
     report['digest'] = _hash(report)
     return report
 
 @transaction.atomic
-def apply_classification_preview(family, start, end, expected_digest):
+def apply_classification_preview(family, start, end, expected_digest, *, confirmations=None):
     from django.apps import apps
     from .models import AssetClassificationAudit, AssetCategory
     # Serialize with other classification updates for this family.
@@ -174,7 +184,7 @@ def apply_classification_preview(family, start, end, expected_digest):
     for records in groups:
         if records:
             list(type(records[0]).objects.select_for_update().filter(pk__in=[r.pk for r in records]).order_by('pk'))
-    report = build_classification_preview(family, start, end)
+    report = build_classification_preview(family, start, end, confirmations=confirmations)
     if report['digest'] != expected_digest:
         raise ValidationError('预览后数据或映射规则已变化，请重新预览并确认摘要。')
     batch = uuid.uuid4()

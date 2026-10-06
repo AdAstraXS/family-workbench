@@ -22,7 +22,7 @@ SECONDARY_CATEGORIES = (
 )
 INSTRUMENTS_BY_SECONDARY = {
     "cash_balance": {"other"}, "money_market": {"etf", "fund", "other"},
-    "government_short": {"bond"}, "government_long": {"bond", "etf", "fund"},
+    "government_short": {"bond", "etf", "fund"}, "government_long": {"bond", "etf", "fund"},
     "bond_fund": {"etf", "fund", "other"}, "equity_index": {"etf", "fund"},
     "equity_fund": {"etf", "fund"}, "equity_stock": {"stock"},
     "option": {"option"}, "crypto": {"etf", "fund", "other"},
@@ -53,11 +53,21 @@ def seed_categories(family, model=None):
     for order, (code, name, parent_code) in enumerate(SECONDARY_CATEGORIES, 1):
         existing = model.objects.filter(family=family, name=name).first()
         # Dictionary installation never reclassifies historical rows implicitly.
+        if existing and code == 'credit_card' and existing.code != code and not existing.parent_id:
+            if existing.children.exists() or model.objects.filter(family=family, name='信用卡（旧分类）').exists():
+                raise ValidationError('旧信用卡类别存在层级或名称冲突，请先核对。')
+            metadata = dict(existing.extra_data or {})
+            metadata['classification_legacy_label'] = existing.name
+            metadata['classification_legacy_code'] = existing.code
+            model.objects.filter(pk=existing.pk).update(name='信用卡（旧分类）', extra_data=metadata)
+            existing = None
         if existing and existing.code != code:
             raise ValidationError(f"资产类别名称冲突：{name}；请先核对旧字典。")
-        model.objects.get_or_create(family=family, code=code, defaults={
+        leaf, _ = model.objects.get_or_create(family=family, code=code, defaults={
             "name": name, "parent": primary[parent_code], "display_order": order,
         })
+        if leaf.parent_id != primary[parent_code].pk:
+            raise ValidationError(f'二级类别稳定代码存在旧层级冲突：{code}；请先核对。')
     return primary
 
 def validate_assignment(category, *, family=None, instrument=None):

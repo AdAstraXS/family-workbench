@@ -28,16 +28,28 @@ def install_dictionary(apps, schema_editor):
         for order, (code, name) in enumerate(PRIMARY, 1):
             roots[code], _ = categories.get_or_create(family_id=family_id, code=code, defaults={'name': name, 'display_order': order})
         for order, (code, name, parent) in enumerate(SECONDARY, 1):
+            legacy = categories.filter(family_id=family_id, name=name).first()
+            if legacy and code == 'credit_card' and legacy.code != code and not legacy.parent_id:
+                if categories.filter(parent_id=legacy.pk).exists() or categories.filter(family_id=family_id, name='信用卡（旧分类）').exists():
+                    raise RuntimeError('旧信用卡类别存在层级或名称冲突，迁移未改挂历史记录。')
+                metadata = dict(legacy.extra_data or {})
+                metadata['classification_legacy_label'] = legacy.name
+                metadata['classification_legacy_code'] = legacy.code
+                # Free the unique display name while retaining the legacy ID,
+                # stable code and every existing historical FK for reviewed apply.
+                categories.filter(pk=legacy.pk).update(name='信用卡（旧分类）', extra_data=metadata)
             conflict = categories.filter(family_id=family_id, name=name).exclude(code=code).exists()
             if conflict:
                 raise RuntimeError(f'资产类别名称冲突：{name}；请先核对旧字典，迁移未调整历史分类。')
-            categories.get_or_create(family_id=family_id, code=code, defaults={'name': name, 'parent': roots[parent], 'display_order': order})
+            leaf, _ = categories.get_or_create(family_id=family_id, code=code, defaults={'name': name, 'parent': roots[parent], 'display_order': order})
+            if leaf.parent_id != roots[parent].pk:
+                raise RuntimeError(f'二级类别稳定代码存在旧层级冲突：{code}；迁移未改挂历史记录。')
 
 class Migration(migrations.Migration):
     dependencies = [
         ('family_core', '0009_assetcategory_parent_assetclassificationaudit'),
         ('portfolio', '0032_bonddetail_original_issue_date_and_more'),
     ]
-    # Old categories and every financial record remain untouched. Dictionary
+    # Old category IDs/codes and every financial FK remain untouched. Dictionary
     # rows stay on reverse so historical FK references can never be removed.
     operations = [migrations.RunPython(install_dictionary, migrations.RunPython.noop)]

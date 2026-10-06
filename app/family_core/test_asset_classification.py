@@ -60,6 +60,35 @@ class AssetClassificationTests(TestCase):
         self.assertEqual(old.name, '基金类')
         self.assertEqual(AssetCategory.objects.filter(family=legacy, parent__isnull=False).count(), 13)
 
+    def test_legacy_credit_card_name_is_archived_without_repointing_financial_rows(self):
+        import importlib
+        from django.apps import apps
+        from django.db import connection
+        from types import SimpleNamespace
+        legacy_family = Family.objects.create(name='旧信用卡家庭')
+        member = FamilyMember.objects.create(family=legacy_family, display_name='成员')
+        bank = BankAccount.objects.create(family=legacy_family, member=member, account_name='中国银行')
+        category = AssetCategory.objects.create(family=legacy_family, name='信用卡', code='asset-category-legacy-card', extra_data={'existing':'保留'})
+        snapshot = AssetBalanceSnapshot.objects.create(family=legacy_family, snapshot_date=self.day)
+        entry = AssetBalanceEntry.objects.create(snapshot=snapshot, member=member, account=bank, asset_category=category, original_amount=Decimal('-99.1234'), base_amount=Decimal('-99.1234'))
+        before = list(AssetBalanceEntry.objects.values())
+        migration = importlib.import_module('family_core.migrations.0010_two_level_asset_dictionary')
+        migration.install_dictionary(apps, SimpleNamespace(connection=connection))
+        self.assertEqual(before, list(AssetBalanceEntry.objects.values()))
+        category.refresh_from_db()
+        entry.refresh_from_db()
+        self.assertEqual(category.name, '信用卡（旧分类）')
+        self.assertEqual(category.code, 'asset-category-legacy-card')
+        self.assertIsNone(category.parent_id)
+        self.assertEqual(category.extra_data['existing'],'保留')
+        self.assertEqual(category.extra_data['classification_legacy_label'],'信用卡')
+        self.assertEqual(AssetCategory.objects.get(family=legacy_family,code='credit_card').parent.code,'liabilities')
+        self.assertEqual(propose_entry(entry)[0],'credit_card')
+        entry.original_amount=Decimal('1')
+        self.assertIsNone(propose_entry(entry)[0])
+        seed_categories(legacy_family)
+        self.assertEqual(AssetCategory.objects.filter(family=legacy_family,parent__isnull=False).count(),13)
+
     def test_get_pages_render_two_selectors_without_writing(self):
         self.entry()
         self.client.force_login(self.user)
@@ -106,6 +135,7 @@ class AssetClassificationTests(TestCase):
         for old, name, expected in [
             ('fixed_income', '招商银行', 'cash_balance'), ('fixed_income', '医保账户', 'cash_balance'),
             ('fixed_income', '养老金', 'savings_insurance'), ('cash', '活期余额', 'cash_balance'),
+            ('fixed_income', '现金', 'cash_balance'),
         ]:
             self.assertEqual(propose_entry(self.entry(old, name))[0], expected)
         fund = AssetCategory.objects.create(family=self.family, name='基金类', code='fund')
@@ -130,9 +160,155 @@ class AssetClassificationTests(TestCase):
         self.assertEqual(propose_entry(self.entry('alternatives', '套利账户'))[0], 'cash_balance')
 
     def test_etf_rules_include_industry_crypto_bonds_and_mixed_fund(self):
-        for symbol, expected in [('XLU', 'equity_fund'), ('XLV', 'equity_fund'), ('TQQQ', 'equity_index'), ('IBIT', 'crypto'), ('03433', 'government_long'), ('ALLW', 'bond_fund')]:
+        for symbol, expected in [('XLU', 'equity_fund'), ('XLV', 'equity_fund'), ('TQQQ', 'equity_index'), ('IBIT', 'crypto'), ('03433', 'government_long'), ('ALLW', 'equity_fund')]:
             self.security.symbol = symbol
             self.assertEqual(propose_security(self.security)[0], expected)
+
+    def confirmation(self, entry, target='cash_balance', scope='matching_history'):
+        return {'version': 1, 'ledger_rules': [{
+            'anchor': {'id': entry.pk, 'date': str(entry.snapshot.snapshot_date),
+                       'member_name': str(entry.member), 'account_name': entry.account.account_name if entry.account else entry.account_name,
+                       'currency': entry.currency, 'old_category_code': entry.asset_category.code,
+                       'original_amount': str(entry.original_amount)},
+            'target_code': target, 'scope': scope,
+        }]}
+
+    def test_government_etfs_accept_both_terms_and_unknown_underlying_is_not_guessed(self):
+        for code in ('government_short', 'government_long'):
+            for instrument in ('etf', 'fund', 'bond'):
+                validate_assignment(self.categories[code], family=self.family, instrument=instrument)
+        self.security.symbol = 'UNKNOWN_GOV_ETF'
+        self.assertIsNone(propose_security(self.security)[0])
+        self.security.asset_category = self.categories['government_short']
+        self.assertEqual(propose_security(self.security)[0], 'government_short')
+
+    def test_confirmation_overrides_generic_bank_rule_and_extends_by_ids_only(self):
+        entry = self.entry()
+        plan = self.confirmation(entry, 'bond_fund')
+        earlier = AssetBalanceSnapshot.objects.create(family=self.family, snapshot_date=date(2024, 12, 31))
+        historical = self.entry()
+        historical.snapshot = earlier
+        historical.save()
+        same_name_different_account = self.entry(name=self.bank.account_name)
+        different_currency = self.entry(currency='USD')
+        before = list(AssetBalanceEntry.objects.values())
+        report = build_classification_preview(self.family, earlier.snapshot_date, self.day, confirmations=plan)
+        rows = {r['id']: r for r in report['rows'] if r['model'] == 'ledger.assetbalanceentry'}
+        self.assertEqual(rows[entry.pk]['proposed_code'], 'bond_fund')
+        self.assertEqual(rows[historical.pk]['proposed_code'], 'bond_fund')
+        self.assertEqual(rows[same_name_different_account.pk]['proposed_code'], 'cash_balance')
+        self.assertEqual(rows[different_currency.pk]['proposed_code'], 'cash_balance')
+        self.assertEqual(before, list(AssetBalanceEntry.objects.values()))
+
+    def test_ambiguous_historical_pair_keeps_exact_anchors_and_blocks_other_dates(self):
+        cash, bond, historical = self.entry(), self.entry(), self.entry()
+        plan = self.confirmation(cash, 'cash_balance')
+        plan['ledger_rules'] += self.confirmation(bond, 'government_long')['ledger_rules']
+        report = build_classification_preview(self.family, self.day, self.day, confirmations=plan)
+        rows = {r['id']: r for r in report['rows'] if r['model'] == 'ledger.assetbalanceentry'}
+        self.assertEqual(rows[cash.pk]['proposed_code'], 'cash_balance')
+        self.assertEqual(rows[bond.pk]['proposed_code'], 'government_long')
+        self.assertEqual(rows[historical.pk]['status'], 'unresolved')
+        self.assertIn('多个新类别', rows[historical.pk]['reason'])
+
+    def test_record_only_confirmation_does_not_reclassify_other_history(self):
+        cash, bond, historical = self.entry(), self.entry(), self.entry()
+        plan = self.confirmation(cash, 'cash_balance', 'record')
+        plan['ledger_rules'] += self.confirmation(bond, 'government_long', 'record')['ledger_rules']
+        rows = build_classification_preview(self.family, self.day, self.day, confirmations=plan)['rows']
+        self.assertEqual(next(r for r in rows if r['model'] == 'ledger.assetbalanceentry' and r['id'] == historical.pk)['status'], 'unresolved')
+
+    def test_explicit_other_dates_cash_preserves_source_date_bond_and_cash(self):
+        cash, bond = self.entry(), self.entry()
+        plan = self.confirmation(cash, 'cash_balance')
+        plan['ledger_rules'] += self.confirmation(bond, 'government_long')['ledger_rules']
+        for rule in plan['ledger_rules']:
+            rule['history_target_code'] = 'cash_balance'
+        historical = self.entry()
+        earlier = AssetBalanceSnapshot.objects.create(family=self.family, snapshot_date=date(2024, 12, 31))
+        historical.snapshot = earlier
+        historical.save()
+        unknown_same_day = self.entry()
+        report = build_classification_preview(self.family, earlier.snapshot_date, self.day, confirmations=plan)
+        rows = {r['id']: r for r in report['rows'] if r['model'] == 'ledger.assetbalanceentry'}
+        self.assertEqual(rows[cash.pk]['proposed_code'], 'cash_balance')
+        self.assertEqual(rows[bond.pk]['proposed_code'], 'government_long')
+        self.assertEqual(rows[historical.pk]['proposed_code'], 'cash_balance')
+        self.assertEqual(rows[unknown_same_day.pk]['status'], 'unresolved')
+        before = report['financial_digest']
+        apply_classification_preview(self.family, earlier.snapshot_date, self.day, report['digest'], confirmations=plan)
+        historical.refresh_from_db()
+        bond.refresh_from_db()
+        self.assertEqual(historical.asset_category.code, 'cash_balance')
+        self.assertEqual(bond.asset_category.code, 'government_long')
+        self.assertEqual(build_classification_preview(self.family, earlier.snapshot_date, self.day, confirmations=plan)['financial_digest'], before)
+
+    def test_conflicting_other_dates_codes_stay_unresolved(self):
+        cash, bond = self.entry(), self.entry()
+        plan = self.confirmation(cash, 'cash_balance')
+        plan['ledger_rules'] += self.confirmation(bond, 'government_long')['ledger_rules']
+        plan['ledger_rules'][0]['history_target_code'] = 'cash_balance'
+        plan['ledger_rules'][1]['history_target_code'] = 'government_long'
+        historical = self.entry()
+        earlier = AssetBalanceSnapshot.objects.create(family=self.family, snapshot_date=date(2024, 12, 31))
+        historical.snapshot = earlier
+        historical.save()
+        rows = build_classification_preview(self.family, earlier.snapshot_date, self.day, confirmations=plan)['rows']
+        self.assertEqual(next(r for r in rows if r['model'] == 'ledger.assetbalanceentry' and r['id'] == historical.pk)['status'], 'unresolved')
+
+    def test_stale_or_other_family_confirmation_stops_before_any_write(self):
+        entry = self.entry()
+        plan = self.confirmation(entry)
+        report = build_classification_preview(self.family, self.day, self.day, confirmations=plan)
+        entry.base_amount = Decimal('999')
+        entry.save()
+        with self.assertRaises(ValidationError):
+            apply_classification_preview(self.family, self.day, self.day, report['digest'], confirmations=plan)
+        entry.original_amount = Decimal('100')
+        entry.save()
+        with self.assertRaises(ValidationError):
+            build_classification_preview(self.family, self.day, self.day, confirmations=plan)
+        other = Family.objects.create(name='其他家庭')
+        with self.assertRaises(ValidationError):
+            build_classification_preview(other, self.day, self.day, confirmations=plan)
+        self.assertFalse(AssetClassificationAudit.objects.exists())
+
+    def test_modified_confirmation_digest_cannot_apply_and_valid_plan_is_idempotent(self):
+        from copy import deepcopy
+        entry = self.entry()
+        plan = self.confirmation(entry, 'bond_fund')
+        report = build_classification_preview(self.family, self.day, self.day, confirmations=plan)
+        changed = deepcopy(plan)
+        changed['ledger_rules'][0]['target_code'] = 'government_long'
+        with self.assertRaises(ValidationError):
+            apply_classification_preview(self.family, self.day, self.day, report['digest'], confirmations=changed)
+        result = apply_classification_preview(self.family, self.day, self.day, report['digest'], confirmations=plan)
+        entry.refresh_from_db()
+        self.assertEqual(entry.asset_category.code, 'bond_fund')
+        self.assertEqual(entry.original_amount, Decimal('123.4567'))
+        self.assertEqual(entry.base_amount, Decimal('123.4567'))
+        second = build_classification_preview(self.family, self.day, self.day, confirmations=plan)
+        self.assertEqual(second['financial_digest'], report['financial_digest'])
+        self.assertEqual(apply_classification_preview(self.family, self.day, self.day, second['digest'], confirmations=plan)['updated'], 0)
+        self.assertEqual(AssetClassificationAudit.objects.count(), result['updated'])
+
+    def test_confirmation_invalid_payloads_are_rejected_and_existing_leaf_preserved(self):
+        from copy import deepcopy
+        entry = self.entry()
+        plan = self.confirmation(entry)
+        for mutation in ('duplicate', 'nan', 'float', 'wrong_member', 'unknown_code'):
+            invalid = deepcopy(plan)
+            rule = invalid['ledger_rules'][0]
+            if mutation == 'duplicate': invalid['ledger_rules'].append(deepcopy(rule))
+            elif mutation == 'nan': rule['anchor']['original_amount'] = 'NaN'
+            elif mutation == 'float': rule['anchor']['original_amount'] = 123.4567
+            elif mutation == 'wrong_member': rule['anchor']['member_name'] = '其他人'
+            else: rule['target_code'] = 'unknown'
+            with self.subTest(mutation=mutation), self.assertRaises(ValidationError):
+                build_classification_preview(self.family, self.day, self.day, confirmations=invalid)
+        historical = self.entry('equity_stock')
+        rows = build_classification_preview(self.family, self.day, self.day, confirmations=plan)['rows']
+        self.assertEqual(next(r for r in rows if r['model'] == 'ledger.assetbalanceentry' and r['id'] == historical.pk)['status'], 'unchanged')
 
     def test_bond_without_original_issue_date_remains_unresolved(self):
         self.security.asset_type = 'bond'
