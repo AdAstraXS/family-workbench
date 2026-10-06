@@ -9,6 +9,13 @@
 
 ## 用户一次性安装
 
+2026-10-06用户明确授权代理代为安装并做好备份。可由代理打开
+`deploy/open-classification-install.ps1`，用户仅在SSH的sudo提示中输入NAS管理员密码；
+`deploy/install-classification-entry.sh`执行固定哈希核对、保留旧入口、原子替换及安装验证。
+脚本不接受目标参数，不修改SSH或sudoers，不接收、保存或打印密码。安装后检查失败会
+恢复原入口。7项本地临时目录安装测试通过，覆盖成功、幂等、校验失败及回滚。
+下列手工步骤仍可供用户自行安装；代理代为执行时无需用户理解或输入这些命令。
+
 准备文件：`deploy/family-workbench-deploy`，已完成7项模拟后端边界测试。
 通过既有部署密钥上传至：
 
