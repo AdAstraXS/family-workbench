@@ -157,3 +157,24 @@ python manage.py preview_asset_classification --family FAMILY_ID --start YYYY-MM
 - 包装器更新需按NAS技能由用户完成一次交互式安装，不改SSH公钥或sudoers范围。
   安装步骤见[分类受限入口安装](asset-classification-nas-entry.md)。应用源代码发布和历史分类
   批次分开验收；历史批次完成前不能宣称全历史已更新。
+
+### 代码及结构发布结果（2026-10-06）
+
+- NAS已发布并记录`bb0dd1131d03da8dbe43a421bc244d2df63eebd3`，同提交已推送GitHub。
+  使用精确Git归档，SHA-256：`ff9e7d5d068f3986ad94c4a1496bc5da192be9d352180bffd6a03d42604af1fe`。
+- 发布前生产备份`family-workbench-asset-classification-management-20261006-bb0dd11.dump`
+  为101MiB、root600，已通过`pg_restore -l`验证，SHA-256：
+  `63c6318899332be99554a177db4f30e94642ebc9b482c78606ec6d92a2bb7827`。
+  未下载备份，未上传或恢复本地数据库。源码回滚包为
+  `source-predeploy-dbd7b80e35a1a04f83657059b0f12bc1a9687386-20261006-163716.tar.gz`。
+- 成功应用`family_core.0009`、`portfolio.0032`、`family_core.0010`；安装层级、审计表、
+  快照分类字段、债券发行日期字段及共用分类字典。只归档旧信用卡显示名称，保留原编号及
+  全部历史财务外键，不自动调整历史交易、余额或快照的分类。
+- 静态收集及Gunicorn启动通过，生产Django检查无提示、没有待执行迁移。内部HTTP正常跳转，
+  外部已登录管理页及新增页可用、返回地址正确；线上未建立任何测试分类。
+- 前后账户35、持仓483、交易1,083、快照2,400、明细14,952、每日估值85、最新快照2026-10-06
+  均相同；正式账本563条汇率/金额、现金流水、期权关联与持仓审计无问题，未触发估值或
+  快照刷新。生产`.env`摘要未变，DB及OpenD健康且创建时间未变。
+- 新受限入口候选已上传DX主目录，哈希及NAS`sh -n`检查通过，尚未安装到root路径。
+  **全历史分类批次未执行**，仍待用户按安装说明完成一次交互式安装后，重新生成并核对
+  实际生产摘要。该限制不影响已上线的基础资料管理页面。
