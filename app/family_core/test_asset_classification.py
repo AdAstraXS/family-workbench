@@ -43,6 +43,22 @@ class AssetClassificationTests(TestCase):
         seed_categories(self.family)
         self.assertEqual(before, list(AssetCategory.objects.filter(family=self.family).values_list('id', 'code', 'name', 'parent_id')))
 
+    def test_form_renders_secondary_options_with_parent_and_adjacent_fields(self):
+        self.security.asset_category = self.categories['equity_index']
+        form = SecurityForm(instance=self.security, family=self.family)
+        html = str(form['asset_category'])
+        self.assertIn(f'data-parent-id="{self.categories["equity"].pk}"', html)
+        self.assertIn('股指基金', html)
+        self.assertIn('selected', html)
+        names = list(form.fields)
+        self.assertEqual(names[names.index('asset_primary') + 1], 'asset_category')
+        legacy = AssetCategory.objects.create(family=self.family, code='old-card', name='信用卡（旧分类）')
+        self.assertNotIn(legacy, form.fields['asset_primary'].queryset)
+        self.security.asset_category = legacy
+        historical = SecurityForm(instance=self.security, family=self.family)
+        self.assertIn(legacy, historical.fields['asset_primary'].queryset)
+        self.assertIn('历史未细分', str(historical['asset_category']))
+
     def test_dictionary_migration_preserves_old_categories_and_financial_records(self):
         import importlib
         from django.apps import apps
@@ -101,6 +117,11 @@ class AssetClassificationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id_asset_primary')
         self.assertContains(response, 'id_asset_category')
+        legacy = AssetCategory.objects.create(family=self.family, code='old-card', name='信用卡（旧分类）')
+        response = self.client.get(reverse('portfolio:transaction_form_options'), {'family': self.family.pk})
+        choices = {row['id']: row for row in response.json()['categories']}
+        self.assertFalse(choices[legacy.pk]['is_primary_choice'])
+        self.assertTrue(choices[self.categories['equity'].pk]['is_primary_choice'])
         self.assertEqual(before, (AssetClassificationAudit.objects.count(), AssetBalanceEntry.objects.count()))
 
     def test_hierarchy_rejects_cycles_third_level_and_other_family(self):
@@ -160,9 +181,20 @@ class AssetClassificationTests(TestCase):
         self.assertEqual(propose_entry(self.entry('alternatives', '套利账户'))[0], 'cash_balance')
 
     def test_etf_rules_include_industry_crypto_bonds_and_mixed_fund(self):
-        for symbol, expected in [('XLU', 'equity_fund'), ('XLV', 'equity_fund'), ('TQQQ', 'equity_index'), ('IBIT', 'crypto'), ('03433', 'government_long'), ('ALLW', 'equity_fund')]:
+        for symbol, expected in [('XLU', 'equity_fund'), ('XLV', 'equity_fund'), ('SMH', 'equity_fund'), ('TQQQ', 'equity_index'), ('IBIT', 'crypto'), ('03433', 'government_long'), ('ALLW', 'equity_fund')]:
             self.security.symbol = symbol
             self.assertEqual(propose_security(self.security)[0], expected)
+
+    def test_exact_legacy_treasury_alias_does_not_infer_unknown_bonds_or_tech_index(self):
+        self.security.asset_type = 'bond'
+        self.security.symbol = 'GOVT 4.75 NOV15’53 912810TV0'
+        self.assertEqual(propose_security(self.security)[0], 'government_long')
+        self.assertEqual(self.security.symbol, 'GOVT 4.75 NOV15’53 912810TV0')
+        self.security.symbol = 'UNKNOWN 912810TV0'
+        self.assertIsNone(propose_security(self.security)[0])
+        self.security.asset_type = 'etf'
+        self.security.symbol = '07552'
+        self.assertIsNone(propose_security(self.security)[0])
 
     def confirmation(self, entry, target='cash_balance', scope='matching_history'):
         return {'version': 1, 'ledger_rules': [{

@@ -239,7 +239,15 @@
     const updateSecurities = (reset = false) => {
       const current = reset ? "" : security.value;
       const allowed = allowedInstrumentTypes();
-      const rows = securityRows.filter(row => (!allowed.length || allowed.includes(row.asset_type)) && (!assetType.value || row.asset_type === assetType.value));
+      const selectedCategory = categoryRows.find(item => String(item.id) === category.value);
+      const rows = securityRows.filter(row => {
+        const existing = categoryRows.find(item => item.id === row.asset_category_id);
+        const matchesCategory = !selectedCategory || !existing || existing.id === selectedCategory.id || (
+          !existing.parent_id && (existing.code === selectedCategory.primary_code ||
+            (existing.code === "fund" && ["etf", "fund"].includes(row.asset_type)))
+        );
+        return matchesCategory && (!allowed.length || allowed.includes(row.asset_type)) && (!assetType.value || row.asset_type === assetType.value);
+      });
       security.replaceChildren(new Option("---------", ""));
       rows.forEach((row) => {
         const option = new Option(row.name, row.id);
@@ -316,7 +324,7 @@
       categoryRows = data.categories || [];
       securityRows = data.securities || [];
       const selectedCategory = category.value;
-      replaceOptions(primary, categoryRows.filter(row => !row.parent_id && (row.code !== "fund" || String(row.id) === primary.value)), "请选择一级资产类别");
+      replaceOptions(primary, categoryRows.filter(row => !row.parent_id && (row.is_primary_choice || String(row.id) === primary.value)), "请选择一级资产类别");
       updateCategories();
       if ([...category.options].some(option => option.value === selectedCategory)) category.value = selectedCategory;
       replaceOptions(optionUnderlying, data.underlyings || [], "---------");

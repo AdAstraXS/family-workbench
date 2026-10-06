@@ -17,6 +17,7 @@ from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_POST
 
 from family_core.audit import stamp_actor
+from family_core.asset_classification import PRIMARY_CATEGORIES
 from family_core.navigation import return_url
 from family_core.household import get_household_family, get_site_setting
 from family_core.models import AssetCategory, Currency, FamilyMember
@@ -2468,7 +2469,8 @@ def transaction_form_options(request):
             ],
             "categories": [
                 {"id": item.pk, "name": item.name, "code": item.code,
-                 "parent_id": item.parent_id, "primary_code": item.primary.code}
+                 "parent_id": item.parent_id, "primary_code": item.primary.code,
+                 "is_primary_choice": not item.parent_id and item.code in dict(PRIMARY_CATEGORIES)}
                 for item in categories
             ],
             "securities": [

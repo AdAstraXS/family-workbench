@@ -12,11 +12,13 @@ from .classification_confirmations import resolve_ledger_confirmations
 
 SYMBOL_RULES = {
     **dict.fromkeys(('VOO', 'SPY', 'IVV', 'QQQ', 'QQQM', 'TQQQ', 'TNA', 'IWM', '03086', '03195', '510300', '159919'), 'equity_index'),
-    **dict.fromkeys(('GGLL', 'DRAM', 'QTUM', 'XLU', 'XLV', 'NVDY', 'ALLW'), 'equity_fund'),
+    **dict.fromkeys(('GGLL', 'DRAM', 'QTUM', 'XLU', 'XLV', 'NVDY', 'ALLW', 'SMH'), 'equity_fund'),
     **dict.fromkeys(('IBIT', 'ETHA'), 'crypto'),
     # 03433 holds 20+ year US Treasuries. This is a product-specific rule,
     # not a default for all government bond ETFs.
     '03433': 'government_long', '912810TV0': 'government_long',
+    # Exact legacy symbol for the same reviewed Treasury, not a suffix guess.
+    'GOVT 4.75 NOV15’53 912810TV0': 'government_long',
 }
 
 def propose_security(security):

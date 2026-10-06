@@ -2,7 +2,7 @@ from django import forms
 from django.db.models import Q
 from django.core.exceptions import ValidationError
 from .models import AssetCategory
-from .asset_classification import categories_for_family, validate_assignment
+from .asset_classification import PRIMARY_CATEGORIES, categories_for_family, validate_assignment
 
 class AssetCategorySelect(forms.Select):
     def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
@@ -36,15 +36,21 @@ class AssetClassificationFormMixin(forms.Form):
             secondary = categories.filter(parent__isnull=False)
             if current and not current.parent_id:
                 secondary = categories.filter(Q(parent__isnull=False) | Q(pk=current.pk))
-            primary = primary.exclude(code='fund') if not (current and current.code == 'fund') else primary
+            allowed = Q(code__in=[code for code, _ in PRIMARY_CATEGORIES])
+            if current and not current.parent_id:
+                allowed |= Q(pk=current.pk)
+            primary = primary.filter(allowed)
             self.fields['asset_primary'].queryset = primary
         else:
             secondary = categories
         field = self.fields['asset_category']
         field.label = '二级资产类别'
+        field.widget = AssetCategorySelect(attrs={'class': 'form-control', 'data-asset-secondary': ''})
         field.queryset = secondary.order_by('parent__display_order', 'display_order', 'name')
         field.label_from_instance = lambda category: category.name if category.parent_id else f'{category.name}（历史未细分）'
-        field.widget = AssetCategorySelect(attrs={'class': 'form-control', 'data-asset-secondary': ''})
+        names = [name for name in self.fields if name != 'asset_primary']
+        names.insert(names.index('asset_category'), 'asset_primary')
+        self.order_fields(names)
 
     def clean(self):
         cleaned = super().clean()
