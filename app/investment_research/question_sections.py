@@ -1,6 +1,19 @@
 """Keep source-specific answers distinct from a combined conclusion."""
 
 
+def history_sections(question, update, revisions):
+    if update.analysis.analysis_type != 'thesis_synthesis':
+        return tracking_sections(question, update)
+    from .report_sections import source_sections
+    content = revisions.get(update.question_revision, {})
+    origin = revisions.get(1, {}).get('legacy_origin', {})
+    report = source_sections(update.analysis.result.result_json, update.analysis.scope)
+    matches = [row for row in report.get('assessments', [])
+               if row.get('text') == content.get('title', question.title)
+               and row.get('kind') == origin.get('kind', 'question')]
+    return matches[0]['source_sections'] if len(matches) == 1 else []
+
+
 def tracking_sections(question, update):
     rows = update.analysis.result.result_json.get('updates', [])
     row = next((row for row in rows if row.get('question_id') == question.pk

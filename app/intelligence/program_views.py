@@ -203,6 +203,7 @@ def _program_settings_context(request, *, form=None, editor_form=None, source=No
 
 @login_required
 def program_detail(request, pk):
+    from .program_progress import program_progress
     entry = get_object_or_404(family_entries(request), pk=pk)
     revision = entry.current_revision
     if request.GET.get('version'):
@@ -226,6 +227,7 @@ def program_detail(request, pk):
                 continue
             groups.setdefault(point['topic'], []).append(point)
     return render(request, 'intelligence/program_detail.html', {'entry': entry, 'revision': revision,
+        'progress': program_progress(entry),
         'segments': segments, 'groups': groups, 'summary_warning': summary_warning, 'source_name': source_spec(entry.subscription)['name'],
         'versions': entry.revisions.order_by('-pk'), 'can_admin': _is_family_admin(request),
         'can_write': request.family_member.role != 'viewer',

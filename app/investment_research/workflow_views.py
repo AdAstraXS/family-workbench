@@ -208,8 +208,21 @@ def question_detail(request, pk, question_pk):
             return redirect(request.path)
         except ResearchAiError as exc:
             data['error'] = str(exc)
-    data.update(question=workflow.attach_updates([question])[0], revisions=question.revisions.all(),
-        updates=question.updates.select_related('analysis'), actions=question.actions.all())
+    from .question_sections import history_sections
+    revisions = list(question.revisions.select_related('created_by'))
+    revision_content = {revision.number: revision.content for revision in revisions}
+    field_labels = {'title': '问题', 'supporting_condition': '更相信的证据',
+                    'reconsidering_condition': '重新考虑的证据', 'metrics': '指标', 'source_notes': '来源'}
+    for revision in revisions:
+        previous = revision_content.get(revision.number - 1)
+        revision.changes = [{'label': label, 'before': previous.get(key, ''), 'after': revision.content.get(key, '')}
+                            for key, label in field_labels.items()
+                            if previous is not None and previous.get(key, '') != revision.content.get(key, '')]
+    updates = Paginator(question.updates.select_related('analysis__result'), 20).get_page(request.GET.get('history_page'))
+    for update in updates:
+        update.source_sections = history_sections(question, update, revision_content)
+    data.update(question=workflow.attach_updates([question])[0], revisions=revisions,
+        updates=updates, actions=question.actions.select_related('created_by'))
     if request.method == 'POST' and data['error'] and request.POST.get('action') != 'status':
         data['question_form'] = request.POST
     return render(request, 'investment_research/workflow_question_detail.html', data)

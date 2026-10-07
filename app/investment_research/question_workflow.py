@@ -42,6 +42,10 @@ def active_questions(dossier):
 def save_question(actor, dossier, values, *, question_id=None, expected_revision=None,
                   expected_list_revision=None, introduction=None):
     authorize(actor, dossier)
+    change_note = values.get('change_note', '')
+    if not isinstance(change_note, str) or len(change_note.strip()) > 1000:
+        raise ResearchAiError('修改理由不超过 1,000 字。')
+    change_note = change_note.strip()
     values = clean_question(values)
     locked = ResearchDossier.objects.select_for_update().get(pk=dossier.pk)
     if expected_list_revision is not None and str(locked.question_list_revision) != str(expected_list_revision):
@@ -75,7 +79,7 @@ def save_question(actor, dossier, values, *, question_id=None, expected_revision
         setattr(question, key, value)
     question.save()
     ResearchQuestionRevision.objects.create(question=question, number=question.revision,
-                                             content=snapshot(question), created_by=actor)
+                                             content=snapshot(question) | {'change_note': change_note}, created_by=actor)
     locked.question_list_revision += 1
     entering = not locked.question_workflow
     locked.question_workflow = True

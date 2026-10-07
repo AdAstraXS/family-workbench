@@ -69,6 +69,18 @@ class QuestionWorkflowTests(TestCase):
         self.assertTrue(newer.old_update)
         self.assertEqual(ResearchThesisRevision.objects.count(), 0)
 
+    def test_question_history_preserves_three_sections_and_member_change_reason(self):
+        q = self.question()
+        job = self.enqueue()
+        self.assertTrue(question_ai.run(job.pk, lambda *a, **kw: self.response(self.output(job))))
+        workflow.save_question(self.actor, self.dossier,
+            self.values('资本开支回报是否改善？') | {'change_note': '新年报改变了关注重点'},
+            question_id=q.pk, expected_revision=1, expected_list_revision=1)
+        response = self.client.get(reverse('investment_research:question_detail', args=[self.dossier.pk, q.pk]))
+        for text in ['投研资料需完整报表核查。', '新闻尚无相关正文证据。', '新年报改变了关注重点', '问题已修改', '此前：']:
+            self.assertContains(response, text)
+        self.assertEqual(q.revisions.get(number=2).content['change_note'], '新年报改变了关注重点')
+
     def test_question_conflicts_duplicates_and_other_owner_blocked(self):
         q = self.question()
         for fn in [lambda:workflow.save_question(self.outsider, self.dossier, self.values()),

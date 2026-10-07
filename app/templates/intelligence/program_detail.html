@@ -4,6 +4,7 @@
 {% block content %}
 <a href="{% url 'intelligence:program_list' %}">← 精选订阅</a><header class="intel-page-head"><div><span class="intel-eyebrow">{{ source_name }}</span><h1>{{ entry.title }}</h1><p>{{ entry.published_at|date:'Y-m-d' }} · {{ entry.get_state_display }}{% if entry.private_owner_id %} · 仅上传者可见{% endif %}</p>{% if entry.url %}<a href="{{ entry.url }}" target="_blank" rel="noopener noreferrer">打开原始来源 ↗</a>{% endif %}{% if entry.uploaded_original %}<p><a href="{% url 'intelligence:program_uploaded_original' entry.pk %}">下载上传的原始文件</a></p>{% endif %}</div></header>
 {% if entry.last_error %}<div class="intel-section program-error">{{ entry.last_error }}</div>{% endif %}
+<details class="intel-section"{% if entry.state == 'failed' or entry.state == 'uncertain' or entry.state == 'waiting_config' %} open{% endif %}><summary>当前处理阶段：{{ progress.stage }}</summary>{% for step in progress.completed %}<p>✓ {{ step }}</p>{% empty %}<p>尚无已保存步骤。</p>{% endfor %}<p>{{ progress.next_step }}</p></details>
 {% if revision %}
 <div class="program-reading"><main><section class="intel-section"><div class="intel-section-head"><h2>AI 阅读要点</h2>{% if revision.summary_complete %}<span>未经人工复核</span>{% endif %}</div>
 {% if summary_warning %}<p class="program-error">部分要点未展示：{{ summary_warning }} 管理员可在下方点击“获取 / 继续处理”。</p>{% endif %}

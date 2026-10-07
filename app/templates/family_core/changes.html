@@ -1,0 +1,4 @@
+{% extends 'base.html' %}{% load static %}
+{% block title %}工作台更新记录{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/workbench-review.css' %}">{% endblock %}
+{% block content %}<main class="wb-review"><header class="wb-heading"><h1>工作台更新记录</h1><a href="{% url 'family_core:review' %}">本周回顾</a></header><section class="wb-section"><h2>2026-10-07 · 回顾、查找与依据</h2><ul><li>新增本周回顾，集中查看财务记录、问题新证据、继续阅读与下周已知安排。</li><li>新增跨模块资料查找，按原模块权限查看来源、日期和内容性质。</li><li>财务计算依据连接到保存快照、账户流水与只读差异，财务计算规则保持原口径。</li><li>问题历史补全各次核查的投研、新闻与综合分析；已有原文、正式问题和历史记录保留。</li><li>任务与数据时效展示当前失败阶段、已完成步骤和原页面处理入口。</li></ul><p>本次页面使用已有记录，打开页面不会抓行情或产生 AI 调用费用。</p><h3>当前覆盖范围</h3><p>跨模块搜索查当前资料版本；书库查书名、作者和简介。回顾中的公司财报日尚未接入统一日历，缺少日期时明确留空。数据来源获取失败仍需在原模块处理。</p></section></main>{% endblock %}

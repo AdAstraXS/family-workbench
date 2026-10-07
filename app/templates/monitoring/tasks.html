@@ -1,0 +1,11 @@
+{% extends 'base.html' %}{% load static table_navigation %}
+{% block title %}任务与数据时效{% endblock %}
+{% block extra_head %}<link rel="stylesheet" href="{% static 'css/workbench-review.css' %}">{% endblock %}
+{% block content %}<main class="wb-review">
+<header class="wb-heading"><div><h1>任务与数据时效</h1><p>资料日期说明内容覆盖到何时；获取成功只表示该次请求完成。请结合原模块的缺口与发布日核对。</p></div><a href="{% url 'monitoring:index' %}">返回运行监控</a></header>
+<section class="wb-section"><h2>需要处理</h2><p class="wb-muted">仅展示当前成员可见的任务。打开详情后沿用原有授权、预算和重试检查。</p>
+{% for task in tasks %}<article class="wb-row"><h3><a href="{{ task.url }}">{{ task.title }}</a></h3><p class="wb-muted">{{ task.module }} · {{ task.stage }} · {{ task.time|date:'Y-m-d H:i'|default:'时间未记录' }}</p><p>{{ task.completed }}</p><p>{{ task.next_step }} <a href="{{ task.url }}">查看并处理 →</a></p></article>{% empty %}<p class="wb-empty">已接入的任务中暂无需要处理项。</p>{% endfor %}</section>
+<section class="wb-section"><h2>来源与数据日期</h2><p class="wb-muted">未知时间显示“未记录”；宏观数据统计期与请求成功时间分别保留。本人知识来源的具体资料日期请进入详情核对。</p>
+{% table_page sources "source_freshness" "来源与指标" as source_table %}<div id="{{ source_table.anchor }}">{% include "workspace/table_pagination.html" with table=source_table %}</div>
+<div class="wb-table"><table><thead><tr><th>来源／指标</th><th>模块</th><th>资料日期／统计期</th><th>最近成功获取</th><th>最近检查</th><th>状态</th></tr></thead><tbody>{% for source in source_table.page %}<tr><td><a href="{{ source.url }}">{{ source.name }}</a></td><td>{{ source.module }}</td><td>{{ source.period|date:'Y-m-d'|default:'未记录' }}</td><td>{{ source.success|date:'Y-m-d H:i'|default:'未记录' }}</td><td>{{ source.checked|date:'Y-m-d H:i'|default:'未记录' }}</td><td>{{ source.status }}</td></tr>{% empty %}<tr><td colspan="6">暂无已启用来源。</td></tr>{% endfor %}</tbody></table></div>{% include "workspace/table_pagination.html" with table=source_table %}</section>
+</main>{% endblock %}

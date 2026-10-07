@@ -174,7 +174,19 @@ def index(request):
     ctx=overview(family_for(request),request.GET.get('period','30days'),request.GET.get('vendor','all'),
                  request.GET.get('unknown')=='1',request.GET.get('page',1))
     ctx['can_configure']=can_configure(request)
+    from .models import RestoreVerification
+    ctx['restore_verification'] = RestoreVerification.objects.filter(family=family_for(request)).first()
     return render(request,'monitoring/index.html',ctx)
+
+
+@login_required
+def tasks(request):
+    from family_core.permissions import current_member
+    from .task_health import task_health
+    member = current_member(request)
+    if member is None:
+        raise PermissionDenied
+    return render(request, 'monitoring/tasks.html', task_health(member))
 
 
 @login_required

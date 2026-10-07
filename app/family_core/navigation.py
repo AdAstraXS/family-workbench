@@ -15,6 +15,8 @@ def return_url(request, fallback=None):
         match = resolve(parsed.path)
     except Resolver404:
         return fallback
+    if match.app_name == 'family_core' and match.url_name in {'search', 'review', 'financial_basis'}:
+        return target
     if match.app_name not in {"ledger", "portfolio", "knowledge", "notes", "investment_research", "option_wheel", "dashboard"}:
         return fallback
     return target

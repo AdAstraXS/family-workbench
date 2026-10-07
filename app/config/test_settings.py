@@ -9,3 +9,4 @@ if not DATABASES["default"]["TEST"]["NAME"].startswith("test_"):  # noqa: F405
 if DATABASES["default"]["TEST"]["NAME"] == DATABASES["default"]["NAME"]:  # noqa: F405
     raise ValueError("The test database must differ from the application database")
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+STORAGES = {**STORAGES, 'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'}}  # noqa: F405

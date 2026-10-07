@@ -3,6 +3,7 @@ from django.urls import reverse
 
 
 MODULES = (
+    ("family_core", "review", "本周回顾", "notes", "本周变化、继续阅读与下周安排", "日常回顾"),
     ("portfolio", "overview", "投资组合", "briefcase-2", "账户、持仓与资产变化", "财富管理"),
     ("ledger", "overview", "家庭账本", "wallet", "收支、预算与家庭资产", "财富管理"),
     ("investment_research", "index", "投研", "chart-line", "公司研究与投资判断", "财富管理"),
@@ -30,7 +31,10 @@ def workspace_navigation(request):
                     badge="废案待处理" if app == "intelligence" and view == "index" else "",
                     active=active == app and (app != "intelligence" or is_programs == (view == "program_list")))
                for app, view, label, icon, description, group in MODULES]
+    title = next((m["label"] for m in modules if m["active"]), "家庭概览")
+    if active == 'family_core':
+        title = {'search': '查找资料', 'financial_basis': '财务计算依据', 'changes': '工作台更新'}.get(match.url_name, title)
     return {"workspace_modules": modules,
             "workspace_is_programs": is_programs,
             "workspace_is_legacy_intelligence": active == "intelligence" and not is_programs,
-            "workspace_title": next((m["label"] for m in modules if m["active"]), "家庭概览")}
+            "workspace_title": title}

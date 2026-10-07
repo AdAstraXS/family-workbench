@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import UsageRecord, BalanceAccount, HostSample, DownloadRecord, CollectorState
+from .models import UsageRecord, BalanceAccount, HostSample, DownloadRecord, CollectorState, RestoreVerification
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -23,3 +23,4 @@ class BalanceAdmin(ReadOnlyAdmin):
 admin.site.register(HostSample,ReadOnlyAdmin)
 admin.site.register(DownloadRecord,ReadOnlyAdmin)
 admin.site.register(CollectorState,ReadOnlyAdmin)
+admin.site.register(RestoreVerification,ReadOnlyAdmin)

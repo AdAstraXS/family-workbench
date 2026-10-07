@@ -120,3 +120,20 @@ class CollectorState(models.Model):
     finished_at = models.DateTimeField(null=True)
     status = models.CharField(max_length=20, default='waiting')
     message = models.CharField(max_length=200, blank=True)
+
+
+class RestoreVerification(models.Model):
+    family = models.ForeignKey('family_core.Family', on_delete=models.PROTECT)
+    recorded_by = models.ForeignKey('family_core.FamilyMember', on_delete=models.PROTECT)
+    recorded_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField()
+    backup_sha256 = models.CharField(max_length=64)
+    report_sha256 = models.CharField(max_length=64)
+    status = models.CharField(max_length=16, choices=[('passed', '通过'), ('incomplete', '验证未完整通过')])
+    checks = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ['-completed_at', '-pk']
+        verbose_name = '隔离恢复验证记录'
+        verbose_name_plural = verbose_name
+        constraints = [models.UniqueConstraint(fields=['family', 'report_sha256'], name='restore_report_per_family')]

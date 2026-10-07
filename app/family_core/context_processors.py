@@ -10,7 +10,9 @@ def page_navigation(request):
         return {}
     target = return_url(request)
     if target:
-        return {"page_parent_url": target, "return_to": target}
+        from urllib.parse import urlsplit
+        search_return = target if urlsplit(target).path == reverse('family_core:search') else ''
+        return {"page_parent_url": target, "return_to": target, "search_return_url": search_return}
     app_name = match.app_name
     url_name = match.url_name
     kwargs = match.kwargs

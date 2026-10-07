@@ -3,3 +3,4 @@
 <label>什么证据会重新考虑<textarea name="reconsidering_condition{% if indexed %}_{{ index }}{% endif %}" rows="2" maxlength="1600">{{ question.reconsidering_condition }}</textarea></label>
 <label>关注指标及口径<textarea name="metrics{% if indexed %}_{{ index }}{% endif %}" rows="3" maxlength="1600" placeholder="可列多项；保留报告期、单季／累计、同比／环比、披露／计算口径">{{ question.metrics }}</textarea></label>
 <label>指标来源<textarea name="source_notes{% if indexed %}_{{ index }}{% endif %}" rows="2" maxlength="1600" placeholder="例如：年报分部数据；未披露的指标明确写缺失">{{ question.source_notes }}</textarea></label>
+{% if not indexed and request.resolver_match.url_name == 'question_detail' %}<label>本次修改理由（选填）<textarea name="change_note" maxlength="1000" rows="2" placeholder="例如：新增财报证据后，调整关注指标。">{{ question.change_note|default:'' }}</textarea></label>{% endif %}
