@@ -1,4 +1,5 @@
 import subprocess
+import tempfile
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -9,12 +10,47 @@ from django.urls import reverse
 from django.utils import timezone
 
 from family_core.models import Family, FamilyMember
-from .program_media import _yt_command, probe_youtube_audio, youtube_audio
+from .program_media import _yt_command, probe_youtube_audio, youtube_audio, ProgramMediaError
 from .program_models import ProgramEntry, ProgramSubscription
 from .program_sources import ProgramError
 
 
 class MediaFailureTests(SimpleTestCase):
+    @patch('intelligence.program_media.time.sleep')
+    @patch('intelligence.program_media._yt_command')
+    def test_forbidden_refreshes_url_in_fresh_directory(self, command, sleep):
+        from pathlib import Path
+        paths = []
+        def download(args, **kwargs):
+            path = Path(args[args.index('-o') + 1])
+            paths.append(path)
+            self.assertFalse(path.exists())
+            path.write_bytes(b'partial' if len(paths) == 1 else b'complete')
+            if len(paths) == 1:
+                raise ProgramMediaError('HTTP 403', 'forbidden')
+        command.side_effect = download
+        self.assertEqual(youtube_audio(SimpleNamespace(external_id='yjp8mm4tq5g'))[0], b'complete')
+        self.assertNotEqual(paths[0].parent, paths[1].parent)
+        self.assertTrue(all(not path.exists() for path in paths))
+
+    @patch('intelligence.program_media.time.sleep')
+    @patch('intelligence.program_media._yt_command')
+    def test_retry_limit_and_nonretryable_failures(self, command, sleep):
+        for reason, count in [('forbidden', 3), ('network', 3), ('login_required', 1),
+                              ('rate_limit', 1), ('unavailable', 1)]:
+            command.reset_mock()
+            command.side_effect = ProgramMediaError('safe error', reason)
+            with self.assertRaises(ProgramError):
+                youtube_audio(SimpleNamespace(external_id='yjp8mm4tq5g'))
+            self.assertEqual(command.call_count, count)
+
+    @patch('intelligence.program_media.time.monotonic', side_effect=[0, 0, 54])
+    @patch('intelligence.program_media._yt_command', side_effect=ProgramMediaError('HTTP 403', 'forbidden'))
+    def test_retry_obeys_total_time_budget(self, command, monotonic):
+        with self.assertRaises(ProgramError):
+            youtube_audio(SimpleNamespace(external_id='yjp8mm4tq5g'), timeout=55)
+        command.assert_called_once()
+
     @patch('intelligence.program_media.source_proxy', return_value='')
     @patch('intelligence.program_media.subprocess.run')
     def test_failure_distinguishes_stage_and_does_not_expose_signed_urls(self, run, proxy):
@@ -99,7 +135,7 @@ class ProbeActionTests(TestCase):
         self.client.force_login(self.user)
 
     @patch('intelligence.program_processing.asr_request')
-    @patch('intelligence.program_media.probe_youtube_audio', return_value=(57234835, 3539))
+    @patch('intelligence.program_processing.cache_youtube_audio', return_value=(57234835, 3539))
     def test_admin_probe_does_not_change_entry_or_submit_asr(self, probe, asr):
         before = ProgramEntry.objects.filter(pk=self.entry.pk).values().get()
         response = self.client.post(self.url, {'action': 'probe_youtube'}, follow=True)
@@ -110,7 +146,7 @@ class ProbeActionTests(TestCase):
         asr.assert_not_called()
         probe.assert_called_once()
 
-    @patch('intelligence.program_media.probe_youtube_audio')
+    @patch('intelligence.program_processing.cache_youtube_audio')
     def test_member_cannot_probe_and_get_does_not_download(self, probe):
         self.assertEqual(self.client.get(self.url).status_code, 405)
         self.member.role = 'member'
@@ -118,7 +154,7 @@ class ProbeActionTests(TestCase):
         self.assertEqual(self.client.post(self.url, {'action': 'probe_youtube'}).status_code, 403)
         probe.assert_not_called()
 
-    @patch('intelligence.program_media.probe_youtube_audio')
+    @patch('intelligence.program_processing.cache_youtube_audio')
     def test_foreign_entry_and_active_worker_cannot_probe(self, probe):
         other = Family.objects.create(name='其他家庭')
         sub = ProgramSubscription.objects.create(family=other, code='other', kind='youtube')
@@ -131,10 +167,54 @@ class ProbeActionTests(TestCase):
         self.assertContains(response, '任务正在运行')
         probe.assert_not_called()
 
-    @patch('intelligence.program_media.probe_youtube_audio', side_effect=ProgramError('YouTube 音频下载失败：HTTP 403'))
+    @patch('intelligence.program_processing.cache_youtube_audio', side_effect=ProgramError('YouTube 音频下载失败：HTTP 403'))
     def test_probe_failure_is_visible_and_preserves_original_error(self, probe):
         response = self.client.post(self.url, {'action': 'probe_youtube'}, follow=True)
         self.assertContains(response, 'HTTP 403')
         self.entry.refresh_from_db()
         self.assertEqual(self.entry.last_error, '原错误')
         self.assertEqual(self.entry.state, 'failed')
+
+    @patch('intelligence.program_media.verified_youtube_audio', return_value=(b'complete-audio', 'audio/mp4', 3539))
+    @patch('intelligence.program_processing.asr_request')
+    def test_probe_encrypts_reusable_audio_without_changing_task(self, asr, fetch):
+        from cryptography.fernet import Fernet
+        from knowledge.crypto import _fernet_key
+        with tempfile.TemporaryDirectory() as directory, self.settings(MEDIA_ROOT=directory,
+                KNOWLEDGE_TOKEN_ENCRYPTION_KEY=Fernet.generate_key().decode()):
+            response = self.client.post(self.url, {'action': 'probe_youtube'}, follow=True)
+            self.assertContains(response, '加密暂存')
+            self.entry.refresh_from_db()
+            with self.entry.audio_file.open('rb') as audio:
+                encrypted = audio.read()
+            self.assertNotIn(b'complete-audio', encrypted)
+            self.assertEqual(Fernet(_fernet_key()).decrypt(encrypted), b'complete-audio')
+            self.assertGreater(self.entry.audio_expires_at, timezone.now())
+            self.assertEqual((self.entry.state, self.entry.last_error, self.entry.task_id), ('failed', '原错误', ''))
+            self.assertIsNone(self.entry.submitted_at)
+            self.assertEqual(self.entry.asr_reserved_cny, 0)
+            asr.assert_not_called()
+            from knowledge.crypto import encrypt_json
+            from .program_models import ProgramSettings
+            from .program_processing import submit_asr
+            config = ProgramSettings.objects.create(family=self.family, allow_asr=True,
+                encrypted_credentials=encrypt_json({'api_key': 'test-only'}))
+            self.entry.duration_seconds = 3539
+            with patch('intelligence.program_processing.youtube_audio') as download, patch(
+                    'intelligence.program_processing.upload_asr_audio', side_effect=ProgramError('stop before cloud')) as upload:
+                with self.assertRaisesMessage(ProgramError, 'stop before cloud'):
+                    submit_asr(self.entry, config)
+                download.assert_not_called()
+                upload.assert_called_once_with(config, b'complete-audio', 'audio/mp4')
+
+    @patch('intelligence.program_processing.store_audio')
+    @patch('intelligence.program_media.verified_youtube_audio')
+    def test_worker_starting_during_probe_prevents_cache_write(self, fetch, store):
+        from .program_processing import cache_youtube_audio
+        def started(entry):
+            ProgramEntry.objects.filter(pk=entry.pk).update(lease_until=timezone.now() + timedelta(minutes=5))
+            return b'audio', 'audio/mp4', 3539
+        fetch.side_effect = started
+        with self.assertRaisesMessage(ProgramError, '任务状态已变化'):
+            cache_youtube_audio(self.entry)
+        store.assert_not_called()

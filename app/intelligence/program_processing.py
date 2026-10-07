@@ -66,6 +66,26 @@ def store_audio(entry, body, mime):
     entry.save(update_fields=['audio_file', 'audio_mime', 'audio_expires_at', 'updated_at'])
 
 
+def cache_youtube_audio(entry):
+    """Verify audio without cloud calls; preserve task state and billing fields."""
+    from .program_media import verified_youtube_audio
+    body, mime, duration = verified_youtube_audio(entry)
+    with transaction.atomic():
+        locked = ProgramEntry.objects.select_for_update().get(pk=entry.pk)
+        if (locked.lease_until and locked.lease_until > timezone.now()
+                or locked.updated_at != entry.updated_at):
+            raise ProgramError('任务状态已变化，请稍后再检查。')
+        # Never replace audio an existing task may still be consuming.
+        if not (locked.audio_file and locked.audio_expires_at and locked.audio_expires_at > timezone.now()):
+            old_name, storage = locked.audio_file.name, locked.audio_file.storage
+            store_audio(locked, body, mime)
+            if old_name:
+                transaction.on_commit(lambda: storage.delete(old_name))
+            from monitoring.metering import record_download
+            record_download(locked, len(body), mime)
+    return len(body), duration
+
+
 def audio_access_url(entry, config):
     if not config.public_base_url:
         raise ProgramConfigurationRequired('YouTube 转写需要管理员设置本工作台的公网 HTTPS 地址，以提供限时音频给百炼。')

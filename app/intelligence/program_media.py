@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from datetime import datetime, timezone
@@ -179,6 +180,12 @@ def download_asr_result(output):
     return parse_asr_result(json.loads(body))
 
 
+class ProgramMediaError(ProgramError):
+    def __init__(self, message, reason):
+        super().__init__(message)
+        self.reason = reason
+
+
 def _yt_command(args, timeout=180, *, use_proxy=True):
     proxy_args = ['--proxy', source_proxy()] if use_proxy and source_proxy() else []
     platform = 'YouTube' if use_proxy else '视频来源'
@@ -201,7 +208,7 @@ def _yt_command(args, timeout=180, *, use_proxy=True):
     # proxy credentials or local file paths. Only allowlisted diagnoses leave here.
     logger.warning('program_media_failure platform=%s stage=%s reason=%s returncode=%s',
                    platform, stage, reason, getattr(failure, 'returncode', None))
-    raise ProgramError(f'{platform} {stage}失败：{detail}') from failure
+    raise ProgramMediaError(f'{platform} {stage}失败：{detail}', reason) from failure
 
 
 def _yt_failure_detail(stderr):
@@ -291,6 +298,20 @@ def youtube_captions(info):
 
 
 def youtube_audio(entry, *, timeout=300):
+    deadline = time.monotonic() + timeout
+    for attempt in range(3):
+        remaining = max(1, math.ceil(deadline - time.monotonic()))
+        try:
+            return _youtube_audio_attempt(entry, timeout=remaining)
+        except ProgramMediaError as exc:
+            if exc.reason not in {'forbidden', 'network'}:
+                raise
+            if attempt == 2 or deadline - time.monotonic() <= 2:
+                raise ProgramMediaError(f'{exc}（已尝试 {attempt + 1} 次）', exc.reason) from exc
+            time.sleep(1)
+
+
+def _youtube_audio_attempt(entry, *, timeout):
     with tempfile.TemporaryDirectory(prefix='intelligence-audio-') as directory:
         path = Path(directory) / 'audio.m4a'
         # Use the public visionOS client explicitly. It supplies direct audio
@@ -306,12 +327,17 @@ def youtube_audio(entry, *, timeout=300):
 
 def probe_youtube_audio(entry):
     """Bounded manual diagnostic; no stored media, task changes or cloud calls."""
+    body, _, duration = verified_youtube_audio(entry)
+    return len(body), duration
+
+
+def verified_youtube_audio(entry):
     info = youtube_metadata(entry, 240, timeout=30)
-    body, _ = youtube_audio(entry, timeout=55)
+    body, mime = youtube_audio(entry, timeout=55)
     duration = media_duration(body)
     if abs(duration - float(info['duration'])) > 10:
         raise ProgramError('取得的音频时长与节目不符，未提交转写。')
-    return len(body), duration
+    return body, mime, duration
 
 
 def bilibili_metadata(entry, max_minutes):

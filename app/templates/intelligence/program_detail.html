@@ -39,7 +39,7 @@
 {% else %}<section class="intel-empty"><h2>正在等待完整内容</h2><p>先获取出版方文字稿或字幕；没有文字稿时，按已配置预算进行音频转写。</p></section>{% endif %}
 {% if can_admin %}<details class="intel-section"><summary>处理与补充原文</summary>
 {% if entry.subscription.kind == 'youtube' or entry.subscription.code == 'rhino' %}
-<p>获取失败时，可先检查完整音频是否可下载。检查最多约 85 秒，不保存音频，不调用转写或 AI 服务，也不改变处理状态。</p>
+<p>获取失败时，可先检查完整音频是否可下载。检查最多约 85 秒，成功后加密暂存音频（最长 6 小时），供后续处理复用；不调用转写或 AI 服务，也不改变处理状态。</p>
 <form method="post" action="{% url 'intelligence:program_action' entry.pk %}">{% csrf_token %}<input type="hidden" name="action" value="probe_youtube"><button class="button" type="submit">检查音频获取（不转写）</button></form>
 {% endif %}
 <p>保留成功的转写和摘要片段。只有失败的 AI 片段会在确认继续后重试，可能产生新的摘要费用。</p>

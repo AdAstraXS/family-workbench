@@ -252,10 +252,10 @@ def program_action(request, pk):
         if action == 'probe_youtube':
             if entry.lease_until and entry.lease_until > timezone.now():
                 raise ProgramError('任务正在运行，请稍后再检查。')
-            from .program_media import probe_youtube_audio
-            size, duration = probe_youtube_audio(entry)
+            from .program_processing import cache_youtube_audio
+            size, duration = cache_youtube_audio(entry)
             messages.success(request, f'检查成功：已取得完整音频（{duration // 60} 分 {duration % 60} 秒，'
-                             f'{size / 1024 / 1024:.1f} MB）。未保存音频、未提交转写，也未改变处理状态。'
+                             f'{size / 1024 / 1024:.1f} MB）。音频已加密暂存（最长 6 小时），未提交转写，也未改变处理状态。'
                              '可点击“获取 / 继续处理”加入原有队列。')
             return redirect('intelligence:program_detail', pk=entry.pk)
         with transaction.atomic():
