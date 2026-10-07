@@ -7,11 +7,14 @@ from portfolio.account_history import family_snapshots
 from portfolio.models import PortfolioSnapshot
 from portfolio.views import _snapshot_audit_summary
 
+AMOUNT_REVIEW_THRESHOLD = Decimal('50')
+
 
 def financial_basis(member):
     snapshot = family_snapshots(member.family).filter(snapshot_date__lte=timezone.localdate()).first()
     ledger = AssetBalanceSnapshot.objects.filter(family=member.family, is_draft=False).order_by('-snapshot_date', '-created_at').first()
-    data = {'snapshot': snapshot, 'ledger_snapshot': ledger, 'accounts': [], 'issues': [], 'audit': None}
+    data = {'snapshot': snapshot, 'ledger_snapshot': ledger, 'accounts': [], 'issues': [], 'audit': None,
+            'amount_review_threshold': AMOUNT_REVIEW_THRESHOLD}
     if not snapshot:
         return data
     data['audit'] = _snapshot_audit_summary(snapshot)
@@ -21,17 +24,15 @@ def financial_basis(member):
     data['accounts'] = accounts
     data['account_total'] = sum((a.total_asset for a in accounts), Decimal('0')) if accounts else None
     data['components_total'] = snapshot.total_cash + snapshot.total_market_value
-    # Stored values use four decimal places; sum-of-rounded-account discrepancies
-    # are disclosed separately from mismatches exceeding that rounding envelope.
+    # Display threshold in the snapshot currency; saved financial values stay exact.
     if accounts:
         difference = snapshot.total_asset - data['account_total']
-        if difference:
-            tolerance = Decimal('0.0001') * len(accounts)
+        if abs(difference) >= AMOUNT_REVIEW_THRESHOLD:
             data['issues'].append({'label': '家庭总额与账户合计差额', 'amount': difference,
-                                   'note': '在逐账户四位小数舍入范围内。' if abs(difference) <= tolerance else '超出逐账户舍入范围，请打开快照核对范围与明细。'})
+                                   'note': '差额已达到提示阈值，请打开快照核对范围与明细。'})
     else:
         data['issues'].append({'label': '缺少同日账户明细', 'amount': None, 'note': '无法核对家庭总额与账户合计。'})
-    if data['components_total'] != snapshot.total_asset:
+    if abs(snapshot.total_asset - data['components_total']) >= AMOUNT_REVIEW_THRESHOLD:
         data['issues'].append({'label': '现金加市值与保存总额的差额',
                                'amount': snapshot.total_asset - data['components_total'],
                                'note': '按保存值核对；本页不会改写快照。'})

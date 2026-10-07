@@ -91,3 +91,33 @@ class ReviewTests(TestCase):
         book = Book.objects.create(family=self.family, owner=self.other, title='私密书')
         ReadingPosition.objects.create(book=book, member=self.member, file_hash='a'*64, progress=100)
         self.assertEqual(weekly_review(self.member)['reading_positions'], [])
+
+    def test_amount_review_threshold_handles_both_signs_without_hiding_missing_prices(self):
+        from .financial_basis import financial_basis
+        from ledger.models import BankAccount
+        from portfolio.models import InvestmentAccount
+        account = InvestmentAccount.objects.create(bank_account=BankAccount.objects.create(
+            family=self.family, member=self.member, account_name='阈值验证', supports_investment=True))
+        snapshot = PortfolioSnapshot.objects.create(family=self.family, snapshot_date=timezone.localdate(),
+            total_asset=1000, total_cash=1000, extra_data={'complete': True})
+        account_snapshot = PortfolioSnapshot.objects.create(family=self.family, account=account,
+            snapshot_date=snapshot.snapshot_date, total_asset=1000)
+        for amount in ['0.0002', '-0.0002', '49.9999', '-49.9999', '50', '-50', '120']:
+            with self.subTest(amount=amount):
+                difference = Decimal(amount)
+                account_snapshot.total_asset = Decimal('1000') - difference
+                account_snapshot.save(update_fields=['total_asset'])
+                snapshot.total_cash = Decimal('1000') - difference
+                snapshot.save(update_fields=['total_cash'])
+                issues = financial_basis(self.member)['issues']
+                self.assertEqual(len(issues), 2 if abs(difference) >= 50 else 0)
+                if issues:
+                    self.assertEqual([issue['amount'] for issue in issues], [difference, difference])
+                snapshot.refresh_from_db()
+                self.assertEqual(snapshot.total_asset, Decimal('1000'))
+        snapshot.extra_data = {'complete': True, 'missing_prices': [{'security_id': self.security.pk}]}
+        snapshot.total_cash = Decimal('1000')
+        snapshot.save()
+        account_snapshot.total_asset = Decimal('999.9998')
+        account_snapshot.save()
+        self.assertEqual([issue['label'] for issue in financial_basis(self.member)['issues']], ['缺少价格'])
