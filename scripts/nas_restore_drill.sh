@@ -75,6 +75,7 @@ done
     echo 'Restore failed; see the private restore.log on the NAS.' >&2; exit 1;
 }
 echo 'Restored isolated database; checking copied files and encrypted records.'
+result=0
 "$DOCKER" run --rm --network "container:$NAME" \
     -e DJANGO_DEBUG=False -e DJANGO_SECRET_KEY -e KNOWLEDGE_TOKEN_ENCRYPTION_KEY \
     -e DATABASE_URL=postgresql://postgres@127.0.0.1:5432/restore_drill_workbench \
@@ -84,6 +85,14 @@ echo 'Restored isolated database; checking copied files and encrypted records.'
     -v "$OUT/knowledge:/drill/knowledge:ro" -v "$OUT/media:/drill/media:ro" -w /app "$web_image" \
     python manage.py verify_restored_workbench --baseline /drill/baseline.json \
     --backup-sha256 "$digest" --output /drill/restore-report.json \
-    --knowledge-root /drill/knowledge --media-root /drill/media
+    --knowledge-root /drill/knowledge --media-root /drill/media || result=$?
+if [ -f "$OUT/restore-report.json" ] && [ ! -L "$OUT/restore-report.json" ]; then
+    # Export only the compact generated result, never source data or credentials.
+    receipt="/volume1/homes/DX/workbench-restore-report-$identifier.json"
+    [ ! -e "$receipt" ] && [ ! -L "$receipt" ] || { echo 'Result path exists.' >&2; exit 1; }
+    install -o DX -g users -m 0600 "$OUT/restore-report.json" "$receipt"
+    echo "Result receipt: $receipt"
+fi
 echo "Report: $OUT/restore-report.json"
 echo 'Private backup and file copies retained; isolated container will now stop.'
+exit "$result"
