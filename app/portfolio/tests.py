@@ -341,7 +341,7 @@ class IpoPortfolioSyncTests(TestCase):
 
 class TransactionFormTests(TestCase):
     def test_transaction_choices_match_active_family_watchlist_without_options(self):
-        from .forms import InvestmentTransactionForm
+        from .forms import InvestmentTransactionForm, OptionContractForm
         family = Family.objects.create(name="自选范围")
         user = get_user_model().objects.create_user(username="watchlist-trader")
         member = FamilyMember.objects.create(family=family, user=user, display_name="成员")
@@ -359,13 +359,24 @@ class TransactionFormTests(TestCase):
         InvestmentPosition.objects.create(account=account, security=held, quantity=0, position_date=date(2026, 10, 1))
         form = InvestmentTransactionForm(user=user)
         self.assertEqual(list(form.fields["security"].queryset), [watched])
+        self.assertEqual(list(form.fields["option_underlying"].queryset), [watched])
+        contract_form = OptionContractForm(family=family)
+        self.assertEqual(list(contract_form.fields["underlying"].queryset), [watched])
+        self.assertFalse(OptionContractForm().fields["underlying"].queryset.exists())
         for excluded in [held, option, inactive, foreign]:
             with self.assertRaises(ValidationError):
                 form.fields["security"].clean(excluded.pk)
+            with self.assertRaises(ValidationError):
+                form.fields["option_underlying"].clean(excluded.pk)
+            with self.assertRaises(ValidationError):
+                contract_form.fields["underlying"].clean(excluded.pk)
         self.client.force_login(user)
         url = reverse("portfolio:transaction_form_options")
         response = self.client.get(url, {"family": family.pk, "member": member.pk})
         self.assertEqual([row["id"] for row in response.json()["securities"]], [watched.pk])
+        self.assertEqual([row["id"] for row in response.json()["underlyings"]], [watched.pk])
+        page = self.client.get(reverse("portfolio:option_contract_create"))
+        self.assertEqual(list(page.context["form"].fields["underlying"].queryset), [watched])
         self.assertEqual(self.client.get(url, {"family": foreign.watchlist_items.get().family_id}).json()["securities"], [])
 
         original = InvestmentTransaction.objects.create(account=account, security=held,
@@ -374,6 +385,11 @@ class TransactionFormTests(TestCase):
         self.assertIn(held, edit.fields["security"].queryset)
         response = self.client.get(url, {"family": family.pk, "transaction": original.pk})
         self.assertEqual({row["id"] for row in response.json()["securities"]}, {watched.pk, held.pk})
+        self.assertEqual([row["id"] for row in response.json()["underlyings"]], [watched.pk])
+        OptionContract.objects.create(security=option, underlying=held, option_type=OptionContract.PUT,
+            strike_price=1, expiration_date=date(2027, 1, 1), multiplier=100)
+        edit_contract = OptionContractForm(family=family, instance=option)
+        self.assertEqual(set(edit_contract.fields["underlying"].queryset), {watched, held})
 
     def test_form_uses_family_member_security_account_and_database_options(self):
         user = get_user_model().objects.create_user(
@@ -525,6 +541,7 @@ class TransactionFormTests(TestCase):
             asset_type=Security.TYPE_STOCK,
             currency="USD",
         )
+        WatchlistItem.objects.create(family=family, member=member, security=underlying)
         self.client.force_login(user)
 
         page = self.client.get(reverse("portfolio:option_contract_create"))

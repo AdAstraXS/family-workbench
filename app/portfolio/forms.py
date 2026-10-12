@@ -13,6 +13,7 @@ from family_core.form_widgets import apply_decimal_widgets
 from ledger.models import BankAccount
 
 from .account_sync import sync_investment_account
+from .security_choices import watchlist_security_choices
 from .models import (
     CashMovementTypeChoices,
     InvestmentAccount,
@@ -389,9 +390,13 @@ class OptionContractForm(forms.Form):
         self.family = family
         for field in self.fields.values():
             field.widget.attrs.setdefault("class", "form-control")
-        self.fields["underlying"].queryset = Security.objects.exclude(
-            asset_type=Security.TYPE_OPTION
-        ).order_by("market", "symbol")
+        underlyings = watchlist_security_choices(family.pk if family else None)
+        if instance:
+            underlyings = Security.objects.filter(
+                Q(pk__in=underlyings) | Q(pk=instance.option_contract.underlying_id)
+            ).exclude(asset_type=Security.TYPE_OPTION).order_by("market", "symbol")
+        self.fields["underlying"].queryset = underlyings
+        self.fields["underlying"].help_text = "来自“自选股 → 我的自选”（不含期权）；其他正股请先加入自选。"
         self.fields["currency"].choices = [
             (item.code, str(item)) for item in Currency.objects.filter(is_active=True)
         ]
@@ -850,6 +855,7 @@ class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
         label="期权正股",
         queryset=Security.objects.none(),
         required=False,
+        help_text="来自“自选股 → 我的自选”（不含期权）；其他正股请先加入自选。",
     )
     option_contract_symbol = forms.CharField(
         label="期权合约代码",
@@ -1093,23 +1099,14 @@ class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
             )
         )
         self.fields["asset_type"].initial = selected_asset_type
-        watched_ids = WatchlistItem.objects.filter(
-            family_id=family_id,
-            is_active=True,
-        ).values_list("security_id", flat=True)
-        security_queryset = Security.objects.filter(
-            pk__in=watched_ids,
-        ).exclude(asset_type=Security.TYPE_OPTION).order_by("market", "symbol")
+        security_queryset = watchlist_security_choices(family_id)
         if self.instance.pk and self.instance.security_id:
             security_queryset = Security.objects.filter(
                 Q(pk=self.instance.security_id) | Q(pk__in=security_queryset)
             )
         self.fields["security"].queryset = security_queryset
         self.setup_asset_classification(family_id)
-        self.fields["option_underlying"].queryset = Security.objects.filter(
-            Q(watchlist_items__family_id=family_id, watchlist_items__is_active=True)
-            | Q(positions__account__bank_account__family_id=family_id)
-        ).exclude(asset_type=Security.TYPE_OPTION).distinct().order_by("market", "symbol")
+        self.fields["option_underlying"].queryset = watchlist_security_choices(family_id)
         self.fields["trade_type_option"].queryset = InvestmentOption.objects.filter(
             category=InvestmentOption.CATEGORY_TRANSACTION_TYPE,
             is_active=True,

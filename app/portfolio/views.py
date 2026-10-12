@@ -43,6 +43,7 @@ from .forms import (
 )
 from .futu_service import FutuQueryError, search_futu_securities
 from .exchange_rate_service import cached_daily_exchange_rates
+from .security_choices import watchlist_security_choices
 from .models import (
     DailyPortfolioValuationRun,
     InvestmentAccount,
@@ -2448,18 +2449,8 @@ def transaction_form_options(request):
     categories = AssetCategory.objects.filter(
         Q(family_id=family_id) | Q(family=None),
     ).select_related("parent").order_by("display_order", "name")
-    securities = Security.objects.filter(
-        Q(
-            watchlist_items__family_id=family_id,
-            watchlist_items__is_active=True,
-        )
-        | Q(positions__account__bank_account__family_id=family_id)
-    ).distinct().order_by("market", "symbol")
-    underlyings = securities.exclude(asset_type=Security.TYPE_OPTION)
-    securities = Security.objects.filter(
-        watchlist_items__family_id=family_id,
-        watchlist_items__is_active=True,
-    ).exclude(asset_type=Security.TYPE_OPTION).distinct().order_by("market", "symbol")
+    securities = watchlist_security_choices(family_id)
+    underlyings = securities
     # Preserve the original security when editing an authorized historical trade.
     transaction_id = request.GET.get("transaction", "")
     if transaction_id.isdigit():
