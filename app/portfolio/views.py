@@ -2456,6 +2456,21 @@ def transaction_form_options(request):
         | Q(positions__account__bank_account__family_id=family_id)
     ).distinct().order_by("market", "symbol")
     underlyings = securities.exclude(asset_type=Security.TYPE_OPTION)
+    securities = Security.objects.filter(
+        watchlist_items__family_id=family_id,
+        watchlist_items__is_active=True,
+    ).exclude(asset_type=Security.TYPE_OPTION).distinct().order_by("market", "symbol")
+    # Preserve the original security when editing an authorized historical trade.
+    transaction_id = request.GET.get("transaction", "")
+    if transaction_id.isdigit():
+        original_security = InvestmentTransaction.objects.filter(
+            pk=transaction_id,
+            account__in=_visible_accounts(request),
+            account__bank_account__family_id=family_id,
+        ).values_list("security_id", flat=True)
+        securities = Security.objects.filter(
+            Q(pk__in=securities) | Q(pk__in=original_security)
+        ).order_by("market", "symbol")
     return JsonResponse(
         {
             "members": [{"id": item.pk, "name": item.display_name} for item in members],

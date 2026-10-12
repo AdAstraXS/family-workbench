@@ -1003,7 +1003,7 @@ class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
             ]
         )
         self.fields["security"].label = "交易标的"
-        self.fields["security"].help_text = "已有标的直接选择；新期权或新债券可在当前页面同时建立。"
+        self.fields["security"].help_text = "选项来自“自选股 → 我的自选”（不含期权）；其他标的请先加入自选。新期权或新债券可在当前页面同时建立。"
         self.fields["trade_type_option"].label = "交易类型"
         self.fields["position_effect"].label = "开平仓（期权）"
         self.fields["position_effect"].required = False
@@ -1098,9 +1098,8 @@ class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
             is_active=True,
         ).values_list("security_id", flat=True)
         security_queryset = Security.objects.filter(
-            Q(pk__in=watched_ids)
-            | Q(positions__account__bank_account__family_id=family_id)
-        ).distinct().order_by("market", "symbol")
+            pk__in=watched_ids,
+        ).exclude(asset_type=Security.TYPE_OPTION).order_by("market", "symbol")
         if self.instance.pk and self.instance.security_id:
             security_queryset = Security.objects.filter(
                 Q(pk=self.instance.security_id) | Q(pk__in=security_queryset)

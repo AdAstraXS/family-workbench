@@ -340,6 +340,41 @@ class IpoPortfolioSyncTests(TestCase):
 
 
 class TransactionFormTests(TestCase):
+    def test_transaction_choices_match_active_family_watchlist_without_options(self):
+        from .forms import InvestmentTransactionForm
+        family = Family.objects.create(name="自选范围")
+        user = get_user_model().objects.create_user(username="watchlist-trader")
+        member = FamilyMember.objects.create(family=family, user=user, display_name="成员")
+        bank = BankAccount.objects.create(family=family, member=member, account_name="券商", supports_investment=True)
+        account, _ = InvestmentAccount.objects.get_or_create(bank_account=bank)
+        watched = Security.objects.create(symbol="WATCH", name="自选股票", market="US", currency="USD")
+        held = Security.objects.create(symbol="HELD", name="旧持仓", market="US", currency="USD")
+        option = Security.objects.create(symbol="OPTION", name="期权", market="US", currency="USD", asset_type=Security.TYPE_OPTION)
+        inactive = Security.objects.create(symbol="OLD", name="已移出自选", market="US", currency="USD")
+        foreign = Security.objects.create(symbol="FOREIGN", name="其他家庭", market="US", currency="USD")
+        for security in [watched, option]:
+            WatchlistItem.objects.create(family=family, member=member, security=security)
+        WatchlistItem.objects.create(family=family, member=member, security=inactive, is_active=False)
+        WatchlistItem.objects.create(family=Family.objects.create(name="其他家庭"), security=foreign)
+        InvestmentPosition.objects.create(account=account, security=held, quantity=0, position_date=date(2026, 10, 1))
+        form = InvestmentTransactionForm(user=user)
+        self.assertEqual(list(form.fields["security"].queryset), [watched])
+        for excluded in [held, option, inactive, foreign]:
+            with self.assertRaises(ValidationError):
+                form.fields["security"].clean(excluded.pk)
+        self.client.force_login(user)
+        url = reverse("portfolio:transaction_form_options")
+        response = self.client.get(url, {"family": family.pk, "member": member.pk})
+        self.assertEqual([row["id"] for row in response.json()["securities"]], [watched.pk])
+        self.assertEqual(self.client.get(url, {"family": foreign.watchlist_items.get().family_id}).json()["securities"], [])
+
+        original = InvestmentTransaction.objects.create(account=account, security=held,
+            trade_date=date(2026, 10, 1), trade_type=TradeTypeChoices.BUY, quantity=1, price=1, amount=1, currency="USD")
+        edit = InvestmentTransactionForm(user=user, instance=original)
+        self.assertIn(held, edit.fields["security"].queryset)
+        response = self.client.get(url, {"family": family.pk, "transaction": original.pk})
+        self.assertEqual({row["id"] for row in response.json()["securities"]}, {watched.pk, held.pk})
+
     def test_form_uses_family_member_security_account_and_database_options(self):
         user = get_user_model().objects.create_user(
             username="transaction-form-tester",
