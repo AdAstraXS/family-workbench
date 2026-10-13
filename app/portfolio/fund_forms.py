@@ -55,4 +55,3 @@ class FundBalanceForm(forms.ModelForm):
         fields = ["balance", "balance_date", "revision"]
         widgets = {"balance_date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})}
         help_texts = {"balance": "填0表示已确认余额为0；余额和日期同时留空表示未知。"}
-

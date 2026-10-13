@@ -97,4 +97,3 @@ def run_job(job_id):
         FundRefreshRun.objects.filter(pk=job_id, status="running").update(
             status="failed", message="基金更新异常，已保留此前成功数据。", finished_at=timezone.now())
         raise
-

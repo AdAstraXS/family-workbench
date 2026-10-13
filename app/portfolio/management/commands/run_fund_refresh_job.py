@@ -16,4 +16,3 @@ class Command(BoundedJobCommand):
         except ValueError:
             raise CommandError("任务编号无效。") from None
         run_job(job_id)
-

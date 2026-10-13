@@ -61,4 +61,3 @@ def save_plan(form, *, family, user, member, manage_all, balance_only=False):
         FundDcaChange.objects.create(plan=plan, actor=user, action="balance" if balance_only else ("edit" if before else "create"),
                                      before=before, after=snapshot(plan))
         return plan
-
