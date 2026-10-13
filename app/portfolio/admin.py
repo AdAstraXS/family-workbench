@@ -44,6 +44,7 @@ from .models import (
     WatchlistItem,
 )
 from .services import can_edit_transaction, lock_accounts, rebuild_cash_only_transaction, rebuild_position
+from . import fund_admin  # noqa: F401
 
 
 class SecurityExchangeInline(admin.TabularInline):

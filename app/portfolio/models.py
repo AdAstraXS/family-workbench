@@ -1365,3 +1365,10 @@ class SecurityNews(models.Model):
 
     def __str__(self):
         return self.title
+
+
+# Keep fund planning separate from the transaction and valuation ledger.
+from .fund_models import (  # noqa: E402,F401
+    FundReference, FundNavRecord, FundDisclosureSnapshot,
+    FundDcaPlan, FundDcaChange, FundRefreshRun,
+)

@@ -1,0 +1,9 @@
+{% extends "portfolio/fund_base.html" %}
+{% block title %}{{ workspace_title }}{% endblock %}
+{% block content %}<div class="fund-page fund-form-wrap"><h1>{{ workspace_title }}</h1>
+<p>{% if balance_only %}{{ plan.name }} · {{ plan.member }} · {{ plan.fund }}{% else %}一条定投对应一只基金。名称、金额和余额由你维护，基金资料自动更新。{% endif %}</p>
+<form method="post" class="panel fund-form" data-fund-form>{% csrf_token %}<input type="hidden" name="return_to" value="{{ return_to }}">
+{{ form.non_field_errors }}{% for hidden in form.hidden_fields %}{{ hidden }}{{ hidden.errors }}{% endfor %}
+<div class="fund-form-grid">{% for field in form.visible_fields %}<div class="fund-field {% if field.name == 'remark' %}fund-wide{% endif %}"><label for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %}<span aria-hidden="true"> *</span>{% endif %}</label>{{ field }}{{ field.errors }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}</div>{% endfor %}</div>
+{% if not balance_only %}<aside class="fund-estimate"><strong>计划金额预览</strong><div data-fund-estimate>填写频率、金额和费率后查看折算。</div><p>每次手续费另列，不计入计划额；起止日期不参与年度折算。</p></aside>{% endif %}
+<div class="fund-actions"><button class="button">保存{% if balance_only %}余额{% else %}定投{% endif %}</button><a class="button ghost" href="{{ return_to }}">取消</a></div></form></div>{% endblock %}

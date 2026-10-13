@@ -14,6 +14,7 @@
 <section class="portfolio-module-nav">
   <div class="quick-actions">
     <a class="button ghost" href="{% url 'portfolio:account_list' %}">证券账户和持仓</a>
+    <a class="button ghost" href="{% url 'portfolio:fund_dca_list' %}">基金定投</a>
     <a class="button ghost" href="{% url 'portfolio:security_list' %}">自选股</a>
     <a class="button ghost" href="{% url 'portfolio:snapshot_list' %}">快照审计</a>
     {% if can_reconcile %}

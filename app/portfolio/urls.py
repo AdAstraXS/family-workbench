@@ -1,11 +1,17 @@
 from django.urls import path
 
-from . import views
+from . import views, fund_views
 
 
 app_name = "portfolio"
 
 urlpatterns = [
+    path("fund-dca/", fund_views.fund_dca_list, name="fund_dca_list"),
+    path("fund-dca/new/", fund_views.fund_dca_edit, name="fund_dca_create"),
+    path("fund-dca/<int:pk>/edit/", fund_views.fund_dca_edit, name="fund_dca_edit"),
+    path("fund-dca/<int:pk>/balance/", fund_views.fund_dca_edit, {"balance_only": True}, name="fund_dca_balance"),
+    path("fund-dca/refresh/", fund_views.fund_dca_refresh, name="fund_dca_refresh"),
+    path("funds/<str:code>/", fund_views.fund_detail, name="fund_detail"),
     path("", views.overview, name="overview"),
     path(
         "daily-valuation/refresh/",

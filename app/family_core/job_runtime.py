@@ -61,6 +61,7 @@ def record_failure(command, options, message, *, started):
         "run_wheel_position_scan": ("option_wheel", "WheelPositionScanJob"),
         "run_wheel_put_quote_job": ("option_wheel", "WheelPutQuoteJob"),
         "run_company_acquisition": ("investment_research", "CompanyAcquisitionJob"),
+        "run_fund_refresh_job": ("portfolio", "FundRefreshRun"),
     }
     if command not in models or options.get("job_id") is None:
         return
