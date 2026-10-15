@@ -320,6 +320,11 @@
       if (!family.value) return;
       const url = new URL("{% url 'portfolio:transaction_form_options' %}", location.origin);
       url.searchParams.set("family", family.value);
+      const closingPosition = document.getElementById("id_closing_position");
+      if (closingPosition?.value) {
+        url.searchParams.set("closing_position", closingPosition.value);
+        url.searchParams.set("bank_account", account.value);
+      }
       {% if form.instance.pk %}url.searchParams.set("transaction", "{{ form.instance.pk }}");{% endif %}
       if (!resetMember && member.value) url.searchParams.set("member", member.value);
       const data = await fetch(url).then((response) => response.json());

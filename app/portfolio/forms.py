@@ -835,6 +835,7 @@ class InvestmentPositionForm(BaseModelForm):
 
 
 class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
+    closing_position = forms.IntegerField(required=False, widget=forms.HiddenInput)
     family = forms.ModelChoiceField(label="家庭", queryset=Family.objects.none())
     member = forms.ModelChoiceField(label="用户", queryset=FamilyMember.objects.none())
     bank_account = forms.ModelChoiceField(
@@ -957,7 +958,8 @@ class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
             "remark",
         ]
 
-    def __init__(self, *args, user=None, **kwargs):
+    def __init__(self, *args, user=None, closing_position=None, **kwargs):
+        self.closing_position = closing_position
         super().__init__(*args, **kwargs)
         self.order_fields(
             [
@@ -1100,6 +1102,10 @@ class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
         )
         self.fields["asset_type"].initial = selected_asset_type
         security_queryset = watchlist_security_choices(family_id)
+        if self.closing_position:
+            security_queryset = Security.objects.filter(pk=self.closing_position.security_id)
+            self.initial["closing_position"] = self.closing_position.pk
+            self.fields["security"].help_text = "已带入所选持仓的标的，请按实际成交填写平仓数量和价格。"
         if self.instance.pk and self.instance.security_id:
             security_queryset = Security.objects.filter(
                 Q(pk=self.instance.security_id) | Q(pk__in=security_queryset)
@@ -1136,6 +1142,17 @@ class InvestmentTransactionForm(AssetClassificationFormMixin, BaseModelForm):
         asset_category = cleaned_data.get("asset_category")
         asset_type = cleaned_data.get("asset_type")
         category_code = primary_code(asset_category)
+        if self.closing_position:
+            position = self.closing_position
+            expected_trade = TradeTypeChoices.SELL if position.quantity > 0 else TradeTypeChoices.BUY
+            if not bank_account or bank_account.pk != position.account.bank_account_id:
+                self.add_error("bank_account", "平仓账户必须与所选持仓一致。")
+            if not security or security.pk != position.security_id or creating_option or creating_bond:
+                self.add_error("security", "平仓必须使用所选持仓的原有标的。")
+            if not trade_type_option or trade_type_option.code != expected_trade:
+                self.add_error("trade_type_option", "交易方向必须与所选持仓的平仓方向一致。")
+            if position.security.asset_type == Security.TYPE_OPTION and cleaned_data.get("position_effect") != InvestmentTransaction.EFFECT_CLOSE:
+                self.add_error("position_effect", "此入口仅用于平仓。")
         if creating_option and creating_bond:
             raise forms.ValidationError("一笔交易不能同时新增期权和债券。")
         if creating_option and (

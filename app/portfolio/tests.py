@@ -1117,6 +1117,109 @@ class AccountDashboardTests(TestCase):
             TradeTypeChoices.SELL,
         )
 
+    def make_call_position(self, opening_trade=TradeTypeChoices.BUY):
+        underlying = Security.objects.create(symbol="MSFT", name="微软", market="US", currency="USD")
+        category = AssetCategory.objects.create(family=self.account.family, name="衍生品", code="derivatives")
+        option = Security.objects.create(symbol="MSFT261120C00550000", name="微软 2026-11-20 看涨 550",
+            market="US", currency="USD", asset_type=Security.TYPE_OPTION, asset_category=category, data_source="manual")
+        OptionContract.objects.create(security=option, underlying=underlying, option_type=OptionContract.CALL,
+            strike_price=Decimal("550"), expiration_date=date(2026, 11, 20), multiplier=100)
+        InvestmentTransaction.objects.create(account=self.account, security=option, trade_date=date(2026, 10, 1),
+            trade_type=opening_trade, position_effect=InvestmentTransaction.EFFECT_OPEN,
+            quantity=2, price=3, amount=600, currency="USD")
+        return rebuild_position(self.account, option)
+
+    def close_payload(self, position, trade_code=TradeTypeChoices.SELL):
+        return {
+            "closing_position": position.pk,
+            "family": self.account.family.pk, "member": self.account.member.pk,
+            "bank_account": self.account.bank_account_id,
+            "security": position.security_id,
+            "asset_category": position.security.asset_category_id,
+            "asset_type": Security.TYPE_OPTION,
+            "trade_date": "2026-10-15",
+            "trade_type_option": InvestmentOption.objects.get(
+                category=InvestmentOption.CATEGORY_TRANSACTION_TYPE, code=trade_code).pk,
+            "position_effect": InvestmentTransaction.EFFECT_CLOSE,
+            "currency": "USD", "quantity": "1", "price": "4",
+            "amount": "400", "fee": "1", "tax": "0",
+        }
+
+    def test_long_call_close_shortcut_preserves_contract(self):
+        position = self.make_call_position()
+        option = position.security
+        page = self.client.get(reverse("portfolio:transaction_create"),
+            {"account": self.account.pk, "security": option.pk, "action": "sell"})
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(option, page.context["form"].fields["security"].queryset)
+        self.assertEqual(page.context["form"].initial["position_effect"], InvestmentTransaction.EFFECT_CLOSE)
+        self.assertEqual(page.context["form"].initial["trade_type_option"].code, TradeTypeChoices.SELL)
+        self.assertEqual(page.context["form"].initial["closing_position"], position.pk)
+        options = self.client.get(reverse("portfolio:transaction_form_options"), {
+            "family": self.account.family.pk, "member": self.account.member.pk,
+            "bank_account": self.account.bank_account_id, "closing_position": position.pk,
+        }).json()
+        self.assertEqual([item["id"] for item in options["securities"]], [option.pk])
+        self.assertNotIn(option.pk, [item["id"] for item in options["underlyings"]])
+        response = self.client.post(reverse("portfolio:transaction_create"), self.close_payload(position))
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None) and response.context["form"].errors)
+        position.refresh_from_db()
+        self.assertEqual(position.quantity, Decimal("1"))
+        closed = InvestmentTransaction.objects.filter(account=self.account, position_effect=InvestmentTransaction.EFFECT_CLOSE).get()
+        self.assertEqual(closed.security_id, option.pk)
+        self.assertEqual(closed.amount, Decimal("400"))
+        self.assertEqual(closed.cash_change, Decimal("399"))
+        self.assertEqual(closed.realized_pnl, Decimal("99"))
+
+    def test_short_call_close_buys_back_original_contract(self):
+        position = self.make_call_position(TradeTypeChoices.SELL)
+        page = self.client.get(reverse("portfolio:transaction_create"), {
+            "account": self.account.pk, "security": position.security_id, "action": "sell"})
+        self.assertEqual(page.context["form"].initial["trade_type_option"].code, TradeTypeChoices.BUY)
+        response = self.client.post(reverse("portfolio:transaction_create"), self.close_payload(position, TradeTypeChoices.BUY))
+        self.assertEqual(response.status_code, 302, getattr(response, "context", None) and response.context["form"].errors)
+        position.refresh_from_db()
+        self.assertEqual(position.quantity, Decimal("-1"))
+        closed = InvestmentTransaction.objects.get(
+            account=self.account, position_effect=InvestmentTransaction.EFFECT_CLOSE)
+        self.assertEqual(closed.cash_change, Decimal("-401"))
+        self.assertEqual(closed.realized_pnl, Decimal("-101"))
+
+    def test_close_entry_rejects_changed_direction_and_contract(self):
+        position = self.make_call_position()
+        data = self.close_payload(position, TradeTypeChoices.BUY)
+        response = self.client.post(reverse("portfolio:transaction_create"), data)
+        self.assertIn("trade_type_option", response.context["form"].errors)
+        data = self.close_payload(position)
+        data["security"] = position.security.option_contract.underlying_id
+        response = self.client.post(reverse("portfolio:transaction_create"), data)
+        self.assertIn("security", response.context["form"].errors)
+        data = self.close_payload(position)
+        other_account = create_broker_investment_account(
+            self.account.family, self.account.member, "另一证券账户")
+        data["bank_account"] = other_account.bank_account_id
+        response = self.client.post(reverse("portfolio:transaction_create"), data)
+        self.assertIn("bank_account", response.context["form"].errors)
+        data = self.close_payload(position)
+        data["position_effect"] = InvestmentTransaction.EFFECT_OPEN
+        response = self.client.post(reverse("portfolio:transaction_create"), data)
+        self.assertIn("position_effect", response.context["form"].errors)
+        self.assertEqual(InvestmentTransaction.objects.filter(account=self.account).count(), 1)
+
+    def test_close_entry_cannot_access_another_familys_position(self):
+        position = self.make_call_position()
+        other_user = get_user_model().objects.create_user(username="other-close-user")
+        other_family = Family.objects.create(name="其他家庭")
+        FamilyMember.objects.create(family=other_family, user=other_user, display_name="其他成员")
+        self.client.force_login(other_user)
+        response = self.client.post(reverse("portfolio:transaction_create"), self.close_payload(position))
+        self.assertEqual(response.status_code, 404)
+        options = self.client.get(reverse("portfolio:transaction_form_options"), {
+            "family": other_family.pk, "bank_account": self.account.bank_account_id,
+            "closing_position": position.pk,
+        }).json()
+        self.assertEqual(options["securities"], [])
+
     def test_expired_option_action_form_defaults_to_expiry_date_and_full_quantity(self):
         underlying = Security.objects.create(
             symbol="MSFT",

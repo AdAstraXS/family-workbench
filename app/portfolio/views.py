@@ -2451,6 +2451,16 @@ def transaction_form_options(request):
     ).select_related("parent").order_by("display_order", "name")
     securities = watchlist_security_choices(family_id)
     underlyings = securities
+    closing_position_id = request.GET.get("closing_position", "")
+    if closing_position_id.isdigit():
+        bank_account_id = request.GET.get("bank_account", "")
+        held_security = InvestmentPosition.objects.filter(
+            pk=closing_position_id,
+            account__in=_visible_accounts(request),
+            account__bank_account__family_id=family_id,
+            account__bank_account_id=bank_account_id if bank_account_id.isdigit() else None,
+        ).exclude(quantity=0).values_list("security_id", flat=True)
+        securities = Security.objects.filter(pk__in=held_security).order_by("market", "symbol")
     # Preserve the original security when editing an authorized historical trade.
     transaction_id = request.GET.get("transaction", "")
     if transaction_id.isdigit():
@@ -2514,10 +2524,18 @@ def save_transaction_form(request, title, instance=None):
         else None
     )
     if request.method == "POST":
+        closing_position = None
+        closing_position_id = request.POST.get("closing_position", "")
+        if closing_position_id:
+            closing_position = get_object_or_404(
+                InvestmentPosition.objects.filter(account__in=_visible_accounts(request)).exclude(quantity=0),
+                pk=closing_position_id if closing_position_id.isdigit() else None,
+            )
         form = InvestmentTransactionForm(
             request.POST,
             instance=instance,
             user=request.user,
+            closing_position=closing_position,
         )
         if form.is_valid():
             try:
@@ -2600,7 +2618,6 @@ def save_transaction_form(request, title, instance=None):
             resolution = resolve_position_prices(
                 [selected_position], timezone.localdate()
             )[selected_position.pk]
-            action = request.GET.get("action", "sell")
             trade_code = TradeTypeChoices.SELL
             position_effect = ""
             if selected_position.security.asset_type == Security.TYPE_OPTION:
@@ -2613,7 +2630,7 @@ def save_transaction_form(request, title, instance=None):
             initial.update(
                 {
                     "security": selected_position.security,
-                    "asset_category": selected_position.security.asset_category,
+                    "asset_category": selected_position.security.asset_category_id,
                     "asset_type": selected_position.security.asset_type,
                     "trade_date": timezone.localdate(),
                     "trade_type_option": InvestmentOption.objects.filter(
@@ -2628,7 +2645,7 @@ def save_transaction_form(request, title, instance=None):
                 }
             )
             title = (
-                f"平仓 · {selected_position.security.name}"
+                f"{'卖出平仓' if selected_position.quantity > 0 else '买入平仓'} · {selected_position.security.name}"
                 if selected_position.security.asset_type == Security.TYPE_OPTION
                 else f"卖出 · {selected_position.security.name}"
             )
@@ -2636,6 +2653,7 @@ def save_transaction_form(request, title, instance=None):
             instance=instance,
             initial=initial,
             user=request.user,
+            closing_position=selected_position,
         )
     return render(
         request,
