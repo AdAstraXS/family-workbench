@@ -1,3 +1,4 @@
+import json
 import subprocess
 import tempfile
 from datetime import timedelta
@@ -10,12 +11,58 @@ from django.urls import reverse
 from django.utils import timezone
 
 from family_core.models import Family, FamilyMember
-from .program_media import _yt_command, probe_youtube_audio, youtube_audio, ProgramMediaError
+from .program_media import _yt_command, probe_youtube_audio, youtube_audio, youtube_metadata, ProgramMediaError
 from .program_models import ProgramEntry, ProgramSubscription
 from .program_sources import ProgramError
 
 
 class MediaFailureTests(SimpleTestCase):
+    def metadata_entry(self):
+        return SimpleNamespace(external_id='SbZltIBvi7M', subscription=SimpleNamespace(
+            code='rhino', custom_name='', source_url=''))
+
+    @patch('intelligence.program_media.time.sleep')
+    @patch('intelligence.program_media._yt_command')
+    def test_metadata_recovers_after_transient_network_failure(self, command, sleep):
+        info = {'channel_id': 'UCFQsi7WaF5X41tcuOryDk8w', 'duration': 1200}
+        command.side_effect = [ProgramMediaError('connection failed', 'network'), json.dumps(info)]
+        self.assertEqual(youtube_metadata(self.metadata_entry(), 240), info)
+        self.assertEqual(command.call_count, 2)
+        sleep.assert_called_once_with(1)
+        for call in command.call_args_list:
+            self.assertIn('--skip-download', call.args[0])
+
+    @patch('intelligence.program_media.time.sleep')
+    @patch('intelligence.program_media._yt_command')
+    def test_metadata_retry_limit_and_nonretryable_errors(self, command, sleep):
+        for reason, count in [('network', 3), ('timeout', 3), ('forbidden', 1),
+                              ('rate_limit', 1), ('login_required', 1), ('unavailable', 1)]:
+            with self.subTest(reason=reason):
+                command.reset_mock()
+                command.side_effect = ProgramMediaError('safe failure', reason)
+                with self.assertRaises(ProgramMediaError) as caught:
+                    youtube_metadata(self.metadata_entry(), 240)
+                self.assertEqual(command.call_count, count)
+                self.assertEqual(caught.exception.reason, reason)
+
+    @patch('intelligence.program_media.time.monotonic', side_effect=[0, 0, 29])
+    @patch('intelligence.program_media._yt_command', side_effect=ProgramMediaError('timeout', 'timeout'))
+    def test_metadata_retry_preserves_total_timeout(self, command, monotonic):
+        with self.assertRaisesMessage(ProgramMediaError, '已尝试 1 次'):
+            youtube_metadata(self.metadata_entry(), 240, timeout=30)
+        command.assert_called_once()
+        self.assertEqual(command.call_args.kwargs['timeout'], 30)
+
+    @patch('intelligence.program_media.time.sleep')
+    @patch('intelligence.program_media.time.monotonic', side_effect=[0, 0, 10, 11])
+    @patch('intelligence.program_media._yt_command')
+    def test_metadata_retry_uses_remaining_budget_and_still_checks_channel(self, command, monotonic, sleep):
+        command.side_effect = [ProgramMediaError('network', 'network'),
+                               json.dumps({'channel_id': 'unapproved', 'duration': 1200})]
+        with self.assertRaisesMessage(ProgramError, '不属于已批准的频道'):
+            youtube_metadata(self.metadata_entry(), 240, timeout=30)
+        self.assertEqual([call.kwargs['timeout'] for call in command.call_args_list], [30, 19])
+
     @patch('intelligence.program_media.time.sleep')
     @patch('intelligence.program_media._yt_command')
     def test_forbidden_refreshes_url_in_fresh_directory(self, command, sleep):

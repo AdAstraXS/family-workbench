@@ -238,7 +238,22 @@ def youtube_metadata(entry, max_minutes, *, timeout=180):
     if spec['kind'] != 'youtube' or not re.fullmatch(r'[A-Za-z0-9_-]{11}', entry.external_id):
         raise ProgramError('当前只支持已订阅的 YouTube 公开视频。')
     url = 'https://www.youtube.com/watch?v=' + entry.external_id
-    info = json.loads(_yt_command(['--dump-single-json', '--skip-download', url], timeout=timeout))
+    deadline = time.monotonic() + timeout
+    for attempt in range(3):
+        remaining = max(1, math.ceil(deadline - time.monotonic()))
+        try:
+            info = json.loads(_yt_command(
+                ['--dump-single-json', '--skip-download', url], timeout=remaining))
+            break
+        except ProgramMediaError as exc:
+            # Retry only metadata reads on transient connection failures. Keep
+            # one shared deadline; never retry login/permission/rate limits.
+            if exc.reason not in {'network', 'timeout'}:
+                raise
+            if attempt == 2 or deadline - time.monotonic() <= 2:
+                raise ProgramMediaError(
+                    f'{exc}（已尝试 {attempt + 1} 次）', exc.reason) from exc
+            time.sleep(1)
     if spec['channel_id'] and info.get('channel_id') != spec['channel_id']:
         raise ProgramError('视频不属于已批准的频道。')
     if info.get('availability') not in (None, 'public') or info.get('is_live') or info.get('live_status') == 'is_upcoming':
